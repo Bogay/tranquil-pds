@@ -14,6 +14,25 @@ use jacquard_repo::{mst::Mst, commit::Commit, storage::BlockStore};
 use jacquard::types::{string::Tid, did::Did, integer::LimitedU32};
 use std::sync::Arc;
 
+pub async fn describe_server() -> impl IntoResponse {
+    let domains_str = std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| "example.com".to_string());
+    let domains: Vec<&str> = domains_str.split(',').map(|s| s.trim()).collect();
+
+    Json(json!({
+        "availableUserDomains": domains
+    }))
+}
+
+pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    match sqlx::query("SELECT 1").execute(&state.db).await {
+        Ok(_) => (StatusCode::OK, "OK"),
+        Err(e) => {
+            error!("Health check failed: {:?}", e);
+            (StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable")
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreateAccountInput {
     pub handle: String,

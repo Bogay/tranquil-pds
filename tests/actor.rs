@@ -8,7 +8,7 @@ async fn test_get_profile() {
     let params = [
         ("actor", AUTH_DID),
     ];
-    let res = client.get(format!("{}/xrpc/app.bsky.actor.getProfile", BASE_URL))
+    let res = client.get(format!("{}/xrpc/app.bsky.actor.getProfile", base_url().await))
         .query(&params)
         .bearer_auth(AUTH_TOKEN)
         .send()
@@ -25,7 +25,7 @@ async fn test_search_actors() {
         ("q", "test"),
         ("limit", "10"),
     ];
-    let res = client.get(format!("{}/xrpc/app.bsky.actor.searchActors", BASE_URL))
+    let res = client.get(format!("{}/xrpc/app.bsky.actor.searchActors", base_url().await))
         .query(&params)
         .bearer_auth(AUTH_TOKEN)
         .send()

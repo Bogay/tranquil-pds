@@ -1,108 +1,81 @@
-# Implementation TODOs
+# PDS Implementation TODOs
 
-Lewis' special big boy todofile
+Lewis' corrected big boy todofile
 
-## 1. Server Infrastructure & Health
+## 1. Server Infrastructure & Proxying
 - [x] Health Check
     - [x] Implement `GET /health` endpoint (returns "OK").
 - [x] Server Description
     - [x] Implement `com.atproto.server.describeServer` (returns available user domains).
+- [x] XRPC Proxying
+    - [x] Implement strict forwarding for all `app.bsky.*` and `chat.bsky.*` requests to an appview.
+    - [x] Forward Auth headers correctly.
+    - [x] Handle AppView errors/timeouts gracefully.
 
 ## 2. Authentication & Account Management (`com.atproto.server`)
 - [x] Account Creation
     - [x] Implement `com.atproto.server.createAccount`.
     - [x] Validate handle format (reject invalid characters).
-    - [x] Create DID for new user.
-    - [x] Initialize user repository.
+    - [x] Create DID for new user (PLC directory).
+    - [x] Initialize user repository (Root commit).
     - [x] Return access JWT and DID.
-    - [x] MST stuff I think...
-
+    - [ ] Create DID for new user (did:web).
 - [x] Session Management
     - [x] Implement `com.atproto.server.createSession` (Login).
-        - [x] Validate identifier (handle/email) and password.
-        - [x] Return access JWT, refresh JWT, and DID.
     - [x] Implement `com.atproto.server.getSession`.
-        - [x] Verify JWT validity.
     - [x] Implement `com.atproto.server.refreshSession`.
     - [x] Implement `com.atproto.server.deleteSession` (Logout).
-        - [x] Invalidate current session/token.
 
 ## 3. Repository Operations (`com.atproto.repo`)
 - [ ] Record CRUD
     - [ ] Implement `com.atproto.repo.createRecord`.
-        - [ ] Generate `rkey` if not provided.
-        - [ ] Validate schema against Lexicon.
-        - [ ] Handle `swapCommit` for optimistic locking.
+        - [ ] Validate schema against Lexicon (just structure, not complex logic).
+        - [ ] Generate `rkey` (TID) if not provided.
+        - [ ] Handle MST (Merkle Search Tree) insertion.
+        - [ ] **Trigger Firehose Event**.
     - [ ] Implement `com.atproto.repo.putRecord`.
-        - [ ] Handle create vs update logic.
-        - [ ] Validate `repo` matches authenticated user.
-        - [ ] Validate record schema (e.g., missing required fields).
     - [ ] Implement `com.atproto.repo.getRecord`.
-        - [ ] Handle missing params (400 Bad Request).
-        - [ ] Handle non-existent record (404 Not Found).
     - [ ] Implement `com.atproto.repo.deleteRecord`.
     - [ ] Implement `com.atproto.repo.listRecords`.
-        - [ ] Support pagination (`limit`, `cursor`).
+    - [ ] Implement `com.atproto.repo.describeRepo`.
 - [ ] Blob Management
     - [ ] Implement `com.atproto.repo.uploadBlob`.
-        - [ ] Enforce authentication.
-        - [ ] Validate MIME types (reject unsupported).
-        - [ ] Return blob reference (`$link`).
-- [ ] Repo Meta
-    - [ ] Implement `com.atproto.repo.describeRepo`.
+        - [ ] Store blob (S3).
+        - [ ] return `blob` ref (CID + MimeType).
 
-## 4. Actor & Profile (`app.bsky.actor`)
-- [ ] Profile Management
-    - [ ] Implement `app.bsky.actor.getProfile`.
-        - [ ] Resolve handle to DID.
-        - [ ] Return profile record data.
-- [ ] Discovery
-    - [ ] Implement `app.bsky.actor.searchActors`.
+## 4. Sync & Federation (`com.atproto.sync`)
+- [ ] The Firehose (WebSocket)
+    - [ ] Implement `com.atproto.sync.subscribeRepos`.
+        - [ ] Broadcast real-time commit events.
+        - [ ] Handle cursor replay (backfill).
+- [ ] Bulk Export
+    - [ ] Implement `com.atproto.sync.getRepo` (Return full CAR file of repo).
+    - [ ] Implement `com.atproto.sync.getBlocks` (Return specific blocks via CIDs).
+    - [ ] Implement `com.atproto.sync.getLatestCommit`.
+    - [ ] Implement `com.atproto.sync.getRecord` (Sync version, distinct from repo.getRecord).
+- [ ] Blob Sync
+    - [ ] Implement `com.atproto.sync.getBlob`.
+    - [ ] Implement `com.atproto.sync.listBlobs`.
+- [ ] Crawler Interaction
+    - [ ] Implement `com.atproto.sync.requestCrawl` (Notify relays to index us).
 
-## 5. Feed & Timeline (`app.bsky.feed`)
-- [ ] Feed Retrieval
-    - [ ] Implement `app.bsky.feed.getTimeline`.
-    - [ ] Implement `app.bsky.feed.getAuthorFeed`.
-        - [ ] Filter by actor.
-        - [ ] Respect mutes (if viewer is authenticated).
-    - [ ] Implement `app.bsky.feed.getPostThread`.
-        - [ ] Construct thread tree (parents, replies).
-        - [ ] Handle deleted posts (return `notFoundPost` view).
-- [ ] Record Types
-    - [ ] Support `app.bsky.feed.post` record type.
-    - [ ] Support `app.bsky.feed.like` record type.
-    - [ ] Support `app.bsky.embed.images` in posts.
-
-## 6. Social Graph (`app.bsky.graph`)
-- [ ] Relationships
-    - [ ] Implement `app.bsky.graph.getFollows`.
-    - [ ] Implement `app.bsky.graph.getFollowers`.
-    - [ ] Implement `app.bsky.graph.getMutes`.
-    - [ ] Implement `app.bsky.graph.getBlocks`.
-- [ ] Record Types
-    - [ ] Support `app.bsky.graph.follow` record type.
-    - [ ] Support `app.bsky.graph.mute` record type.
-
-## 7. Notifications (`app.bsky.notification`)
-- [ ] Notification Management
-    - [ ] Implement `app.bsky.notification.listNotifications`.
-        - [ ] Aggregate notifications (likes, follows, replies).
-    - [ ] Implement `app.bsky.notification.getUnreadCount`.
-        - [ ] Track read state.
-        - [ ] Reset count on list/read.
-
-## 8. Identity (`com.atproto.identity`)
+## 5. Identity (`com.atproto.identity`)
 - [ ] Resolution
-    - [ ] Implement `com.atproto.identity.resolveHandle`.
+    - [ ] Implement `com.atproto.identity.resolveHandle` (Can be internal or proxy to PLC).
+    - [ ] Implement `/.well-known/did.json` (Depends on supporting did:web).
 
-## 9. Sync & Federation (`com.atproto.sync`)
-- [ ] Data Export
-    - [ ] Implement `com.atproto.sync.getRepo` (Export CAR file).
-    - [ ] Implement `com.atproto.sync.getBlocks`.
+## 6. Record Schema Validation
+- [ ] `app.bsky.feed.post`
+- [ ] `app.bsky.feed.like`
+- [ ] `app.bsky.feed.repost`
+- [ ] `app.bsky.graph.follow`
+- [ ] `app.bsky.graph.block`
+- [ ] `app.bsky.actor.profile`
+- [ ] Other app(view) validation too!!!
 
-## 10. General Requirements
+## 7. General Requirements
+- [ ] IPLD & MST
+    - [ ] Implement Merkle Search Tree (MST) logic for repo signing.
+    - [ ] Implement CAR (Content Addressable Archives) encoding/decoding.
 - [ ] Validation
-    - [ ] Ensure all endpoints validate input parameters.
-    - [ ] Ensure proper error codes (400, 401, 404, 409).
-- [ ] Concurrency
-    - [ ] Ensure thread safety for repo updates.
+    - [ ] DID PLC Operations (Sign rotation keys).

@@ -5,8 +5,16 @@ use chrono::Utc;
 use std::collections::HashMap;
 #[allow(unused_imports)]
 use std::time::Duration;
+use std::sync::OnceLock;
+use bspds::state::AppState;
+use sqlx::postgres::PgPoolOptions;
+use tokio::net::TcpListener;
+use testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers_modules::postgres::Postgres;
 
-pub const BASE_URL: &str = "http://127.0.0.1:3000";
+static SERVER_URL: OnceLock<String> = OnceLock::new();
+static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
+
 #[allow(dead_code)]
 pub const AUTH_TOKEN: &str = "test-token";
 #[allow(dead_code)]
@@ -20,9 +28,67 @@ pub fn client() -> Client {
     Client::new()
 }
 
+pub async fn base_url() -> &'static str {
+    SERVER_URL.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        std::thread::spawn(move || {
+            if std::env::var("DOCKER_HOST").is_err() {
+                if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+                    let podman_sock = std::path::Path::new(&runtime_dir).join("podman/podman.sock");
+                    if podman_sock.exists() {
+                         unsafe { std::env::set_var("DOCKER_HOST", format!("unix://{}", podman_sock.display())); }
+                    }
+                }
+            }
+
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                let container = Postgres::default().with_tag("18-alpine").start().await.expect("Failed to start Postgres");
+                let connection_string = format!(
+                    "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+                    container.get_host_port_ipv4(5432).await.expect("Failed to get port")
+                );
+
+                DB_CONTAINER.set(container).ok();
+
+                let url = spawn_app(connection_string).await;
+                tx.send(url).unwrap();
+                std::future::pending::<()>().await;
+            });
+        });
+
+        rx.recv().expect("Failed to start test server")
+    })
+}
+
+async fn spawn_app(database_url: String) -> String {
+    let pool = PgPoolOptions::new()
+        .connect(&database_url)
+        .await
+        .expect("Failed to connect to Postgres. Make sure the database is running.");
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+
+    let state = AppState::new(pool);
+    let app = bspds::app(state);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    format!("http://{}", addr)
+}
+
 #[allow(dead_code)]
 pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'static str) -> Value {
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
         .header(header::CONTENT_TYPE, mime)
         .bearer_auth(AUTH_TOKEN)
         .body(data)
@@ -59,7 +125,7 @@ pub async fn create_test_post(
         "record": record
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&payload)
         .send()
@@ -84,7 +150,7 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
         "password": "password"
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
         .json(&payload)
         .send()
         .await

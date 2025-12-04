@@ -30,7 +30,7 @@ async fn test_post_crud_lifecycle() {
         }
     });
 
-    let create_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let create_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&create_payload)
         .send()
@@ -47,7 +47,7 @@ async fn test_post_crud_lifecycle() {
         ("collection", collection),
         ("rkey", &rkey),
     ];
-    let get_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let get_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&params)
         .send()
         .await
@@ -71,7 +71,7 @@ async fn test_post_crud_lifecycle() {
         }
     });
 
-    let update_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let update_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&update_payload)
         .send()
@@ -81,7 +81,7 @@ async fn test_post_crud_lifecycle() {
     assert_eq!(update_res.status(), StatusCode::OK, "Failed to update record");
 
 
-    let get_updated_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let get_updated_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&params)
         .send()
         .await
@@ -98,7 +98,7 @@ async fn test_post_crud_lifecycle() {
         "rkey": rkey
     });
 
-    let delete_res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", BASE_URL))
+    let delete_res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&delete_payload)
         .send()
@@ -108,7 +108,7 @@ async fn test_post_crud_lifecycle() {
     assert_eq!(delete_res.status(), StatusCode::OK, "Failed to delete record");
 
 
-    let get_deleted_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let get_deleted_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&params)
         .send()
         .await
@@ -157,7 +157,7 @@ async fn test_post_with_image_lifecycle() {
         }
     });
 
-    let create_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let create_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&create_payload)
         .send()
@@ -172,7 +172,7 @@ async fn test_post_with_image_lifecycle() {
         ("collection", collection),
         ("rkey", &rkey),
     ];
-    let get_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let get_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&params)
         .send()
         .await
@@ -202,7 +202,7 @@ async fn test_graph_lifecycle_follow_unfollow() {
         }
     });
 
-    let create_res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", BASE_URL))
+    let create_res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&create_payload)
         .send()
@@ -219,7 +219,7 @@ async fn test_graph_lifecycle_follow_unfollow() {
     let params_get_follows = [
         ("actor", AUTH_DID),
     ];
-    let get_follows_res = client.get(format!("{}/xrpc/app.bsky.graph.getFollows", BASE_URL))
+    let get_follows_res = client.get(format!("{}/xrpc/app.bsky.graph.getFollows", base_url().await))
         .query(&params_get_follows)
         .bearer_auth(AUTH_TOKEN)
         .send()
@@ -243,7 +243,7 @@ async fn test_graph_lifecycle_follow_unfollow() {
         "rkey": rkey
     });
 
-    let delete_res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", BASE_URL))
+    let delete_res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&delete_payload)
         .send()
@@ -253,7 +253,7 @@ async fn test_graph_lifecycle_follow_unfollow() {
     assert_eq!(delete_res.status(), StatusCode::OK, "Failed to delete follow record");
 
 
-    let get_unfollowed_res = client.get(format!("{}/xrpc/app.bsky.graph.getFollows", BASE_URL))
+    let get_unfollowed_res = client.get(format!("{}/xrpc/app.bsky.graph.getFollows", base_url().await))
         .query(&params_get_follows)
         .bearer_auth(AUTH_TOKEN)
         .send()
@@ -290,7 +290,7 @@ async fn test_list_records_pagination() {
             }
         });
 
-        let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+        let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
             .bearer_auth(AUTH_TOKEN)
             .json(&payload)
             .send()
@@ -308,7 +308,7 @@ async fn test_list_records_pagination() {
         ("limit", "2"),
     ];
 
-    let page1_res = client.get(format!("{}/xrpc/com.atproto.repo.listRecords", BASE_URL))
+    let page1_res = client.get(format!("{}/xrpc/com.atproto.repo.listRecords", base_url().await))
         .query(&params_page1)
         .send()
         .await
@@ -330,7 +330,7 @@ async fn test_list_records_pagination() {
         ("cursor", cursor),
     ];
 
-    let page2_res = client.get(format!("{}/xrpc/com.atproto.repo.listRecords", BASE_URL))
+    let page2_res = client.get(format!("{}/xrpc/com.atproto.repo.listRecords", base_url().await))
         .query(&params_page2)
         .send()
         .await
@@ -351,7 +351,7 @@ async fn test_list_records_pagination() {
             "collection": collection,
             "rkey": rkey
         });
-        client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", BASE_URL))
+        client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
             .bearer_auth(AUTH_TOKEN)
             .json(&delete_payload)
             .send()
@@ -386,7 +386,7 @@ async fn test_reply_thread_lifecycle() {
     let params = [
         ("uri", &root_uri),
     ];
-    let res = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", BASE_URL))
+    let res = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", base_url().await))
         .query(&params)
         .bearer_auth(AUTH_TOKEN)
         .send()
@@ -410,12 +410,12 @@ async fn test_reply_thread_lifecycle() {
 
 
     let collection = "app.bsky.feed.post";
-    client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", BASE_URL))
+    client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&json!({ "repo": AUTH_DID, "collection": collection, "rkey": reply_rkey }))
         .send().await.expect("Failed to delete reply");
 
-    client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", BASE_URL))
+    client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
         .bearer_auth(AUTH_TOKEN)
         .json(&json!({ "repo": AUTH_DID, "collection": collection, "rkey": root_rkey }))
         .send().await.expect("Failed to delete root post");
@@ -436,7 +436,7 @@ async fn test_account_journey_lifecycle() {
         "password": password
     });
 
-    let create_res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", BASE_URL))
+    let create_res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
         .json(&create_account_payload)
         .send()
         .await
@@ -455,7 +455,7 @@ async fn test_account_journey_lifecycle() {
         "password": password
     });
 
-    let session_res = client.post(format!("{}/xrpc/com.atproto.server.createSession", BASE_URL))
+    let session_res = client.post(format!("{}/xrpc/com.atproto.server.createSession", base_url().await))
         .json(&session_payload)
         .send()
         .await
@@ -479,7 +479,7 @@ async fn test_account_journey_lifecycle() {
         }
     });
 
-    let profile_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let profile_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(&session_jwt)
         .json(&profile_payload)
         .send()
@@ -492,7 +492,7 @@ async fn test_account_journey_lifecycle() {
     let params_get_profile = [
         ("actor", &handle),
     ];
-    let get_profile_res = client.get(format!("{}/xrpc/app.bsky.actor.getProfile", BASE_URL))
+    let get_profile_res = client.get(format!("{}/xrpc/app.bsky.actor.getProfile", base_url().await))
         .query(&params_get_profile)
         .send()
         .await
@@ -506,7 +506,7 @@ async fn test_account_journey_lifecycle() {
     assert_eq!(profile_body["displayName"], "E2E Test User");
 
 
-    let logout_res = client.post(format!("{}/xrpc/com.atproto.server.deleteSession", BASE_URL))
+    let logout_res = client.post(format!("{}/xrpc/com.atproto.server.deleteSession", base_url().await))
         .bearer_auth(&session_jwt)
         .send()
         .await
@@ -515,7 +515,7 @@ async fn test_account_journey_lifecycle() {
     assert_eq!(logout_res.status(), StatusCode::OK, "Failed to delete session");
 
 
-    let get_session_res = client.get(format!("{}/xrpc/com.atproto.server.getSession", BASE_URL))
+    let get_session_res = client.get(format!("{}/xrpc/com.atproto.server.getSession", base_url().await))
         .bearer_auth(&session_jwt)
         .send()
         .await
@@ -536,7 +536,7 @@ async fn setup_new_user(handle_prefix: &str) -> (String, String) {
         "email": email,
         "password": password
     });
-    let create_res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", BASE_URL))
+    let create_res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
         .json(&create_account_payload)
         .send()
         .await
@@ -557,7 +557,7 @@ async fn setup_new_user(handle_prefix: &str) -> (String, String) {
             "description": "A user created by the e2e test suite."
         }
     });
-    let profile_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let profile_res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(&new_jwt)
         .json(&profile_payload)
         .send()
@@ -581,7 +581,7 @@ async fn create_record_as(
         "record": record
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
         .bearer_auth(jwt)
         .json(&payload)
         .send()
@@ -609,7 +609,7 @@ async fn delete_record_as(
         "rkey": rkey
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
         .bearer_auth(jwt)
         .json(&payload)
         .send()
@@ -640,7 +640,7 @@ async fn test_notification_lifecycle() {
     ).await;
     let post_ref = json!({ "uri": post_uri, "cid": post_cid });
 
-    let count_res_1 = client.get(format!("{}/xrpc/app.bsky.notification.getUnreadCount", BASE_URL))
+    let count_res_1 = client.get(format!("{}/xrpc/app.bsky.notification.getUnreadCount", base_url().await))
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getUnreadCount 1 failed");
     let count_body_1: Value = count_res_1.json().await.expect("count 1 not json");
@@ -677,13 +677,13 @@ async fn test_notification_lifecycle() {
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let count_res_2 = client.get(format!("{}/xrpc/app.bsky.notification.getUnreadCount", BASE_URL))
+    let count_res_2 = client.get(format!("{}/xrpc/app.bsky.notification.getUnreadCount", base_url().await))
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getUnreadCount 2 failed");
     let count_body_2: Value = count_res_2.json().await.expect("count 2 not json");
     assert_eq!(count_body_2["count"], 3, "Unread count was not 3 after actions");
 
-    let list_res = client.get(format!("{}/xrpc/app.bsky.notification.listNotifications", BASE_URL))
+    let list_res = client.get(format!("{}/xrpc/app.bsky.notification.listNotifications", base_url().await))
         .bearer_auth(&user_a_jwt)
         .send().await.expect("listNotifications failed");
     let list_body: Value = list_res.json().await.expect("list not json");
@@ -699,7 +699,7 @@ async fn test_notification_lifecycle() {
     assert!(has_like, "Notification list missing 'like'");
     assert!(has_reply, "Notification list missing 'reply'");
 
-    let count_res_3 = client.get(format!("{}/xrpc/app.bsky.notification.getUnreadCount", BASE_URL))
+    let count_res_3 = client.get(format!("{}/xrpc/app.bsky.notification.getUnreadCount", base_url().await))
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getUnreadCount 3 failed");
     let count_body_3: Value = count_res_3.json().await.expect("count 3 not json");
@@ -727,7 +727,7 @@ async fn test_mute_lifecycle_filters_feed() {
     ).await;
 
     let feed_params_1 = [("actor", &user_b_did)];
-    let feed_res_1 = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", BASE_URL))
+    let feed_res_1 = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", base_url().await))
         .query(&feed_params_1)
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getAuthorFeed 1 failed");
@@ -749,7 +749,7 @@ async fn test_mute_lifecycle_filters_feed() {
     let mute_rkey = mute_uri.split('/').last().unwrap();
 
     let feed_params_2 = [("actor", &user_b_did)];
-    let feed_res_2 = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", BASE_URL))
+    let feed_res_2 = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", base_url().await))
         .query(&feed_params_2)
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getAuthorFeed 2 failed");
@@ -765,7 +765,7 @@ async fn test_mute_lifecycle_filters_feed() {
     ).await;
 
     let feed_params_3 = [("actor", &user_b_did)];
-    let feed_res_3 = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", BASE_URL))
+    let feed_res_3 = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", base_url().await))
         .query(&feed_params_3)
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getAuthorFeed 3 failed");
@@ -783,7 +783,7 @@ async fn test_record_update_conflict_lifecycle() {
 
     let (user_did, user_jwt) = setup_new_user("user-conflict").await;
 
-    let get_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let get_res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&[
             ("repo", &user_did),
             ("collection", &"app.bsky.actor.profile".to_string()),
@@ -803,7 +803,7 @@ async fn test_record_update_conflict_lifecycle() {
         },
         "swapCommit": cid_v1 // <-- Correctly point to v1
     });
-    let update_res_v2 = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let update_res_v2 = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(&user_jwt)
         .json(&update_payload_v2)
         .send().await.expect("putRecord v2 failed");
@@ -821,7 +821,7 @@ async fn test_record_update_conflict_lifecycle() {
         },
         "swapCommit": cid_v1
     });
-    let update_res_v3_stale = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let update_res_v3_stale = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(&user_jwt)
         .json(&update_payload_v3_stale)
         .send().await.expect("putRecord v3 (stale) failed");
@@ -842,7 +842,7 @@ async fn test_record_update_conflict_lifecycle() {
         },
         "swapCommit": cid_v2 // <-- Correct
     });
-    let update_res_v3_good = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let update_res_v3_good = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(&user_jwt)
         .json(&update_payload_v3_good)
         .send().await.expect("putRecord v3 (good) failed");
@@ -894,7 +894,7 @@ async fn test_complex_thread_deletion_lifecycle() {
         }),
     ).await;
 
-    let thread_res_1 = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", BASE_URL))
+    let thread_res_1 = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", base_url().await))
         .query(&[("uri", &p1_uri)])
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getThread 1 failed");
@@ -914,7 +914,7 @@ async fn test_complex_thread_deletion_lifecycle() {
         &p2_rkey,
     ).await;
 
-    let thread_res_2 = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", BASE_URL))
+    let thread_res_2 = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", base_url().await))
         .query(&[("uri", &p1_uri)])
         .bearer_auth(&user_a_jwt)
         .send().await.expect("getThread 2 failed");

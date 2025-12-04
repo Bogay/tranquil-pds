@@ -8,7 +8,7 @@ async fn test_resolve_handle() {
     let params = [
         ("handle", "bsky.app"),
     ];
-    let res = client.get(format!("{}/xrpc/com.atproto.identity.resolveHandle", BASE_URL))
+    let res = client.get(format!("{}/xrpc/com.atproto.identity.resolveHandle", base_url().await))
         .query(&params)
         .send()
         .await

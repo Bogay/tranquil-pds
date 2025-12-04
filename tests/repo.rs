@@ -15,7 +15,7 @@ async fn test_get_record() {
         ("rkey", "self"),
     ];
 
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&params)
         .send()
         .await
@@ -36,7 +36,7 @@ async fn test_get_record_not_found() {
         ("rkey", "nonexistent"),
     ];
 
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&params)
         .send()
         .await
@@ -51,7 +51,7 @@ async fn test_get_record_not_found() {
 #[ignore]
 async fn test_upload_blob_no_auth() {
     let client = client();
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
         .header(header::CONTENT_TYPE, "text/plain")
         .body("no auth")
         .send()
@@ -68,7 +68,7 @@ async fn test_upload_blob_no_auth() {
 async fn test_upload_blob_success() {
     let client = client();
     let (token, _) = create_account_and_login(&client).await;
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
         .header(header::CONTENT_TYPE, "text/plain")
         .bearer_auth(token)
         .body("This is our blob data")
@@ -92,7 +92,7 @@ async fn test_put_record_no_auth() {
         "record": {}
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .json(&payload)
         .send()
         .await
@@ -120,7 +120,7 @@ async fn test_put_record_success() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(token)
         .json(&payload)
         .send()
@@ -142,7 +142,7 @@ async fn test_get_record_missing_params() {
         ("repo", "did:plc:12345"),
     ];
 
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", BASE_URL))
+    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
         .query(&params)
         .send()
         .await
@@ -156,7 +156,7 @@ async fn test_get_record_missing_params() {
 #[ignore]
 async fn test_upload_blob_bad_token() {
     let client = client();
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
         .header(header::CONTENT_TYPE, "text/plain")
         .bearer_auth(BAD_AUTH_TOKEN)
         .body("This is our blob data")
@@ -187,7 +187,7 @@ async fn test_put_record_mismatched_repo() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(token)
         .json(&payload)
         .send()
@@ -215,7 +215,7 @@ async fn test_put_record_invalid_schema() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
         .bearer_auth(token)
         .json(&payload)
         .send()
@@ -231,7 +231,7 @@ async fn test_put_record_invalid_schema() {
 async fn test_upload_blob_unsupported_mime_type() {
     let client = client();
     let (token, _) = create_account_and_login(&client).await;
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
         .header(header::CONTENT_TYPE, "application/xml")
         .bearer_auth(token)
         .body("<xml>not an image</xml>")
@@ -252,7 +252,7 @@ async fn test_list_records() {
         ("collection", "app.bsky.feed.post"),
         ("limit", "10"),
     ];
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.listRecords", BASE_URL))
+    let res = client.get(format!("{}/xrpc/com.atproto.repo.listRecords", base_url().await))
         .query(&params)
         .send()
         .await
@@ -270,7 +270,7 @@ async fn test_delete_record() {
         "collection": "app.bsky.feed.post",
         "rkey": "some_post_to_delete"
     });
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
         .bearer_auth(token)
         .json(&payload)
         .send()
@@ -287,7 +287,7 @@ async fn test_describe_repo() {
     let params = [
         ("repo", did.as_str()),
     ];
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.describeRepo", BASE_URL))
+    let res = client.get(format!("{}/xrpc/com.atproto.repo.describeRepo", base_url().await))
         .query(&params)
         .send()
         .await
@@ -310,7 +310,7 @@ async fn test_create_record_success_with_generated_rkey() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
         .json(&payload)
         .bearer_auth(token) // Assuming auth is required
         .send()
@@ -340,7 +340,7 @@ async fn test_create_record_success_with_provided_rkey() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", BASE_URL))
+    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
         .json(&payload)
         .bearer_auth(token) // Assuming auth is required
         .send()

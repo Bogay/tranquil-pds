@@ -8,7 +8,7 @@ use std::collections::HashMap;
 async fn test_get_timeline() {
     let client = client();
     let params = [("limit", "30")];
-    let res = client.get(format!("{}/xrpc/app.bsky.feed.getTimeline", BASE_URL))
+    let res = client.get(format!("{}/xrpc/app.bsky.feed.getTimeline", base_url().await))
         .query(&params)
         .bearer_auth(AUTH_TOKEN)
         .send()
@@ -25,7 +25,7 @@ async fn test_get_author_feed() {
         ("actor", AUTH_DID),
         ("limit", "30")
     ];
-    let res = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", BASE_URL))
+    let res = client.get(format!("{}/xrpc/app.bsky.feed.getAuthorFeed", base_url().await))
         .query(&params)
         .bearer_auth(AUTH_TOKEN)
         .send()
@@ -42,7 +42,7 @@ async fn test_get_post_thread() {
     params.insert("uri", "at://did:plc:other/app.bsky.feed.post/3k12345");
     params.insert("depth", "5");
 
-    let res = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", BASE_URL))
+    let res = client.get(format!("{}/xrpc/app.bsky.feed.getPostThread", base_url().await))
         .query(&params)
         .bearer_auth(AUTH_TOKEN)
         .send()
