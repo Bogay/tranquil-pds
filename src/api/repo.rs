@@ -46,20 +46,22 @@ pub async fn create_record(
     }
     let token = auth_header.unwrap().to_str().unwrap_or("").replace("Bearer ", "");
 
-    if let Err(_) = crate::auth::verify_token(&token) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid token"}))).into_response();
-    }
-
-    let session = sqlx::query("SELECT did FROM sessions WHERE access_jwt = $1")
+    let session = sqlx::query(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1"
+        )
         .bind(&token)
         .fetch_optional(&state.db)
         .await
         .unwrap_or(None);
 
-    let did = match session {
-        Some(row) => row.get::<String, _>("did"),
+    let (did, key_bytes) = match session {
+        Some(row) => (row.get::<String, _>("did"), row.get::<Vec<u8>, _>("key_bytes")),
         None => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed"}))).into_response(),
     };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+         return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"}))).into_response();
+    }
 
     if input.repo != did {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "InvalidRepo", "message": "Repo does not match authenticated user"}))).into_response();

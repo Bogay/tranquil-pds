@@ -14,6 +14,7 @@ test-lifecycle:
 test-others:
     cargo test --lib
     cargo test --test actor
+    cargo test --test auth
     cargo test --test feed
     cargo test --test graph
     cargo test --test identity

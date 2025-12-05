@@ -24,6 +24,7 @@ pub const AUTH_DID: &str = "did:plc:fake";
 #[allow(dead_code)]
 pub const TARGET_DID: &str = "did:plc:target";
 
+#[allow(dead_code)]
 pub fn client() -> Client {
     Client::new()
 }
@@ -142,6 +143,7 @@ pub async fn create_test_post(
     (uri, cid, rkey)
 }
 
+#[allow(dead_code)]
 pub async fn create_account_and_login(client: &Client) -> (String, String) {
     let handle = format!("user_{}", uuid::Uuid::new_v4());
     let payload = json!({

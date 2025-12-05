@@ -13,6 +13,8 @@ use tracing::{info, error, warn};
 use jacquard_repo::{mst::Mst, commit::Commit, storage::BlockStore};
 use jacquard::types::{string::Tid, did::Did, integer::LimitedU32};
 use std::sync::Arc;
+use k256::SecretKey;
+use rand::rngs::OsRng;
 
 pub async fn describe_server() -> impl IntoResponse {
     let domains_str = std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| "example.com".to_string());
@@ -139,6 +141,20 @@ pub async fn create_account(
         }
     };
 
+    let secret_key = SecretKey::random(&mut OsRng);
+    let secret_key_bytes = secret_key.to_bytes();
+
+    let key_insert = sqlx::query("INSERT INTO user_keys (user_id, key_bytes) VALUES ($1, $2)")
+        .bind(user_id)
+        .bind(&secret_key_bytes[..])
+        .execute(&mut *tx)
+        .await;
+
+    if let Err(e) = key_insert {
+        error!("Error inserting user key: {:?}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError"}))).into_response();
+    }
+
     let store = Arc::new(state.block_store.clone());
     let mst = Mst::new(store.clone());
     let mst_root = match mst.root().await {
@@ -203,7 +219,7 @@ pub async fn create_account(
         }
     }
 
-    let access_jwt = crate::auth::create_access_token(&did).map_err(|e| {
+    let access_jwt = crate::auth::create_access_token(&did, &secret_key_bytes[..]).map_err(|e| {
         error!("Error creating access token: {:?}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError"}))).into_response()
     });
@@ -212,7 +228,7 @@ pub async fn create_account(
         Err(r) => return r,
     };
 
-    let refresh_jwt = crate::auth::create_refresh_token(&did).map_err(|e| {
+    let refresh_jwt = crate::auth::create_refresh_token(&did, &secret_key_bytes[..]).map_err(|e| {
         error!("Error creating refresh token: {:?}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError"}))).into_response()
     });
@@ -267,7 +283,7 @@ pub async fn create_session(
 ) -> Response {
     info!("create_session: identifier='{}'", input.identifier);
 
-    let user_row = sqlx::query("SELECT did, handle, password_hash FROM users WHERE handle = $1 OR email = $1")
+    let user_row = sqlx::query("SELECT u.did, u.handle, u.password_hash, k.key_bytes FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.handle = $1 OR u.email = $1")
         .bind(&input.identifier)
         .fetch_optional(&state.db)
         .await;
@@ -279,8 +295,9 @@ pub async fn create_session(
             if verify(&input.password, &stored_hash).unwrap_or(false) {
                 let did: String = row.get("did");
                 let handle: String = row.get("handle");
+                let key_bytes: Vec<u8> = row.get("key_bytes");
 
-                let access_jwt = match crate::auth::create_access_token(&did) {
+                let access_jwt = match crate::auth::create_access_token(&did, &key_bytes) {
                     Ok(t) => t,
                     Err(e) => {
                         error!("Failed to create access token: {:?}", e);
@@ -288,7 +305,7 @@ pub async fn create_session(
                     }
                 };
 
-                let refresh_jwt = match crate::auth::create_refresh_token(&did) {
+                let refresh_jwt = match crate::auth::create_refresh_token(&did, &key_bytes) {
                     Ok(t) => t,
                     Err(e) => {
                         error!("Failed to create refresh token: {:?}", e);
@@ -344,19 +361,16 @@ pub async fn get_session(
 
     let token = auth_header.unwrap().to_str().unwrap_or("").replace("Bearer ", "");
 
-    if let Err(_) = crate::auth::verify_token(&token) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid token"}))).into_response();
-    }
-
     let result = sqlx::query(
         r#"
-        SELECT u.handle, u.did, u.email
+        SELECT u.handle, u.did, u.email, k.key_bytes
         FROM sessions s
         JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#
     )
-    .bind(token)
+    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
@@ -365,6 +379,11 @@ pub async fn get_session(
             let handle: String = row.get("handle");
             let did: String = row.get("did");
             let email: String = row.get("email");
+            let key_bytes: Vec<u8> = row.get("key_bytes");
+
+            if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+                 return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"}))).into_response();
+            }
 
             return (StatusCode::OK, Json(json!({
                 "handle": handle,
@@ -424,11 +443,9 @@ pub async fn refresh_session(
 
     let refresh_token = auth_header.unwrap().to_str().unwrap_or("").replace("Bearer ", "");
 
-    if let Err(_) = crate::auth::verify_token(&refresh_token) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid refresh token"}))).into_response();
-    }
-
-    let session = sqlx::query("SELECT did FROM sessions WHERE refresh_jwt = $1")
+    let session = sqlx::query(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.refresh_jwt = $1"
+        )
         .bind(&refresh_token)
         .fetch_optional(&state.db)
         .await;
@@ -436,14 +453,20 @@ pub async fn refresh_session(
     match session {
         Ok(Some(session_row)) => {
             let did: String = session_row.get("did");
-            let new_access_jwt = match crate::auth::create_access_token(&did) {
+            let key_bytes: Vec<u8> = session_row.get("key_bytes");
+
+            if let Err(_) = crate::auth::verify_token(&refresh_token, &key_bytes) {
+                return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid refresh token signature"}))).into_response();
+            }
+
+            let new_access_jwt = match crate::auth::create_access_token(&did, &key_bytes) {
                 Ok(t) => t,
                 Err(e) => {
                     error!("Failed to create access token: {:?}", e);
                     return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError"}))).into_response();
                 }
             };
-            let new_refresh_jwt = match crate::auth::create_refresh_token(&did) {
+            let new_refresh_jwt = match crate::auth::create_refresh_token(&did, &key_bytes) {
                 Ok(t) => t,
                 Err(e) => {
                     error!("Failed to create refresh token: {:?}", e);

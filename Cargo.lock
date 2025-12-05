@@ -450,6 +450,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "bcrypt",
  "bytes",
  "chrono",
@@ -459,7 +460,9 @@ dependencies = [
  "jacquard-axum",
  "jacquard-repo",
  "jsonwebtoken",
+ "k256",
  "multihash",
+ "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_ipld_dagcbor",
@@ -973,7 +976,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 2.0.111",
+ "syn 1.0.109",
 ]
 
 [[package]]

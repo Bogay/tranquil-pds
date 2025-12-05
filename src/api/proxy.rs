@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
     body::Bytes,
@@ -7,8 +7,11 @@ use axum::{
 use reqwest::Client;
 use tracing::{info, error};
 use std::collections::HashMap;
+use crate::state::AppState;
+use sqlx::Row;
 
 pub async fn proxy_handler(
+    State(state): State<AppState>,
     Path(method): Path<String>,
     method_verb: Method,
     headers: HeaderMap,
@@ -20,8 +23,8 @@ pub async fn proxy_handler(
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
 
-    let appview_url = match proxy_header {
-        Some(url) => url,
+    let appview_url = match &proxy_header {
+        Some(url) => url.clone(),
         None => match std::env::var("APPVIEW_URL") {
             Ok(url) => url,
             Err(_) => return (StatusCode::BAD_GATEWAY, "No upstream AppView configured").into_response(),
@@ -38,8 +41,37 @@ pub async fn proxy_handler(
         .request(method_verb, &target_url)
         .query(&params);
 
+    let mut auth_header_val = headers.get("Authorization").map(|h| h.clone());
+
+    if let Some(aud) = &proxy_header {
+        if let Some(auth_val) = &auth_header_val {
+            if let Ok(token) = auth_val.to_str() {
+                let token = token.replace("Bearer ", "");
+                if let Ok(did) = crate::auth::get_did_from_token(&token) {
+                     let key_row = sqlx::query("SELECT k.key_bytes FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1")
+                        .bind(&did)
+                        .fetch_optional(&state.db)
+                        .await;
+
+                    if let Ok(Some(row)) = key_row {
+                        let key_bytes: Vec<u8> = row.get("key_bytes");
+                        if let Ok(new_token) = crate::auth::create_service_token(&did, aud, &method, &key_bytes) {
+                             if let Ok(val) = axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token)) {
+                                 auth_header_val = Some(val);
+                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(val) = auth_header_val {
+        request_builder = request_builder.header("Authorization", val);
+    }
+
     for (key, value) in headers.iter() {
-        if key != "host" && key != "content-length" {
+        if key != "host" && key != "content-length" && key != "authorization" {
             request_builder = request_builder.header(key, value);
         }
     }
