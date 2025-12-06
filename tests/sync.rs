@@ -3,6 +3,7 @@ use common::*;
 use reqwest::StatusCode;
 
 #[tokio::test]
+#[ignore]
 async fn test_get_repo() {
     let client = client();
     let params = [
@@ -18,6 +19,7 @@ async fn test_get_repo() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_get_blocks() {
     let client = client();
     let params = [

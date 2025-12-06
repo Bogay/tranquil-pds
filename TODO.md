@@ -9,9 +9,8 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.server.describeServer` (returns available user domains).
 - [x] XRPC Proxying
     - [x] Implement strict forwarding for all `app.bsky.*` and `chat.bsky.*` requests to an appview.
-    - [x] Forward Auth headers correctly.
-    - [x] Handle AppView errors/timeouts gracefully.
-    - [ ] Implement Read-After-Write (RAW) consistency (Local Overlay) for proxied requests (merge local unindexed records).
+    - [x] Forward auth headers correctly.
+    - [x] Handle appview errors/timeouts gracefully.
 
 ## Authentication & Account Management (`com.atproto.server`)
 - [x] Account Creation
@@ -20,7 +19,8 @@ Lewis' corrected big boy todofile
     - [x] Create DID for new user (PLC directory).
     - [x] Initialize user repository (Root commit).
     - [x] Return access JWT and DID.
-    - [ ] Create DID for new user (did:web).
+    - [x] Create DID for new user (did:web).
+    - [ ] Implement all TODOs regarding did:webs.
 - [x] Session Management
     - [x] Implement `com.atproto.server.createSession` (Login).
     - [x] Implement `com.atproto.server.getSession`.
@@ -50,18 +50,18 @@ Lewis' corrected big boy todofile
         - [ ] Generate `rkey` (TID) if not provided.
         - [ ] Handle MST (Merkle Search Tree) insertion.
         - [ ] **Trigger Firehose Event**.
-    - [ ] Implement `com.atproto.repo.putRecord`.
-    - [ ] Implement `com.atproto.repo.getRecord`.
-    - [ ] Implement `com.atproto.repo.deleteRecord`.
-    - [ ] Implement `com.atproto.repo.listRecords`.
-    - [ ] Implement `com.atproto.repo.describeRepo`.
+    - [x] Implement `com.atproto.repo.putRecord`.
+    - [x] Implement `com.atproto.repo.getRecord`.
+    - [x] Implement `com.atproto.repo.deleteRecord`.
+    - [x] Implement `com.atproto.repo.listRecords`.
+    - [x] Implement `com.atproto.repo.describeRepo`.
     - [ ] Implement `com.atproto.repo.applyWrites` (Batch writes).
     - [ ] Implement `com.atproto.repo.importRepo` (Migration).
     - [ ] Implement `com.atproto.repo.listMissingBlobs`.
 - [ ] Blob Management
-    - [ ] Implement `com.atproto.repo.uploadBlob`.
-        - [ ] Store blob (S3).
-        - [ ] return `blob` ref (CID + MimeType).
+    - [x] Implement `com.atproto.repo.uploadBlob`.
+        - [x] Store blob (S3).
+        - [x] return `blob` ref (CID + MimeType).
 
 ## Sync & Federation (`com.atproto.sync`)
 - [ ] The Firehose (WebSocket)
@@ -88,7 +88,7 @@ Lewis' corrected big boy todofile
     - [ ] Implement `com.atproto.identity.updateHandle`.
     - [ ] Implement `com.atproto.identity.submitPlcOperation` / `signPlcOperation` / `requestPlcOperationSignature`.
     - [ ] Implement `com.atproto.identity.getRecommendedDidCredentials`.
-    - [ ] Implement `/.well-known/did.json` (Depends on supporting did:web).
+    - [x] Implement `/.well-known/did.json` (Depends on supporting did:web).
 
 ## Admin Management (`com.atproto.admin`)
 - [ ] Implement `com.atproto.admin.deleteAccount`.
@@ -108,13 +108,7 @@ Lewis' corrected big boy todofile
 - [ ] Implement `com.atproto.moderation.createReport`.
 
 ## Record Schema Validation
-- [ ] `app.bsky.feed.post`
-- [ ] `app.bsky.feed.like`
-- [ ] `app.bsky.feed.repost`
-- [ ] `app.bsky.graph.follow`
-- [ ] `app.bsky.graph.block`
-- [ ] `app.bsky.actor.profile`
-- [ ] Other app(view) validation too!!!
+- [ ] Handle this generically.
 
 ## Infrastructure & Core Components
 - [ ] Sequencer (Event Log)

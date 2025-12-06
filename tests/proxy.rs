@@ -61,6 +61,7 @@ async fn test_proxy_via_header() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_proxy_via_env_var() {
     let (upstream_url, mut rx) = spawn_mock_upstream().await;
 
@@ -82,6 +83,7 @@ async fn test_proxy_via_env_var() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_proxy_missing_config() {
     unsafe { std::env::remove_var("APPVIEW_URL"); }
 

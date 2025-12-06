@@ -10,13 +10,11 @@ services:
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3000
       DATABASE_URL: postgres://postgres:postgres@db:5432/pds
-      OBJECT_STORAGE_ENDPOINT: http://objsto:9000
-      OBJECT_STORAGE_REGION: us-east-1
-      OBJECT_STORAGE_BUCKET: pds-blobs
-      OBJECT_STORAGE_ACCESS_KEY: minioadmin
-      OBJECT_STORAGE_SECRET_KEY: minioadmin
-      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
-      JWT_SECRET: your-super-secret-jwt-key-please-change-me
+      S3_ENDPOINT: http://objsto:9000
+      AWS_REGION: us-east-1
+      S3_BUCKET: pds-blobs
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
       PDS_HOSTNAME: localhost:3000
     depends_on:
       - db

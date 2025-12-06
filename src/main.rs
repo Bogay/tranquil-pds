@@ -20,7 +20,7 @@ async fn main() {
         .await
         .expect("Failed to run migrations");
 
-    let state = AppState::new(pool);
+    let state = AppState::new(pool).await;
 
     let app = bspds::app(state);
 

@@ -1,15 +1,19 @@
 use sqlx::PgPool;
 use crate::repo::PostgresBlockStore;
+use crate::storage::{BlobStorage, S3BlobStorage};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
     pub block_store: PostgresBlockStore,
+    pub blob_store: Arc<dyn BlobStorage>,
 }
 
 impl AppState {
-    pub fn new(db: PgPool) -> Self {
+    pub async fn new(db: PgPool) -> Self {
         let block_store = PostgresBlockStore::new(db.clone());
-        Self { db, block_store }
+        let blob_store = S3BlobStorage::new().await;
+        Self { db, block_store, blob_store: Arc::new(blob_store) }
     }
 }

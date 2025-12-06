@@ -9,11 +9,19 @@ use std::sync::OnceLock;
 use bspds::state::AppState;
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
-use testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt};
+use testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt, GenericImage};
+use testcontainers::core::ContainerPort;
 use testcontainers_modules::postgres::Postgres;
+use aws_sdk_s3::Client as S3Client;
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::config::Credentials;
+use wiremock::{MockServer, Mock, ResponseTemplate};
+use wiremock::matchers::{method, path};
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
+static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
+static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
 
 #[allow(dead_code)]
 pub const AUTH_TOKEN: &str = "test-token";
@@ -45,6 +53,66 @@ pub async fn base_url() -> &'static str {
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
+                let s3_container = GenericImage::new("minio/minio", "latest")
+                    .with_exposed_port(ContainerPort::Tcp(9000))
+                    .with_env_var("MINIO_ROOT_USER", "minioadmin")
+                    .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
+                    .with_cmd(vec!["server".to_string(), "/data".to_string()])
+                    .start()
+                    .await
+                    .expect("Failed to start MinIO");
+
+                let s3_port = s3_container.get_host_port_ipv4(9000).await.expect("Failed to get S3 port");
+                let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+
+                unsafe {
+                    std::env::set_var("S3_BUCKET", "test-bucket");
+                    std::env::set_var("AWS_ACCESS_KEY_ID", "minioadmin");
+                    std::env::set_var("AWS_SECRET_ACCESS_KEY", "minioadmin");
+                    std::env::set_var("AWS_REGION", "us-east-1");
+                    std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+                }
+
+                let sdk_config = aws_config::defaults(BehaviorVersion::latest())
+                    .region("us-east-1")
+                    .endpoint_url(&s3_endpoint)
+                    .credentials_provider(Credentials::new("minioadmin", "minioadmin", None, None, "test"))
+                    .load()
+                    .await;
+
+                let s3_config = aws_sdk_s3::config::Builder::from(&sdk_config)
+                    .force_path_style(true)
+                    .build();
+                let s3_client = S3Client::from_conf(s3_config);
+
+                let _ = s3_client.create_bucket().bucket("test-bucket").send().await;
+
+                let mock_server = MockServer::start().await;
+
+                Mock::given(method("GET"))
+                    .and(path("/xrpc/app.bsky.actor.getProfile"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                        "handle": "mock.handle",
+                        "did": "did:plc:mock",
+                        "displayName": "Mock User"
+                    })))
+                    .mount(&mock_server)
+                    .await;
+
+                Mock::given(method("GET"))
+                    .and(path("/xrpc/app.bsky.actor.searchActors"))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                        "actors": [],
+                        "cursor": null
+                    })))
+                    .mount(&mock_server)
+                    .await;
+
+                unsafe { std::env::set_var("APPVIEW_URL", mock_server.uri()); }
+                MOCK_APPVIEW.set(mock_server).ok();
+
+                S3_CONTAINER.set(s3_container).ok();
+
                 let container = Postgres::default().with_tag("18-alpine").start().await.expect("Failed to start Postgres");
                 let connection_string = format!(
                     "postgres://postgres:postgres@127.0.0.1:{}/postgres",
@@ -74,7 +142,7 @@ async fn spawn_app(database_url: String) -> String {
         .await
         .expect("Failed to run migrations");
 
-    let state = AppState::new(pool);
+    let state = AppState::new(pool).await;
     let app = bspds::app(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
