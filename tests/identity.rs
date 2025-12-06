@@ -2,6 +2,8 @@ mod common;
 use common::*;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
+use wiremock::{MockServer, Mock, ResponseTemplate};
+use wiremock::matchers::{method, path};
 
 // #[tokio::test]
 // async fn test_resolve_handle() {
@@ -36,9 +38,31 @@ async fn test_well_known_did() {
 async fn test_create_did_web_account_and_resolve() {
     let client = client();
 
+    let mock_server = MockServer::start().await;
+    let mock_uri = mock_server.uri();
+    let mock_addr = mock_uri.trim_start_matches("http://");
+
+    let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
+
     let handle = format!("webuser_{}", uuid::Uuid::new_v4());
 
-    let did = format!("did:web:example.com:u:{}", handle);
+    let pds_endpoint = "https://localhost";
+
+    let did_doc = json!({
+        "@context": ["https://www.w3.org/ns/did/v1"],
+        "id": did,
+        "service": [{
+            "id": "#atproto_pds",
+            "type": "AtprotoPersonalDataServer",
+            "serviceEndpoint": pds_endpoint
+        }]
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/.well-known/did.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(did_doc))
+        .mount(&mock_server)
+        .await;
 
     let payload = json!({
         "handle": handle,
@@ -53,7 +77,11 @@ async fn test_create_did_web_account_and_resolve() {
         .await
         .expect("Failed to send request");
 
-    assert_eq!(res.status(), StatusCode::OK);
+    if res.status() != StatusCode::OK {
+        let status = res.status();
+        let body: Value = res.json().await.unwrap_or(json!({"error": "could not parse body"}));
+        panic!("createAccount failed with status {}: {:?}", status, body);
+    }
     let body: Value = res.json().await.expect("createAccount response was not JSON");
     assert_eq!(body["did"], did);
 

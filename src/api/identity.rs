@@ -16,6 +16,7 @@ use std::sync::Arc;
 use k256::SecretKey;
 use rand::rngs::OsRng;
 use base64::Engine;
+use reqwest;
 
 #[derive(Deserialize)]
 pub struct CreateAccountInput {
@@ -50,10 +51,9 @@ pub async fn create_account(
             format!("did:plc:{}", uuid::Uuid::new_v4())
         } else {
              let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-             let _expected_prefix = format!("did:web:{}", hostname);
-
-             // TODO: should verify we are the authority for it if it matches our hostname.
-             // TODO: if it's an external did:web, we should technically verify ownership via ServiceAuth, but skipping for now.
+             if let Err(e) = verify_did_web(d, &hostname, &input.handle).await {
+                 return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidDid", "message": e}))).into_response();
+             }
              d.clone()
         }
     } else {
@@ -351,4 +351,74 @@ pub async fn user_did_doc(
             "serviceEndpoint": format!("https://{}", hostname)
         }]
     })).into_response()
+}
+
+async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(), String> {
+    let expected_prefix = if hostname.contains(':') {
+        format!("did:web:{}", hostname.replace(':', "%3A"))
+    } else {
+        format!("did:web:{}", hostname)
+    };
+
+    if did.starts_with(&expected_prefix) {
+        let suffix = &did[expected_prefix.len()..];
+        let expected_suffix = format!(":u:{}", handle);
+        if suffix == expected_suffix {
+            Ok(())
+        } else {
+             Err(format!("Invalid DID path for this PDS. Expected {}", expected_suffix))
+        }
+    } else {
+        let parts: Vec<&str> = did.split(':').collect();
+        if parts.len() < 3 || parts[0] != "did" || parts[1] != "web" {
+             return Err("Invalid did:web format".into());
+        }
+
+        let domain_segment = parts[2];
+        let domain = domain_segment.replace("%3A", ":");
+
+        let scheme = if domain.starts_with("localhost") || domain.starts_with("127.0.0.1") {
+            "http"
+        } else {
+            "https"
+        };
+
+        let url = if parts.len() == 3 {
+            format!("{}://{}/.well-known/did.json", scheme, domain)
+        } else {
+            let path = parts[3..].join("/");
+            format!("{}://{}/{}/did.json", scheme, domain, path)
+        };
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|e| format!("Failed to create client: {}", e))?;
+
+        let resp = client.get(&url).send().await
+            .map_err(|e| format!("Failed to fetch DID doc: {}", e))?;
+
+        if !resp.status().is_success() {
+             return Err(format!("Failed to fetch DID doc: HTTP {}", resp.status()));
+        }
+
+        let doc: serde_json::Value = resp.json().await
+            .map_err(|e| format!("Failed to parse DID doc: {}", e))?;
+
+        let services = doc["service"].as_array()
+            .ok_or("No services found in DID doc")?;
+
+        let pds_endpoint = format!("https://{}", hostname);
+
+        let has_valid_service = services.iter().any(|s| {
+            s["type"] == "AtprotoPersonalDataServer" &&
+            s["serviceEndpoint"] == pds_endpoint
+        });
+
+        if has_valid_service {
+            Ok(())
+        } else {
+            Err(format!("DID document does not list this PDS ({}) as AtprotoPersonalDataServer", pds_endpoint))
+        }
+    }
 }

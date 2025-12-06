@@ -20,7 +20,6 @@ Lewis' corrected big boy todofile
     - [x] Initialize user repository (Root commit).
     - [x] Return access JWT and DID.
     - [x] Create DID for new user (did:web).
-    - [ ] Implement all TODOs regarding did:webs.
 - [x] Session Management
     - [x] Implement `com.atproto.server.createSession` (Login).
     - [x] Implement `com.atproto.server.getSession`.
@@ -138,4 +137,5 @@ Lewis' corrected big boy todofile
     - [ ] Implement CAR (Content Addressable Archive) encoding/decoding.
 - [ ] Validation
     - [ ] DID PLC Operations (Sign rotation keys).
+- [ ] Fix any remaining TODOs in the code, everywhere, full stop.
 
