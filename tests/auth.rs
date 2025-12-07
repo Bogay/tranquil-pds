@@ -1,10 +1,10 @@
-use bspds::auth;
-use k256::SecretKey;
-use rand::rngs::OsRng;
-use chrono::{Utc, Duration};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde_json::json;
+use bspds::auth;
+use chrono::{Duration, Utc};
+use k256::SecretKey;
 use k256::ecdsa::{SigningKey, signature::Signer};
+use rand::rngs::OsRng;
+use serde_json::json;
 
 #[test]
 fn test_jwt_flow() {
@@ -24,7 +24,8 @@ fn test_jwt_flow() {
 
     let aud = "did:web:service";
     let lxm = "com.example.test";
-    let s_token = auth::create_service_token(did, aud, lxm, &key_bytes).expect("create service token");
+    let s_token =
+        auth::create_service_token(did, aud, lxm, &key_bytes).expect("create service token");
     let s_data = auth::verify_token(&s_token, &key_bytes).expect("verify service token");
     assert_eq!(s_data.claims.aud, aud);
     assert_eq!(s_data.claims.lxm, Some(lxm.to_string()));

@@ -1,9 +1,9 @@
 mod common;
 use common::*;
 use reqwest::StatusCode;
-use serde_json::{json, Value};
-use wiremock::{MockServer, Mock, ResponseTemplate};
+use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // #[tokio::test]
 // async fn test_resolve_handle() {
@@ -23,7 +23,8 @@ use wiremock::matchers::{method, path};
 #[tokio::test]
 async fn test_well_known_did() {
     let client = client();
-    let res = client.get(format!("{}/.well-known/did.json", base_url().await))
+    let res = client
+        .get(format!("{}/.well-known/did.json", base_url().await))
         .send()
         .await
         .expect("Failed to send request");
@@ -71,7 +72,11 @@ async fn test_create_did_web_account_and_resolve() {
         "did": did
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
@@ -79,13 +84,20 @@ async fn test_create_did_web_account_and_resolve() {
 
     if res.status() != StatusCode::OK {
         let status = res.status();
-        let body: Value = res.json().await.unwrap_or(json!({"error": "could not parse body"}));
+        let body: Value = res
+            .json()
+            .await
+            .unwrap_or(json!({"error": "could not parse body"}));
         panic!("createAccount failed with status {}: {:?}", status, body);
     }
-    let body: Value = res.json().await.expect("createAccount response was not JSON");
+    let body: Value = res
+        .json()
+        .await
+        .expect("createAccount response was not JSON");
     assert_eq!(body["did"], did);
 
-    let res = client.get(format!("{}/u/{}/did.json", base_url().await, handle))
+    let res = client
+        .get(format!("{}/u/{}/did.json", base_url().await, handle))
         .send()
         .await
         .expect("Failed to fetch DID doc");
@@ -111,14 +123,22 @@ async fn test_create_account_duplicate_handle() {
         "password": "password"
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
@@ -143,7 +163,11 @@ async fn test_did_web_lifecycle() {
         "did": did
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&create_payload)
         .send()
         .await
@@ -162,7 +186,11 @@ async fn test_did_web_lifecycle() {
         "identifier": handle,
         "password": "password"
     });
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createSession", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createSession",
+            base_url().await
+        ))
         .json(&login_payload)
         .send()
         .await

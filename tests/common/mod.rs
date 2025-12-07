@@ -1,22 +1,22 @@
-use reqwest::{header, Client, StatusCode};
-use serde_json::{json, Value};
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::Client as S3Client;
+use aws_sdk_s3::config::Credentials;
+use bspds::state::AppState;
 use chrono::Utc;
+use reqwest::{Client, StatusCode, header};
+use serde_json::{Value, json};
+use sqlx::postgres::PgPoolOptions;
 #[allow(unused_imports)]
 use std::collections::HashMap;
+use std::sync::OnceLock;
 #[allow(unused_imports)]
 use std::time::Duration;
-use std::sync::OnceLock;
-use bspds::state::AppState;
-use sqlx::postgres::PgPoolOptions;
-use tokio::net::TcpListener;
-use testcontainers::{runners::AsyncRunner, ContainerAsync, ImageExt, GenericImage};
 use testcontainers::core::ContainerPort;
+use testcontainers::{ContainerAsync, GenericImage, ImageExt, runners::AsyncRunner};
 use testcontainers_modules::postgres::Postgres;
-use aws_sdk_s3::Client as S3Client;
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::config::Credentials;
-use wiremock::{MockServer, Mock, ResponseTemplate};
+use tokio::net::TcpListener;
 use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
@@ -46,7 +46,12 @@ pub async fn base_url() -> &'static str {
                 if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
                     let podman_sock = std::path::Path::new(&runtime_dir).join("podman/podman.sock");
                     if podman_sock.exists() {
-                         unsafe { std::env::set_var("DOCKER_HOST", format!("unix://{}", podman_sock.display())); }
+                        unsafe {
+                            std::env::set_var(
+                                "DOCKER_HOST",
+                                format!("unix://{}", podman_sock.display()),
+                            );
+                        }
                     }
                 }
             }
@@ -62,7 +67,10 @@ pub async fn base_url() -> &'static str {
                     .await
                     .expect("Failed to start MinIO");
 
-                let s3_port = s3_container.get_host_port_ipv4(9000).await.expect("Failed to get S3 port");
+                let s3_port = s3_container
+                    .get_host_port_ipv4(9000)
+                    .await
+                    .expect("Failed to get S3 port");
                 let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
 
                 unsafe {
@@ -76,7 +84,13 @@ pub async fn base_url() -> &'static str {
                 let sdk_config = aws_config::defaults(BehaviorVersion::latest())
                     .region("us-east-1")
                     .endpoint_url(&s3_endpoint)
-                    .credentials_provider(Credentials::new("minioadmin", "minioadmin", None, None, "test"))
+                    .credentials_provider(Credentials::new(
+                        "minioadmin",
+                        "minioadmin",
+                        None,
+                        None,
+                        "test",
+                    ))
                     .load()
                     .await;
 
@@ -108,15 +122,24 @@ pub async fn base_url() -> &'static str {
                     .mount(&mock_server)
                     .await;
 
-                unsafe { std::env::set_var("APPVIEW_URL", mock_server.uri()); }
+                unsafe {
+                    std::env::set_var("APPVIEW_URL", mock_server.uri());
+                }
                 MOCK_APPVIEW.set(mock_server).ok();
 
                 S3_CONTAINER.set(s3_container).ok();
 
-                let container = Postgres::default().with_tag("18-alpine").start().await.expect("Failed to start Postgres");
+                let container = Postgres::default()
+                    .with_tag("18-alpine")
+                    .start()
+                    .await
+                    .expect("Failed to start Postgres");
                 let connection_string = format!(
                     "postgres://postgres:postgres@127.0.0.1:{}/postgres",
-                    container.get_host_port_ipv4(5432).await.expect("Failed to get port")
+                    container
+                        .get_host_port_ipv4(5432)
+                        .await
+                        .expect("Failed to get port")
                 );
 
                 DB_CONTAINER.set(container).ok();
@@ -157,7 +180,11 @@ async fn spawn_app(database_url: String) -> String {
 
 #[allow(dead_code)]
 pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'static str) -> Value {
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.uploadBlob",
+            base_url().await
+        ))
         .header(header::CONTENT_TYPE, mime)
         .bearer_auth(AUTH_TOKEN)
         .body(data)
@@ -170,12 +197,11 @@ pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'stati
     body["blob"].clone()
 }
 
-
 #[allow(dead_code)]
 pub async fn create_test_post(
     client: &Client,
     text: &str,
-    reply_to: Option<Value>
+    reply_to: Option<Value>,
 ) -> (String, String, String) {
     let collection = "app.bsky.feed.post";
     let mut record = json!({
@@ -194,7 +220,11 @@ pub async fn create_test_post(
         "record": record
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
         .bearer_auth(AUTH_TOKEN)
         .json(&payload)
         .send()
@@ -202,11 +232,24 @@ pub async fn create_test_post(
         .expect("Failed to send createRecord");
 
     assert_eq!(res.status(), StatusCode::OK, "Failed to create post record");
-    let body: Value = res.json().await.expect("createRecord response was not JSON");
+    let body: Value = res
+        .json()
+        .await
+        .expect("createRecord response was not JSON");
 
-    let uri = body["uri"].as_str().expect("Response had no URI").to_string();
-    let cid = body["cid"].as_str().expect("Response had no CID").to_string();
-    let rkey = uri.split('/').last().expect("URI was malformed").to_string();
+    let uri = body["uri"]
+        .as_str()
+        .expect("Response had no URI")
+        .to_string();
+    let cid = body["cid"]
+        .as_str()
+        .expect("Response had no CID")
+        .to_string();
+    let rkey = uri
+        .split('/')
+        .last()
+        .expect("URI was malformed")
+        .to_string();
 
     (uri, cid, rkey)
 }
@@ -220,7 +263,11 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
         "password": "password"
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
@@ -231,7 +278,10 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
     }
 
     let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt").to_string();
+    let access_jwt = body["accessJwt"]
+        .as_str()
+        .expect("No accessJwt")
+        .to_string();
     let did = body["did"].as_str().expect("No did").to_string();
     (access_jwt, did)
 }

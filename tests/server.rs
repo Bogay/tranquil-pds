@@ -2,12 +2,13 @@ mod common;
 use common::*;
 
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[tokio::test]
 async fn test_health() {
     let client = client();
-    let res = client.get(format!("{}/health", base_url().await))
+    let res = client
+        .get(format!("{}/health", base_url().await))
         .send()
         .await
         .expect("Failed to send request");
@@ -19,7 +20,11 @@ async fn test_health() {
 #[tokio::test]
 async fn test_describe_server() {
     let client = client();
-    let res = client.get(format!("{}/xrpc/com.atproto.server.describeServer", base_url().await))
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.describeServer",
+            base_url().await
+        ))
         .send()
         .await
         .expect("Failed to send request");
@@ -39,7 +44,11 @@ async fn test_create_session() {
         "email": format!("{}@example.com", handle),
         "password": "password"
     });
-    let _ = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let _ = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await;
@@ -49,7 +58,11 @@ async fn test_create_session() {
         "password": "password"
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createSession", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createSession",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
@@ -67,14 +80,21 @@ async fn test_create_session_missing_identifier() {
         "password": "password"
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createSession", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createSession",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
         .expect("Failed to send request");
 
-    assert!(res.status() == StatusCode::BAD_REQUEST || res.status() == StatusCode::UNPROCESSABLE_ENTITY,
-        "Expected 400 or 422 for missing identifier, got {}", res.status());
+    assert!(
+        res.status() == StatusCode::BAD_REQUEST || res.status() == StatusCode::UNPROCESSABLE_ENTITY,
+        "Expected 400 or 422 for missing identifier, got {}",
+        res.status()
+    );
 }
 
 #[tokio::test]
@@ -86,19 +106,31 @@ async fn test_create_account_invalid_handle() {
         "password": "password"
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
         .expect("Failed to send request");
 
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Expected 400 for invalid handle chars");
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "Expected 400 for invalid handle chars"
+    );
 }
 
 #[tokio::test]
 async fn test_get_session() {
     let client = client();
-    let res = client.get(format!("{}/xrpc/com.atproto.server.getSession", base_url().await))
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getSession",
+            base_url().await
+        ))
         .bearer_auth(AUTH_TOKEN)
         .send()
         .await
@@ -117,7 +149,11 @@ async fn test_refresh_session() {
         "email": format!("{}@example.com", handle),
         "password": "password"
     });
-    let _ = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base_url().await))
+    let _ = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await;
@@ -126,7 +162,11 @@ async fn test_refresh_session() {
         "identifier": handle,
         "password": "password"
     });
-    let res = client.post(format!("{}/xrpc/com.atproto.server.createSession", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createSession",
+            base_url().await
+        ))
         .json(&login_payload)
         .send()
         .await
@@ -134,10 +174,20 @@ async fn test_refresh_session() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
-    let refresh_jwt = body["refreshJwt"].as_str().expect("No refreshJwt").to_string();
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt").to_string();
+    let refresh_jwt = body["refreshJwt"]
+        .as_str()
+        .expect("No refreshJwt")
+        .to_string();
+    let access_jwt = body["accessJwt"]
+        .as_str()
+        .expect("No accessJwt")
+        .to_string();
 
-    let res = client.post(format!("{}/xrpc/com.atproto.server.refreshSession", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.refreshSession",
+            base_url().await
+        ))
         .bearer_auth(&refresh_jwt)
         .send()
         .await
@@ -154,7 +204,11 @@ async fn test_refresh_session() {
 #[tokio::test]
 async fn test_delete_session() {
     let client = client();
-    let res = client.post(format!("{}/xrpc/com.atproto.server.deleteSession", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deleteSession",
+            base_url().await
+        ))
         .bearer_auth(AUTH_TOKEN)
         .send()
         .await

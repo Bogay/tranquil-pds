@@ -1,17 +1,15 @@
 mod common;
 
-use axum::{
-    routing::any,
-    Router,
-    extract::Request,
-    http::StatusCode,
-};
-use tokio::net::TcpListener;
+use axum::{Router, extract::Request, http::StatusCode, routing::any};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Client;
 use std::sync::Arc;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use tokio::net::TcpListener;
 
-async fn spawn_mock_upstream() -> (String, tokio::sync::mpsc::Receiver<(String, String, Option<String>)>) {
+async fn spawn_mock_upstream() -> (
+    String,
+    tokio::sync::mpsc::Receiver<(String, String, Option<String>)>,
+) {
     let (tx, rx) = tokio::sync::mpsc::channel(10);
     let tx = Arc::new(tx);
 
@@ -20,7 +18,9 @@ async fn spawn_mock_upstream() -> (String, tokio::sync::mpsc::Receiver<(String, 
         async move {
             let method = req.method().to_string();
             let uri = req.uri().to_string();
-            let auth = req.headers().get("Authorization")
+            let auth = req
+                .headers()
+                .get("Authorization")
                 .and_then(|h| h.to_str().ok())
                 .map(|s| s.to_string());
 
@@ -45,7 +45,8 @@ async fn test_proxy_via_header() {
     let (upstream_url, mut rx) = spawn_mock_upstream().await;
     let client = Client::new();
 
-    let res = client.get(format!("{}/xrpc/com.example.test", app_url))
+    let res = client
+        .get(format!("{}/xrpc/com.example.test", app_url))
         .header("atproto-proxy", &upstream_url)
         .header("Authorization", "Bearer test-token")
         .send()
@@ -65,12 +66,15 @@ async fn test_proxy_via_header() {
 async fn test_proxy_via_env_var() {
     let (upstream_url, mut rx) = spawn_mock_upstream().await;
 
-    unsafe { std::env::set_var("APPVIEW_URL", &upstream_url); }
+    unsafe {
+        std::env::set_var("APPVIEW_URL", &upstream_url);
+    }
 
     let app_url = common::base_url().await;
     let client = Client::new();
 
-    let res = client.get(format!("{}/xrpc/com.example.envtest", app_url))
+    let res = client
+        .get(format!("{}/xrpc/com.example.envtest", app_url))
         .send()
         .await
         .unwrap();
@@ -85,12 +89,15 @@ async fn test_proxy_via_env_var() {
 #[tokio::test]
 #[ignore]
 async fn test_proxy_missing_config() {
-    unsafe { std::env::remove_var("APPVIEW_URL"); }
+    unsafe {
+        std::env::remove_var("APPVIEW_URL");
+    }
 
     let app_url = common::base_url().await;
     let client = Client::new();
 
-    let res = client.get(format!("{}/xrpc/com.example.fail", app_url))
+    let res = client
+        .get(format!("{}/xrpc/com.example.fail", app_url))
         .send()
         .await
         .unwrap();
@@ -106,7 +113,8 @@ async fn test_proxy_auth_signing() {
 
     let (access_jwt, did) = common::create_account_and_login(&client).await;
 
-    let res = client.get(format!("{}/xrpc/com.example.signed", app_url))
+    let res = client
+        .get(format!("{}/xrpc/com.example.signed", app_url))
         .header("atproto-proxy", &upstream_url)
         .header("Authorization", format!("Bearer {}", access_jwt))
         .send()

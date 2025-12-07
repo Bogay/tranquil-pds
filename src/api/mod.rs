@@ -1,4 +1,4 @@
-pub mod server;
-pub mod repo;
-pub mod proxy;
 pub mod identity;
+pub mod proxy;
+pub mod repo;
+pub mod server;

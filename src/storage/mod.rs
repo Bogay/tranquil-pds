@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use thiserror::Error;
+use aws_config::BehaviorVersion;
+use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::primitives::ByteStream;
-use aws_config::meta::region::RegionProviderChain;
-use aws_config::BehaviorVersion;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -55,7 +55,8 @@ impl S3BlobStorage {
 #[async_trait]
 impl BlobStorage for S3BlobStorage {
     async fn put(&self, key: &str, data: &[u8]) -> Result<(), StorageError> {
-        self.client.put_object()
+        self.client
+            .put_object()
             .bucket(&self.bucket)
             .key(key)
             .body(ByteStream::from(data.to_vec()))
@@ -66,14 +67,19 @@ impl BlobStorage for S3BlobStorage {
     }
 
     async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError> {
-        let resp = self.client.get_object()
+        let resp = self
+            .client
+            .get_object()
             .bucket(&self.bucket)
             .key(key)
             .send()
             .await
             .map_err(|e| StorageError::S3(e.to_string()))?;
 
-        let data = resp.body.collect().await
+        let data = resp
+            .body
+            .collect()
+            .await
             .map_err(|e| StorageError::S3(e.to_string()))?
             .into_bytes();
 
@@ -81,7 +87,8 @@ impl BlobStorage for S3BlobStorage {
     }
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        self.client.delete_object()
+        self.client
+            .delete_object()
             .bucket(&self.bucket)
             .key(key)
             .send()

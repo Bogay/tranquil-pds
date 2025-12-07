@@ -1,9 +1,9 @@
 mod common;
 use common::*;
 
-use reqwest::{header, StatusCode};
-use serde_json::{json, Value};
 use chrono::Utc;
+use reqwest::{StatusCode, header};
+use serde_json::{Value, json};
 
 #[tokio::test]
 #[ignore]
@@ -15,7 +15,11 @@ async fn test_get_record() {
         ("rkey", "self"),
     ];
 
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.getRecord",
+            base_url().await
+        ))
         .query(&params)
         .send()
         .await
@@ -36,7 +40,11 @@ async fn test_get_record_not_found() {
         ("rkey", "nonexistent"),
     ];
 
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.getRecord",
+            base_url().await
+        ))
         .query(&params)
         .send()
         .await
@@ -50,7 +58,11 @@ async fn test_get_record_not_found() {
 #[tokio::test]
 async fn test_upload_blob_no_auth() {
     let client = client();
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.uploadBlob",
+            base_url().await
+        ))
         .header(header::CONTENT_TYPE, "text/plain")
         .body("no auth")
         .send()
@@ -66,7 +78,11 @@ async fn test_upload_blob_no_auth() {
 async fn test_upload_blob_success() {
     let client = client();
     let (token, _) = create_account_and_login(&client).await;
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.uploadBlob",
+            base_url().await
+        ))
         .header(header::CONTENT_TYPE, "text/plain")
         .bearer_auth(token)
         .body("This is our blob data")
@@ -90,7 +106,11 @@ async fn test_put_record_no_auth() {
         "record": {}
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .json(&payload)
         .send()
         .await
@@ -118,7 +138,11 @@ async fn test_put_record_success() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(token)
         .json(&payload)
         .send()
@@ -135,23 +159,33 @@ async fn test_put_record_success() {
 #[ignore]
 async fn test_get_record_missing_params() {
     let client = client();
-    let params = [
-        ("repo", "did:plc:12345"),
-    ];
+    let params = [("repo", "did:plc:12345")];
 
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.getRecord",
+            base_url().await
+        ))
         .query(&params)
         .send()
         .await
         .expect("Failed to send request");
 
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Expected 400 for missing params");
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "Expected 400 for missing params"
+    );
 }
 
 #[tokio::test]
 async fn test_upload_blob_bad_token() {
     let client = client();
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.uploadBlob",
+            base_url().await
+        ))
         .header(header::CONTENT_TYPE, "text/plain")
         .bearer_auth(BAD_AUTH_TOKEN)
         .body("This is our blob data")
@@ -181,14 +215,22 @@ async fn test_put_record_mismatched_repo() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(token)
         .json(&payload)
         .send()
         .await
         .expect("Failed to send request");
 
-    assert_eq!(res.status(), StatusCode::FORBIDDEN, "Expected 403 for mismatched repo and auth");
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "Expected 403 for mismatched repo and auth"
+    );
 }
 
 #[tokio::test]
@@ -207,21 +249,33 @@ async fn test_put_record_invalid_schema() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(token)
         .json(&payload)
         .send()
         .await
         .expect("Failed to send request");
 
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Expected 400 for invalid record schema");
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "Expected 400 for invalid record schema"
+    );
 }
 
 #[tokio::test]
 async fn test_upload_blob_unsupported_mime_type() {
     let client = client();
     let (token, _) = create_account_and_login(&client).await;
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.uploadBlob",
+            base_url().await
+        ))
         .header(header::CONTENT_TYPE, "application/xml")
         .bearer_auth(token)
         .body("<xml>not an image</xml>")
@@ -242,7 +296,11 @@ async fn test_list_records() {
         ("collection", "app.bsky.feed.post"),
         ("limit", "10"),
     ];
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.listRecords", base_url().await))
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.listRecords",
+            base_url().await
+        ))
         .query(&params)
         .send()
         .await
@@ -255,10 +313,12 @@ async fn test_list_records() {
 async fn test_describe_repo() {
     let client = client();
     let (_, did) = create_account_and_login(&client).await;
-    let params = [
-        ("repo", did.as_str()),
-    ];
-    let res = client.get(format!("{}/xrpc/com.atproto.repo.describeRepo", base_url().await))
+    let params = [("repo", did.as_str())];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.describeRepo",
+            base_url().await
+        ))
         .query(&params)
         .send()
         .await
@@ -282,7 +342,11 @@ async fn test_create_record_success_with_generated_rkey() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
         .json(&payload)
         .bearer_auth(token)
         .send()
@@ -313,7 +377,11 @@ async fn test_create_record_success_with_provided_rkey() {
         }
     });
 
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
         .json(&payload)
         .bearer_auth(token)
         .send()
@@ -322,7 +390,10 @@ async fn test_create_record_success_with_provided_rkey() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Response was not valid JSON");
-    assert_eq!(body["uri"], format!("at://{}/app.bsky.feed.post/{}", did, rkey));
+    assert_eq!(
+        body["uri"],
+        format!("at://{}/app.bsky.feed.post/{}", did, rkey)
+    );
     // assert_eq!(body["cid"], "bafyreihy");
 }
 
@@ -336,7 +407,11 @@ async fn test_delete_record() {
         "collection": "app.bsky.feed.post",
         "rkey": "some_post_to_delete"
     });
-    let res = client.post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.deleteRecord",
+            base_url().await
+        ))
         .bearer_auth(token)
         .json(&payload)
         .send()

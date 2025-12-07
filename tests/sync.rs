@@ -6,10 +6,12 @@ use reqwest::StatusCode;
 #[ignore]
 async fn test_get_repo() {
     let client = client();
-    let params = [
-        ("did", AUTH_DID),
-    ];
-    let res = client.get(format!("{}/xrpc/com.atproto.sync.getRepo", base_url().await))
+    let params = [("did", AUTH_DID)];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getRepo",
+            base_url().await
+        ))
         .query(&params)
         .send()
         .await
@@ -26,7 +28,11 @@ async fn test_get_blocks() {
         ("did", AUTH_DID),
         // "cids" would be a list of CIDs
     ];
-    let res = client.get(format!("{}/xrpc/com.atproto.sync.getBlocks", base_url().await))
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getBlocks",
+            base_url().await
+        ))
         .query(&params)
         .send()
         .await

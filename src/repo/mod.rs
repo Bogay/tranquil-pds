@@ -1,11 +1,11 @@
-use jacquard_repo::storage::BlockStore;
+use bytes::Bytes;
+use cid::Cid;
 use jacquard_repo::error::RepoError;
 use jacquard_repo::repo::CommitData;
-use cid::Cid;
-use sqlx::{PgPool, Row};
-use bytes::Bytes;
-use sha2::{Sha256, Digest};
+use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
+use sha2::{Digest, Sha256};
+use sqlx::{PgPool, Row};
 
 #[derive(Clone)]
 pub struct PostgresBlockStore {
@@ -31,7 +31,7 @@ impl BlockStore for PostgresBlockStore {
             Some(row) => {
                 let data: Vec<u8> = row.get("data");
                 Ok(Some(Bytes::from(data)))
-            },
+            }
             None => Ok(None),
         }
     }
@@ -65,16 +65,21 @@ impl BlockStore for PostgresBlockStore {
         Ok(row.is_some())
     }
 
-    async fn put_many(&self, blocks: impl IntoIterator<Item = (Cid, Bytes)> + Send) -> Result<(), RepoError> {
+    async fn put_many(
+        &self,
+        blocks: impl IntoIterator<Item = (Cid, Bytes)> + Send,
+    ) -> Result<(), RepoError> {
         let blocks: Vec<_> = blocks.into_iter().collect();
         for (cid, data) in blocks {
             let cid_bytes = cid.to_bytes();
-            sqlx::query("INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING")
-                .bind(cid_bytes)
-                .bind(data.as_ref())
-                .execute(&self.pool)
-                .await
-                .map_err(|e| RepoError::storage(e))?;
+            sqlx::query(
+                "INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING",
+            )
+            .bind(cid_bytes)
+            .bind(data.as_ref())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| RepoError::storage(e))?;
         }
         Ok(())
     }

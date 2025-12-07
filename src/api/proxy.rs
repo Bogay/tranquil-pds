@@ -1,14 +1,14 @@
+use crate::state::AppState;
 use axum::{
+    body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
-    body::Bytes,
 };
 use reqwest::Client;
-use tracing::{info, error};
-use std::collections::HashMap;
-use crate::state::AppState;
 use sqlx::Row;
+use std::collections::HashMap;
+use tracing::{error, info};
 
 pub async fn proxy_handler(
     State(state): State<AppState>,
@@ -18,8 +18,8 @@ pub async fn proxy_handler(
     Query(params): Query<HashMap<String, String>>,
     body: Bytes,
 ) -> Response {
-
-    let proxy_header = headers.get("atproto-proxy")
+    let proxy_header = headers
+        .get("atproto-proxy")
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
 
@@ -27,7 +27,9 @@ pub async fn proxy_handler(
         Some(url) => url.clone(),
         None => match std::env::var("APPVIEW_URL") {
             Ok(url) => url,
-            Err(_) => return (StatusCode::BAD_GATEWAY, "No upstream AppView configured").into_response(),
+            Err(_) => {
+                return (StatusCode::BAD_GATEWAY, "No upstream AppView configured").into_response();
+            }
         },
     };
 
@@ -37,9 +39,7 @@ pub async fn proxy_handler(
 
     let client = Client::new();
 
-    let mut request_builder = client
-        .request(method_verb, &target_url)
-        .query(&params);
+    let mut request_builder = client.request(method_verb, &target_url).query(&params);
 
     let mut auth_header_val = headers.get("Authorization").map(|h| h.clone());
 
@@ -48,17 +48,21 @@ pub async fn proxy_handler(
             if let Ok(token) = auth_val.to_str() {
                 let token = token.replace("Bearer ", "");
                 if let Ok(did) = crate::auth::get_did_from_token(&token) {
-                     let key_row = sqlx::query("SELECT k.key_bytes FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1")
+                    let key_row = sqlx::query("SELECT k.key_bytes FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1")
                         .bind(&did)
                         .fetch_optional(&state.db)
                         .await;
 
                     if let Ok(Some(row)) = key_row {
                         let key_bytes: Vec<u8> = row.get("key_bytes");
-                        if let Ok(new_token) = crate::auth::create_service_token(&did, aud, &method, &key_bytes) {
-                             if let Ok(val) = axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token)) {
-                                 auth_header_val = Some(val);
-                             }
+                        if let Ok(new_token) =
+                            crate::auth::create_service_token(&did, aud, &method, &key_bytes)
+                        {
+                            if let Ok(val) =
+                                axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))
+                            {
+                                auth_header_val = Some(val);
+                            }
                         }
                     }
                 }
@@ -86,7 +90,8 @@ pub async fn proxy_handler(
                 Ok(b) => b,
                 Err(e) => {
                     error!("Error reading proxy response body: {:?}", e);
-                    return (StatusCode::BAD_GATEWAY, "Error reading upstream response").into_response();
+                    return (StatusCode::BAD_GATEWAY, "Error reading upstream response")
+                        .into_response();
                 }
             };
 
@@ -99,11 +104,11 @@ pub async fn proxy_handler(
             match response_builder.body(axum::body::Body::from(body)) {
                 Ok(r) => r,
                 Err(e) => {
-                     error!("Error building proxy response: {:?}", e);
-                     (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
+                    error!("Error building proxy response: {:?}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
                 }
             }
-        },
+        }
         Err(e) => {
             error!("Error sending proxy request: {:?}", e);
             if e.is_timeout() {
