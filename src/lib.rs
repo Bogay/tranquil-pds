@@ -65,6 +65,10 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.atproto.repo.uploadBlob",
             post(api::repo::upload_blob),
         )
+        .route(
+            "/xrpc/app.bsky.feed.getTimeline",
+            get(api::feed::get_timeline),
+        )
         .route("/.well-known/did.json", get(api::identity::well_known_did))
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))

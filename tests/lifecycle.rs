@@ -53,7 +53,6 @@ async fn setup_new_user(handle_prefix: &str) -> (String, String) {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_post_crud_lifecycle() {
     let client = client();
     let (did, jwt) = setup_new_user("lifecycle-crud").await;
@@ -221,7 +220,6 @@ async fn test_post_crud_lifecycle() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_record_update_conflict_lifecycle() {
     let client = client();
     let (user_did, user_jwt) = setup_new_user("user-conflict").await;
@@ -277,7 +275,7 @@ async fn test_record_update_conflict_lifecycle() {
             "$type": "app.bsky.actor.profile",
             "displayName": "Updated Name (v2)"
         },
-        "swapCommit": cid_v1 // <-- Correctly point to v1
+        "swapRecord": cid_v1
     });
     let update_res_v2 = client
         .post(format!(
@@ -308,7 +306,7 @@ async fn test_record_update_conflict_lifecycle() {
             "$type": "app.bsky.actor.profile",
             "displayName": "Stale Update (v3)"
         },
-        "swapCommit": cid_v1
+        "swapRecord": cid_v1
     });
     let update_res_v3_stale = client
         .post(format!(
@@ -335,7 +333,7 @@ async fn test_record_update_conflict_lifecycle() {
             "$type": "app.bsky.actor.profile",
             "displayName": "Good Update (v3)"
         },
-        "swapCommit": cid_v2 // <-- Correct
+        "swapRecord": cid_v2
     });
     let update_res_v3_good = client
         .post(format!(
@@ -448,7 +446,6 @@ async fn create_follow(
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_social_flow_lifecycle() {
     let client = client();
 

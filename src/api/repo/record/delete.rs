@@ -151,17 +151,21 @@ pub async fn delete_record(
 
     // TODO: Check swapRecord if provided? Skipping for brevity/robustness
 
-    if let Err(e) = mst.delete(&key).await {
-        error!("Failed to delete from MST: {:?}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": format!("Failed to delete from MST: {:?}", e)}))).into_response();
-    }
+    let new_mst = match mst.delete(&key).await {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to delete from MST: {:?}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": format!("Failed to delete from MST: {:?}", e)}))).into_response();
+        }
+    };
 
-    let new_mst_root = match mst.root().await {
+    let new_mst_root = match new_mst.persist().await {
         Ok(c) => c,
-        Err(_e) => {
+        Err(e) => {
+            error!("Failed to persist MST: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to get new MST root"})),
+                Json(json!({"error": "InternalError", "message": "Failed to persist MST"})),
             )
                 .into_response();
         }

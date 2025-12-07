@@ -206,10 +206,10 @@ pub async fn create_account(
     }
 
     let mst = Mst::new(Arc::new(state.block_store.clone()));
-    let mst_root = match mst.root().await {
+    let mst_root = match mst.persist().await {
         Ok(c) => c,
         Err(e) => {
-            error!("Error creating MST root: {:?}", e);
+            error!("Error persisting MST: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),

@@ -205,19 +205,22 @@ pub async fn create_record(
     };
 
     let key = format!("{}/{}", collection_nsid, rkey);
-    if let Err(e) = mst.update(&key, record_cid).await {
-        error!("Failed to update MST: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
-    }
+    let new_mst = match mst.add(&key, record_cid).await {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to add to MST: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
 
-    let new_mst_root = match mst.root().await {
+    let new_mst_root = match new_mst.persist().await {
         Ok(c) => c,
         Err(e) => {
-            error!("Failed to get new MST root: {:?}", e);
+            error!("Failed to persist MST: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -317,6 +320,8 @@ pub struct PutRecordInput {
     pub record: serde_json::Value,
     #[serde(rename = "swapCommit")]
     pub swap_commit: Option<String>,
+    #[serde(rename = "swapRecord")]
+    pub swap_record: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -490,18 +495,78 @@ pub async fn put_record(
     };
 
     let key = format!("{}/{}", collection_nsid, rkey);
-    if let Err(e) = mst.update(&key, record_cid).await {
-        error!("Failed to update MST: {:?}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": format!("Failed to update MST: {:?}", e)}))).into_response();
-    }
 
-    let new_mst_root = match mst.root().await {
-        Ok(c) => c,
+    let existing = match mst.get(&key).await {
+        Ok(v) => v,
         Err(e) => {
-            error!("Failed to get new MST root: {:?}", e);
+            error!("Failed to check MST key: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to get new MST root"})),
+                Json(
+                    json!({"error": "InternalError", "message": "Failed to check existing record"}),
+                ),
+            )
+                .into_response();
+        }
+    };
+
+    if let Some(swap_record_str) = &input.swap_record {
+        let swap_record_cid = match Cid::from_str(swap_record_str) {
+            Ok(c) => c,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        json!({"error": "InvalidSwapRecord", "message": "Invalid swapRecord CID"}),
+                    ),
+                )
+                    .into_response();
+            }
+        };
+        match &existing {
+            Some(current_cid) if *current_cid != swap_record_cid => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({"error": "InvalidSwap", "message": "Record has been modified"})),
+                )
+                    .into_response();
+            }
+            None => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(json!({"error": "InvalidSwap", "message": "Record does not exist"})),
+                )
+                    .into_response();
+            }
+            _ => {}
+        }
+    }
+
+    let new_mst = if existing.is_some() {
+        match mst.update(&key, record_cid).await {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to update MST: {:?}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": format!("Failed to update MST: {:?}", e)}))).into_response();
+            }
+        }
+    } else {
+        match mst.add(&key, record_cid).await {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to add to MST: {:?}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": format!("Failed to add to MST: {:?}", e)}))).into_response();
+            }
+        }
+    };
+
+    let new_mst_root = match new_mst.persist().await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to persist MST: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to persist MST"})),
             )
                 .into_response();
         }
