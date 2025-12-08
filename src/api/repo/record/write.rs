@@ -15,7 +15,6 @@ use jacquard::types::{
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
@@ -58,18 +57,18 @@ pub async fn create_record(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1"
+    let session = sqlx::query!(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
+            token
         )
-        .bind(&token)
         .fetch_optional(&state.db)
         .await
         .unwrap_or(None);
 
     let (did, key_bytes) = match session {
         Some(row) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
+            row.did,
+            row.key_bytes,
         ),
         None => {
             return (
@@ -92,13 +91,12 @@ pub async fn create_record(
         return (StatusCode::FORBIDDEN, Json(json!({"error": "InvalidRepo", "message": "Repo does not match authenticated user"}))).into_response();
     }
 
-    let user_query = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
+    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
     let user_id: uuid::Uuid = match user_query {
-        Ok(Some(row)) => row.get("id"),
+        Ok(Some(row)) => row.id,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -108,14 +106,13 @@ pub async fn create_record(
         }
     };
 
-    let repo_root_query = sqlx::query("SELECT repo_root_cid FROM repos WHERE user_id = $1")
-        .bind(user_id)
+    let repo_root_query = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
         .fetch_optional(&state.db)
         .await;
 
     let current_root_cid = match repo_root_query {
         Ok(Some(row)) => {
-            let cid_str: String = row.get("repo_root_cid");
+            let cid_str: String = row.repo_root_cid;
             Cid::from_str(&cid_str).ok()
         }
         _ => None,
@@ -280,9 +277,7 @@ pub async fn create_record(
         }
     };
 
-    let update_repo = sqlx::query("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2")
-        .bind(new_root_cid.to_string())
-        .bind(user_id)
+    let update_repo = sqlx::query!("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2", new_root_cid.to_string(), user_id)
         .execute(&state.db)
         .await;
 
@@ -295,14 +290,14 @@ pub async fn create_record(
             .into_response();
     }
 
-    let record_insert = sqlx::query(
+    let record_insert = sqlx::query!(
         "INSERT INTO records (repo_id, collection, rkey, record_cid) VALUES ($1, $2, $3, $4)
          ON CONFLICT (repo_id, collection, rkey) DO UPDATE SET record_cid = $4, created_at = NOW()",
+        user_id,
+        input.collection,
+        rkey,
+        record_cid.to_string()
     )
-    .bind(user_id)
-    .bind(&input.collection)
-    .bind(&rkey)
-    .bind(record_cid.to_string())
     .execute(&state.db)
     .await;
 
@@ -362,18 +357,18 @@ pub async fn put_record(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1"
+    let session = sqlx::query!(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
+            token
         )
-        .bind(&token)
         .fetch_optional(&state.db)
         .await
         .unwrap_or(None);
 
     let (did, key_bytes) = match session {
         Some(row) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
+            row.did,
+            row.key_bytes,
         ),
         None => {
             return (
@@ -396,13 +391,12 @@ pub async fn put_record(
         return (StatusCode::FORBIDDEN, Json(json!({"error": "InvalidRepo", "message": "Repo does not match authenticated user"}))).into_response();
     }
 
-    let user_query = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
+    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
     let user_id: uuid::Uuid = match user_query {
-        Ok(Some(row)) => row.get("id"),
+        Ok(Some(row)) => row.id,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -412,14 +406,13 @@ pub async fn put_record(
         }
     };
 
-    let repo_root_query = sqlx::query("SELECT repo_root_cid FROM repos WHERE user_id = $1")
-        .bind(user_id)
+    let repo_root_query = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
         .fetch_optional(&state.db)
         .await;
 
     let current_root_cid = match repo_root_query {
         Ok(Some(row)) => {
-            let cid_str: String = row.get("repo_root_cid");
+            let cid_str: String = row.repo_root_cid;
             Cid::from_str(&cid_str).ok()
         }
         _ => None,
@@ -637,9 +630,7 @@ pub async fn put_record(
         }
     };
 
-    let update_repo = sqlx::query("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2")
-        .bind(new_root_cid.to_string())
-        .bind(user_id)
+    let update_repo = sqlx::query!("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2", new_root_cid.to_string(), user_id)
         .execute(&state.db)
         .await;
 
@@ -652,14 +643,14 @@ pub async fn put_record(
             .into_response();
     }
 
-    let record_insert = sqlx::query(
+    let record_insert = sqlx::query!(
         "INSERT INTO records (repo_id, collection, rkey, record_cid) VALUES ($1, $2, $3, $4)
          ON CONFLICT (repo_id, collection, rkey) DO UPDATE SET record_cid = $4, created_at = NOW()",
+        user_id,
+        input.collection,
+        rkey,
+        record_cid.to_string()
     )
-    .bind(user_id)
-    .bind(&input.collection)
-    .bind(&rkey)
-    .bind(record_cid.to_string())
     .execute(&state.db)
     .await;
 

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_cid",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f09c0e92f101ef5abe2579083a26f782946646a8bd813bcd6cc568a6b7fc8f6d"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8c9297289cb753c8eaa4231ae9eab6cd3367f9bf543d9f49bca4afa53434ce0d"
+}

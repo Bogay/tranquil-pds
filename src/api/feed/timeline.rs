@@ -11,7 +11,6 @@ use axum::{
 use jacquard_repo::storage::BlockStore;
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::Row;
 use tracing::error;
 
 #[derive(Serialize)]
@@ -153,29 +152,18 @@ pub async fn get_timeline(
             .into_response();
     }
 
-    let placeholders: Vec<String> = followed_dids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("${}", i + 1))
-        .collect();
-
-    let posts_query = format!(
+    let posts_result = sqlx::query!(
         "SELECT r.record_cid, r.rkey, r.created_at, u.did, u.handle
          FROM records r
          JOIN repos rp ON r.repo_id = rp.user_id
          JOIN users u ON rp.user_id = u.id
-         WHERE u.did IN ({}) AND r.collection = 'app.bsky.feed.post'
+         WHERE u.did = ANY($1) AND r.collection = 'app.bsky.feed.post'
          ORDER BY r.created_at DESC
          LIMIT 50",
-        placeholders.join(", ")
-    );
-
-    let mut query = sqlx::query(&posts_query);
-    for did in &followed_dids {
-        query = query.bind(did);
-    }
-
-    let posts_result = query.fetch_all(&state.db).await;
+        &followed_dids
+    )
+    .fetch_all(&state.db)
+    .await;
 
     let posts = match posts_result {
         Ok(rows) => rows,
@@ -192,11 +180,11 @@ pub async fn get_timeline(
     let mut feed: Vec<FeedViewPost> = Vec::new();
 
     for row in posts {
-        let record_cid: String = row.get("record_cid");
-        let rkey: String = row.get("rkey");
-        let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
-        let author_did: String = row.get("did");
-        let author_handle: String = row.get("handle");
+        let record_cid: String = row.record_cid;
+        let rkey: String = row.rkey;
+        let created_at: chrono::DateTime<chrono::Utc> = row.created_at;
+        let author_did: String = row.did;
+        let author_handle: String = row.handle;
 
         let cid = match record_cid.parse::<cid::Cid>() {
             Ok(c) => c,

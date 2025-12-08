@@ -9,7 +9,6 @@ use cid::Cid;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 use std::str::FromStr;
 use tracing::error;
 
@@ -25,20 +24,20 @@ pub async fn get_record(
     State(state): State<AppState>,
     Query(input): Query<GetRecordInput>,
 ) -> Response {
-    let user_row = if input.repo.starts_with("did:") {
-        sqlx::query("SELECT id FROM users WHERE did = $1")
-            .bind(&input.repo)
+    let user_id_opt = if input.repo.starts_with("did:") {
+        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo)
             .fetch_optional(&state.db)
             .await
+            .map(|opt| opt.map(|r| r.id))
     } else {
-        sqlx::query("SELECT id FROM users WHERE handle = $1")
-            .bind(&input.repo)
+        sqlx::query!("SELECT id FROM users WHERE handle = $1", input.repo)
             .fetch_optional(&state.db)
             .await
+            .map(|opt| opt.map(|r| r.id))
     };
 
-    let user_id: uuid::Uuid = match user_row {
-        Ok(Some(row)) => row.get("id"),
+    let user_id: uuid::Uuid = match user_id_opt {
+        Ok(Some(id)) => id,
         _ => {
             return (
                 StatusCode::NOT_FOUND,
@@ -48,17 +47,17 @@ pub async fn get_record(
         }
     };
 
-    let record_row = sqlx::query(
+    let record_row = sqlx::query!(
         "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
+        user_id,
+        input.collection,
+        input.rkey
     )
-    .bind(user_id)
-    .bind(&input.collection)
-    .bind(&input.rkey)
     .fetch_optional(&state.db)
     .await;
 
     let record_cid_str: String = match record_row {
-        Ok(Some(row)) => row.get("record_cid"),
+        Ok(Some(row)) => row.record_cid,
         _ => {
             return (
                 StatusCode::NOT_FOUND,
@@ -143,20 +142,20 @@ pub async fn list_records(
     State(state): State<AppState>,
     Query(input): Query<ListRecordsInput>,
 ) -> Response {
-    let user_row = if input.repo.starts_with("did:") {
-        sqlx::query("SELECT id FROM users WHERE did = $1")
-            .bind(&input.repo)
+    let user_id_opt = if input.repo.starts_with("did:") {
+        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo)
             .fetch_optional(&state.db)
             .await
+            .map(|opt| opt.map(|r| r.id))
     } else {
-        sqlx::query("SELECT id FROM users WHERE handle = $1")
-            .bind(&input.repo)
+        sqlx::query!("SELECT id FROM users WHERE handle = $1", input.repo)
             .fetch_optional(&state.db)
             .await
+            .map(|opt| opt.map(|r| r.id))
     };
 
-    let user_id: uuid::Uuid = match user_row {
-        Ok(Some(row)) => row.get("id"),
+    let user_id: uuid::Uuid = match user_id_opt {
+        Ok(Some(id)) => id,
         _ => {
             return (
                 StatusCode::NOT_FOUND,
@@ -172,30 +171,56 @@ pub async fn list_records(
     // Simplistic query construction - no sophisticated cursor handling or rkey ranges for now, just basic pagination
     // TODO: Implement rkeyStart/End and correct cursor logic
 
-    let query_str = format!(
-        "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 {} ORDER BY rkey {} LIMIT {}",
-        if let Some(_c) = &input.cursor {
-            if reverse {
-                "AND rkey < $3"
-            } else {
-                "AND rkey > $3"
-            }
+    let limit_i64 = limit as i64;
+    let rows_res = if let Some(cursor) = &input.cursor {
+        if reverse {
+            sqlx::query!(
+                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey < $3 ORDER BY rkey DESC LIMIT $4",
+                user_id,
+                input.collection,
+                cursor,
+                limit_i64
+            )
+            .fetch_all(&state.db)
+            .await
+            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
         } else {
-            ""
-        },
-        if reverse { "DESC" } else { "ASC" },
-        limit
-    );
+            sqlx::query!(
+                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey > $3 ORDER BY rkey ASC LIMIT $4",
+                user_id,
+                input.collection,
+                cursor,
+                limit_i64
+            )
+            .fetch_all(&state.db)
+            .await
+            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
+        }
+    } else {
+        if reverse {
+            sqlx::query!(
+                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 ORDER BY rkey DESC LIMIT $3",
+                user_id,
+                input.collection,
+                limit_i64
+            )
+            .fetch_all(&state.db)
+            .await
+            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
+        } else {
+            sqlx::query!(
+                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 ORDER BY rkey ASC LIMIT $3",
+                user_id,
+                input.collection,
+                limit_i64
+            )
+            .fetch_all(&state.db)
+            .await
+            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
+        }
+    };
 
-    let mut query = sqlx::query(&query_str)
-        .bind(user_id)
-        .bind(&input.collection);
-
-    if let Some(c) = &input.cursor {
-        query = query.bind(c);
-    }
-
-    let rows = match query.fetch_all(&state.db).await {
+    let rows = match rows_res {
         Ok(r) => r,
         Err(e) => {
             error!("Error listing records: {:?}", e);
@@ -210,9 +235,7 @@ pub async fn list_records(
     let mut records = Vec::new();
     let mut last_rkey = None;
 
-    for row in rows {
-        let rkey: String = row.get("rkey");
-        let cid_str: String = row.get("record_cid");
+    for (rkey, cid_str) in rows {
         last_rkey = Some(rkey.clone());
 
         if let Ok(cid) = Cid::from_str(&cid_str) {
