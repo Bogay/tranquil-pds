@@ -7,7 +7,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 use tracing::error;
 
 #[derive(Deserialize)]
@@ -57,31 +56,26 @@ pub async fn get_account_info(
             .into_response();
     }
 
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"
         SELECT did, handle, email, created_at
         FROM users
         WHERE did = $1
         "#,
+        did
     )
-    .bind(did)
     .fetch_optional(&state.db)
     .await;
 
     match result {
         Ok(Some(row)) => {
-            let user_did: String = row.get("did");
-            let handle: String = row.get("handle");
-            let email: String = row.get("email");
-            let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
-
             (
                 StatusCode::OK,
                 Json(AccountInfo {
-                    did: user_did,
-                    handle,
-                    email: Some(email),
-                    indexed_at: created_at.to_rfc3339(),
+                    did: row.did,
+                    handle: row.handle,
+                    email: Some(row.email),
+                    indexed_at: row.created_at.to_rfc3339(),
                     invite_note: None,
                     invites_disabled: false,
                     email_confirmed_at: None,
@@ -141,28 +135,23 @@ pub async fn get_account_infos(
             continue;
         }
 
-        let result = sqlx::query(
+        let result = sqlx::query!(
             r#"
             SELECT did, handle, email, created_at
             FROM users
             WHERE did = $1
             "#,
+            did
         )
-        .bind(did)
         .fetch_optional(&state.db)
         .await;
 
         if let Ok(Some(row)) = result {
-            let user_did: String = row.get("did");
-            let handle: String = row.get("handle");
-            let email: String = row.get("email");
-            let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
-
             infos.push(AccountInfo {
-                did: user_did,
-                handle,
-                email: Some(email),
-                indexed_at: created_at.to_rfc3339(),
+                did: row.did,
+                handle: row.handle,
+                email: Some(row.email),
+                indexed_at: row.created_at.to_rfc3339(),
                 invite_note: None,
                 invites_disabled: false,
                 email_confirmed_at: None,
@@ -202,13 +191,12 @@ pub async fn delete_account(
             .into_response();
     }
 
-    let user = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(did)
+    let user = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
-    let user_id: uuid::Uuid = match user {
-        Ok(Some(row)) => row.get("id"),
+    let user_id = match user {
+        Ok(Some(row)) => row.id,
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -226,33 +214,27 @@ pub async fn delete_account(
         }
     };
 
-    let _ = sqlx::query("DELETE FROM sessions WHERE did = $1")
-        .bind(did)
+    let _ = sqlx::query!("DELETE FROM sessions WHERE did = $1", did)
         .execute(&state.db)
         .await;
 
-    let _ = sqlx::query("DELETE FROM records WHERE repo_id = $1")
-        .bind(user_id)
+    let _ = sqlx::query!("DELETE FROM records WHERE repo_id = $1", user_id)
         .execute(&state.db)
         .await;
 
-    let _ = sqlx::query("DELETE FROM repos WHERE user_id = $1")
-        .bind(user_id)
+    let _ = sqlx::query!("DELETE FROM repos WHERE user_id = $1", user_id)
         .execute(&state.db)
         .await;
 
-    let _ = sqlx::query("DELETE FROM blobs WHERE created_by_user = $1")
-        .bind(user_id)
+    let _ = sqlx::query!("DELETE FROM blobs WHERE created_by_user = $1", user_id)
         .execute(&state.db)
         .await;
 
-    let _ = sqlx::query("DELETE FROM user_keys WHERE user_id = $1")
-        .bind(user_id)
+    let _ = sqlx::query!("DELETE FROM user_keys WHERE user_id = $1", user_id)
         .execute(&state.db)
         .await;
 
-    let result = sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(user_id)
+    let result = sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
         .execute(&state.db)
         .await;
 
@@ -300,9 +282,7 @@ pub async fn update_account_email(
             .into_response();
     }
 
-    let result = sqlx::query("UPDATE users SET email = $1 WHERE did = $2")
-        .bind(email)
-        .bind(account)
+    let result = sqlx::query!("UPDATE users SET email = $1 WHERE did = $2", email, account)
         .execute(&state.db)
         .await;
 
@@ -370,9 +350,7 @@ pub async fn update_account_handle(
             .into_response();
     }
 
-    let existing = sqlx::query("SELECT id FROM users WHERE handle = $1 AND did != $2")
-        .bind(handle)
-        .bind(did)
+    let existing = sqlx::query!("SELECT id FROM users WHERE handle = $1 AND did != $2", handle, did)
         .fetch_optional(&state.db)
         .await;
 
@@ -384,9 +362,7 @@ pub async fn update_account_handle(
             .into_response();
     }
 
-    let result = sqlx::query("UPDATE users SET handle = $1 WHERE did = $2")
-        .bind(handle)
-        .bind(did)
+    let result = sqlx::query!("UPDATE users SET handle = $1 WHERE did = $2", handle, did)
         .execute(&state.db)
         .await;
 
@@ -455,9 +431,7 @@ pub async fn update_account_password(
         }
     };
 
-    let result = sqlx::query("UPDATE users SET password_hash = $1 WHERE did = $2")
-        .bind(&password_hash)
-        .bind(did)
+    let result = sqlx::query!("UPDATE users SET password_hash = $1 WHERE did = $2", password_hash, did)
         .execute(&state.db)
         .await;
 

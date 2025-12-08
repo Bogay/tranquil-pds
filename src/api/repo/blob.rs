@@ -12,7 +12,6 @@ use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 use std::str::FromStr;
 use tracing::error;
 
@@ -35,19 +34,16 @@ pub async fn upload_blob(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1"
+    let session = sqlx::query!(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
+            token
         )
-        .bind(&token)
         .fetch_optional(&state.db)
         .await
         .unwrap_or(None);
 
     let (did, key_bytes) = match session {
-        Some(row) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-        ),
+        Some(row) => (row.did, row.key_bytes),
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -92,13 +88,12 @@ pub async fn upload_blob(
             .into_response();
     }
 
-    let user_query = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
+    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
-    let user_id: uuid::Uuid = match user_query {
-        Ok(Some(row)) => row.get("id"),
+    let user_id = match user_query {
+        Ok(Some(row)) => row.id,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -108,14 +103,14 @@ pub async fn upload_blob(
         }
     };
 
-    let insert = sqlx::query(
-        "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cid) DO NOTHING"
+    let insert = sqlx::query!(
+        "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cid) DO NOTHING",
+        cid_str,
+        mime_type,
+        size,
+        user_id,
+        storage_key
     )
-    .bind(&cid_str)
-    .bind(&mime_type)
-    .bind(size)
-    .bind(user_id)
-    .bind(&storage_key)
     .execute(&state.db)
     .await;
 
@@ -202,19 +197,16 @@ pub async fn list_missing_blobs(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1"
+    let session = sqlx::query!(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
+            token
         )
-        .bind(&token)
         .fetch_optional(&state.db)
         .await
         .unwrap_or(None);
 
     let (did, key_bytes) = match session {
-        Some(row) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-        ),
+        Some(row) => (row.did, row.key_bytes),
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -232,13 +224,12 @@ pub async fn list_missing_blobs(
             .into_response();
     }
 
-    let user_query = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
+    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
-    let user_id: uuid::Uuid = match user_query {
-        Ok(Some(row)) => row.get("id"),
+    let user_id = match user_query {
+        Ok(Some(row)) => row.id,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -257,13 +248,13 @@ pub async fn list_missing_blobs(
         (String::new(), String::new())
     };
 
-    let records_query = sqlx::query(
-        "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1 AND (collection, rkey) > ($2, $3) ORDER BY collection, rkey LIMIT $4"
+    let records_query = sqlx::query!(
+        "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1 AND (collection, rkey) > ($2, $3) ORDER BY collection, rkey LIMIT $4",
+        user_id,
+        cursor_collection,
+        cursor_rkey,
+        limit
     )
-    .bind(user_id)
-    .bind(cursor_collection)
-    .bind(cursor_rkey)
-    .bind(limit)
     .fetch_all(&state.db)
     .await;
 
@@ -283,9 +274,9 @@ pub async fn list_missing_blobs(
     let mut last_cursor = None;
 
     for row in &records {
-        let collection: String = row.get("collection");
-        let rkey: String = row.get("rkey");
-        let record_cid_str: String = row.get("record_cid");
+        let collection = &row.collection;
+        let rkey = &row.rkey;
+        let record_cid_str = &row.record_cid;
 
         last_cursor = Some(format!("{}|{}", collection, rkey));
 
@@ -308,9 +299,7 @@ pub async fn list_missing_blobs(
         find_blobs(&record_val, &mut blobs);
 
         for blob_cid_str in blobs {
-            let exists = sqlx::query("SELECT 1 FROM blobs WHERE cid = $1 AND created_by_user = $2")
-                .bind(&blob_cid_str)
-                .bind(user_id)
+            let exists = sqlx::query!("SELECT 1 as one FROM blobs WHERE cid = $1 AND created_by_user = $2", blob_cid_str, user_id)
                 .fetch_optional(&state.db)
                 .await;
 

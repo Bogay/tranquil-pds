@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1ee6eda3e44660e7f14fcfe56adc2d41c72901b9c701fc7b992314e5370b32dc"
+}

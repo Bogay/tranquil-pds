@@ -8,7 +8,6 @@ use axum::{
 use bcrypt::verify;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 use tracing::{error, info, warn};
 
 #[derive(Deserialize)]
@@ -43,7 +42,7 @@ pub async fn get_service_auth(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes
         FROM sessions s
@@ -51,16 +50,13 @@ pub async fn get_service_auth(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (did, key_bytes) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -125,31 +121,31 @@ pub async fn create_session(
 ) -> Response {
     info!("create_session: identifier='{}'", input.identifier);
 
-    let user_row = sqlx::query("SELECT u.id, u.did, u.handle, u.password_hash, k.key_bytes FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.handle = $1 OR u.email = $1")
-        .bind(&input.identifier)
+    let user_row = sqlx::query!(
+        "SELECT u.id, u.did, u.handle, u.password_hash, k.key_bytes FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.handle = $1 OR u.email = $1",
+        input.identifier
+    )
         .fetch_optional(&state.db)
         .await;
 
     match user_row {
         Ok(Some(row)) => {
-            let user_id: uuid::Uuid = row.get("id");
-            let stored_hash: String = row.get("password_hash");
-            let did: String = row.get("did");
-            let handle: String = row.get("handle");
-            let key_bytes: Vec<u8> = row.get("key_bytes");
+            let user_id = row.id;
+            let stored_hash = &row.password_hash;
+            let did = &row.did;
+            let handle = &row.handle;
+            let key_bytes = &row.key_bytes;
 
-            let password_valid = if verify(&input.password, &stored_hash).unwrap_or(false) {
+            let password_valid = if verify(&input.password, stored_hash).unwrap_or(false) {
                 true
             } else {
-                let app_pass_rows = sqlx::query("SELECT password_hash FROM app_passwords WHERE user_id = $1")
-                    .bind(user_id)
+                let app_pass_rows = sqlx::query!("SELECT password_hash FROM app_passwords WHERE user_id = $1", user_id)
                     .fetch_all(&state.db)
                     .await
                     .unwrap_or_default();
 
                 app_pass_rows.iter().any(|row| {
-                    let hash: String = row.get("password_hash");
-                    verify(&input.password, &hash).unwrap_or(false)
+                    verify(&input.password, &row.password_hash).unwrap_or(false)
                 })
             };
 
@@ -178,12 +174,12 @@ pub async fn create_session(
                     }
                 };
 
-                let session_insert = sqlx::query(
+                let session_insert = sqlx::query!(
                     "INSERT INTO sessions (access_jwt, refresh_jwt, did) VALUES ($1, $2, $3)",
+                    access_jwt,
+                    refresh_jwt,
+                    did
                 )
-                .bind(&access_jwt)
-                .bind(&refresh_jwt)
-                .bind(&did)
                 .execute(&state.db)
                 .await;
 
@@ -194,8 +190,8 @@ pub async fn create_session(
                             Json(CreateSessionOutput {
                                 access_jwt,
                                 refresh_jwt,
-                                handle,
-                                did,
+                                handle: handle.clone(),
+                                did: did.clone(),
                             }),
                         )
                             .into_response();
@@ -255,7 +251,7 @@ pub async fn get_session(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"
         SELECT u.handle, u.did, u.email, k.key_bytes
         FROM sessions s
@@ -263,28 +259,23 @@ pub async fn get_session(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     match result {
         Ok(Some(row)) => {
-            let handle: String = row.get("handle");
-            let did: String = row.get("did");
-            let email: String = row.get("email");
-            let key_bytes: Vec<u8> = row.get("key_bytes");
-
-            if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+            if let Err(_) = crate::auth::verify_token(&token, &row.key_bytes) {
                 return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"}))).into_response();
             }
 
             return (
                 StatusCode::OK,
                 Json(json!({
-                    "handle": handle,
-                    "did": did,
-                    "email": email,
+                    "handle": row.handle,
+                    "did": row.did,
+                    "email": row.email,
                     "didDoc": {}
                 })),
             )
@@ -327,8 +318,7 @@ pub async fn delete_session(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let result = sqlx::query("DELETE FROM sessions WHERE access_jwt = $1")
-        .bind(token)
+    let result = sqlx::query!("DELETE FROM sessions WHERE access_jwt = $1", token)
         .execute(&state.db)
         .await;
 
@@ -369,17 +359,17 @@ pub async fn refresh_session(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.refresh_jwt = $1"
+    let session = sqlx::query!(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.refresh_jwt = $1",
+            refresh_token
         )
-        .bind(&refresh_token)
         .fetch_optional(&state.db)
         .await;
 
     match session {
         Ok(Some(session_row)) => {
-            let did: String = session_row.get("did");
-            let key_bytes: Vec<u8> = session_row.get("key_bytes");
+            let did = &session_row.did;
+            let key_bytes = &session_row.key_bytes;
 
             if let Err(_) = crate::auth::verify_token(&refresh_token, &key_bytes) {
                 return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid refresh token signature"}))).into_response();
@@ -408,31 +398,29 @@ pub async fn refresh_session(
                 }
             };
 
-            let update = sqlx::query(
+            let update = sqlx::query!(
                 "UPDATE sessions SET access_jwt = $1, refresh_jwt = $2 WHERE refresh_jwt = $3",
+                new_access_jwt,
+                new_refresh_jwt,
+                refresh_token
             )
-            .bind(&new_access_jwt)
-            .bind(&new_refresh_jwt)
-            .bind(&refresh_token)
             .execute(&state.db)
             .await;
 
             match update {
                 Ok(_) => {
-                    let user = sqlx::query("SELECT handle FROM users WHERE did = $1")
-                        .bind(&did)
+                    let user = sqlx::query!("SELECT handle FROM users WHERE did = $1", did)
                         .fetch_optional(&state.db)
                         .await;
 
                     match user {
                         Ok(Some(u)) => {
-                            let handle: String = u.get("handle");
                             return (
                                 StatusCode::OK,
                                 Json(json!({
                                     "accessJwt": new_access_jwt,
                                     "refreshJwt": new_refresh_jwt,
-                                    "handle": handle,
+                                    "handle": u.handle,
                                     "did": did
                                 })),
                             )
@@ -517,7 +505,7 @@ pub async fn check_account_status(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes, u.id as user_id
         FROM sessions s
@@ -525,17 +513,13 @@ pub async fn check_account_status(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-            row.get::<uuid::Uuid, _>("user_id"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -561,37 +545,35 @@ pub async fn check_account_status(
             .into_response();
     }
 
-    let user_status = sqlx::query("SELECT deactivated_at FROM users WHERE did = $1")
-        .bind(&did)
+    let user_status = sqlx::query!("SELECT deactivated_at FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
-    let deactivated_at: Option<chrono::DateTime<chrono::Utc>> = match user_status {
-        Ok(Some(row)) => row.get("deactivated_at"),
+    let deactivated_at = match user_status {
+        Ok(Some(row)) => row.deactivated_at,
         _ => None,
     };
 
-    let repo_result = sqlx::query("SELECT repo_root_cid FROM repos WHERE user_id = $1")
-        .bind(user_id)
+    let repo_result = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
         .fetch_optional(&state.db)
         .await;
 
     let repo_commit = match repo_result {
-        Ok(Some(row)) => row.get::<String, _>("repo_root_cid"),
+        Ok(Some(row)) => row.repo_root_cid,
         _ => String::new(),
     };
 
-    let record_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM records WHERE repo_id = $1")
-        .bind(user_id)
+    let record_count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM records WHERE repo_id = $1", user_id)
         .fetch_one(&state.db)
         .await
+        .unwrap_or(Some(0))
         .unwrap_or(0);
 
     let blob_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM blobs WHERE created_by_user = $1")
-            .bind(user_id)
+        sqlx::query_scalar!("SELECT COUNT(*) FROM blobs WHERE created_by_user = $1", user_id)
             .fetch_one(&state.db)
             .await
+            .unwrap_or(Some(0))
             .unwrap_or(0);
 
     let valid_did = did.starts_with("did:");
@@ -632,7 +614,7 @@ pub async fn activate_account(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes
         FROM sessions s
@@ -640,16 +622,13 @@ pub async fn activate_account(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (did, key_bytes) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -675,8 +654,7 @@ pub async fn activate_account(
             .into_response();
     }
 
-    let result = sqlx::query("UPDATE users SET deactivated_at = NULL WHERE did = $1")
-        .bind(&did)
+    let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
         .execute(&state.db)
         .await;
 
@@ -719,7 +697,7 @@ pub async fn deactivate_account(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes
         FROM sessions s
@@ -727,16 +705,13 @@ pub async fn deactivate_account(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (did, key_bytes) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -762,8 +737,7 @@ pub async fn deactivate_account(
             .into_response();
     }
 
-    let result = sqlx::query("UPDATE users SET deactivated_at = NOW() WHERE did = $1")
-        .bind(&did)
+    let result = sqlx::query!("UPDATE users SET deactivated_at = NOW() WHERE did = $1", did)
         .execute(&state.db)
         .await;
 
@@ -812,7 +786,7 @@ pub async fn list_app_passwords(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes, u.id as user_id
         FROM sessions s
@@ -820,17 +794,13 @@ pub async fn list_app_passwords(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-            row.get::<uuid::Uuid, _>("user_id"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -856,8 +826,7 @@ pub async fn list_app_passwords(
             .into_response();
     }
 
-    let result = sqlx::query("SELECT name, created_at, privileged FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC")
-        .bind(user_id)
+    let result = sqlx::query!("SELECT name, created_at, privileged FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC", user_id)
         .fetch_all(&state.db)
         .await;
 
@@ -866,13 +835,10 @@ pub async fn list_app_passwords(
             let passwords: Vec<AppPassword> = rows
                 .iter()
                 .map(|row| {
-                    let name: String = row.get("name");
-                    let created_at: chrono::DateTime<chrono::Utc> = row.get("created_at");
-                    let privileged: bool = row.get("privileged");
                     AppPassword {
-                        name,
-                        created_at: created_at.to_rfc3339(),
-                        privileged,
+                        name: row.name.clone(),
+                        created_at: row.created_at.to_rfc3339(),
+                        privileged: row.privileged,
                     }
                 })
                 .collect();
@@ -925,7 +891,7 @@ pub async fn create_app_password(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes, u.id as user_id
         FROM sessions s
@@ -933,17 +899,13 @@ pub async fn create_app_password(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-            row.get::<uuid::Uuid, _>("user_id"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -978,9 +940,7 @@ pub async fn create_app_password(
             .into_response();
     }
 
-    let existing = sqlx::query("SELECT id FROM app_passwords WHERE user_id = $1 AND name = $2")
-        .bind(user_id)
-        .bind(name)
+    let existing = sqlx::query!("SELECT id FROM app_passwords WHERE user_id = $1 AND name = $2", user_id, name)
         .fetch_optional(&state.db)
         .await;
 
@@ -1017,14 +977,14 @@ pub async fn create_app_password(
     let privileged = input.privileged.unwrap_or(false);
     let created_at = chrono::Utc::now();
 
-    let result = sqlx::query(
-        "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged) VALUES ($1, $2, $3, $4, $5)"
+    let result = sqlx::query!(
+        "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged) VALUES ($1, $2, $3, $4, $5)",
+        user_id,
+        name,
+        password_hash,
+        created_at,
+        privileged
     )
-    .bind(user_id)
-    .bind(name)
-    .bind(&password_hash)
-    .bind(created_at)
-    .bind(privileged)
     .execute(&state.db)
     .await;
 
@@ -1075,7 +1035,7 @@ pub async fn revoke_app_password(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes, u.id as user_id
         FROM sessions s
@@ -1083,17 +1043,13 @@ pub async fn revoke_app_password(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-            row.get::<uuid::Uuid, _>("user_id"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -1128,9 +1084,7 @@ pub async fn revoke_app_password(
             .into_response();
     }
 
-    let result = sqlx::query("DELETE FROM app_passwords WHERE user_id = $1 AND name = $2")
-        .bind(user_id)
-        .bind(name)
+    let result = sqlx::query!("DELETE FROM app_passwords WHERE user_id = $1 AND name = $2", user_id, name)
         .execute(&state.db)
         .await;
 

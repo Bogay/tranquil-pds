@@ -7,7 +7,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::Row;
 use tracing::error;
 
 #[derive(Deserialize)]
@@ -49,7 +48,7 @@ pub async fn create_report(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes
         FROM sessions s
@@ -57,16 +56,13 @@ pub async fn create_report(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (did, key_bytes) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -113,15 +109,16 @@ pub async fn create_report(
     let created_at = chrono::Utc::now();
     let report_id = created_at.timestamp_millis();
 
-    let insert = sqlx::query(
-        "INSERT INTO reports (id, reason_type, reason, subject_json, reported_by_did, created_at) VALUES ($1, $2, $3, $4, $5, $6)"
+    let subject_json = json!(input.subject);
+    let insert = sqlx::query!(
+        "INSERT INTO reports (id, reason_type, reason, subject_json, reported_by_did, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        report_id,
+        input.reason_type,
+        input.reason,
+        subject_json,
+        did,
+        created_at
     )
-    .bind(report_id)
-    .bind(&input.reason_type)
-    .bind(&input.reason)
-    .bind(json!(input.subject))
-    .bind(&did)
-    .bind(created_at)
     .execute(&state.db)
     .await;
 

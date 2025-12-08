@@ -15,7 +15,7 @@ pub async fn describe_server() -> impl IntoResponse {
 }
 
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
-    match sqlx::query("SELECT 1").execute(&state.db).await {
+    match sqlx::query!("SELECT 1 as one").fetch_one(&state.db).await {
         Ok(_) => (StatusCode::OK, "OK"),
         Err(e) => {
             error!("Health check failed: {:?}", e);

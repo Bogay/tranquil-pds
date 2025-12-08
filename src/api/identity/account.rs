@@ -13,7 +13,6 @@ use k256::SecretKey;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -82,8 +81,7 @@ pub async fn create_account(
         }
     };
 
-    let exists_query = sqlx::query("SELECT 1 FROM users WHERE handle = $1")
-        .bind(&input.handle)
+    let exists_query = sqlx::query!("SELECT 1 as one FROM users WHERE handle = $1", input.handle)
         .fetch_optional(&mut *tx)
         .await;
 
@@ -108,22 +106,20 @@ pub async fn create_account(
 
     if let Some(code) = &input.invite_code {
         let invite_query =
-            sqlx::query("SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE")
-                .bind(code)
+            sqlx::query!("SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE", code)
                 .fetch_optional(&mut *tx)
                 .await;
 
         match invite_query {
             Ok(Some(row)) => {
-                let uses: i32 = row.get("available_uses");
-                if uses <= 0 {
+                if row.available_uses <= 0 {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidInviteCode", "message": "Invite code exhausted"}))).into_response();
                 }
 
-                let update_invite = sqlx::query(
+                let update_invite = sqlx::query!(
                     "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
+                    code
                 )
-                .bind(code)
                 .execute(&mut *tx)
                 .await;
 
@@ -166,16 +162,18 @@ pub async fn create_account(
         }
     };
 
-    let user_insert = sqlx::query("INSERT INTO users (handle, email, did, password_hash) VALUES ($1, $2, $3, $4) RETURNING id")
-        .bind(&input.handle)
-        .bind(&input.email)
-        .bind(&did)
-        .bind(&password_hash)
+    let user_insert = sqlx::query!(
+        "INSERT INTO users (handle, email, did, password_hash) VALUES ($1, $2, $3, $4) RETURNING id",
+        input.handle,
+        input.email,
+        did,
+        password_hash
+    )
         .fetch_one(&mut *tx)
         .await;
 
-    let user_id: uuid::Uuid = match user_insert {
-        Ok(row) => row.get("id"),
+    let user_id = match user_insert {
+        Ok(row) => row.id,
         Err(e) => {
             error!("Error inserting user: {:?}", e);
             // TODO: Check for unique constraint violation on email/did specifically
@@ -190,9 +188,7 @@ pub async fn create_account(
     let secret_key = SecretKey::random(&mut OsRng);
     let secret_key_bytes = secret_key.to_bytes();
 
-    let key_insert = sqlx::query("INSERT INTO user_keys (user_id, key_bytes) VALUES ($1, $2)")
-        .bind(user_id)
-        .bind(&secret_key_bytes[..])
+    let key_insert = sqlx::query!("INSERT INTO user_keys (user_id, key_bytes) VALUES ($1, $2)", user_id, &secret_key_bytes[..])
         .execute(&mut *tx)
         .await;
 
@@ -257,9 +253,8 @@ pub async fn create_account(
         }
     };
 
-    let repo_insert = sqlx::query("INSERT INTO repos (user_id, repo_root_cid) VALUES ($1, $2)")
-        .bind(user_id)
-        .bind(commit_cid.to_string())
+    let commit_cid_str = commit_cid.to_string();
+    let repo_insert = sqlx::query!("INSERT INTO repos (user_id, repo_root_cid) VALUES ($1, $2)", user_id, commit_cid_str)
         .execute(&mut *tx)
         .await;
 
@@ -274,9 +269,7 @@ pub async fn create_account(
 
     if let Some(code) = &input.invite_code {
         let use_insert =
-            sqlx::query("INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)")
-                .bind(code)
-                .bind(user_id)
+            sqlx::query!("INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)", code, user_id)
                 .execute(&mut *tx)
                 .await;
 
@@ -317,10 +310,7 @@ pub async fn create_account(
     };
 
     let session_insert =
-        sqlx::query("INSERT INTO sessions (access_jwt, refresh_jwt, did) VALUES ($1, $2, $3)")
-            .bind(&access_jwt)
-            .bind(&refresh_jwt)
-            .bind(&did)
+        sqlx::query!("INSERT INTO sessions (access_jwt, refresh_jwt, did) VALUES ($1, $2, $3)", access_jwt, refresh_jwt, did)
             .execute(&mut *tx)
             .await;
 

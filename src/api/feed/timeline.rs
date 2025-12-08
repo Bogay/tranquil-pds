@@ -59,19 +59,16 @@ pub async fn get_timeline(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
-        "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1"
+    let session = sqlx::query!(
+        "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
+        token
     )
-        .bind(&token)
         .fetch_optional(&state.db)
         .await
         .unwrap_or(None);
 
     let (did, key_bytes) = match session {
-        Some(row) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-        ),
+        Some(row) => (row.did, row.key_bytes),
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -89,13 +86,12 @@ pub async fn get_timeline(
             .into_response();
     }
 
-    let user_query = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
+    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
-    let user_id: uuid::Uuid = match user_query {
-        Ok(Some(row)) => row.get("id"),
+    let user_id = match user_query {
+        Ok(Some(row)) => row.id,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -105,15 +101,15 @@ pub async fn get_timeline(
         }
     };
 
-    let follows_query = sqlx::query(
-        "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = 'app.bsky.graph.follow'"
+    let follows_query = sqlx::query!(
+        "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = 'app.bsky.graph.follow'",
+        user_id
     )
-        .bind(user_id)
         .fetch_all(&state.db)
         .await;
 
     let follow_cids: Vec<String> = match follows_query {
-        Ok(rows) => rows.iter().map(|r| r.get("record_cid")).collect(),
+        Ok(rows) => rows.iter().map(|r| r.record_cid.clone()).collect(),
         Err(e) => {
             error!("Failed to get follows: {:?}", e);
             return (

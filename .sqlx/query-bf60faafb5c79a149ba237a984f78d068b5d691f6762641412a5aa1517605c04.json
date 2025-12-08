@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = 'app.bsky.graph.follow'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "record_cid",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bf60faafb5c79a149ba237a984f78d068b5d691f6762641412a5aa1517605c04"
+}

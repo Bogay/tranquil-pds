@@ -6,7 +6,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use reqwest::Client;
-use sqlx::Row;
 use std::collections::HashMap;
 use tracing::{error, info};
 
@@ -48,15 +47,13 @@ pub async fn proxy_handler(
             if let Ok(token) = auth_val.to_str() {
                 let token = token.replace("Bearer ", "");
                 if let Ok(did) = crate::auth::get_did_from_token(&token) {
-                    let key_row = sqlx::query("SELECT k.key_bytes FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1")
-                        .bind(&did)
+                    let key_row = sqlx::query!("SELECT k.key_bytes FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1", did)
                         .fetch_optional(&state.db)
                         .await;
 
                     if let Ok(Some(row)) = key_row {
-                        let key_bytes: Vec<u8> = row.get("key_bytes");
                         if let Ok(new_token) =
-                            crate::auth::create_service_token(&did, aud, &method, &key_bytes)
+                            crate::auth::create_service_token(&did, aud, &method, &row.key_bytes)
                         {
                             if let Ok(val) =
                                 axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))

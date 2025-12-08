@@ -5,7 +5,7 @@ use jacquard_repo::repo::CommitData;
 use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct PostgresBlockStore {
@@ -21,17 +21,13 @@ impl PostgresBlockStore {
 impl BlockStore for PostgresBlockStore {
     async fn get(&self, cid: &Cid) -> Result<Option<Bytes>, RepoError> {
         let cid_bytes = cid.to_bytes();
-        let row = sqlx::query("SELECT data FROM blocks WHERE cid = $1")
-            .bind(cid_bytes)
+        let row = sqlx::query!("SELECT data FROM blocks WHERE cid = $1", &cid_bytes)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| RepoError::storage(e))?;
 
         match row {
-            Some(row) => {
-                let data: Vec<u8> = row.get("data");
-                Ok(Some(Bytes::from(data)))
-            }
+            Some(row) => Ok(Some(Bytes::from(row.data))),
             None => Ok(None),
         }
     }
@@ -44,9 +40,7 @@ impl BlockStore for PostgresBlockStore {
         let cid = Cid::new_v1(0x71, multihash);
         let cid_bytes = cid.to_bytes();
 
-        sqlx::query("INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING")
-            .bind(cid_bytes)
-            .bind(data)
+        sqlx::query!("INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING", &cid_bytes, data)
             .execute(&self.pool)
             .await
             .map_err(|e| RepoError::storage(e))?;
@@ -56,8 +50,7 @@ impl BlockStore for PostgresBlockStore {
 
     async fn has(&self, cid: &Cid) -> Result<bool, RepoError> {
         let cid_bytes = cid.to_bytes();
-        let row = sqlx::query("SELECT 1 FROM blocks WHERE cid = $1")
-            .bind(cid_bytes)
+        let row = sqlx::query!("SELECT 1 as one FROM blocks WHERE cid = $1", &cid_bytes)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| RepoError::storage(e))?;
@@ -72,11 +65,12 @@ impl BlockStore for PostgresBlockStore {
         let blocks: Vec<_> = blocks.into_iter().collect();
         for (cid, data) in blocks {
             let cid_bytes = cid.to_bytes();
-            sqlx::query(
+            let data_ref = data.as_ref();
+            sqlx::query!(
                 "INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING",
+                &cid_bytes,
+                data_ref
             )
-            .bind(cid_bytes)
-            .bind(data.as_ref())
             .execute(&self.pool)
             .await
             .map_err(|e| RepoError::storage(e))?;

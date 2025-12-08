@@ -9,7 +9,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 use tracing::{error, info};
 
 #[derive(Deserialize)]
@@ -37,25 +36,24 @@ pub async fn get_latest_commit(
             .into_response();
     }
 
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"
         SELECT r.repo_root_cid
         FROM repos r
         JOIN users u ON r.user_id = u.id
         WHERE u.did = $1
         "#,
+        did
     )
-    .bind(did)
     .fetch_optional(&state.db)
     .await;
 
     match result {
         Ok(Some(row)) => {
-            let cid: String = row.get("repo_root_cid");
             (
                 StatusCode::OK,
                 Json(GetLatestCommitOutput {
-                    cid,
+                    cid: row.repo_root_cid,
                     rev: chrono::Utc::now().timestamp_millis().to_string(),
                 }),
             )
@@ -105,7 +103,7 @@ pub async fn list_repos(
     let limit = params.limit.unwrap_or(50).min(1000);
     let cursor_did = params.cursor.as_deref().unwrap_or("");
 
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"
         SELECT u.did, r.repo_root_cid
         FROM repos r
@@ -114,9 +112,9 @@ pub async fn list_repos(
         ORDER BY u.did ASC
         LIMIT $2
         "#,
+        cursor_did,
+        limit + 1
     )
-    .bind(cursor_did)
-    .bind(limit + 1)
     .fetch_all(&state.db)
     .await;
 
@@ -127,11 +125,9 @@ pub async fn list_repos(
                 .iter()
                 .take(limit as usize)
                 .map(|row| {
-                    let did: String = row.get("did");
-                    let head: String = row.get("repo_root_cid");
                     RepoInfo {
-                        did,
-                        head,
+                        did: row.did.clone(),
+                        head: row.repo_root_cid.clone(),
                         rev: chrono::Utc::now().timestamp_millis().to_string(),
                         active: true,
                     }
@@ -193,8 +189,7 @@ pub async fn get_blob(
             .into_response();
     }
 
-    let user_exists = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(did)
+    let user_exists = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
@@ -217,15 +212,14 @@ pub async fn get_blob(
         Ok(Some(_)) => {}
     }
 
-    let blob_result = sqlx::query("SELECT storage_key, mime_type FROM blobs WHERE cid = $1")
-        .bind(cid)
+    let blob_result = sqlx::query!("SELECT storage_key, mime_type FROM blobs WHERE cid = $1", cid)
         .fetch_optional(&state.db)
         .await;
 
     match blob_result {
         Ok(Some(row)) => {
-            let storage_key: String = row.get("storage_key");
-            let mime_type: String = row.get("mime_type");
+            let storage_key = &row.storage_key;
+            let mime_type = &row.mime_type;
 
             match state.blob_store.get(&storage_key).await {
                 Ok(data) => Response::builder()
@@ -290,13 +284,12 @@ pub async fn list_blobs(
     let limit = params.limit.unwrap_or(500).min(1000);
     let cursor_cid = params.cursor.as_deref().unwrap_or("");
 
-    let user_result = sqlx::query("SELECT id FROM users WHERE did = $1")
-        .bind(did)
+    let user_result = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
-    let user_id: uuid::Uuid = match user_result {
-        Ok(Some(row)) => row.get("id"),
+    let user_id = match user_result {
+        Ok(Some(row)) => row.id,
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -314,44 +307,48 @@ pub async fn list_blobs(
         }
     };
 
-    let result = if let Some(since) = &params.since {
-        sqlx::query(
+    let cids_result: Result<Vec<String>, sqlx::Error> = if let Some(since) = &params.since {
+        let since_time = chrono::DateTime::parse_from_rfc3339(since)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(|_| chrono::Utc::now());
+        sqlx::query!(
             r#"
             SELECT cid FROM blobs
             WHERE created_by_user = $1 AND cid > $2 AND created_at > $3
             ORDER BY cid ASC
             LIMIT $4
             "#,
+            user_id,
+            cursor_cid,
+            since_time,
+            limit + 1
         )
-        .bind(user_id)
-        .bind(cursor_cid)
-        .bind(since)
-        .bind(limit + 1)
         .fetch_all(&state.db)
         .await
+        .map(|rows| rows.into_iter().map(|r| r.cid).collect())
     } else {
-        sqlx::query(
+        sqlx::query!(
             r#"
             SELECT cid FROM blobs
             WHERE created_by_user = $1 AND cid > $2
             ORDER BY cid ASC
             LIMIT $3
             "#,
+            user_id,
+            cursor_cid,
+            limit + 1
         )
-        .bind(user_id)
-        .bind(cursor_cid)
-        .bind(limit + 1)
         .fetch_all(&state.db)
         .await
+        .map(|rows| rows.into_iter().map(|r| r.cid).collect())
     };
 
-    match result {
-        Ok(rows) => {
-            let has_more = rows.len() as i64 > limit;
-            let cids: Vec<String> = rows
-                .iter()
+    match cids_result {
+        Ok(cids) => {
+            let has_more = cids.len() as i64 > limit;
+            let cids: Vec<String> = cids
+                .into_iter()
                 .take(limit as usize)
-                .map(|row| row.get("cid"))
                 .collect();
 
             let next_cursor = if has_more {
@@ -406,29 +403,26 @@ pub async fn get_repo_status(
             .into_response();
     }
 
-    let result = sqlx::query(
+    let result = sqlx::query!(
         r#"
         SELECT u.did, r.repo_root_cid
         FROM users u
         LEFT JOIN repos r ON u.id = r.user_id
         WHERE u.did = $1
         "#,
+        did
     )
-    .bind(did)
     .fetch_optional(&state.db)
     .await;
 
     match result {
         Ok(Some(row)) => {
-            let user_did: String = row.get("did");
-            let repo_root: Option<String> = row.get("repo_root_cid");
-
-            let rev = repo_root.map(|_| chrono::Utc::now().timestamp_millis().to_string());
+            let rev = Some(chrono::Utc::now().timestamp_millis().to_string());
 
             (
                 StatusCode::OK,
                 Json(GetRepoStatusOutput {
-                    did: user_did,
+                    did: row.did,
                     active: true,
                     rev,
                 }),

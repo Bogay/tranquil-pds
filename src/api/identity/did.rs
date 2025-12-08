@@ -11,7 +11,6 @@ use k256::elliptic_curve::sec1::ToEncodedPoint;
 use reqwest;
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::Row;
 use tracing::error;
 
 #[derive(Deserialize)]
@@ -33,15 +32,13 @@ pub async fn resolve_handle(
             .into_response();
     }
 
-    let user = sqlx::query("SELECT did FROM users WHERE handle = $1")
-        .bind(handle)
+    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
         .fetch_optional(&state.db)
         .await;
 
     match user {
         Ok(Some(row)) => {
-            let did: String = row.get("did");
-            (StatusCode::OK, Json(json!({ "did": did }))).into_response()
+            (StatusCode::OK, Json(json!({ "did": row.did }))).into_response()
         }
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -97,17 +94,12 @@ pub async fn well_known_did(State(_state): State<AppState>) -> impl IntoResponse
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
 
-    let user = sqlx::query("SELECT id, did FROM users WHERE handle = $1")
-        .bind(&handle)
+    let user = sqlx::query!("SELECT id, did FROM users WHERE handle = $1", handle)
         .fetch_optional(&state.db)
         .await;
 
     let (user_id, did) = match user {
-        Ok(Some(row)) => {
-            let id: uuid::Uuid = row.get("id");
-            let d: String = row.get("did");
-            (id, d)
-        }
+        Ok(Some(row)) => (row.id, row.did),
         Ok(None) => {
             return (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"}))).into_response();
         }
@@ -129,13 +121,12 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
             .into_response();
     }
 
-    let key_row = sqlx::query("SELECT key_bytes FROM user_keys WHERE user_id = $1")
-        .bind(user_id)
+    let key_row = sqlx::query!("SELECT key_bytes FROM user_keys WHERE user_id = $1", user_id)
         .fetch_optional(&state.db)
         .await;
 
     let key_bytes: Vec<u8> = match key_row {
-        Ok(Some(row)) => row.get("key_bytes"),
+        Ok(Some(row)) => row.key_bytes,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -294,7 +285,7 @@ pub async fn get_recommended_did_credentials(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes, u.handle
         FROM sessions s
@@ -302,17 +293,13 @@ pub async fn get_recommended_did_credentials(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (_did, key_bytes, handle) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-            row.get::<String, _>("handle"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes, row.handle),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -404,7 +391,7 @@ pub async fn update_handle(
         .unwrap_or("")
         .replace("Bearer ", "");
 
-    let session = sqlx::query(
+    let session = sqlx::query!(
         r#"
         SELECT s.did, k.key_bytes, u.id as user_id
         FROM sessions s
@@ -412,17 +399,13 @@ pub async fn update_handle(
         JOIN user_keys k ON u.id = k.user_id
         WHERE s.access_jwt = $1
         "#,
+        token
     )
-    .bind(&token)
     .fetch_optional(&state.db)
     .await;
 
     let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (
-            row.get::<String, _>("did"),
-            row.get::<Vec<u8>, _>("key_bytes"),
-            row.get::<uuid::Uuid, _>("user_id"),
-        ),
+        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -468,9 +451,7 @@ pub async fn update_handle(
             .into_response();
     }
 
-    let existing = sqlx::query("SELECT id FROM users WHERE handle = $1 AND id != $2")
-        .bind(new_handle)
-        .bind(user_id)
+    let existing = sqlx::query!("SELECT id FROM users WHERE handle = $1 AND id != $2", new_handle, user_id)
         .fetch_optional(&state.db)
         .await;
 
@@ -482,9 +463,7 @@ pub async fn update_handle(
             .into_response();
     }
 
-    let result = sqlx::query("UPDATE users SET handle = $1 WHERE id = $2")
-        .bind(new_handle)
-        .bind(user_id)
+    let result = sqlx::query!("UPDATE users SET handle = $1 WHERE id = $2", new_handle, user_id)
         .execute(&state.db)
         .await;
 
