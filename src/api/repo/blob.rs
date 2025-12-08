@@ -7,11 +7,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cid::Cid;
+use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
+use std::str::FromStr;
 use tracing::error;
 
 pub async fn upload_blob(
@@ -157,10 +159,33 @@ pub struct ListMissingBlobsOutput {
     pub blobs: Vec<RecordBlob>,
 }
 
+fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
+    if let Some(obj) = val.as_object() {
+        if let Some(type_val) = obj.get("$type") {
+            if type_val == "blob" {
+                if let Some(r) = obj.get("ref") {
+                    if let Some(link) = r.get("$link") {
+                        if let Some(s) = link.as_str() {
+                            blobs.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        for (_, v) in obj {
+            find_blobs(v, blobs);
+        }
+    } else if let Some(arr) = val.as_array() {
+        for v in arr {
+            find_blobs(v, blobs);
+        }
+    }
+}
+
 pub async fn list_missing_blobs(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    Query(_params): Query<ListMissingBlobsParams>,
+    Query(params): Query<ListMissingBlobsParams>,
 ) -> Response {
     let auth_header = headers.get("Authorization");
     if auth_header.is_none() {
@@ -171,11 +196,153 @@ pub async fn list_missing_blobs(
             .into_response();
     }
 
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query(
+            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1"
+        )
+        .bind(&token)
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or(None);
+
+    let (did, key_bytes) = match session {
+        Some(row) => (
+            row.get::<String, _>("did"),
+            row.get::<Vec<u8>, _>("key_bytes"),
+        ),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let user_query = sqlx::query("SELECT id FROM users WHERE did = $1")
+        .bind(&did)
+        .fetch_optional(&state.db)
+        .await;
+
+    let user_id: uuid::Uuid = match user_query {
+        Ok(Some(row)) => row.get("id"),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let limit = params.limit.unwrap_or(500).min(1000);
+    let cursor_str = params.cursor.unwrap_or_default();
+    let (cursor_collection, cursor_rkey) = if cursor_str.contains('|') {
+        let parts: Vec<&str> = cursor_str.split('|').collect();
+        (parts[0].to_string(), parts[1].to_string())
+    } else {
+        (String::new(), String::new())
+    };
+
+    let records_query = sqlx::query(
+        "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1 AND (collection, rkey) > ($2, $3) ORDER BY collection, rkey LIMIT $4"
+    )
+    .bind(user_id)
+    .bind(cursor_collection)
+    .bind(cursor_rkey)
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await;
+
+    let records = match records_query {
+        Ok(r) => r,
+        Err(e) => {
+            error!("DB error fetching records: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let mut missing_blobs = Vec::new();
+    let mut last_cursor = None;
+
+    for row in &records {
+        let collection: String = row.get("collection");
+        let rkey: String = row.get("rkey");
+        let record_cid_str: String = row.get("record_cid");
+
+        last_cursor = Some(format!("{}|{}", collection, rkey));
+
+        let record_cid = match Cid::from_str(&record_cid_str) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let block_bytes = match state.block_store.get(&record_cid).await {
+            Ok(Some(b)) => b,
+            _ => continue,
+        };
+
+        let record_val: serde_json::Value = match serde_ipld_dagcbor::from_slice(&block_bytes) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let mut blobs = Vec::new();
+        find_blobs(&record_val, &mut blobs);
+
+        for blob_cid_str in blobs {
+            let exists = sqlx::query("SELECT 1 FROM blobs WHERE cid = $1 AND created_by_user = $2")
+                .bind(&blob_cid_str)
+                .bind(user_id)
+                .fetch_optional(&state.db)
+                .await;
+
+            match exists {
+                Ok(None) => {
+                    missing_blobs.push(RecordBlob {
+                        cid: blob_cid_str,
+                        record_uri: format!("at://{}/{}/{}", did, collection, rkey),
+                    });
+                }
+                Err(e) => {
+                    error!("DB error checking blob existence: {:?}", e);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // if we fetched fewer records than limit, we are done, so cursor is None.
+    // otherwise, cursor is the last one we saw.
+    // ...right?
+    let next_cursor = if records.len() < limit as usize {
+        None
+    } else {
+        last_cursor
+    };
+
     (
         StatusCode::OK,
         Json(ListMissingBlobsOutput {
-            cursor: None,
-            blobs: vec![],
+            cursor: next_cursor,
+            blobs: missing_blobs,
         }),
     )
         .into_response()

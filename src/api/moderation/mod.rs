@@ -110,8 +110,29 @@ pub async fn create_report(
             .into_response();
     }
 
-    let created_at = chrono::Utc::now().to_rfc3339();
-    let report_id = chrono::Utc::now().timestamp_millis();
+    let created_at = chrono::Utc::now();
+    let report_id = created_at.timestamp_millis();
+
+    let insert = sqlx::query(
+        "INSERT INTO reports (id, reason_type, reason, subject_json, reported_by_did, created_at) VALUES ($1, $2, $3, $4, $5, $6)"
+    )
+    .bind(report_id)
+    .bind(&input.reason_type)
+    .bind(&input.reason)
+    .bind(json!(input.subject))
+    .bind(&did)
+    .bind(created_at)
+    .execute(&state.db)
+    .await;
+
+    if let Err(e) = insert {
+        error!("Failed to insert report: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
 
     (
         StatusCode::OK,
@@ -121,7 +142,7 @@ pub async fn create_report(
             reason: input.reason,
             subject: input.subject,
             reported_by: did,
-            created_at,
+            created_at: created_at.to_rfc3339(),
         }),
     )
         .into_response()

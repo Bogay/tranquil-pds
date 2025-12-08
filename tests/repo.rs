@@ -204,7 +204,6 @@ async fn test_put_record_mismatched_repo() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_put_record_invalid_schema() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;

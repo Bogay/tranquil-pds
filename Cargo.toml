@@ -36,6 +36,7 @@ tracing-subscriber = "0.3.22"
 uuid = { version = "1.19.0", features = ["v4", "fast-rng"] }
 
 [dev-dependencies]
+ctor = "0.6.3"
 testcontainers = "0.26.0"
 testcontainers-modules = { version = "0.14.0", features = ["postgres"] }
 wiremock = "0.6.5"

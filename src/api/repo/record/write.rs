@@ -182,6 +182,18 @@ pub async fn create_record(
         .rkey
         .unwrap_or_else(|| Utc::now().format("%Y%m%d%H%M%S%f").to_string());
 
+    if input.validate.unwrap_or(true) {
+        if input.collection == "app.bsky.feed.post" {
+            if input.record.get("text").is_none() || input.record.get("createdAt").is_none() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidRecord", "message": "Record validation failed"})),
+                )
+                    .into_response();
+            }
+        }
+    }
+
     let mut record_bytes = Vec::new();
     if let Err(e) = serde_ipld_dagcbor::to_writer(&mut record_bytes, &input.record) {
         error!("Error serializing record: {:?}", e);
@@ -471,6 +483,18 @@ pub async fn put_record(
     };
 
     let rkey = input.rkey.clone();
+
+    if input.validate.unwrap_or(true) {
+        if input.collection == "app.bsky.feed.post" {
+            if input.record.get("text").is_none() || input.record.get("createdAt").is_none() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidRecord", "message": "Record validation failed"})),
+                )
+                    .into_response();
+            }
+        }
+    }
 
     let mut record_bytes = Vec::new();
     if let Err(e) = serde_ipld_dagcbor::to_writer(&mut record_bytes, &input.record) {

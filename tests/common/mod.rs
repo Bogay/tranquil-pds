@@ -32,6 +32,22 @@ pub const AUTH_DID: &str = "did:plc:fake";
 #[allow(dead_code)]
 pub const TARGET_DID: &str = "did:plc:target";
 
+#[cfg(test)]
+#[ctor::dtor]
+fn cleanup() {
+    // my attempt to force clean up containers created by this test binary.
+    // this is a fallback in case ryuk fails or is not supported
+    if std::env::var("XDG_RUNTIME_DIR").is_ok() {
+         let _ = std::process::Command::new("podman")
+            .args(&["rm", "-f", "--filter", "label=bspds_test=true"])
+            .output();
+    }
+
+    let _ = std::process::Command::new("docker")
+        .args(&["container", "prune", "-f", "--filter", "label=bspds_test=true"])
+        .output();
+}
+
 #[allow(dead_code)]
 pub fn client() -> Client {
     Client::new()
@@ -63,6 +79,7 @@ pub async fn base_url() -> &'static str {
                     .with_env_var("MINIO_ROOT_USER", "minioadmin")
                     .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
                     .with_cmd(vec!["server".to_string(), "/data".to_string()])
+                    .with_label("bspds_test", "true")
                     .start()
                     .await
                     .expect("Failed to start MinIO");
@@ -131,6 +148,7 @@ pub async fn base_url() -> &'static str {
 
                 let container = Postgres::default()
                     .with_tag("18-alpine")
+                    .with_label("bspds_test", "true")
                     .start()
                     .await
                     .expect("Failed to start Postgres");
