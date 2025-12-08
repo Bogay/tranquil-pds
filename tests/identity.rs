@@ -304,3 +304,55 @@ async fn test_did_web_lifecycle() {
     assert_eq!(record_body["value"]["displayName"], "DID Web User");
     */
 }
+
+#[tokio::test]
+async fn test_get_recommended_did_credentials_success() {
+    let client = client();
+    let (access_jwt, _) = create_account_and_login(&client).await;
+
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.identity.getRecommendedDidCredentials",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert!(body["rotationKeys"].is_array());
+    assert!(body["alsoKnownAs"].is_array());
+    assert!(body["verificationMethods"].is_object());
+    assert!(body["services"].is_object());
+
+    let rotation_keys = body["rotationKeys"].as_array().unwrap();
+    assert!(!rotation_keys.is_empty());
+    assert!(rotation_keys[0].as_str().unwrap().starts_with("did:key:"));
+
+    let also_known_as = body["alsoKnownAs"].as_array().unwrap();
+    assert!(!also_known_as.is_empty());
+    assert!(also_known_as[0].as_str().unwrap().starts_with("at://"));
+
+    assert!(body["verificationMethods"]["atproto"].is_string());
+    assert_eq!(body["services"]["atprotoPds"]["type"], "AtprotoPersonalDataServer");
+    assert!(body["services"]["atprotoPds"]["endpoint"].is_string());
+}
+
+#[tokio::test]
+async fn test_get_recommended_did_credentials_no_auth() {
+    let client = client();
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.identity.getRecommendedDidCredentials",
+            base_url().await
+        ))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "AuthenticationRequired");
+}

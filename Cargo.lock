@@ -920,6 +920,7 @@ dependencies = [
  "jacquard-repo",
  "jsonwebtoken",
  "k256",
+ "multibase",
  "multihash",
  "rand 0.8.5",
  "reqwest",

@@ -245,3 +245,258 @@ pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(
         }
     }
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetRecommendedDidCredentialsOutput {
+    pub rotation_keys: Vec<String>,
+    pub also_known_as: Vec<String>,
+    pub verification_methods: VerificationMethods,
+    pub services: Services,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationMethods {
+    pub atproto: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Services {
+    pub atproto_pds: AtprotoPds,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AtprotoPds {
+    #[serde(rename = "type")]
+    pub service_type: String,
+    pub endpoint: String,
+}
+
+pub async fn get_recommended_did_credentials(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query(
+        r#"
+        SELECT s.did, k.key_bytes, u.handle
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+    )
+    .bind(&token)
+    .fetch_optional(&state.db)
+    .await;
+
+    let (_did, key_bytes, handle) = match session {
+        Ok(Some(row)) => (
+            row.get::<String, _>("did"),
+            row.get::<Vec<u8>, _>("key_bytes"),
+            row.get::<String, _>("handle"),
+        ),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in get_recommended_did_credentials: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_endpoint = format!("https://{}", hostname);
+
+    let secret_key = match k256::SecretKey::from_slice(&key_bytes) {
+        Ok(k) => k,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let public_key = secret_key.public_key();
+    let encoded = public_key.to_encoded_point(true);
+    let did_key = format!(
+        "did:key:zQ3sh{}",
+        multibase::encode(multibase::Base::Base58Btc, encoded.as_bytes())
+            .chars()
+            .skip(1)
+            .collect::<String>()
+    );
+
+    (
+        StatusCode::OK,
+        Json(GetRecommendedDidCredentialsOutput {
+            rotation_keys: vec![did_key.clone()],
+            also_known_as: vec![format!("at://{}", handle)],
+            verification_methods: VerificationMethods { atproto: did_key },
+            services: Services {
+                atproto_pds: AtprotoPds {
+                    service_type: "AtprotoPersonalDataServer".to_string(),
+                    endpoint: pds_endpoint,
+                },
+            },
+        }),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct UpdateHandleInput {
+    pub handle: String,
+}
+
+pub async fn update_handle(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<UpdateHandleInput>,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query(
+        r#"
+        SELECT s.did, k.key_bytes, u.id as user_id
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+    )
+    .bind(&token)
+    .fetch_optional(&state.db)
+    .await;
+
+    let (_did, key_bytes, user_id) = match session {
+        Ok(Some(row)) => (
+            row.get::<String, _>("did"),
+            row.get::<Vec<u8>, _>("key_bytes"),
+            row.get::<uuid::Uuid, _>("user_id"),
+        ),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in update_handle: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let new_handle = input.handle.trim();
+    if new_handle.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "handle is required"})),
+        )
+            .into_response();
+    }
+
+    if !new_handle
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"})),
+        )
+            .into_response();
+    }
+
+    let existing = sqlx::query("SELECT id FROM users WHERE handle = $1 AND id != $2")
+        .bind(new_handle)
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    if let Ok(Some(_)) = existing {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "HandleTaken", "message": "Handle is already in use"})),
+        )
+            .into_response();
+    }
+
+    let result = sqlx::query("UPDATE users SET handle = $1 WHERE id = $2")
+        .bind(new_handle)
+        .bind(user_id)
+        .execute(&state.db)
+        .await;
+
+    match result {
+        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Err(e) => {
+            error!("DB error updating handle: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}

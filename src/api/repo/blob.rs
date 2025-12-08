@@ -2,12 +2,13 @@ use crate::state::AppState;
 use axum::body::Bytes;
 use axum::{
     Json,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use cid::Cid;
 use multihash::Multihash;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -135,4 +136,47 @@ pub async fn upload_blob(
         }
     }))
     .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct ListMissingBlobsParams {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordBlob {
+    pub cid: String,
+    pub record_uri: String,
+}
+
+#[derive(Serialize)]
+pub struct ListMissingBlobsOutput {
+    pub cursor: Option<String>,
+    pub blobs: Vec<RecordBlob>,
+}
+
+pub async fn list_missing_blobs(
+    State(_state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Query(_params): Query<ListMissingBlobsParams>,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    (
+        StatusCode::OK,
+        Json(ListMissingBlobsOutput {
+            cursor: None,
+            blobs: vec![],
+        }),
+    )
+        .into_response()
 }

@@ -757,3 +757,38 @@ async fn test_apply_writes_empty_writes() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn test_list_missing_blobs() {
+    let client = client();
+    let (access_jwt, _) = create_account_and_login(&client).await;
+
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.listMissingBlobs",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert!(body["blobs"].is_array());
+}
+
+#[tokio::test]
+async fn test_list_missing_blobs_no_auth() {
+    let client = client();
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.listMissingBlobs",
+            base_url().await
+        ))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}

@@ -317,3 +317,96 @@ async fn test_get_service_auth_missing_aud() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn test_check_account_status_success() {
+    let client = client();
+    let (access_jwt, _) = create_account_and_login(&client).await;
+
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.checkAccountStatus",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["activated"], true);
+    assert_eq!(body["validDid"], true);
+    assert!(body["repoCommit"].is_string());
+    assert!(body["repoRev"].is_string());
+    assert!(body["indexedRecords"].is_number());
+}
+
+#[tokio::test]
+async fn test_check_account_status_no_auth() {
+    let client = client();
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.checkAccountStatus",
+            base_url().await
+        ))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "AuthenticationRequired");
+}
+
+#[tokio::test]
+async fn test_activate_account_success() {
+    let client = client();
+    let (access_jwt, _) = create_account_and_login(&client).await;
+
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.activateAccount",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_activate_account_no_auth() {
+    let client = client();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.activateAccount",
+            base_url().await
+        ))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_deactivate_account_success() {
+    let client = client();
+    let (access_jwt, _) = create_account_and_login(&client).await;
+
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+}

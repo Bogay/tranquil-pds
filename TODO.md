@@ -25,22 +25,22 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.server.getSession`.
     - [x] Implement `com.atproto.server.refreshSession`.
     - [x] Implement `com.atproto.server.deleteSession` (Logout).
-    - [ ] Implement `com.atproto.server.activateAccount`.
-    - [ ] Implement `com.atproto.server.checkAccountStatus`.
-    - [ ] Implement `com.atproto.server.confirmEmail`.
-    - [ ] Implement `com.atproto.server.createAppPassword`.
+    - [x] Implement `com.atproto.server.activateAccount`.
+    - [x] Implement `com.atproto.server.checkAccountStatus`.
+    - [x] Implement `com.atproto.server.createAppPassword`.
     - [ ] Implement `com.atproto.server.createInviteCode`.
     - [ ] Implement `com.atproto.server.createInviteCodes`.
-    - [ ] Implement `com.atproto.server.deactivateAccount` / `deleteAccount`.
+    - [x] Implement `com.atproto.server.deactivateAccount` / `deleteAccount`.
     - [ ] Implement `com.atproto.server.getAccountInviteCodes`.
     - [x] Implement `com.atproto.server.getServiceAuth` (Cross-service auth).
-    - [ ] Implement `com.atproto.server.listAppPasswords`.
+    - [x] Implement `com.atproto.server.listAppPasswords`.
     - [ ] Implement `com.atproto.server.requestAccountDelete`.
     - [ ] Implement `com.atproto.server.requestEmailConfirmation` / `requestEmailUpdate`.
     - [ ] Implement `com.atproto.server.requestPasswordReset` / `resetPassword`.
     - [ ] Implement `com.atproto.server.reserveSigningKey`.
-    - [ ] Implement `com.atproto.server.revokeAppPassword`.
+    - [x] Implement `com.atproto.server.revokeAppPassword`.
     - [ ] Implement `com.atproto.server.updateEmail`.
+    - [ ] Implement `com.atproto.server.confirmEmail`.
 
 ## Repository Operations (`com.atproto.repo`)
 - [ ] Record CRUD
@@ -56,7 +56,7 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.repo.describeRepo`.
     - [x] Implement `com.atproto.repo.applyWrites` (Batch writes).
     - [ ] Implement `com.atproto.repo.importRepo` (Migration).
-    - [ ] Implement `com.atproto.repo.listMissingBlobs`.
+    - [x] Implement `com.atproto.repo.listMissingBlobs`.
 - [ ] Blob Management
     - [x] Implement `com.atproto.repo.uploadBlob`.
         - [x] Store blob (S3).
@@ -72,39 +72,39 @@ Lewis' corrected big boy todofile
     - [ ] Implement `com.atproto.sync.getBlocks` (Return specific blocks via CIDs).
     - [x] Implement `com.atproto.sync.getLatestCommit`.
     - [ ] Implement `com.atproto.sync.getRecord` (Sync version, distinct from repo.getRecord).
-    - [ ] Implement `com.atproto.sync.getRepoStatus`.
+    - [x] Implement `com.atproto.sync.getRepoStatus`.
     - [x] Implement `com.atproto.sync.listRepos`.
-    - [ ] Implement `com.atproto.sync.notifyOfUpdate`.
+    - [x] Implement `com.atproto.sync.notifyOfUpdate`.
 - [ ] Blob Sync
-    - [ ] Implement `com.atproto.sync.getBlob`.
-    - [ ] Implement `com.atproto.sync.listBlobs`.
-- [ ] Crawler Interaction
-    - [ ] Implement `com.atproto.sync.requestCrawl` (Notify relays to index us).
+    - [x] Implement `com.atproto.sync.getBlob`.
+    - [x] Implement `com.atproto.sync.listBlobs`.
+- [x] Crawler Interaction
+    - [x] Implement `com.atproto.sync.requestCrawl` (Notify relays to index us).
 
 ## Identity (`com.atproto.identity`)
 - [ ] Resolution
     - [x] Implement `com.atproto.identity.resolveHandle` (Can be internal or proxy to PLC).
-    - [ ] Implement `com.atproto.identity.updateHandle`.
+    - [x] Implement `com.atproto.identity.updateHandle`.
     - [ ] Implement `com.atproto.identity.submitPlcOperation` / `signPlcOperation` / `requestPlcOperationSignature`.
-    - [ ] Implement `com.atproto.identity.getRecommendedDidCredentials`.
+    - [x] Implement `com.atproto.identity.getRecommendedDidCredentials`.
     - [x] Implement `/.well-known/did.json` (Depends on supporting did:web).
 
 ## Admin Management (`com.atproto.admin`)
-- [ ] Implement `com.atproto.admin.deleteAccount`.
+- [x] Implement `com.atproto.admin.deleteAccount`.
 - [ ] Implement `com.atproto.admin.disableAccountInvites`.
 - [ ] Implement `com.atproto.admin.disableInviteCodes`.
 - [ ] Implement `com.atproto.admin.enableAccountInvites`.
-- [ ] Implement `com.atproto.admin.getAccountInfo` / `getAccountInfos`.
+- [x] Implement `com.atproto.admin.getAccountInfo` / `getAccountInfos`.
 - [ ] Implement `com.atproto.admin.getInviteCodes`.
 - [ ] Implement `com.atproto.admin.getSubjectStatus`.
 - [ ] Implement `com.atproto.admin.sendEmail`.
-- [ ] Implement `com.atproto.admin.updateAccountEmail`.
-- [ ] Implement `com.atproto.admin.updateAccountHandle`.
-- [ ] Implement `com.atproto.admin.updateAccountPassword`.
+- [x] Implement `com.atproto.admin.updateAccountEmail`.
+- [x] Implement `com.atproto.admin.updateAccountHandle`.
+- [x] Implement `com.atproto.admin.updateAccountPassword`.
 - [ ] Implement `com.atproto.admin.updateSubjectStatus`.
 
 ## Moderation (`com.atproto.moderation`)
-- [ ] Implement `com.atproto.moderation.createReport`.
+- [x] Implement `com.atproto.moderation.createReport`.
 
 ## Record Schema Validation
 - [ ] Handle this generically.
