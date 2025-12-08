@@ -216,3 +216,104 @@ async fn test_delete_session() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn test_get_service_auth_success() {
+    let client = client();
+    let (access_jwt, did) = create_account_and_login(&client).await;
+
+    let params = [("aud", "did:web:example.com")];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getServiceAuth",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert!(body["token"].is_string());
+
+    let token = body["token"].as_str().unwrap();
+    let parts: Vec<&str> = token.split('.').collect();
+    assert_eq!(parts.len(), 3, "Token should be a valid JWT");
+
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).expect("payload b64");
+    let claims: Value = serde_json::from_slice(&payload_bytes).expect("payload json");
+
+    assert_eq!(claims["iss"], did);
+    assert_eq!(claims["sub"], did);
+    assert_eq!(claims["aud"], "did:web:example.com");
+}
+
+#[tokio::test]
+async fn test_get_service_auth_with_lxm() {
+    let client = client();
+    let (access_jwt, did) = create_account_and_login(&client).await;
+
+    let params = [("aud", "did:web:example.com"), ("lxm", "com.atproto.repo.getRecord")];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getServiceAuth",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let token = body["token"].as_str().unwrap();
+    let parts: Vec<&str> = token.split('.').collect();
+    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).expect("payload b64");
+    let claims: Value = serde_json::from_slice(&payload_bytes).expect("payload json");
+
+    assert_eq!(claims["iss"], did);
+    assert_eq!(claims["lxm"], "com.atproto.repo.getRecord");
+}
+
+#[tokio::test]
+async fn test_get_service_auth_no_auth() {
+    let client = client();
+    let params = [("aud", "did:web:example.com")];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getServiceAuth",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "AuthenticationRequired");
+}
+
+#[tokio::test]
+async fn test_get_service_auth_missing_aud() {
+    let client = client();
+    let (access_jwt, _) = create_account_and_login(&client).await;
+
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getServiceAuth",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}

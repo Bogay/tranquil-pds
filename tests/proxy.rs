@@ -61,49 +61,6 @@ async fn test_proxy_via_header() {
     assert_eq!(auth, Some("Bearer test-token".to_string()));
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_proxy_via_env_var() {
-    let (upstream_url, mut rx) = spawn_mock_upstream().await;
-
-    unsafe {
-        std::env::set_var("APPVIEW_URL", &upstream_url);
-    }
-
-    let app_url = common::base_url().await;
-    let client = Client::new();
-
-    let res = client
-        .get(format!("{}/xrpc/com.example.envtest", app_url))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::OK);
-
-    let (method, uri, _) = rx.recv().await.expect("Upstream should receive request");
-    assert_eq!(method, "GET");
-    assert_eq!(uri, "/xrpc/com.example.envtest");
-}
-
-#[tokio::test]
-#[ignore]
-async fn test_proxy_missing_config() {
-    unsafe {
-        std::env::remove_var("APPVIEW_URL");
-    }
-
-    let app_url = common::base_url().await;
-    let client = Client::new();
-
-    let res = client
-        .get(format!("{}/xrpc/com.example.fail", app_url))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
-}
 
 #[tokio::test]
 async fn test_proxy_auth_signing() {

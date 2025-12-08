@@ -33,7 +33,7 @@ Lewis' corrected big boy todofile
     - [ ] Implement `com.atproto.server.createInviteCodes`.
     - [ ] Implement `com.atproto.server.deactivateAccount` / `deleteAccount`.
     - [ ] Implement `com.atproto.server.getAccountInviteCodes`.
-    - [ ] Implement `com.atproto.server.getServiceAuth` (Cross-service auth).
+    - [x] Implement `com.atproto.server.getServiceAuth` (Cross-service auth).
     - [ ] Implement `com.atproto.server.listAppPasswords`.
     - [ ] Implement `com.atproto.server.requestAccountDelete`.
     - [ ] Implement `com.atproto.server.requestEmailConfirmation` / `requestEmailUpdate`.
@@ -44,17 +44,17 @@ Lewis' corrected big boy todofile
 
 ## Repository Operations (`com.atproto.repo`)
 - [ ] Record CRUD
-    - [ ] Implement `com.atproto.repo.createRecord`.
+    - [x] Implement `com.atproto.repo.createRecord`.
         - [ ] Validate schema against Lexicon (just structure, not complex logic).
-        - [ ] Generate `rkey` (TID) if not provided.
-        - [ ] Handle MST (Merkle Search Tree) insertion.
+        - [x] Generate `rkey` (TID) if not provided.
+        - [x] Handle MST (Merkle Search Tree) insertion.
         - [ ] **Trigger Firehose Event**.
     - [x] Implement `com.atproto.repo.putRecord`.
     - [x] Implement `com.atproto.repo.getRecord`.
     - [x] Implement `com.atproto.repo.deleteRecord`.
     - [x] Implement `com.atproto.repo.listRecords`.
     - [x] Implement `com.atproto.repo.describeRepo`.
-    - [ ] Implement `com.atproto.repo.applyWrites` (Batch writes).
+    - [x] Implement `com.atproto.repo.applyWrites` (Batch writes).
     - [ ] Implement `com.atproto.repo.importRepo` (Migration).
     - [ ] Implement `com.atproto.repo.listMissingBlobs`.
 - [ ] Blob Management
@@ -70,10 +70,10 @@ Lewis' corrected big boy todofile
 - [ ] Bulk Export
     - [ ] Implement `com.atproto.sync.getRepo` (Return full CAR file of repo).
     - [ ] Implement `com.atproto.sync.getBlocks` (Return specific blocks via CIDs).
-    - [ ] Implement `com.atproto.sync.getLatestCommit`.
+    - [x] Implement `com.atproto.sync.getLatestCommit`.
     - [ ] Implement `com.atproto.sync.getRecord` (Sync version, distinct from repo.getRecord).
     - [ ] Implement `com.atproto.sync.getRepoStatus`.
-    - [ ] Implement `com.atproto.sync.listRepos`.
+    - [x] Implement `com.atproto.sync.listRepos`.
     - [ ] Implement `com.atproto.sync.notifyOfUpdate`.
 - [ ] Blob Sync
     - [ ] Implement `com.atproto.sync.getBlob`.
@@ -83,7 +83,7 @@ Lewis' corrected big boy todofile
 
 ## Identity (`com.atproto.identity`)
 - [ ] Resolution
-    - [ ] Implement `com.atproto.identity.resolveHandle` (Can be internal or proxy to PLC).
+    - [x] Implement `com.atproto.identity.resolveHandle` (Can be internal or proxy to PLC).
     - [ ] Implement `com.atproto.identity.updateHandle`.
     - [ ] Implement `com.atproto.identity.submitPlcOperation` / `signPlcOperation` / `requestPlcOperationSignature`.
     - [ ] Implement `com.atproto.identity.getRecommendedDidCredentials`.

@@ -3,6 +3,7 @@ pub mod auth;
 pub mod repo;
 pub mod state;
 pub mod storage;
+pub mod sync;
 
 use axum::{
     Router,
@@ -38,6 +39,14 @@ pub fn app(state: AppState) -> Router {
             post(api::server::refresh_session),
         )
         .route(
+            "/xrpc/com.atproto.server.getServiceAuth",
+            get(api::server::get_service_auth),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.resolveHandle",
+            get(api::identity::resolve_handle),
+        )
+        .route(
             "/xrpc/com.atproto.repo.createRecord",
             post(api::repo::create_record),
         )
@@ -65,6 +74,19 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.atproto.repo.uploadBlob",
             post(api::repo::upload_blob),
         )
+        .route(
+            "/xrpc/com.atproto.repo.applyWrites",
+            post(api::repo::apply_writes),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.getLatestCommit",
+            get(sync::get_latest_commit),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.listRepos",
+            get(sync::list_repos),
+        )
+        // I know I know, I'm not supposed to implement appview endpoints. Leave me be
         .route(
             "/xrpc/app.bsky.feed.getTimeline",
             get(api::feed::get_timeline),

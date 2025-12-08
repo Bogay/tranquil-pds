@@ -1,20 +1,25 @@
-# Run all tests with correct threading models
-test: test-proxy test-lifecycle test-others
+# Run all tests
+test:
+    cargo test
 
-# Proxy tests modify environment variables, so must run single-threaded
-# TODO: figure out how to run in parallel
-test-proxy:
-    cargo test --test proxy -- --test-threads=1
-
-# Lifecycle tests involve complex state mutations, run single-threaded to be safe
-# TODO: figure out how to run in parallel
-test-lifecycle:
-    cargo test --test lifecycle -- --test-threads=1
-
-test-others:
-    cargo test --lib
-    cargo test --test auth
-    cargo test --test identity
+# Run specific test suites if needed
+test-repo:
     cargo test --test repo
-    cargo test --test server
+
+test-lifecycle:
+    cargo test --test lifecycle
+
+test-proxy:
+    cargo test --test proxy
+
+test-sync:
     cargo test --test sync
+
+test-server:
+    cargo test --test server
+
+test-identity:
+    cargo test --test identity
+
+test-auth:
+    cargo test --test auth

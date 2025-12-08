@@ -5,20 +5,79 @@ use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-// #[tokio::test]
-// async fn test_resolve_handle() {
-//     let client = client();
-//     let params = [
-//         ("handle", "bsky.app"),
-//     ];
-//     let res = client.get(format!("{}/xrpc/com.atproto.identity.resolveHandle", base_url().await))
-//         .query(&params)
-//         .send()
-//         .await
-//         .expect("Failed to send request");
-//
-//     assert_eq!(res.status(), StatusCode::OK);
-// }
+#[tokio::test]
+async fn test_resolve_handle_success() {
+    let client = client();
+    let handle = format!("resolvetest_{}", uuid::Uuid::new_v4());
+    let payload = json!({
+        "handle": handle,
+        "email": format!("{}@example.com", handle),
+        "password": "password"
+    });
+
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
+        .json(&payload)
+        .send()
+        .await
+        .expect("Failed to create account");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Invalid JSON");
+    let did = body["did"].as_str().expect("No DID").to_string();
+
+    let params = [("handle", handle.as_str())];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.identity.resolveHandle",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["did"], did);
+}
+
+#[tokio::test]
+async fn test_resolve_handle_not_found() {
+    let client = client();
+    let params = [("handle", "nonexistent_handle_12345")];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.identity.resolveHandle",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "HandleNotFound");
+}
+
+#[tokio::test]
+async fn test_resolve_handle_missing_param() {
+    let client = client();
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.identity.resolveHandle",
+            base_url().await
+        ))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
 
 #[tokio::test]
 async fn test_well_known_did() {

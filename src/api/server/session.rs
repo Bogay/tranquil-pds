@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use axum::{
     Json,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -10,6 +10,99 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use tracing::{error, info, warn};
+
+#[derive(Deserialize)]
+pub struct GetServiceAuthParams {
+    pub aud: String,
+    pub lxm: Option<String>,
+    pub exp: Option<i64>,
+}
+
+#[derive(Serialize)]
+pub struct GetServiceAuthOutput {
+    pub token: String,
+}
+
+pub async fn get_service_auth(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Query(params): Query<GetServiceAuthParams>,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query(
+        r#"
+        SELECT s.did, k.key_bytes
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+    )
+    .bind(&token)
+    .fetch_optional(&state.db)
+    .await;
+
+    let (did, key_bytes) = match session {
+        Ok(Some(row)) => (
+            row.get::<String, _>("did"),
+            row.get::<Vec<u8>, _>("key_bytes"),
+        ),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in get_service_auth: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let lxm = params.lxm.as_deref().unwrap_or("*");
+
+    let service_token = match crate::auth::create_service_token(&did, &params.aud, lxm, &key_bytes)
+    {
+        Ok(t) => t,
+        Err(e) => {
+            error!("Failed to create service token: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    (StatusCode::OK, Json(GetServiceAuthOutput { token: service_token })).into_response()
+}
 
 #[derive(Deserialize)]
 pub struct CreateSessionInput {

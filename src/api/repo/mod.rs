@@ -4,4 +4,4 @@ pub mod record;
 
 pub use blob::upload_blob;
 pub use meta::describe_repo;
-pub use record::{create_record, delete_record, get_record, list_records, put_record};
+pub use record::{apply_writes, create_record, delete_record, get_record, list_records, put_record};

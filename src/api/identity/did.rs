@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -9,9 +9,55 @@ use base64::Engine;
 use k256::SecretKey;
 use k256::elliptic_curve::sec1::ToEncodedPoint;
 use reqwest;
+use serde::Deserialize;
 use serde_json::json;
 use sqlx::Row;
 use tracing::error;
+
+#[derive(Deserialize)]
+pub struct ResolveHandleParams {
+    pub handle: String,
+}
+
+pub async fn resolve_handle(
+    State(state): State<AppState>,
+    Query(params): Query<ResolveHandleParams>,
+) -> Response {
+    let handle = params.handle.trim();
+
+    if handle.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "handle is required"})),
+        )
+            .into_response();
+    }
+
+    let user = sqlx::query("SELECT did FROM users WHERE handle = $1")
+        .bind(handle)
+        .fetch_optional(&state.db)
+        .await;
+
+    match user {
+        Ok(Some(row)) => {
+            let did: String = row.get("did");
+            (StatusCode::OK, Json(json!({ "did": did }))).into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "HandleNotFound", "message": "Unable to resolve handle"})),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("DB error resolving handle: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}
 
 pub fn get_jwk(key_bytes: &[u8]) -> serde_json::Value {
     let secret_key = SecretKey::from_slice(key_bytes).expect("Invalid key length");

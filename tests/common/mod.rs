@@ -156,6 +156,7 @@ pub async fn base_url() -> &'static str {
 
 async fn spawn_app(database_url: String) -> String {
     let pool = PgPoolOptions::new()
+        .max_connections(50)
         .connect(&database_url)
         .await
         .expect("Failed to connect to Postgres. Make sure the database is running.");
@@ -256,32 +257,48 @@ pub async fn create_test_post(
 
 #[allow(dead_code)]
 pub async fn create_account_and_login(client: &Client) -> (String, String) {
-    let handle = format!("user_{}", uuid::Uuid::new_v4());
-    let payload = json!({
-        "handle": handle,
-        "email": format!("{}@example.com", handle),
-        "password": "password"
-    });
+    let mut last_error = String::new();
 
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base_url().await
-        ))
-        .json(&payload)
-        .send()
-        .await
-        .expect("Failed to create account");
+    for attempt in 0..3 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(100 * (attempt as u64 + 1))).await;
+        }
 
-    if res.status() != StatusCode::OK {
-        panic!("Failed to create account: {:?}", res.text().await);
+        let handle = format!("user_{}", uuid::Uuid::new_v4());
+        let payload = json!({
+            "handle": handle,
+            "email": format!("{}@example.com", handle),
+            "password": "password"
+        });
+
+        let res = match client
+            .post(format!(
+                "{}/xrpc/com.atproto.server.createAccount",
+                base_url().await
+            ))
+            .json(&payload)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = format!("Request failed: {}", e);
+                continue;
+            }
+        };
+
+        if res.status() == StatusCode::OK {
+            let body: Value = res.json().await.expect("Invalid JSON");
+            let access_jwt = body["accessJwt"]
+                .as_str()
+                .expect("No accessJwt")
+                .to_string();
+            let did = body["did"].as_str().expect("No did").to_string();
+            return (access_jwt, did);
+        }
+
+        last_error = format!("Status {}: {:?}", res.status(), res.text().await);
     }
 
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"]
-        .as_str()
-        .expect("No accessJwt")
-        .to_string();
-    let did = body["did"].as_str().expect("No did").to_string();
-    (access_jwt, did)
+    panic!("Failed to create account after 3 attempts: {}", last_error);
 }
