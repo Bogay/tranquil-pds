@@ -14,7 +14,7 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Deserialize)]
 pub struct CreateAccountInput {
@@ -330,6 +330,19 @@ pub async fn create_account(
             Json(json!({"error": "InternalError"})),
         )
             .into_response();
+    }
+
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    if let Err(e) = crate::notifications::enqueue_welcome_email(
+        &state.db,
+        user_id,
+        &input.email,
+        &input.handle,
+        &hostname,
+    )
+    .await
+    {
+        warn!("Failed to enqueue welcome email: {:?}", e);
     }
 
     (

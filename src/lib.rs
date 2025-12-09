@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod notifications;
 pub mod repo;
 pub mod state;
 pub mod storage;

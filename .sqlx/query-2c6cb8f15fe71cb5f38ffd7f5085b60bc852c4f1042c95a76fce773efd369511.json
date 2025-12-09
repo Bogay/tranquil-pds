@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE notification_queue\n            SET\n                status = CASE\n                    WHEN attempts + 1 >= max_attempts THEN 'failed'::notification_status\n                    ELSE 'pending'::notification_status\n                END,\n                attempts = attempts + 1,\n                last_error = $2,\n                updated_at = NOW(),\n                scheduled_for = NOW() + (INTERVAL '1 minute' * (attempts + 1))\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c6cb8f15fe71cb5f38ffd7f5085b60bc852c4f1042c95a76fce773efd369511"
+}

@@ -1,0 +1,150 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE notification_queue\n            SET status = 'processing', updated_at = NOW()\n            WHERE id IN (\n                SELECT id FROM notification_queue\n                WHERE status = 'pending'\n                  AND scheduled_for <= $1\n                  AND attempts < max_attempts\n                ORDER BY scheduled_for ASC\n                LIMIT $2\n                FOR UPDATE SKIP LOCKED\n            )\n            RETURNING\n                id, user_id,\n                channel as \"channel: NotificationChannel\",\n                notification_type as \"notification_type: super::types::NotificationType\",\n                status as \"status: NotificationStatus\",\n                recipient, subject, body, metadata,\n                attempts, max_attempts, last_error,\n                created_at, updated_at, scheduled_for, processed_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel: NotificationChannel",
+        "type_info": {
+          "Custom": {
+            "name": "notification_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "notification_type: super::types::NotificationType",
+        "type_info": {
+          "Custom": {
+            "name": "notification_type",
+            "kind": {
+              "Enum": [
+                "welcome",
+                "email_verification",
+                "password_reset",
+                "email_update",
+                "account_deletion"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "status: NotificationStatus",
+        "type_info": {
+          "Custom": {
+            "name": "notification_status",
+            "kind": {
+              "Enum": [
+                "pending",
+                "processing",
+                "sent",
+                "failed"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "recipient",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "max_attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_error",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "scheduled_for",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "processed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "cb6f48aaba124c79308d20e66c23adb44d1196296b7f93fad19b2d17548ed3de"
+}

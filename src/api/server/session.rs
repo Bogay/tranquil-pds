@@ -363,7 +363,7 @@ pub async fn request_account_delete(
 
     let session = sqlx::query!(
         r#"
-        SELECT s.did, k.key_bytes
+        SELECT s.did, u.id as user_id, u.email, u.handle, k.key_bytes
         FROM sessions s
         JOIN users u ON s.did = u.did
         JOIN user_keys k ON u.id = k.user_id
@@ -374,8 +374,8 @@ pub async fn request_account_delete(
     .fetch_optional(&state.db)
     .await;
 
-    let (did, key_bytes) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes),
+    let (did, user_id, email, handle, key_bytes) = match session {
+        Ok(Some(row)) => (row.did, row.user_id, row.email, row.handle, row.key_bytes),
         Ok(None) => {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -422,8 +422,21 @@ pub async fn request_account_delete(
             .into_response();
     }
 
-    // TODO: Send email or other notification
-    info!("Account deletion requested for user {}, token: {}", did, confirmation_token);
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    if let Err(e) = crate::notifications::enqueue_account_deletion(
+        &state.db,
+        user_id,
+        &email,
+        &handle,
+        &confirmation_token,
+        &hostname,
+    )
+    .await
+    {
+        warn!("Failed to enqueue account deletion notification: {:?}", e);
+    }
+
+    info!("Account deletion requested for user {}", did);
 
     (StatusCode::OK, Json(json!({}))).into_response()
 }

@@ -126,10 +126,16 @@ Lewis' corrected big boy todofile
     - [ ] Implement caching layer for DID resolution (Redis or in-memory).
     - [ ] Handle cache invalidation/expiry.
 - [ ] Background Jobs
-    - [ ] Implement background queue for async tasks (crawler notifications, discord/telegram 2FA sending instead of email).
     - [ ] Implement `Crawlers` service (debounce notifications to relays).
-- [ ] Mailer equivalent
-    - [ ] Implement code/notification sending service as a replacement for the mailer because there's no way I'm starting with email. :D
+- [x] Notification Service
+    - [x] Queue-based notification system with database table
+    - [x] Background worker polling for pending notifications
+    - [x] Extensible sender trait for multiple channels
+    - [x] Email sender via OS sendmail/msmtp
+    - [ ] Discord bot sender
+    - [ ] Telegram bot sender
+    - [ ] Signal bot sender
+    - [x] Helper functions for common notification types (welcome, password reset, email verification, etc.)
 - [ ] Image Processing
     - [ ] Implement image resize/formatting pipeline (for blob uploads).
 - [ ] IPLD & MST

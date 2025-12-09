@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO notification_queue\n            (user_id, channel, notification_type, recipient, subject, body, metadata)\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "notification_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "notification_type",
+            "kind": {
+              "Enum": [
+                "welcome",
+                "email_verification",
+                "password_reset",
+                "email_update",
+                "account_deletion"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5d49bbf0307a0c642b0174d641de748fa648c97f8109255120e969c957ff95bf"
+}
