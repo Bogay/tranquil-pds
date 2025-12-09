@@ -28,10 +28,10 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.server.activateAccount`.
     - [x] Implement `com.atproto.server.checkAccountStatus`.
     - [x] Implement `com.atproto.server.createAppPassword`.
-    - [ ] Implement `com.atproto.server.createInviteCode`.
-    - [ ] Implement `com.atproto.server.createInviteCodes`.
+    - [x] Implement `com.atproto.server.createInviteCode`.
+    - [x] Implement `com.atproto.server.createInviteCodes`.
     - [x] Implement `com.atproto.server.deactivateAccount` / `deleteAccount`.
-    - [ ] Implement `com.atproto.server.getAccountInviteCodes`.
+    - [x] Implement `com.atproto.server.getAccountInviteCodes`.
     - [x] Implement `com.atproto.server.getServiceAuth` (Cross-service auth).
     - [x] Implement `com.atproto.server.listAppPasswords`.
     - [ ] Implement `com.atproto.server.requestAccountDelete`.
@@ -91,17 +91,17 @@ Lewis' corrected big boy todofile
 
 ## Admin Management (`com.atproto.admin`)
 - [x] Implement `com.atproto.admin.deleteAccount`.
-- [ ] Implement `com.atproto.admin.disableAccountInvites`.
-- [ ] Implement `com.atproto.admin.disableInviteCodes`.
-- [ ] Implement `com.atproto.admin.enableAccountInvites`.
+- [x] Implement `com.atproto.admin.disableAccountInvites`.
+- [x] Implement `com.atproto.admin.disableInviteCodes`.
+- [x] Implement `com.atproto.admin.enableAccountInvites`.
 - [x] Implement `com.atproto.admin.getAccountInfo` / `getAccountInfos`.
-- [ ] Implement `com.atproto.admin.getInviteCodes`.
-- [ ] Implement `com.atproto.admin.getSubjectStatus`.
+- [x] Implement `com.atproto.admin.getInviteCodes`.
+- [x] Implement `com.atproto.admin.getSubjectStatus`.
 - [ ] Implement `com.atproto.admin.sendEmail`.
 - [x] Implement `com.atproto.admin.updateAccountEmail`.
 - [x] Implement `com.atproto.admin.updateAccountHandle`.
 - [x] Implement `com.atproto.admin.updateAccountPassword`.
-- [ ] Implement `com.atproto.admin.updateSubjectStatus`.
+- [x] Implement `com.atproto.admin.updateSubjectStatus`.
 
 ## Moderation (`com.atproto.moderation`)
 - [x] Implement `com.atproto.moderation.createReport`.

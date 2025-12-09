@@ -182,6 +182,42 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.atproto.server.revokeAppPassword",
             post(api::server::revoke_app_password),
         )
+        .route(
+            "/xrpc/com.atproto.server.createInviteCode",
+            post(api::server::create_invite_code),
+        )
+        .route(
+            "/xrpc/com.atproto.server.createInviteCodes",
+            post(api::server::create_invite_codes),
+        )
+        .route(
+            "/xrpc/com.atproto.server.getAccountInviteCodes",
+            get(api::server::get_account_invite_codes),
+        )
+        .route(
+            "/xrpc/com.atproto.admin.getInviteCodes",
+            get(api::admin::get_invite_codes),
+        )
+        .route(
+            "/xrpc/com.atproto.admin.disableAccountInvites",
+            post(api::admin::disable_account_invites),
+        )
+        .route(
+            "/xrpc/com.atproto.admin.enableAccountInvites",
+            post(api::admin::enable_account_invites),
+        )
+        .route(
+            "/xrpc/com.atproto.admin.disableInviteCodes",
+            post(api::admin::disable_invite_codes),
+        )
+        .route(
+            "/xrpc/com.atproto.admin.getSubjectStatus",
+            get(api::admin::get_subject_status),
+        )
+        .route(
+            "/xrpc/com.atproto.admin.updateSubjectStatus",
+            post(api::admin::update_subject_status),
+        )
         // I know I know, I'm not supposed to implement appview endpoints. Leave me be
         .route(
             "/xrpc/app.bsky.feed.getTimeline",
