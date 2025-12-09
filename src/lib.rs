@@ -164,6 +164,14 @@ pub fn app(state: AppState) -> Router {
             post(api::server::reset_password),
         )
         .route(
+            "/xrpc/com.atproto.server.requestEmailUpdate",
+            post(api::server::request_email_update),
+        )
+        .route(
+            "/xrpc/com.atproto.server.confirmEmail",
+            post(api::server::confirm_email),
+        )
+        .route(
             "/xrpc/com.atproto.identity.updateHandle",
             post(api::identity::update_handle),
         )
