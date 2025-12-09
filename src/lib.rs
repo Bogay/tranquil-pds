@@ -172,6 +172,14 @@ pub fn app(state: AppState) -> Router {
             post(api::server::confirm_email),
         )
         .route(
+            "/xrpc/com.atproto.server.updateEmail",
+            post(api::server::update_email),
+        )
+        .route(
+            "/xrpc/com.atproto.server.reserveSigningKey",
+            post(api::server::reserve_signing_key),
+        )
+        .route(
             "/xrpc/com.atproto.identity.updateHandle",
             post(api::identity::update_handle),
         )

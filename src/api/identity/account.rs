@@ -17,13 +17,14 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateAccountInput {
     pub handle: String,
     pub email: String,
     pub password: String,
-    #[serde(rename = "inviteCode")]
     pub invite_code: Option<String>,
     pub did: Option<String>,
+    pub signing_key: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -185,12 +186,55 @@ pub async fn create_account(
         }
     };
 
-    let secret_key = SecretKey::random(&mut OsRng);
-    let secret_key_bytes = secret_key.to_bytes();
+    let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
+        if let Some(signing_key_did) = &input.signing_key {
+            let reserved = sqlx::query!(
+                r#"
+                SELECT id, private_key_bytes
+                FROM reserved_signing_keys
+                WHERE public_key_did_key = $1
+                  AND used_at IS NULL
+                  AND expires_at > NOW()
+                FOR UPDATE
+                "#,
+                signing_key_did
+            )
+            .fetch_optional(&mut *tx)
+            .await;
 
-    let key_insert = sqlx::query!("INSERT INTO user_keys (user_id, key_bytes) VALUES ($1, $2)", user_id, &secret_key_bytes[..])
-        .execute(&mut *tx)
-        .await;
+            match reserved {
+                Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
+                Ok(None) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "InvalidSigningKey",
+                            "message": "Signing key not found, already used, or expired"
+                        })),
+                    )
+                        .into_response();
+                }
+                Err(e) => {
+                    error!("Error looking up reserved signing key: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            }
+        } else {
+            let secret_key = SecretKey::random(&mut OsRng);
+            (secret_key.to_bytes().to_vec(), None)
+        };
+
+    let key_insert = sqlx::query!(
+        "INSERT INTO user_keys (user_id, key_bytes) VALUES ($1, $2)",
+        user_id,
+        &secret_key_bytes[..]
+    )
+    .execute(&mut *tx)
+    .await;
 
     if let Err(e) = key_insert {
         error!("Error inserting user key: {:?}", e);
@@ -199,6 +243,24 @@ pub async fn create_account(
             Json(json!({"error": "InternalError"})),
         )
             .into_response();
+    }
+
+    if let Some(key_id) = reserved_key_id {
+        let mark_used = sqlx::query!(
+            "UPDATE reserved_signing_keys SET used_at = NOW() WHERE id = $1",
+            key_id
+        )
+        .execute(&mut *tx)
+        .await;
+
+        if let Err(e) = mark_used {
+            error!("Error marking reserved key as used: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
     }
 
     let mst = Mst::new(Arc::new(state.block_store.clone()));
