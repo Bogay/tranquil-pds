@@ -1,0 +1,393 @@
+use crate::state::AppState;
+use axum::{
+    Json,
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use chrono::{Duration, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use tracing::{error, info, warn};
+use uuid::Uuid;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckAccountStatusOutput {
+    pub activated: bool,
+    pub valid_did: bool,
+    pub repo_commit: String,
+    pub repo_rev: String,
+    pub repo_blocks: i64,
+    pub indexed_records: i64,
+    pub private_state_values: i64,
+    pub expected_blobs: i64,
+    pub imported_blobs: i64,
+}
+
+pub async fn check_account_status(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query!(
+        r#"
+        SELECT s.did, k.key_bytes, u.id as user_id
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+        token
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (did, key_bytes, user_id) = match session {
+        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in check_account_status: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let user_status = sqlx::query!("SELECT deactivated_at FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await;
+
+    let deactivated_at = match user_status {
+        Ok(Some(row)) => row.deactivated_at,
+        _ => None,
+    };
+
+    let repo_result = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    let repo_commit = match repo_result {
+        Ok(Some(row)) => row.repo_root_cid,
+        _ => String::new(),
+    };
+
+    let record_count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM records WHERE repo_id = $1", user_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(Some(0))
+        .unwrap_or(0);
+
+    let blob_count: i64 =
+        sqlx::query_scalar!("SELECT COUNT(*) FROM blobs WHERE created_by_user = $1", user_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(Some(0))
+            .unwrap_or(0);
+
+    let valid_did = did.starts_with("did:");
+
+    (
+        StatusCode::OK,
+        Json(CheckAccountStatusOutput {
+            activated: deactivated_at.is_none(),
+            valid_did,
+            repo_commit: repo_commit.clone(),
+            repo_rev: chrono::Utc::now().timestamp_millis().to_string(),
+            repo_blocks: 0,
+            indexed_records: record_count,
+            private_state_values: 0,
+            expected_blobs: blob_count,
+            imported_blobs: blob_count,
+        }),
+    )
+        .into_response()
+}
+
+pub async fn activate_account(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query!(
+        r#"
+        SELECT s.did, k.key_bytes
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+        token
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (did, key_bytes) = match session {
+        Ok(Some(row)) => (row.did, row.key_bytes),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in activate_account: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
+        .execute(&state.db)
+        .await;
+
+    match result {
+        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Err(e) => {
+            error!("DB error activating account: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeactivateAccountInput {
+    pub delete_after: Option<String>,
+}
+
+pub async fn deactivate_account(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(_input): Json<DeactivateAccountInput>,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query!(
+        r#"
+        SELECT s.did, k.key_bytes
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+        token
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (did, key_bytes) = match session {
+        Ok(Some(row)) => (row.did, row.key_bytes),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in deactivate_account: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let result = sqlx::query!("UPDATE users SET deactivated_at = NOW() WHERE did = $1", did)
+        .execute(&state.db)
+        .await;
+
+    match result {
+        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Err(e) => {
+            error!("DB error deactivating account: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn request_account_delete(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query!(
+        r#"
+        SELECT s.did, u.id as user_id, u.email, u.handle, k.key_bytes
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+        token
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (did, user_id, email, handle, key_bytes) = match session {
+        Ok(Some(row)) => (row.did, row.user_id, row.email, row.handle, row.key_bytes),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in request_account_delete: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let confirmation_token = Uuid::new_v4().to_string();
+    let expires_at = Utc::now() + Duration::minutes(15);
+
+    let insert = sqlx::query!(
+        "INSERT INTO account_deletion_requests (token, did, expires_at) VALUES ($1, $2, $3)",
+        confirmation_token,
+        did,
+        expires_at
+    )
+    .execute(&state.db)
+    .await;
+
+    if let Err(e) = insert {
+        error!("DB error creating deletion token: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    if let Err(e) = crate::notifications::enqueue_account_deletion(
+        &state.db,
+        user_id,
+        &email,
+        &handle,
+        &confirmation_token,
+        &hostname,
+    )
+    .await
+    {
+        warn!("Failed to enqueue account deletion notification: {:?}", e);
+    }
+
+    info!("Account deletion requested for user {}", did);
+
+    (StatusCode::OK, Json(json!({}))).into_response()
+}
