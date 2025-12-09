@@ -184,11 +184,15 @@ async fn spawn_app(database_url: String) -> String {
         .await
         .expect("Failed to run migrations");
 
-    let state = AppState::new(pool).await;
-    let app = bspds::app(state);
-
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+
+    unsafe {
+        std::env::set_var("PDS_HOSTNAME", addr.to_string());
+    }
+
+    let state = AppState::new(pool).await;
+    let app = bspds::app(state);
 
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();

@@ -3,6 +3,7 @@ use common::*;
 use reqwest::StatusCode;
 use reqwest::header;
 use serde_json::Value;
+use chrono;
 
 #[tokio::test]
 async fn test_get_latest_commit_success() {
@@ -351,4 +352,206 @@ async fn test_request_crawl() {
         .expect("Failed to send request");
 
     assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_get_repo_success() {
+    let client = client();
+    let (access_jwt, did) = create_account_and_login(&client).await;
+
+    let post_payload = serde_json::json!({
+        "repo": did,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": "Test post for getRepo",
+            "createdAt": chrono::Utc::now().to_rfc3339()
+        }
+    });
+    let _ = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&post_payload)
+        .send()
+        .await
+        .expect("Failed to create record");
+
+    let params = [("did", did.as_str())];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getRepo",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok()),
+        Some("application/vnd.ipld.car")
+    );
+    let body = res.bytes().await.expect("Failed to get body");
+    assert!(!body.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_repo_not_found() {
+    let client = client();
+    let params = [("did", "did:plc:nonexistent12345")];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getRepo",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "RepoNotFound");
+}
+
+#[tokio::test]
+async fn test_get_record_sync_success() {
+    let client = client();
+    let (access_jwt, did) = create_account_and_login(&client).await;
+
+    let post_payload = serde_json::json!({
+        "repo": did,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": "Test post for sync getRecord",
+            "createdAt": chrono::Utc::now().to_rfc3339()
+        }
+    });
+    let create_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&post_payload)
+        .send()
+        .await
+        .expect("Failed to create record");
+
+    let create_body: Value = create_res.json().await.expect("Invalid JSON");
+    let uri = create_body["uri"].as_str().expect("No URI");
+    let rkey = uri.split('/').last().expect("Invalid URI");
+
+    let params = [
+        ("did", did.as_str()),
+        ("collection", "app.bsky.feed.post"),
+        ("rkey", rkey),
+    ];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getRecord",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok()),
+        Some("application/vnd.ipld.car")
+    );
+    let body = res.bytes().await.expect("Failed to get body");
+    assert!(!body.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_record_sync_not_found() {
+    let client = client();
+    let (_, did) = create_account_and_login(&client).await;
+
+    let params = [
+        ("did", did.as_str()),
+        ("collection", "app.bsky.feed.post"),
+        ("rkey", "nonexistent12345"),
+    ];
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getRecord",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "RecordNotFound");
+}
+
+#[tokio::test]
+async fn test_get_blocks_success() {
+    let client = client();
+    let (_, did) = create_account_and_login(&client).await;
+
+    let params = [("did", did.as_str())];
+    let latest_res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getLatestCommit",
+            base_url().await
+        ))
+        .query(&params)
+        .send()
+        .await
+        .expect("Failed to get latest commit");
+
+    let latest_body: Value = latest_res.json().await.expect("Invalid JSON");
+    let root_cid = latest_body["cid"].as_str().expect("No CID");
+
+    let url = format!(
+        "{}/xrpc/com.atproto.sync.getBlocks?did={}&cids={}",
+        base_url().await,
+        did,
+        root_cid
+    );
+    let res = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok()),
+        Some("application/vnd.ipld.car")
+    );
+}
+
+#[tokio::test]
+async fn test_get_blocks_not_found() {
+    let client = client();
+    let url = format!(
+        "{}/xrpc/com.atproto.sync.getBlocks?did=did:plc:nonexistent12345&cids=bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+        base_url().await
+    );
+    let res = client
+        .get(&url)
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }

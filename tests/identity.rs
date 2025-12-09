@@ -106,7 +106,7 @@ async fn test_create_did_web_account_and_resolve() {
 
     let handle = format!("webuser_{}", uuid::Uuid::new_v4());
 
-    let pds_endpoint = "https://localhost";
+    let pds_endpoint = base_url().await.replace("http://", "https://");
 
     let did_doc = json!({
         "@context": ["https://www.w3.org/ns/did/v1"],
@@ -211,9 +211,32 @@ async fn test_create_account_duplicate_handle() {
 #[tokio::test]
 async fn test_did_web_lifecycle() {
     let client = client();
+
+    let mock_server = MockServer::start().await;
+    let mock_uri = mock_server.uri();
+    let mock_addr = mock_uri.trim_start_matches("http://");
+
     let handle = format!("lifecycle_{}", uuid::Uuid::new_v4());
-    let did = format!("did:web:localhost:u:{}", handle);
+    let did = format!("did:web:{}:u:{}", mock_addr.replace(":", "%3A"), handle);
     let email = format!("{}@test.com", handle);
+
+    let pds_endpoint = base_url().await.replace("http://", "https://");
+
+    let did_doc = json!({
+        "@context": ["https://www.w3.org/ns/did/v1"],
+        "id": did,
+        "service": [{
+            "id": "#atproto_pds",
+            "type": "AtprotoPersonalDataServer",
+            "serviceEndpoint": pds_endpoint
+        }]
+    });
+
+    Mock::given(method("GET"))
+        .and(path(format!("/u/{}/did.json", handle)))
+        .respond_with(ResponseTemplate::new(200).set_body_json(did_doc))
+        .mount(&mock_server)
+        .await;
 
     let create_payload = json!({
         "handle": handle,

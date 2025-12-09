@@ -98,3 +98,69 @@ async fn test_proxy_auth_signing() {
     assert_eq!(claims["aud"], upstream_url);
     assert_eq!(claims["lxm"], "com.example.signed");
 }
+
+#[tokio::test]
+async fn test_proxy_post_with_body() {
+    let app_url = common::base_url().await;
+    let (upstream_url, mut rx) = spawn_mock_upstream().await;
+    let client = Client::new();
+
+    let payload = serde_json::json!({
+        "text": "Hello from proxy test",
+        "createdAt": "2024-01-01T00:00:00Z"
+    });
+
+    let res = client
+        .post(format!("{}/xrpc/com.example.postMethod", app_url))
+        .header("atproto-proxy", &upstream_url)
+        .header("Authorization", "Bearer test-token")
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let (method, uri, auth) = rx.recv().await.expect("Upstream should receive request");
+    assert_eq!(method, "POST");
+    assert_eq!(uri, "/xrpc/com.example.postMethod");
+    assert_eq!(auth, Some("Bearer test-token".to_string()));
+}
+
+#[tokio::test]
+async fn test_proxy_with_query_params() {
+    let app_url = common::base_url().await;
+    let (upstream_url, mut rx) = spawn_mock_upstream().await;
+    let client = Client::new();
+
+    let res = client
+        .get(format!(
+            "{}/xrpc/com.example.query?repo=did:plc:test&collection=app.bsky.feed.post&limit=50",
+            app_url
+        ))
+        .header("atproto-proxy", &upstream_url)
+        .header("Authorization", "Bearer test-token")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let (method, uri, _auth) = rx.recv().await.expect("Upstream should receive request");
+    assert_eq!(method, "GET");
+    assert!(
+        uri.contains("repo=did") || uri.contains("repo=did%3Aplc%3Atest"),
+        "URI should contain repo param, got: {}",
+        uri
+    );
+    assert!(
+        uri.contains("collection=app.bsky.feed.post") || uri.contains("collection=app.bsky"),
+        "URI should contain collection param, got: {}",
+        uri
+    );
+    assert!(
+        uri.contains("limit=50"),
+        "URI should contain limit param, got: {}",
+        uri
+    );
+}

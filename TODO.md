@@ -68,10 +68,10 @@ Lewis' corrected big boy todofile
         - [ ] Broadcast real-time commit events.
         - [ ] Handle cursor replay (backfill).
 - [ ] Bulk Export
-    - [ ] Implement `com.atproto.sync.getRepo` (Return full CAR file of repo).
-    - [ ] Implement `com.atproto.sync.getBlocks` (Return specific blocks via CIDs).
+    - [x] Implement `com.atproto.sync.getRepo` (Return full CAR file of repo).
+    - [x] Implement `com.atproto.sync.getBlocks` (Return specific blocks via CIDs).
     - [x] Implement `com.atproto.sync.getLatestCommit`.
-    - [ ] Implement `com.atproto.sync.getRecord` (Sync version, distinct from repo.getRecord).
+    - [x] Implement `com.atproto.sync.getRecord` (Sync version, distinct from repo.getRecord).
     - [x] Implement `com.atproto.sync.getRepoStatus`.
     - [x] Implement `com.atproto.sync.listRepos`.
     - [x] Implement `com.atproto.sync.notifyOfUpdate`.
