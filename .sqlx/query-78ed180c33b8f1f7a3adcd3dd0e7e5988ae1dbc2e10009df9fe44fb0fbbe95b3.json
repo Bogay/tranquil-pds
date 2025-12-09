@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET invites_disabled = FALSE WHERE did = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "78ed180c33b8f1f7a3adcd3dd0e7e5988ae1dbc2e10009df9fe44fb0fbbe95b3"
+}

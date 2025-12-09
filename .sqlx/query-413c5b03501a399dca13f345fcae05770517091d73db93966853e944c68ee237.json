@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE invite_codes SET disabled = TRUE WHERE created_by_user = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "413c5b03501a399dca13f345fcae05770517091d73db93966853e944c68ee237"
+}

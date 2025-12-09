@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE records SET takedown_ref = $1 WHERE record_cid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "411a7cff2d43612379903d6343da0761ae5b8b30a2fa1c89afb85047d4fbe3eb"
+}

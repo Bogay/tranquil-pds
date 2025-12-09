@@ -7,6 +7,7 @@ use helpers::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use std::time::Duration;
+use chrono::Utc;
 
 #[tokio::test]
 async fn test_social_flow_lifecycle() {
@@ -413,4 +414,103 @@ async fn test_mutual_follow_lifecycle() {
     let bob_tl: Value = bob_timeline_res.json().await.unwrap();
     let bob_feed = bob_tl["feed"].as_array().unwrap();
     assert_eq!(bob_feed.len(), 1, "Bob should see Alice's 1 post");
+}
+
+#[tokio::test]
+async fn test_account_to_post_full_lifecycle() {
+    let client = client();
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("fullcycle-{}.test", ts);
+    let email = format!("fullcycle-{}@test.com", ts);
+    let password = "fullcycle-password";
+
+    let create_account_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .expect("Failed to create account");
+
+    assert_eq!(create_account_res.status(), StatusCode::OK);
+    let account_body: Value = create_account_res.json().await.unwrap();
+    let did = account_body["did"].as_str().unwrap().to_string();
+    let access_jwt = account_body["accessJwt"].as_str().unwrap().to_string();
+
+    let get_session_res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getSession",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .expect("Failed to get session");
+
+    assert_eq!(get_session_res.status(), StatusCode::OK);
+    let session_body: Value = get_session_res.json().await.unwrap();
+    assert_eq!(session_body["did"], did);
+    assert_eq!(session_body["handle"], handle);
+
+    let profile_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&json!({
+            "repo": did,
+            "collection": "app.bsky.actor.profile",
+            "rkey": "self",
+            "record": {
+                "$type": "app.bsky.actor.profile",
+                "displayName": "Full Cycle User"
+            }
+        }))
+        .send()
+        .await
+        .expect("Failed to create profile");
+
+    assert_eq!(profile_res.status(), StatusCode::OK);
+
+    let (post_uri, post_cid) = create_post(&client, &did, &access_jwt, "My first post!").await;
+
+    let get_post_res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.getRecord",
+            base_url().await
+        ))
+        .query(&[
+            ("repo", did.as_str()),
+            ("collection", "app.bsky.feed.post"),
+            ("rkey", post_uri.split('/').last().unwrap()),
+        ])
+        .send()
+        .await
+        .expect("Failed to get post");
+
+    assert_eq!(get_post_res.status(), StatusCode::OK);
+
+    create_like(&client, &did, &access_jwt, &post_uri, &post_cid).await;
+
+    let describe_res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.describeRepo",
+            base_url().await
+        ))
+        .query(&[("repo", did.as_str())])
+        .send()
+        .await
+        .expect("Failed to describe repo");
+
+    assert_eq!(describe_res.status(), StatusCode::OK);
+    let describe_body: Value = describe_res.json().await.unwrap();
+    assert_eq!(describe_body["did"], did);
+    assert_eq!(describe_body["handle"], handle);
 }

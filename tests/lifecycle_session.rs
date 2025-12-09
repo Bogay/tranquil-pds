@@ -304,3 +304,142 @@ async fn test_app_password_lifecycle() {
     let passwords_after = list_after["passwords"].as_array().unwrap();
     assert_eq!(passwords_after.len(), 0, "No app passwords should remain");
 }
+
+#[tokio::test]
+async fn test_account_deactivation_lifecycle() {
+    let client = client();
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("deactivate-{}.test", ts);
+    let email = format!("deactivate-{}@test.com", ts);
+    let password = "deactivate-password";
+
+    let create_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url().await
+        ))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .expect("Failed to create account");
+
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let did = account["did"].as_str().unwrap().to_string();
+    let jwt = account["accessJwt"].as_str().unwrap().to_string();
+
+    let (post_uri, _) = create_post(&client, &did, &jwt, "Post before deactivation").await;
+    let post_rkey = post_uri.split('/').last().unwrap();
+
+    let status_before = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.checkAccountStatus",
+            base_url().await
+        ))
+        .bearer_auth(&jwt)
+        .send()
+        .await
+        .expect("Failed to check status");
+
+    assert_eq!(status_before.status(), StatusCode::OK);
+    let status_body: Value = status_before.json().await.unwrap();
+    assert_eq!(status_body["activated"], true);
+
+    let deactivate_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base_url().await
+        ))
+        .bearer_auth(&jwt)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("Failed to deactivate");
+
+    assert_eq!(deactivate_res.status(), StatusCode::OK);
+
+    let get_post_res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.getRecord",
+            base_url().await
+        ))
+        .query(&[
+            ("repo", did.as_str()),
+            ("collection", "app.bsky.feed.post"),
+            ("rkey", post_rkey),
+        ])
+        .send()
+        .await
+        .expect("Failed to get post while deactivated");
+
+    assert_eq!(get_post_res.status(), StatusCode::OK, "Records should still be readable");
+
+    let activate_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.activateAccount",
+            base_url().await
+        ))
+        .bearer_auth(&jwt)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("Failed to reactivate");
+
+    assert_eq!(activate_res.status(), StatusCode::OK);
+
+    let status_after_activate = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.checkAccountStatus",
+            base_url().await
+        ))
+        .bearer_auth(&jwt)
+        .send()
+        .await
+        .expect("Failed to check status after activate");
+
+    assert_eq!(status_after_activate.status(), StatusCode::OK);
+
+    let (new_post_uri, _) = create_post(&client, &did, &jwt, "Post after reactivation").await;
+    assert!(!new_post_uri.is_empty(), "Should be able to post after reactivation");
+}
+
+#[tokio::test]
+async fn test_service_auth_lifecycle() {
+    let client = client();
+    let (did, jwt) = setup_new_user("service-auth-test").await;
+
+    let service_auth_res = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getServiceAuth",
+            base_url().await
+        ))
+        .query(&[
+            ("aud", "did:web:api.bsky.app"),
+            ("lxm", "com.atproto.repo.uploadBlob"),
+        ])
+        .bearer_auth(&jwt)
+        .send()
+        .await
+        .expect("Failed to get service auth");
+
+    assert_eq!(service_auth_res.status(), StatusCode::OK);
+    let auth_body: Value = service_auth_res.json().await.unwrap();
+    let service_token = auth_body["token"].as_str().expect("No token in response");
+
+    let parts: Vec<&str> = service_token.split('.').collect();
+    assert_eq!(parts.len(), 3, "Service token should be a valid JWT");
+
+    use base64::Engine;
+    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .expect("Failed to decode JWT payload");
+    let claims: Value = serde_json::from_slice(&payload_bytes).expect("Invalid JWT payload");
+
+    assert_eq!(claims["iss"], did);
+    assert_eq!(claims["aud"], "did:web:api.bsky.app");
+    assert_eq!(claims["lxm"], "com.atproto.repo.uploadBlob");
+}
