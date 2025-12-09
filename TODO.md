@@ -36,7 +36,7 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.server.listAppPasswords`.
     - [x] Implement `com.atproto.server.requestAccountDelete`.
     - [ ] Implement `com.atproto.server.requestEmailConfirmation` / `requestEmailUpdate`.
-    - [ ] Implement `com.atproto.server.requestPasswordReset` / `resetPassword`.
+    - [x] Implement `com.atproto.server.requestPasswordReset` / `resetPassword`.
     - [ ] Implement `com.atproto.server.reserveSigningKey`.
     - [x] Implement `com.atproto.server.revokeAppPassword`.
     - [ ] Implement `com.atproto.server.updateEmail`.
@@ -97,7 +97,7 @@ Lewis' corrected big boy todofile
 - [x] Implement `com.atproto.admin.getAccountInfo` / `getAccountInfos`.
 - [x] Implement `com.atproto.admin.getInviteCodes`.
 - [x] Implement `com.atproto.admin.getSubjectStatus`.
-- [ ] Implement `com.atproto.admin.sendEmail`.
+- [x] Implement `com.atproto.admin.sendEmail`.
 - [x] Implement `com.atproto.admin.updateAccountEmail`.
 - [x] Implement `com.atproto.admin.updateAccountHandle`.
 - [x] Implement `com.atproto.admin.updateAccountPassword`.

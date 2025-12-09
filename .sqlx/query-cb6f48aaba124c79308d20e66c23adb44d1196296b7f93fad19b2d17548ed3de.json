@@ -42,7 +42,8 @@
                 "email_verification",
                 "password_reset",
                 "email_update",
-                "account_deletion"
+                "account_deletion",
+                "admin_email"
               ]
             }
           }

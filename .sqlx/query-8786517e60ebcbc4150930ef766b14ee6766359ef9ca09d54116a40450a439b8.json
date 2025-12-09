@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, password_reset_code, password_reset_code_expires_at FROM users WHERE password_reset_code = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "password_reset_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "password_reset_code_expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "8786517e60ebcbc4150930ef766b14ee6766359ef9ca09d54116a40450a439b8"
+}

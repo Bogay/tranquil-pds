@@ -156,6 +156,14 @@ pub fn app(state: AppState) -> Router {
             post(api::server::request_account_delete),
         )
         .route(
+            "/xrpc/com.atproto.server.requestPasswordReset",
+            post(api::server::request_password_reset),
+        )
+        .route(
+            "/xrpc/com.atproto.server.resetPassword",
+            post(api::server::reset_password),
+        )
+        .route(
             "/xrpc/com.atproto.identity.updateHandle",
             post(api::identity::update_handle),
         )
@@ -222,6 +230,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.admin.updateSubjectStatus",
             post(api::admin::update_subject_status),
+        )
+        .route(
+            "/xrpc/com.atproto.admin.sendEmail",
+            post(api::admin::send_email),
         )
         // I know I know, I'm not supposed to implement appview endpoints. Leave me be
         .route(

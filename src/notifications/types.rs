@@ -29,6 +29,7 @@ pub enum NotificationType {
     PasswordReset,
     EmailUpdate,
     AccountDeletion,
+    AdminEmail,
 }
 
 #[derive(Debug, Clone, FromRow)]
