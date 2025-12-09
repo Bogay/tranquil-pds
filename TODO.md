@@ -34,7 +34,7 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.server.getAccountInviteCodes`.
     - [x] Implement `com.atproto.server.getServiceAuth` (Cross-service auth).
     - [x] Implement `com.atproto.server.listAppPasswords`.
-    - [ ] Implement `com.atproto.server.requestAccountDelete`.
+    - [x] Implement `com.atproto.server.requestAccountDelete`.
     - [ ] Implement `com.atproto.server.requestEmailConfirmation` / `requestEmailUpdate`.
     - [ ] Implement `com.atproto.server.requestPasswordReset` / `resetPassword`.
     - [ ] Implement `com.atproto.server.reserveSigningKey`.

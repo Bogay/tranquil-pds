@@ -202,6 +202,14 @@ async fn spawn_app(database_url: String) -> String {
 }
 
 #[allow(dead_code)]
+pub async fn get_db_connection_string() -> String {
+    base_url().await;
+    let container = DB_CONTAINER.get().expect("DB container not initialized");
+    let port = container.get_host_port_ipv4(5432).await.expect("Failed to get port");
+    format!("postgres://postgres:postgres@127.0.0.1:{}/postgres", port)
+}
+
+#[allow(dead_code)]
 pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'static str) -> Value {
     let res = client
         .post(format!(

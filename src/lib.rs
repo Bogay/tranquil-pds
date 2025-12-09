@@ -151,6 +151,10 @@ pub fn app(state: AppState) -> Router {
             post(api::server::deactivate_account),
         )
         .route(
+            "/xrpc/com.atproto.server.requestAccountDelete",
+            post(api::server::request_account_delete),
+        )
+        .route(
             "/xrpc/com.atproto.identity.updateHandle",
             post(api::identity::update_handle),
         )

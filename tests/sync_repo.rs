@@ -6,7 +6,6 @@ use helpers::*;
 use reqwest::StatusCode;
 use reqwest::header;
 use serde_json::{Value, json};
-use chrono::Utc;
 
 #[tokio::test]
 async fn test_get_latest_commit_success() {

@@ -96,6 +96,7 @@ pub async fn create_post(
     (uri, cid)
 }
 
+#[allow(dead_code)]
 pub async fn create_follow(
     client: &reqwest::Client,
     follower_did: &str,
@@ -142,6 +143,7 @@ pub async fn create_follow(
     (uri, cid)
 }
 
+#[allow(dead_code)]
 pub async fn create_like(
     client: &reqwest::Client,
     liker_did: &str,
@@ -186,6 +188,7 @@ pub async fn create_like(
     )
 }
 
+#[allow(dead_code)]
 pub async fn create_repost(
     client: &reqwest::Client,
     reposter_did: &str,

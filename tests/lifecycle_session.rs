@@ -443,3 +443,34 @@ async fn test_service_auth_lifecycle() {
     assert_eq!(claims["aud"], "did:web:api.bsky.app");
     assert_eq!(claims["lxm"], "com.atproto.repo.uploadBlob");
 }
+
+#[tokio::test]
+async fn test_request_account_delete() {
+    let client = client();
+    let (did, jwt) = setup_new_user("request-delete-test").await;
+
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestAccountDelete",
+            base_url().await
+        ))
+        .bearer_auth(&jwt)
+        .send()
+        .await
+        .expect("Failed to request account deletion");
+
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let db_url = get_db_connection_string().await;
+    let pool = sqlx::PgPool::connect(&db_url).await.expect("Failed to connect to test DB");
+
+    let row = sqlx::query!("SELECT token, expires_at FROM account_deletion_requests WHERE did = $1", did)
+        .fetch_optional(&pool)
+        .await
+        .expect("Failed to query DB");
+
+    assert!(row.is_some(), "Deletion token should exist in DB");
+    let row = row.unwrap();
+    assert!(!row.token.is_empty(), "Token should not be empty");
+    assert!(row.expires_at > Utc::now(), "Token should not be expired");
+}

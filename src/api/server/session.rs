@@ -6,6 +6,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::verify;
+use chrono::{Duration, Utc};
+use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -338,6 +340,92 @@ pub async fn delete_session(
         Json(json!({"error": "AuthenticationFailed"})),
     )
         .into_response()
+}
+
+pub async fn request_account_delete(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let auth_header = headers.get("Authorization");
+    if auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired"})),
+        )
+            .into_response();
+    }
+
+    let token = auth_header
+        .unwrap()
+        .to_str()
+        .unwrap_or("")
+        .replace("Bearer ", "");
+
+    let session = sqlx::query!(
+        r#"
+        SELECT s.did, k.key_bytes
+        FROM sessions s
+        JOIN users u ON s.did = u.did
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE s.access_jwt = $1
+        "#,
+        token
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (did, key_bytes) = match session {
+        Ok(Some(row)) => (row.did, row.key_bytes),
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in request_account_delete: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
+        )
+            .into_response();
+    }
+
+    let confirmation_token = Uuid::new_v4().to_string();
+    let expires_at = Utc::now() + Duration::minutes(15);
+
+    let insert = sqlx::query!(
+        "INSERT INTO account_deletion_requests (token, did, expires_at) VALUES ($1, $2, $3)",
+        confirmation_token,
+        did,
+        expires_at
+    )
+    .execute(&state.db)
+    .await;
+
+    if let Err(e) = insert {
+        error!("DB error creating deletion token: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+
+    // TODO: Send email or other notification
+    info!("Account deletion requested for user {}, token: {}", did, confirmation_token);
+
+    (StatusCode::OK, Json(json!({}))).into_response()
 }
 
 pub async fn refresh_session(
