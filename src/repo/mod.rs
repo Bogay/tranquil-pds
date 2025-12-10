@@ -7,6 +7,8 @@ use multihash::Multihash;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
+pub mod tracking;
+
 #[derive(Clone)]
 pub struct PostgresBlockStore {
     pool: PgPool,

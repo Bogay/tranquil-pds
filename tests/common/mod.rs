@@ -19,6 +19,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
+static APP_PORT: OnceLock<u16> = OnceLock::new();
 static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
 static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
@@ -51,6 +52,11 @@ fn cleanup() {
 #[allow(dead_code)]
 pub fn client() -> Client {
     Client::new()
+}
+
+#[allow(dead_code)]
+pub fn app_port() -> u16 {
+    *APP_PORT.get().expect("APP_PORT not initialized")
 }
 
 pub async fn base_url() -> &'static str {
@@ -153,7 +159,7 @@ pub async fn base_url() -> &'static str {
                     .await
                     .expect("Failed to start Postgres");
                 let connection_string = format!(
-                    "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+                    "postgres://postgres:postgres@127.0.0.1:{}",
                     container
                         .get_host_port_ipv4(5432)
                         .await
@@ -186,12 +192,16 @@ async fn spawn_app(database_url: String) -> String {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    APP_PORT.set(addr.port()).ok();
 
     unsafe {
         std::env::set_var("PDS_HOSTNAME", addr.to_string());
     }
 
     let state = AppState::new(pool).await;
+
+    bspds::sync::listener::start_sequencer_listener(state.clone()).await;
+
     let app = bspds::app(state);
 
     tokio::spawn(async move {

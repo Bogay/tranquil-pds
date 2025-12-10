@@ -1,16 +1,15 @@
+use crate::api::repo::record::utils::{commit_and_log, RecordOp};
+use crate::api::repo::record::write::prepare_repo_write;
+use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use axum::{
-    Json,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
+    Json,
 };
 use cid::Cid;
-use jacquard::types::{
-    did::Did,
-    integer::LimitedU32,
-    string::{Nsid, Tid},
-};
+use jacquard::types::string::Nsid;
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
 use serde::Deserialize;
 use serde_json::json;
@@ -31,122 +30,58 @@ pub struct DeleteRecordInput {
 
 pub async fn delete_record(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     Json(input): Json<DeleteRecordInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
+    let (did, user_id, current_root_cid) =
+        match prepare_repo_write(&state, &headers, &input.repo).await {
+            Ok(res) => res,
+            Err(err_res) => return err_res,
+        };
 
-    let session = sqlx::query!(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
-            token
-        )
-        .fetch_optional(&state.db)
-        .await
-        .unwrap_or(None);
-
-    let (did, key_bytes) = match session {
-        Some(row) => (
-            row.did,
-            row.key_bytes,
-        ),
-        None => {
+    if let Some(swap_commit) = &input.swap_commit {
+        if Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
             return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                StatusCode::CONFLICT,
+                Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
             )
                 .into_response();
         }
-    };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
     }
 
-    if input.repo != did {
-        return (StatusCode::FORBIDDEN, Json(json!({"error": "InvalidRepo", "message": "Repo does not match authenticated user"}))).into_response();
-    }
+    let tracking_store = TrackingBlockStore::new(state.block_store.clone());
 
-    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await;
-
-    let user_id: uuid::Uuid = match user_query {
-        Ok(Some(row)) => row.id,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "User not found"})),
-            )
-                .into_response();
-        }
-    };
-
-    let repo_root_query = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
-        .fetch_optional(&state.db)
-        .await;
-
-    let current_root_cid = match repo_root_query {
-        Ok(Some(row)) => {
-            let cid_str: String = row.repo_root_cid;
-            Cid::from_str(&cid_str).ok()
-        }
-        _ => None,
-    };
-
-    if current_root_cid.is_none() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Repo root not found"})),
-        )
-            .into_response();
-    }
-    let current_root_cid = current_root_cid.unwrap();
-
-    let commit_bytes = match state.block_store.get(&current_root_cid).await {
+    let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
-        Ok(None) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Commit block not found"}))).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": format!("Failed to load commit block: {:?}", e)}))).into_response(),
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Commit block not found"}))).into_response(),
     };
-
     let commit = match Commit::from_cbor(&commit_bytes) {
         Ok(c) => c,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": format!("Failed to parse commit: {:?}", e)}))).into_response(),
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to parse commit"}))).into_response(),
     };
 
-    let mst_root = commit.data;
-    let store = Arc::new(state.block_store.clone());
-    let mst = Mst::load(store.clone(), mst_root, None);
-
+    let mst = Mst::load(
+        Arc::new(tracking_store.clone()),
+        commit.data,
+        None,
+    );
     let collection_nsid = match input.collection.parse::<Nsid>() {
         Ok(n) => n,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidCollection"})),
-            )
-                .into_response();
-        }
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidCollection"}))).into_response(),
     };
-
     let key = format!("{}/{}", collection_nsid, input.rkey);
 
-    // TODO: Check swapRecord if provided? Skipping for brevity/robustness
+    if let Some(swap_record_str) = &input.swap_record {
+        let expected_cid = Cid::from_str(swap_record_str).ok();
+        let actual_cid = mst.get(&key).await.ok().flatten();
+        if expected_cid != actual_cid {
+            return (StatusCode::CONFLICT, Json(json!({"error": "InvalidSwap", "message": "Record has been modified or does not exist"}))).into_response();
+        }
+    }
+
+    if mst.get(&key).await.ok().flatten().is_none() {
+        return (StatusCode::OK, Json(json!({}))).into_response();
+    }
 
     let new_mst = match mst.delete(&key).await {
         Ok(m) => m,
@@ -160,73 +95,17 @@ pub async fn delete_record(
         Ok(c) => c,
         Err(e) => {
             error!("Failed to persist MST: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to persist MST"})),
-            )
-                .into_response();
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to persist MST"}))).into_response();
         }
     };
 
-    let did_obj = match Did::new(&did) {
-        Ok(d) => d,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid DID"})),
-            )
-                .into_response();
-        }
+    let op = RecordOp::Delete { collection: input.collection, rkey: input.rkey };
+    let written_cids = tracking_store.get_written_cids();
+    let written_cids_str = written_cids.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+
+    if let Err(e) = commit_and_log(&state, &did, user_id, Some(current_root_cid), new_mst_root, vec![op], &written_cids_str).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": e}))).into_response();
     };
-
-    let rev = Tid::now(LimitedU32::MIN);
-
-    let new_commit = Commit::new_unsigned(did_obj, new_mst_root, rev, Some(current_root_cid));
-
-    let new_commit_bytes =
-        match new_commit.to_cbor() {
-            Ok(b) => b,
-            Err(_e) => return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": "InternalError", "message": "Failed to serialize new commit"}),
-                ),
-            )
-                .into_response(),
-        };
-
-    let new_root_cid = match state.block_store.put(&new_commit_bytes).await {
-        Ok(c) => c,
-        Err(_e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to save new commit"})),
-            )
-                .into_response();
-        }
-    };
-
-    let update_repo = sqlx::query!("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2", new_root_cid.to_string(), user_id)
-        .execute(&state.db)
-        .await;
-
-    if let Err(e) = update_repo {
-        error!("Failed to update repo root in DB: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to update repo root in DB"})),
-        )
-            .into_response();
-    }
-
-    let record_delete =
-        sqlx::query!("DELETE FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3", user_id, input.collection, input.rkey)
-            .execute(&state.db)
-            .await;
-
-    if let Err(e) = record_delete {
-        error!("Error deleting record index: {:?}", e);
-    }
 
     (StatusCode::OK, Json(json!({}))).into_response()
 }

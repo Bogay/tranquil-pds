@@ -132,6 +132,10 @@ pub fn app(state: AppState) -> Router {
             get(sync::get_record),
         )
         .route(
+            "/xrpc/com.atproto.sync.subscribeRepos",
+            get(sync::subscribe_repos),
+        )
+        .route(
             "/xrpc/com.atproto.moderation.createReport",
             post(api::moderation::create_report),
         )

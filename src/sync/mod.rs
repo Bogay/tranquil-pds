@@ -2,9 +2,16 @@ pub mod blob;
 pub mod car;
 pub mod commit;
 pub mod crawl;
+pub mod firehose;
+pub mod frame;
+pub mod listener;
+pub mod relay_client;
 pub mod repo;
+pub mod subscribe_repos;
+pub mod util;
 
 pub use blob::{get_blob, list_blobs};
 pub use commit::{get_latest_commit, get_repo_status, list_repos};
 pub use crawl::{notify_of_update, request_crawl};
-pub use repo::{get_blocks, get_record, get_repo};
+pub use repo::{get_blocks, get_repo, get_record};
+pub use subscribe_repos::subscribe_repos;

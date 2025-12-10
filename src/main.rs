@@ -24,6 +24,15 @@ async fn main() {
 
     let state = AppState::new(pool.clone()).await;
 
+    bspds::sync::listener::start_sequencer_listener(state.clone()).await;
+    let relays = std::env::var("RELAYS")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    bspds::sync::relay_client::start_relay_clients(state.clone(), relays, None).await;
+
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let mut notification_service = NotificationService::new(pool);

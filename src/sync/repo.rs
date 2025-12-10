@@ -1,342 +1,212 @@
 use crate::state::AppState;
-use crate::sync::car::{encode_car_header, ld_write};
+use crate::sync::car::encode_car_header;
 use axum::{
-    Json,
-    body::Body,
     extract::{Query, State},
     http::StatusCode,
-    http::header,
     response::{IntoResponse, Response},
+    Json,
 };
-use bytes::Bytes;
 use cid::Cid;
-use jacquard_repo::{commit::Commit, storage::BlockStore};
+use jacquard_repo::storage::BlockStore;
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashSet;
+use std::io::Write;
+use std::str::FromStr;
 use tracing::error;
 
 #[derive(Deserialize)]
-pub struct GetBlocksParams {
+pub struct GetBlocksQuery {
     pub did: String,
     pub cids: String,
 }
 
 pub async fn get_blocks(
     State(state): State<AppState>,
-    Query(params): Query<GetBlocksParams>,
+    Query(query): Query<GetBlocksQuery>,
 ) -> Response {
-    let did = params.did.trim();
-
-    if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
-    }
-
-    let cid_strings: Vec<&str> = params.cids.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-
-    if cid_strings.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "cids is required"})),
-        )
-            .into_response();
-    }
-
-    let repo_result = sqlx::query!(
-        r#"
-        SELECT r.repo_root_cid
-        FROM repos r
-        JOIN users u ON r.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let repo_root_cid_str = match repo_result {
-        Ok(Some(row)) => row.repo_root_cid,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Could not find repo for DID"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in get_blocks: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
-
-    let root_cid = match repo_root_cid_str.parse::<Cid>() {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Failed to parse root CID: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
-
-    let mut requested_cids: Vec<Cid> = Vec::new();
-    for cid_str in &cid_strings {
-        match cid_str.parse::<Cid>() {
-            Ok(c) => requested_cids.push(c),
-            Err(e) => {
-                error!("Failed to parse CID '{}': {:?}", cid_str, e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": format!("Invalid CID: {}", cid_str)})),
-                )
-                    .into_response();
-            }
-        }
-    }
-
-    let mut buf = Vec::new();
-    let car_header = encode_car_header(&root_cid);
-    if let Err(e) = ld_write(&mut buf, &car_header) {
-        error!("Failed to write CAR header: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
-    }
-
-    for cid in &requested_cids {
-        let cid_bytes = cid.to_bytes();
-        let block_result = sqlx::query!(
-            "SELECT data FROM blocks WHERE cid = $1",
-            &cid_bytes
-        )
+    let user_exists = sqlx::query!("SELECT id FROM users WHERE did = $1", query.did)
         .fetch_optional(&state.db)
-        .await;
+        .await
+        .unwrap_or(None);
 
-        match block_result {
-            Ok(Some(row)) => {
-                let mut block_data = Vec::new();
-                block_data.extend_from_slice(&cid_bytes);
-                block_data.extend_from_slice(&row.data);
-                if let Err(e) = ld_write(&mut buf, &block_data) {
-                    error!("Failed to write block: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
-                }
-            }
-            Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "BlockNotFound", "message": format!("Block not found: {}", cid)})),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                error!("DB error fetching block: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
+    if user_exists.is_none() {
+        return (StatusCode::NOT_FOUND, "Repo not found").into_response();
+    }
+
+    let cids_str: Vec<&str> = query.cids.split(',').collect();
+    let mut cids = Vec::new();
+    for s in cids_str {
+        match Cid::from_str(s) {
+            Ok(cid) => cids.push(cid),
+            Err(_) => return (StatusCode::BAD_REQUEST, "Invalid CID").into_response(),
         }
     }
 
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/vnd.ipld.car")
-        .body(Body::from(buf))
-        .unwrap()
+    let blocks_res = state.block_store.get_many(&cids).await;
+    let blocks = match blocks_res {
+        Ok(blocks) => blocks,
+        Err(e) => {
+            error!("Failed to get blocks: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get blocks").into_response();
+        }
+    };
+
+    let root_cid = cids.first().cloned().unwrap_or_default();
+
+    if cids.is_empty() {
+         return (StatusCode::BAD_REQUEST, "No CIDs provided").into_response();
+    }
+
+    let header = encode_car_header(&root_cid);
+
+    let mut car_bytes = header;
+
+    for (i, block_opt) in blocks.into_iter().enumerate() {
+        if let Some(block) = block_opt {
+            let cid = cids[i];
+            let cid_bytes = cid.to_bytes();
+            let total_len = cid_bytes.len() + block.len();
+
+            let mut writer = Vec::new();
+            crate::sync::car::write_varint(&mut writer, total_len as u64).unwrap();
+            writer.write_all(&cid_bytes).unwrap();
+            writer.write_all(&block).unwrap();
+
+            car_bytes.extend_from_slice(&writer);
+        }
+    }
+
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+        car_bytes,
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
-pub struct GetRepoParams {
+pub struct GetRepoQuery {
     pub did: String,
     pub since: Option<String>,
 }
 
 pub async fn get_repo(
     State(state): State<AppState>,
-    Query(params): Query<GetRepoParams>,
+    Query(query): Query<GetRepoQuery>,
 ) -> Response {
-    let did = params.did.trim();
+    let repo_row = sqlx::query!(
+        r#"
+        SELECT r.repo_root_cid
+        FROM repos r
+        JOIN users u ON u.id = r.user_id
+        WHERE u.did = $1
+        "#,
+        query.did
+    )
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or(None);
 
-    if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
-    }
+    let head_str = match repo_row {
+        Some(r) => r.repo_root_cid,
+        None => {
+            let user_exists = sqlx::query!("SELECT id FROM users WHERE did = $1", query.did)
+                .fetch_optional(&state.db)
+                .await
+                .unwrap_or(None);
 
-    let user_result = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await;
-
-    let user_id = match user_result {
-        Ok(Some(row)) => row.id,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Could not find repo for DID"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in get_repo: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
-
-    let repo_result = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
-        .fetch_optional(&state.db)
-        .await;
-
-    let repo_root_cid_str = match repo_result {
-        Ok(Some(row)) => row.repo_root_cid,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Repository not initialized"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in get_repo: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            if user_exists.is_none() {
+                 return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
+                )
+                    .into_response();
+            } else {
+                 return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
+                )
+                    .into_response();
+            }
         }
     };
 
-    let root_cid = match repo_root_cid_str.parse::<Cid>() {
+    let head_cid = match Cid::from_str(&head_str) {
         Ok(c) => c,
-        Err(e) => {
-            error!("Failed to parse root CID: {:?}", e);
+        Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
+                Json(json!({"error": "InternalError", "message": "Invalid head CID"})),
             )
                 .into_response();
         }
     };
 
-    let commit_bytes = match state.block_store.get(&root_cid).await {
-        Ok(Some(b)) => b,
-        Ok(None) => {
-            error!("Commit block not found: {}", root_cid);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+    let mut car_bytes = encode_car_header(&head_cid);
+
+    let mut stack = vec![head_cid];
+    let mut visited = std::collections::HashSet::new();
+    let mut limit = 20000;
+
+    while let Some(cid) = stack.pop() {
+        if visited.contains(&cid) {
+            continue;
         }
-        Err(e) => {
-            error!("Failed to load commit block: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+        visited.insert(cid);
+        if limit == 0 { break; }
+        limit -= 1;
 
-    let commit = match Commit::from_cbor(&commit_bytes) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Failed to parse commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+        if let Ok(Some(block)) = state.block_store.get(&cid).await {
+            let cid_bytes = cid.to_bytes();
+            let total_len = cid_bytes.len() + block.len();
+            let mut writer = Vec::new();
+            crate::sync::car::write_varint(&mut writer, total_len as u64).unwrap();
+            writer.write_all(&cid_bytes).unwrap();
+            writer.write_all(&block).unwrap();
+            car_bytes.extend_from_slice(&writer);
 
-    let mut collected_blocks: Vec<(Cid, Bytes)> = Vec::new();
-    let mut visited: HashSet<Vec<u8>> = HashSet::new();
-
-    collected_blocks.push((root_cid, commit_bytes.clone()));
-    visited.insert(root_cid.to_bytes());
-
-    let mst_root_cid = commit.data;
-    if !visited.contains(&mst_root_cid.to_bytes()) {
-        visited.insert(mst_root_cid.to_bytes());
-        if let Ok(Some(data)) = state.block_store.get(&mst_root_cid).await {
-            collected_blocks.push((mst_root_cid, data));
-        }
-    }
-
-    let records = sqlx::query!("SELECT record_cid FROM records WHERE repo_id = $1", user_id)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
-
-    for record in records {
-        if let Ok(cid) = record.record_cid.parse::<Cid>() {
-            if !visited.contains(&cid.to_bytes()) {
-                visited.insert(cid.to_bytes());
-                if let Ok(Some(data)) = state.block_store.get(&cid).await {
-                    collected_blocks.push((cid, data));
-                }
+             if let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block) {
+                extract_links_json(&value, &mut stack);
             }
         }
     }
 
-    let mut buf = Vec::new();
-    let car_header = encode_car_header(&root_cid);
-    if let Err(e) = ld_write(&mut buf, &car_header) {
-        error!("Failed to write CAR header: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
-    }
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+        car_bytes,
+    )
+        .into_response()
+}
 
-    for (cid, data) in &collected_blocks {
-        let mut block_data = Vec::new();
-        block_data.extend_from_slice(&cid.to_bytes());
-        block_data.extend_from_slice(data);
-        if let Err(e) = ld_write(&mut buf, &block_data) {
-            error!("Failed to write block: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+fn extract_links_json(value: &serde_json::Value, stack: &mut Vec<Cid>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(s)) = map.get("/") {
+                if let Ok(cid) = Cid::from_str(s) {
+                    stack.push(cid);
+                }
+            } else if let Some(serde_json::Value::String(s)) = map.get("$link") {
+                 if let Ok(cid) = Cid::from_str(s) {
+                    stack.push(cid);
+                }
+            } else {
+                for v in map.values() {
+                    extract_links_json(v, stack);
+                }
+            }
         }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                extract_links_json(v, stack);
+            }
+        }
+        _ => {}
     }
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/vnd.ipld.car")
-        .body(Body::from(buf))
-        .unwrap()
 }
 
 #[derive(Deserialize)]
-pub struct GetRecordParams {
+pub struct GetRecordQuery {
     pub did: String,
     pub collection: String,
     pub rkey: String,
@@ -344,213 +214,71 @@ pub struct GetRecordParams {
 
 pub async fn get_record(
     State(state): State<AppState>,
-    Query(params): Query<GetRecordParams>,
+    Query(query): Query<GetRecordQuery>,
 ) -> Response {
-    let did = params.did.trim();
-    let collection = params.collection.trim();
-    let rkey = params.rkey.trim();
-
-    if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
-    }
-
-    if collection.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "collection is required"})),
-        )
-            .into_response();
-    }
-
-    if rkey.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "rkey is required"})),
-        )
-            .into_response();
-    }
-
-    let user_result = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
+    let user = sqlx::query!("SELECT id FROM users WHERE did = $1", query.did)
         .fetch_optional(&state.db)
-        .await;
+        .await
+        .unwrap_or(None);
 
-    let user_id = match user_result {
-        Ok(Some(row)) => row.id,
-        Ok(None) => {
-            return (
+    let user_id = match user {
+        Some(u) => u.id,
+        None => {
+             return (
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Could not find repo for DID"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in sync get_record: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
+                Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
             )
                 .into_response();
         }
     };
 
-    let record_result = sqlx::query!(
+    let record = sqlx::query!(
         "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
         user_id,
-        collection,
-        rkey
+        query.collection,
+        query.rkey
     )
     .fetch_optional(&state.db)
-    .await;
+    .await
+    .unwrap_or(None);
 
-    let record_cid_str = match record_result {
-        Ok(Some(row)) => row.record_cid,
-        Ok(None) => {
-            return (
+    let record_cid_str = match record {
+        Some(r) => r.record_cid,
+        None => {
+             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "RecordNotFound", "message": "Record not found"})),
             )
                 .into_response();
         }
-        Err(e) => {
-            error!("DB error in sync get_record: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
     };
 
-    let record_cid = match record_cid_str.parse::<Cid>() {
+    let cid = match Cid::from_str(&record_cid_str) {
         Ok(c) => c,
-        Err(e) => {
-            error!("Failed to parse record CID: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid CID").into_response(),
     };
 
-    let repo_result = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
-        .fetch_optional(&state.db)
-        .await;
-
-    let repo_root_cid_str = match repo_result {
-        Ok(Some(row)) => row.repo_root_cid,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Repository not initialized"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in sync get_record: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
-
-    let root_cid = match repo_root_cid_str.parse::<Cid>() {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Failed to parse root CID: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
-
-    let mut collected_blocks: Vec<(Cid, Bytes)> = Vec::new();
-
-    let commit_bytes = match state.block_store.get(&root_cid).await {
+    let block_res = state.block_store.get(&cid).await;
+    let block = match block_res {
         Ok(Some(b)) => b,
-        Ok(None) => {
-            error!("Commit block not found: {}", root_cid);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("Failed to load commit block: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+        _ => return (StatusCode::NOT_FOUND, "Block not found").into_response(),
     };
 
-    collected_blocks.push((root_cid, commit_bytes.clone()));
+    let header = encode_car_header(&cid);
+    let mut car_bytes = header;
 
-    let commit = match Commit::from_cbor(&commit_bytes) {
-        Ok(c) => c,
-        Err(e) => {
-            error!("Failed to parse commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+    let cid_bytes = cid.to_bytes();
+    let total_len = cid_bytes.len() + block.len();
+    let mut writer = Vec::new();
+    crate::sync::car::write_varint(&mut writer, total_len as u64).unwrap();
+    writer.write_all(&cid_bytes).unwrap();
+    writer.write_all(&block).unwrap();
+    car_bytes.extend_from_slice(&writer);
 
-    let mst_root_cid = commit.data;
-    if let Ok(Some(data)) = state.block_store.get(&mst_root_cid).await {
-        collected_blocks.push((mst_root_cid, data));
-    }
-
-    if let Ok(Some(data)) = state.block_store.get(&record_cid).await {
-        collected_blocks.push((record_cid, data));
-    } else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "RecordNotFound", "message": "Record block not found"})),
-        )
-            .into_response();
-    }
-
-    let mut buf = Vec::new();
-    let car_header = encode_car_header(&root_cid);
-    if let Err(e) = ld_write(&mut buf, &car_header) {
-        error!("Failed to write CAR header: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
-    }
-
-    for (cid, data) in &collected_blocks {
-        let mut block_data = Vec::new();
-        block_data.extend_from_slice(&cid.to_bytes());
-        block_data.extend_from_slice(data);
-        if let Err(e) = ld_write(&mut buf, &block_data) {
-            error!("Failed to write block: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    }
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/vnd.ipld.car")
-        .body(Body::from(buf))
-        .unwrap()
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
+        car_bytes,
+    )
+        .into_response()
 }
