@@ -6,16 +6,11 @@ services:
     image: bspds
     ports:
       - "3000:3000"
+    env_file:
+    - ./.env
     environment:
-      SERVER_HOST: 0.0.0.0
-      SERVER_PORT: 3000
       DATABASE_URL: postgres://postgres:postgres@db:5432/pds
       S3_ENDPOINT: http://objsto:9000
-      AWS_REGION: us-east-1
-      S3_BUCKET: pds-blobs
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      PDS_HOSTNAME: localhost:3000
     depends_on:
       - db
       - objsto
