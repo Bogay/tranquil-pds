@@ -5,6 +5,7 @@ Lewis' corrected big boy todofile
 ## Server Infrastructure & Proxying
 - [x] Health Check
     - [x] Implement `GET /health` endpoint (returns "OK").
+    - [x] Implement `GET /xrpc/_health` endpoint (returns "OK").
 - [x] Server Description
     - [x] Implement `com.atproto.server.describeServer` (returns available user domains).
 - [x] XRPC Proxying

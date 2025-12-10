@@ -15,6 +15,7 @@ use state::AppState;
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(api::server::health))
+        .route("/xrpc/_health", get(api::server::health))
         .route(
             "/xrpc/com.atproto.server.describeServer",
             get(api::server::describe_server),
