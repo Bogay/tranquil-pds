@@ -5,6 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use bcrypt::verify;
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -390,4 +391,212 @@ pub async fn request_account_delete(
     info!("Account deletion requested for user {}", did);
 
     (StatusCode::OK, Json(json!({}))).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct DeleteAccountInput {
+    pub did: String,
+    pub password: String,
+    pub token: String,
+}
+
+pub async fn delete_account(
+    State(state): State<AppState>,
+    Json(input): Json<DeleteAccountInput>,
+) -> Response {
+    let did = input.did.trim();
+    let password = &input.password;
+    let token = input.token.trim();
+
+    if did.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
+        )
+            .into_response();
+    }
+
+    if password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "password is required"})),
+        )
+            .into_response();
+    }
+
+    if token.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidToken", "message": "token is required"})),
+        )
+            .into_response();
+    }
+
+    let user = sqlx::query!(
+        "SELECT id, password_hash FROM users WHERE did = $1",
+        did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (user_id, password_hash) = match user {
+        Ok(Some(row)) => (row.id, row.password_hash),
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in delete_account: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let password_valid = if verify(password, &password_hash).unwrap_or(false) {
+        true
+    } else {
+        let app_pass_rows = sqlx::query!(
+            "SELECT password_hash FROM app_passwords WHERE user_id = $1",
+            user_id
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        app_pass_rows
+            .iter()
+            .any(|row| verify(password, &row.password_hash).unwrap_or(false))
+    };
+
+    if !password_valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationFailed", "message": "Invalid password"})),
+        )
+            .into_response();
+    }
+
+    let deletion_request = sqlx::query!(
+        "SELECT did, expires_at FROM account_deletion_requests WHERE token = $1",
+        token
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (token_did, expires_at) = match deletion_request {
+        Ok(Some(row)) => (row.did, row.expires_at),
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidToken", "message": "Invalid or expired token"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error fetching deletion token: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if token_did != did {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidToken", "message": "Token does not match account"})),
+        )
+            .into_response();
+    }
+
+    if Utc::now() > expires_at {
+        let _ = sqlx::query!("DELETE FROM account_deletion_requests WHERE token = $1", token)
+            .execute(&state.db)
+            .await;
+
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
+        )
+            .into_response();
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Failed to begin transaction: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let deletion_result: Result<(), sqlx::Error> = async {
+        sqlx::query!("DELETE FROM sessions WHERE did = $1", did)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("DELETE FROM records WHERE repo_id = $1", user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("DELETE FROM repos WHERE user_id = $1", user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("DELETE FROM blobs WHERE created_by_user = $1", user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("DELETE FROM user_keys WHERE user_id = $1", user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("DELETE FROM app_passwords WHERE user_id = $1", user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("DELETE FROM account_deletion_requests WHERE did = $1", did)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        Ok(())
+    }
+    .await;
+
+    match deletion_result {
+        Ok(()) => {
+            if let Err(e) = tx.commit().await {
+                error!("Failed to commit account deletion transaction: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            info!("Account {} deleted successfully", did);
+            (StatusCode::OK, Json(json!({}))).into_response()
+        }
+        Err(e) => {
+            error!("DB error deleting account, rolling back: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
 }

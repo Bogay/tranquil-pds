@@ -8,7 +8,8 @@ pub mod session;
 pub mod signing_key;
 
 pub use account_status::{
-    activate_account, check_account_status, deactivate_account, request_account_delete,
+    activate_account, check_account_status, deactivate_account, delete_account,
+    request_account_delete,
 };
 pub use app_password::{create_app_password, list_app_passwords, revoke_app_password};
 pub use email::{confirm_email, request_email_update, update_email};

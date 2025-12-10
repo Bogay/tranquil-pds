@@ -161,6 +161,10 @@ pub fn app(state: AppState) -> Router {
             post(api::server::request_account_delete),
         )
         .route(
+            "/xrpc/com.atproto.server.deleteAccount",
+            post(api::server::delete_account),
+        )
+        .route(
             "/xrpc/com.atproto.server.requestPasswordReset",
             post(api::server::request_password_reset),
         )

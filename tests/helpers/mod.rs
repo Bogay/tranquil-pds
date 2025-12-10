@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 pub use crate::common::*;
 
+#[allow(dead_code)]
 pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     let client = client();
     let ts = Utc::now().timestamp_millis();
@@ -50,6 +51,7 @@ pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     (new_did, new_jwt)
 }
 
+#[allow(dead_code)]
 pub async fn create_post(
     client: &reqwest::Client,
     did: &str,

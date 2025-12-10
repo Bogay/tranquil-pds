@@ -31,7 +31,8 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.server.createAppPassword`.
     - [x] Implement `com.atproto.server.createInviteCode`.
     - [x] Implement `com.atproto.server.createInviteCodes`.
-    - [x] Implement `com.atproto.server.deactivateAccount` / `deleteAccount`.
+    - [x] Implement `com.atproto.server.deactivateAccount`.
+    - [x] Implement `com.atproto.server.deleteAccount` (user-initiated, requires password + email token).
     - [x] Implement `com.atproto.server.getAccountInviteCodes`.
     - [x] Implement `com.atproto.server.getServiceAuth` (Cross-service auth).
     - [x] Implement `com.atproto.server.listAppPasswords`.
@@ -106,8 +107,62 @@ Lewis' corrected big boy todofile
 ## Moderation (`com.atproto.moderation`)
 - [x] Implement `com.atproto.moderation.createReport`.
 
+## Temp Namespace (`com.atproto.temp`)
+- [ ] Implement `com.atproto.temp.checkSignupQueue` (signup queue status for gated signups).
+
+## OAuth 2.0 Support
+The reference PDS implements full OAuth 2.0 provider functionality for native app authentication.
+- [ ] OAuth Provider Core
+    - [ ] Implement `/.well-known/oauth-protected-resource` metadata endpoint.
+    - [ ] Implement `/.well-known/oauth-authorization-server` metadata endpoint.
+    - [ ] Implement `/oauth/authorize` authorization endpoint.
+    - [ ] Implement `/oauth/par` Pushed Authorization Request endpoint.
+    - [ ] Implement `/oauth/token` token endpoint.
+    - [ ] Implement `/oauth/jwks` JSON Web Key Set endpoint.
+- [ ] OAuth Database Tables
+    - [ ] Device table for tracking authorized devices.
+    - [ ] Authorization request table.
+    - [ ] Authorized client table.
+    - [ ] Token table for OAuth tokens.
+    - [ ] Used refresh token table.
+- [ ] DPoP (Demonstrating Proof-of-Possession) support.
+- [ ] Client metadata fetching and validation.
+
+## PDS-Level App Endpoints
+These endpoints need to be implemented at the PDS level (not just proxied to appview).
+
+### Actor (`app.bsky.actor`)
+- [ ] Implement `app.bsky.actor.getPreferences` (user preferences storage).
+- [ ] Implement `app.bsky.actor.putPreferences` (update user preferences).
+- [ ] Implement `app.bsky.actor.getProfile` (PDS-level with proxy fallback).
+- [ ] Implement `app.bsky.actor.getProfiles` (PDS-level with proxy fallback).
+
+### Feed (`app.bsky.feed`)
+These are implemented at PDS level to enable local-first reads:
+- [ ] Implement `app.bsky.feed.getTimeline` (PDS-level with proxy).
+- [ ] Implement `app.bsky.feed.getAuthorFeed` (PDS-level with proxy).
+- [ ] Implement `app.bsky.feed.getActorLikes` (PDS-level with proxy).
+- [ ] Implement `app.bsky.feed.getPostThread` (PDS-level with proxy).
+- [ ] Implement `app.bsky.feed.getFeed` (PDS-level with proxy).
+
+### Notification (`app.bsky.notification`)
+- [ ] Implement `app.bsky.notification.registerPush` (push notification registration).
+
+## Deprecated Sync Endpoints (for compatibility)
+- [ ] Implement `com.atproto.sync.getCheckout` (deprecated, still needed for compatibility).
+- [ ] Implement `com.atproto.sync.getHead` (deprecated, still needed for compatibility).
+
+## Misc HTTP Endpoints
+- [ ] Implement `/robots.txt` endpoint.
+
 ## Record Schema Validation
 - [ ] Handle this generically.
+
+## Preference Storage
+User preferences (for app.bsky.actor.getPreferences/putPreferences):
+- [ ] Create preferences table for storing user app preferences.
+- [ ] Implement `app.bsky.actor.getPreferences` handler (read from postgres, proxy fallback).
+- [ ] Implement `app.bsky.actor.putPreferences` handler (write to postgres).
 
 ## Infrastructure & Core Components
 - [x] Sequencer (Event Log)
