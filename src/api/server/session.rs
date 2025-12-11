@@ -27,60 +27,42 @@ pub async fn get_service_auth(
     headers: axum::http::HeaderMap,
     Query(params): Query<GetServiceAuthParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (did, key_bytes) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in get_service_auth: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
     };
 
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let (did, key_bytes) = match auth_result {
+        Ok(user) => {
+            let kb = match user.key_bytes {
+                Some(kb) => kb,
+                None => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error": "AuthenticationFailed", "message": "OAuth tokens cannot create service auth"})),
+                    )
+                        .into_response();
+                }
+            };
+            (user.did, kb)
+        }
+        Err(e) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
 
     let lxm = params.lxm.as_deref().unwrap_or("*");
 
@@ -122,7 +104,7 @@ pub async fn create_session(
     info!("create_session: identifier='{}'", input.identifier);
 
     let user_row = sqlx::query!(
-        "SELECT u.id, u.did, u.handle, u.password_hash, k.key_bytes FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.handle = $1 OR u.email = $1",
+        "SELECT u.id, u.did, u.handle, u.password_hash, k.key_bytes, k.encryption_version FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.handle = $1 OR u.email = $1",
         input.identifier
     )
         .fetch_optional(&state.db)
@@ -134,7 +116,17 @@ pub async fn create_session(
             let stored_hash = &row.password_hash;
             let did = &row.did;
             let handle = &row.handle;
-            let key_bytes = &row.key_bytes;
+            let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Failed to decrypt user key: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
 
             let password_valid = if verify(&input.password, stored_hash).unwrap_or(false) {
                 true
@@ -150,8 +142,8 @@ pub async fn create_session(
             };
 
             if password_valid {
-                let access_jwt = match crate::auth::create_access_token(&did, &key_bytes) {
-                    Ok(t) => t,
+                let access_meta = match crate::auth::create_access_token_with_metadata(did, &key_bytes) {
+                    Ok(m) => m,
                     Err(e) => {
                         error!("Failed to create access token: {:?}", e);
                         return (
@@ -162,8 +154,8 @@ pub async fn create_session(
                     }
                 };
 
-                let refresh_jwt = match crate::auth::create_refresh_token(&did, &key_bytes) {
-                    Ok(t) => t,
+                let refresh_meta = match crate::auth::create_refresh_token_with_metadata(did, &key_bytes) {
+                    Ok(m) => m,
                     Err(e) => {
                         error!("Failed to create refresh token: {:?}", e);
                         return (
@@ -175,10 +167,12 @@ pub async fn create_session(
                 };
 
                 let session_insert = sqlx::query!(
-                    "INSERT INTO sessions (access_jwt, refresh_jwt, did) VALUES ($1, $2, $3)",
-                    access_jwt,
-                    refresh_jwt,
-                    did
+                    "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+                    did,
+                    access_meta.jti,
+                    refresh_meta.jti,
+                    access_meta.expires_at,
+                    refresh_meta.expires_at
                 )
                 .execute(&state.db)
                 .await;
@@ -188,8 +182,8 @@ pub async fn create_session(
                         return (
                             StatusCode::OK,
                             Json(CreateSessionOutput {
-                                access_jwt,
-                                refresh_jwt,
+                                access_jwt: access_meta.token,
+                                refresh_jwt: refresh_meta.token,
                                 handle: handle.clone(),
                                 did: did.clone(),
                             }),
@@ -236,45 +230,45 @@ pub async fn get_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationRequired", "message": "Invalid Authorization header format"})),
+            )
+                .into_response();
+        }
+    };
 
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
+        Err(e) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
 
-    let result = sqlx::query!(
-        r#"
-        SELECT u.handle, u.did, u.email, k.key_bytes
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
+    let user = sqlx::query!(
+        "SELECT handle, email FROM users WHERE did = $1",
+        did
     )
     .fetch_optional(&state.db)
     .await;
 
-    match result {
+    match user {
         Ok(Some(row)) => {
-            if let Err(_) = crate::auth::verify_token(&token, &row.key_bytes) {
-                return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"}))).into_response();
-            }
-
             return (
                 StatusCode::OK,
                 Json(json!({
                     "handle": row.handle,
-                    "did": row.did,
+                    "did": did,
                     "email": row.email,
                     "didDoc": {}
                 })),
@@ -303,22 +297,71 @@ pub async fn delete_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationRequired"})),
+            )
+                .into_response();
+        }
+    };
 
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
+    let jti = match crate::auth::get_did_from_token(&token) {
+        Ok(_) => {
+            let parts: Vec<&str> = token.split('.').collect();
+            if parts.len() != 3 {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
+                )
+                    .into_response();
+            }
+            use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+            let claims_json = match URL_SAFE_NO_PAD.decode(parts[1]) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error": "AuthenticationFailed"})),
+                    )
+                        .into_response();
+                }
+            };
+            let claims: serde_json::Value = match serde_json::from_slice(&claims_json) {
+                Ok(c) => c,
+                Err(_) => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error": "AuthenticationFailed"})),
+                    )
+                        .into_response();
+                }
+            };
+            match claims.get("jti").and_then(|j| j.as_str()) {
+                Some(jti) => jti.to_string(),
+                None => {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error": "AuthenticationFailed"})),
+                    )
+                        .into_response();
+                }
+            }
+        }
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response();
+        }
+    };
 
-    let result = sqlx::query!("DELETE FROM sessions WHERE access_jwt = $1", token)
+    let result = sqlx::query!("DELETE FROM session_tokens WHERE access_jti = $1", jti)
         .execute(&state.db)
         .await;
 
@@ -344,39 +387,114 @@ pub async fn refresh_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    let refresh_token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationRequired"})),
+            )
+                .into_response();
+        }
+    };
+
+    let refresh_jti = {
+        let parts: Vec<&str> = refresh_token.split('.').collect();
+        if parts.len() != 3 {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed", "message": "Invalid token format"})),
+            )
+                .into_response();
+        }
+        let claims_bytes = match URL_SAFE_NO_PAD.decode(parts[1]) {
+            Ok(b) => b,
+            Err(_) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
+                )
+                    .into_response();
+            }
+        };
+        let claims: serde_json::Value = match serde_json::from_slice(&claims_bytes) {
+            Ok(c) => c,
+            Err(_) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
+                )
+                    .into_response();
+            }
+        };
+        match claims.get("jti").and_then(|j| j.as_str()) {
+            Some(jti) => jti.to_string(),
+            None => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let reuse_check = sqlx::query_scalar!(
+        "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1",
+        refresh_jti
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    if let Ok(Some(session_id)) = reuse_check {
+        warn!("Refresh token reuse detected! Revoking token family for session_id: {}", session_id);
+        let _ = sqlx::query!("DELETE FROM session_tokens WHERE id = $1", session_id)
+            .execute(&state.db)
+            .await;
         return (
             StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
+            Json(json!({"error": "ExpiredToken", "message": "Refresh token has been revoked due to suspected compromise"})),
         )
             .into_response();
     }
 
-    let refresh_token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
     let session = sqlx::query!(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.refresh_jwt = $1",
-            refresh_token
-        )
-        .fetch_optional(&state.db)
-        .await;
+        r#"SELECT st.id, st.did, k.key_bytes, k.encryption_version
+           FROM session_tokens st
+           JOIN users u ON st.did = u.did
+           JOIN user_keys k ON u.id = k.user_id
+           WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()"#,
+        refresh_jti
+    )
+    .fetch_optional(&state.db)
+    .await;
 
     match session {
         Ok(Some(session_row)) => {
+            let session_id = session_row.id;
             let did = &session_row.did;
-            let key_bytes = &session_row.key_bytes;
+            let key_bytes = match crate::config::decrypt_key(&session_row.key_bytes, session_row.encryption_version) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Failed to decrypt user key: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
 
-            if let Err(_) = crate::auth::verify_token(&refresh_token, &key_bytes) {
-                return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid refresh token signature"}))).into_response();
+            if let Err(_) = crate::auth::verify_refresh_token(&refresh_token, &key_bytes) {
+                return (StatusCode::UNAUTHORIZED, Json(json!({"error": "AuthenticationFailed", "message": "Invalid refresh token"}))).into_response();
             }
 
-            let new_access_jwt = match crate::auth::create_access_token(&did, &key_bytes) {
-                Ok(t) => t,
+            let new_access_meta = match crate::auth::create_access_token_with_metadata(did, &key_bytes) {
+                Ok(m) => m,
                 Err(e) => {
                     error!("Failed to create access token: {:?}", e);
                     return (
@@ -386,8 +504,8 @@ pub async fn refresh_session(
                         .into_response();
                 }
             };
-            let new_refresh_jwt = match crate::auth::create_refresh_token(&did, &key_bytes) {
-                Ok(t) => t,
+            let new_refresh_meta = match crate::auth::create_refresh_token_with_metadata(did, &key_bytes) {
+                Ok(m) => m,
                 Err(e) => {
                     error!("Failed to create refresh token: {:?}", e);
                     return (
@@ -398,54 +516,89 @@ pub async fn refresh_session(
                 }
             };
 
-            let update = sqlx::query!(
-                "UPDATE sessions SET access_jwt = $1, refresh_jwt = $2 WHERE refresh_jwt = $3",
-                new_access_jwt,
-                new_refresh_jwt,
-                refresh_token
+            let mut tx = match state.db.begin().await {
+                Ok(tx) => tx,
+                Err(e) => {
+                    error!("Failed to begin transaction: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+
+            if let Err(e) = sqlx::query!(
+                "INSERT INTO used_refresh_tokens (refresh_jti, session_id) VALUES ($1, $2)",
+                refresh_jti,
+                session_id
             )
-            .execute(&state.db)
-            .await;
+            .execute(&mut *tx)
+            .await
+            {
+                error!("Failed to record used refresh token: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
 
-            match update {
-                Ok(_) => {
-                    let user = sqlx::query!("SELECT handle FROM users WHERE did = $1", did)
-                        .fetch_optional(&state.db)
-                        .await;
+            if let Err(e) = sqlx::query!(
+                "UPDATE session_tokens SET access_jti = $1, refresh_jti = $2, access_expires_at = $3, refresh_expires_at = $4, updated_at = NOW() WHERE id = $5",
+                new_access_meta.jti,
+                new_refresh_meta.jti,
+                new_access_meta.expires_at,
+                new_refresh_meta.expires_at,
+                session_id
+            )
+            .execute(&mut *tx)
+            .await
+            {
+                error!("Database error updating session: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
 
-                    match user {
-                        Ok(Some(u)) => {
-                            return (
-                                StatusCode::OK,
-                                Json(json!({
-                                    "accessJwt": new_access_jwt,
-                                    "refreshJwt": new_refresh_jwt,
-                                    "handle": u.handle,
-                                    "did": did
-                                })),
-                            )
-                                .into_response();
-                        }
-                        Ok(None) => {
-                            error!("User not found for existing session: {}", did);
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": "InternalError"})),
-                            )
-                                .into_response();
-                        }
-                        Err(e) => {
-                            error!("Database error fetching user: {:?}", e);
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": "InternalError"})),
-                            )
-                                .into_response();
-                        }
-                    }
+            if let Err(e) = tx.commit().await {
+                error!("Failed to commit transaction: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+
+            let user = sqlx::query!("SELECT handle FROM users WHERE did = $1", did)
+                .fetch_optional(&state.db)
+                .await;
+
+            match user {
+                Ok(Some(u)) => {
+                    return (
+                        StatusCode::OK,
+                        Json(json!({
+                            "accessJwt": new_access_meta.token,
+                            "refreshJwt": new_refresh_meta.token,
+                            "handle": u.handle,
+                            "did": did
+                        })),
+                    )
+                        .into_response();
+                }
+                Ok(None) => {
+                    error!("User not found for existing session: {}", did);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
                 }
                 Err(e) => {
-                    error!("Database error updating session: {:?}", e);
+                    error!("Database error fetching user: {:?}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": "InternalError"})),

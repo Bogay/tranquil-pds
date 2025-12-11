@@ -13,14 +13,14 @@ fn test_jwt_flow() {
     let did = "did:plc:test";
 
     let token = auth::create_access_token(did, &key_bytes).expect("create token");
-    let data = auth::verify_token(&token, &key_bytes).expect("verify token");
+    let data = auth::verify_access_token(&token, &key_bytes).expect("verify access token");
     assert_eq!(data.claims.sub, did);
     assert_eq!(data.claims.iss, did);
-    assert_eq!(data.claims.scope, Some("access".to_string()));
+    assert_eq!(data.claims.scope, Some(auth::SCOPE_ACCESS.to_string()));
 
     let r_token = auth::create_refresh_token(did, &key_bytes).expect("create refresh token");
-    let r_data = auth::verify_token(&r_token, &key_bytes).expect("verify refresh token");
-    assert_eq!(r_data.claims.scope, Some("refresh".to_string()));
+    let r_data = auth::verify_refresh_token(&r_token, &key_bytes).expect("verify refresh token");
+    assert_eq!(r_data.claims.scope, Some(auth::SCOPE_REFRESH.to_string()));
 
     let aud = "did:web:service";
     let lxm = "com.example.test";
@@ -29,6 +29,22 @@ fn test_jwt_flow() {
     let s_data = auth::verify_token(&s_token, &key_bytes).expect("verify service token");
     assert_eq!(s_data.claims.aud, aud);
     assert_eq!(s_data.claims.lxm, Some(lxm.to_string()));
+}
+
+#[test]
+fn test_token_type_confusion_prevented() {
+    let secret_key = SecretKey::random(&mut OsRng);
+    let key_bytes = secret_key.to_bytes();
+    let did = "did:plc:test";
+
+    let access_token = auth::create_access_token(did, &key_bytes).expect("create access token");
+    let refresh_token = auth::create_refresh_token(did, &key_bytes).expect("create refresh token");
+
+    assert!(auth::verify_access_token(&access_token, &key_bytes).is_ok());
+    assert!(auth::verify_access_token(&refresh_token, &key_bytes).is_err());
+
+    assert!(auth::verify_refresh_token(&refresh_token, &key_bytes).is_ok());
+    assert!(auth::verify_refresh_token(&access_token, &key_bytes).is_err());
 }
 
 #[test]

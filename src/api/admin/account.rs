@@ -214,7 +214,7 @@ pub async fn delete_account(
         }
     };
 
-    let _ = sqlx::query!("DELETE FROM sessions WHERE did = $1", did)
+    let _ = sqlx::query!("DELETE FROM session_tokens WHERE did = $1", did)
         .execute(&state.db)
         .await;
 

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, email_confirmation_code, email_confirmation_code_expires_at, email_pending_verification FROM users WHERE did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email_confirmation_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email_confirmation_code_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "email_pending_verification",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b551a83dbe436c1d0e4ce674f23668a9d5ef7ac5b76a332a8f8b5dc2220e9ea5"
+}

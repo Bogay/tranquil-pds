@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,\n               device_id, parameters, details, code, current_refresh_token, scope\n        FROM oauth_token\n        WHERE current_refresh_token = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "token_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "client_auth",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "parameters",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "details",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "current_refresh_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "scope",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "bc816a96fa2e186cd0ff279f98543bebd9a815677d86fa8852f51fe76f95ce95"
+}

@@ -20,31 +20,22 @@ pub async fn upload_blob(
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
-            token
-        )
-        .fetch_optional(&state.db)
-        .await
-        .unwrap_or(None);
-
-    let (did, key_bytes) = match session {
-        Some(row) => (row.did, row.key_bytes),
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
         None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationRequired"})),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+        Ok(user) => user,
+        Err(_) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "AuthenticationFailed"})),
@@ -52,14 +43,7 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
+    let did = auth_user.did;
 
     let mime_type = headers
         .get("content-type")
@@ -182,32 +166,22 @@ pub async fn list_missing_blobs(
     headers: axum::http::HeaderMap,
     Query(params): Query<ListMissingBlobsParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-            "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
-            token
-        )
-        .fetch_optional(&state.db)
-        .await
-        .unwrap_or(None);
-
-    let (did, key_bytes) = match session {
-        Some(row) => (row.did, row.key_bytes),
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
         None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationRequired"})),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+        Ok(user) => user,
+        Err(_) => {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "AuthenticationFailed"})),
@@ -216,13 +190,7 @@ pub async fn list_missing_blobs(
         }
     };
 
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
+    let did = auth_user.did;
 
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)

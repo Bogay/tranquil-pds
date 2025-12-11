@@ -228,10 +228,23 @@ pub async fn create_account(
             (secret_key.to_bytes().to_vec(), None)
         };
 
+    let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
+        Ok(enc) => enc,
+        Err(e) => {
+            error!("Error encrypting user key: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
     let key_insert = sqlx::query!(
-        "INSERT INTO user_keys (user_id, key_bytes) VALUES ($1, $2)",
+        "INSERT INTO user_keys (user_id, key_bytes, encryption_version, encrypted_at) VALUES ($1, $2, $3, NOW())",
         user_id,
-        &secret_key_bytes[..]
+        &encrypted_key_bytes[..],
+        crate::config::ENCRYPTION_VERSION
     )
     .execute(&mut *tx)
     .await;
@@ -345,7 +358,7 @@ pub async fn create_account(
         }
     }
 
-    let access_jwt = crate::auth::create_access_token(&did, &secret_key_bytes[..]).map_err(|e| {
+    let access_meta = crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes[..]).map_err(|e| {
         error!("Error creating access token: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -353,12 +366,12 @@ pub async fn create_account(
         )
             .into_response()
     });
-    let access_jwt = match access_jwt {
-        Ok(t) => t,
+    let access_meta = match access_meta {
+        Ok(m) => m,
         Err(r) => return r,
     };
 
-    let refresh_jwt = crate::auth::create_refresh_token(&did, &secret_key_bytes[..]).map_err(|e| {
+    let refresh_meta = crate::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes[..]).map_err(|e| {
         error!("Error creating refresh token: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -366,13 +379,20 @@ pub async fn create_account(
         )
             .into_response()
     });
-    let refresh_jwt = match refresh_jwt {
-        Ok(t) => t,
+    let refresh_meta = match refresh_meta {
+        Ok(m) => m,
         Err(r) => return r,
     };
 
     let session_insert =
-        sqlx::query!("INSERT INTO sessions (access_jwt, refresh_jwt, did) VALUES ($1, $2, $3)", access_jwt, refresh_jwt, did)
+        sqlx::query!(
+            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+            did,
+            access_meta.jti,
+            refresh_meta.jti,
+            access_meta.expires_at,
+            refresh_meta.expires_at
+        )
             .execute(&mut *tx)
             .await;
 
@@ -410,8 +430,8 @@ pub async fn create_account(
     (
         StatusCode::OK,
         Json(CreateAccountOutput {
-            access_jwt,
-            refresh_jwt,
+            access_jwt: access_meta.token,
+            refresh_jwt: refresh_meta.token,
             handle: input.handle,
             did,
         }),

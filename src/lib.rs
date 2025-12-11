@@ -1,6 +1,8 @@
 pub mod api;
 pub mod auth;
+pub mod config;
 pub mod notifications;
+pub mod oauth;
 pub mod repo;
 pub mod state;
 pub mod storage;
@@ -267,6 +269,25 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/.well-known/did.json", get(api::identity::well_known_did))
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))
+        // OAuth 2.1 endpoints
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(oauth::endpoints::oauth_protected_resource),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(oauth::endpoints::oauth_authorization_server),
+        )
+        .route("/oauth/jwks", get(oauth::endpoints::oauth_jwks))
+        .route(
+            "/oauth/par",
+            post(oauth::endpoints::pushed_authorization_request),
+        )
+        .route("/oauth/authorize", get(oauth::endpoints::authorize_get))
+        .route("/oauth/authorize", post(oauth::endpoints::authorize_post))
+        .route("/oauth/token", post(oauth::endpoints::token_endpoint))
+        .route("/oauth/revoke", post(oauth::endpoints::revoke_token))
+        .route("/oauth/introspect", post(oauth::endpoints::introspect_token))
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
         .with_state(state)
 }

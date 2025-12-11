@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key_bytes",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "encryption_version",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "b51ed30a0421d19beba933234679b39dc7cc9b02d18bbce1958ac9b0ee6f6268"
+}

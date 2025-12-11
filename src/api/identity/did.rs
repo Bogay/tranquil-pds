@@ -121,12 +121,23 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
             .into_response();
     }
 
-    let key_row = sqlx::query!("SELECT key_bytes FROM user_keys WHERE user_id = $1", user_id)
+    let key_row = sqlx::query!("SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1", user_id)
         .fetch_optional(&state.db)
         .await;
 
     let key_bytes: Vec<u8> = match key_row {
-        Ok(Some(row)) => row.key_bytes,
+        Ok(Some(row)) => {
+            match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+                Ok(k) => k,
+                Err(_) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            }
+        }
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -270,45 +281,37 @@ pub async fn get_recommended_did_credentials(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.handle
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, handle) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.handle),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(ref user) => user.did.clone(),
         Err(e) => {
-            error!("DB error in get_recommended_did_credentials: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user = match sqlx::query!("SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -316,14 +319,18 @@ pub async fn get_recommended_did_credentials(
                 .into_response();
         }
     };
+    let handle = user.handle;
 
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
+    let key_bytes = match auth_result.ok().and_then(|u| u.key_bytes) {
+        Some(kb) => kb,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed", "message": "OAuth tokens cannot get DID credentials"})),
+            )
+                .into_response();
+        }
+    };
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -376,45 +383,37 @@ pub async fn update_handle(
     headers: axum::http::HeaderMap,
     Json(input): Json<UpdateHandleInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in update_handle: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -422,14 +421,6 @@ pub async fn update_handle(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
 
     let new_handle = input.handle.trim();
     if new_handle.is_empty() {

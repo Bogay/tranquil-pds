@@ -23,45 +23,27 @@ pub async fn prepare_repo_write(
     headers: &HeaderMap,
     repo_did: &str,
 ) -> Result<(String, Uuid, Cid), Response> {
-    let auth_header = headers.get("Authorization").ok_or_else(|| {
+    let token = crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ).ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "AuthenticationRequired"})),
         )
             .into_response()
     })?;
-    let token = auth_header
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
 
-    let session = sqlx::query!(
-        "SELECT s.did, k.key_bytes FROM sessions s JOIN users u ON s.did = u.did JOIN user_keys k ON u.id = k.user_id WHERE s.access_jwt = $1",
-        token
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        error!("DB error fetching session: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError"}))).into_response()
-    })?
-    .ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed"})),
-        )
-            .into_response()
-    })?;
+    let auth_user = crate::auth::validate_bearer_token(&state.db, &token)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationFailed"})),
+            )
+                .into_response()
+        })?;
 
-    crate::auth::verify_token(&token, &session.key_bytes).map_err(|_| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response()
-    })?;
-
-    if repo_did != session.did {
+    if repo_did != auth_user.did {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({"error": "InvalidRepo", "message": "Repo does not match authenticated user"})),
@@ -69,7 +51,7 @@ pub async fn prepare_repo_write(
             .into_response());
     }
 
-    let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", session.did)
+    let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
         .fetch_optional(&state.db)
         .await
         .map_err(|e| {
@@ -108,7 +90,7 @@ pub async fn prepare_repo_write(
             .into_response()
     })?;
 
-    Ok((session.did, user_id, current_root_cid))
+    Ok((auth_user.did, user_id, current_root_cid))
 }
 
 #[derive(Deserialize)]

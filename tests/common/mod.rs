@@ -11,18 +11,25 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 #[allow(unused_imports)]
 use std::time::Duration;
-use testcontainers::core::ContainerPort;
-use testcontainers::{ContainerAsync, GenericImage, ImageExt, runners::AsyncRunner};
-use testcontainers_modules::postgres::Postgres;
 use tokio::net::TcpListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static APP_PORT: OnceLock<u16> = OnceLock::new();
-static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
-static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
+
+#[cfg(not(feature = "external-infra"))]
+use testcontainers::core::ContainerPort;
+#[cfg(not(feature = "external-infra"))]
+use testcontainers::{ContainerAsync, GenericImage, ImageExt, runners::AsyncRunner};
+#[cfg(not(feature = "external-infra"))]
+use testcontainers_modules::postgres::Postgres;
+
+#[cfg(not(feature = "external-infra"))]
+static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
+#[cfg(not(feature = "external-infra"))]
+static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
 
 #[allow(dead_code)]
 pub const AUTH_TOKEN: &str = "test-token";
@@ -33,11 +40,18 @@ pub const AUTH_DID: &str = "did:plc:fake";
 #[allow(dead_code)]
 pub const TARGET_DID: &str = "did:plc:target";
 
+fn has_external_infra() -> bool {
+    std::env::var("BSPDS_TEST_INFRA_READY").is_ok()
+        || (std::env::var("DATABASE_URL").is_ok() && std::env::var("S3_ENDPOINT").is_ok())
+}
+
 #[cfg(test)]
 #[ctor::dtor]
 fn cleanup() {
-    // my attempt to force clean up containers created by this test binary.
-    // this is a fallback in case ryuk fails or is not supported
+    if has_external_infra() {
+        return;
+    }
+
     if std::env::var("XDG_RUNTIME_DIR").is_ok() {
          let _ = std::process::Command::new("podman")
             .args(&["rm", "-f", "--filter", "label=bspds_test=true"])
@@ -80,102 +94,145 @@ pub async fn base_url() -> &'static str {
 
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
-                let s3_container = GenericImage::new("minio/minio", "latest")
-                    .with_exposed_port(ContainerPort::Tcp(9000))
-                    .with_env_var("MINIO_ROOT_USER", "minioadmin")
-                    .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
-                    .with_cmd(vec!["server".to_string(), "/data".to_string()])
-                    .with_label("bspds_test", "true")
-                    .start()
-                    .await
-                    .expect("Failed to start MinIO");
-
-                let s3_port = s3_container
-                    .get_host_port_ipv4(9000)
-                    .await
-                    .expect("Failed to get S3 port");
-                let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
-
-                unsafe {
-                    std::env::set_var("S3_BUCKET", "test-bucket");
-                    std::env::set_var("AWS_ACCESS_KEY_ID", "minioadmin");
-                    std::env::set_var("AWS_SECRET_ACCESS_KEY", "minioadmin");
-                    std::env::set_var("AWS_REGION", "us-east-1");
-                    std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+                if has_external_infra() {
+                    let url = setup_with_external_infra().await;
+                    tx.send(url).unwrap();
+                } else {
+                    let url = setup_with_testcontainers().await;
+                    tx.send(url).unwrap();
                 }
-
-                let sdk_config = aws_config::defaults(BehaviorVersion::latest())
-                    .region("us-east-1")
-                    .endpoint_url(&s3_endpoint)
-                    .credentials_provider(Credentials::new(
-                        "minioadmin",
-                        "minioadmin",
-                        None,
-                        None,
-                        "test",
-                    ))
-                    .load()
-                    .await;
-
-                let s3_config = aws_sdk_s3::config::Builder::from(&sdk_config)
-                    .force_path_style(true)
-                    .build();
-                let s3_client = S3Client::from_conf(s3_config);
-
-                let _ = s3_client.create_bucket().bucket("test-bucket").send().await;
-
-                let mock_server = MockServer::start().await;
-
-                Mock::given(method("GET"))
-                    .and(path("/xrpc/app.bsky.actor.getProfile"))
-                    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                        "handle": "mock.handle",
-                        "did": "did:plc:mock",
-                        "displayName": "Mock User"
-                    })))
-                    .mount(&mock_server)
-                    .await;
-
-                Mock::given(method("GET"))
-                    .and(path("/xrpc/app.bsky.actor.searchActors"))
-                    .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                        "actors": [],
-                        "cursor": null
-                    })))
-                    .mount(&mock_server)
-                    .await;
-
-                unsafe {
-                    std::env::set_var("APPVIEW_URL", mock_server.uri());
-                }
-                MOCK_APPVIEW.set(mock_server).ok();
-
-                S3_CONTAINER.set(s3_container).ok();
-
-                let container = Postgres::default()
-                    .with_tag("18-alpine")
-                    .with_label("bspds_test", "true")
-                    .start()
-                    .await
-                    .expect("Failed to start Postgres");
-                let connection_string = format!(
-                    "postgres://postgres:postgres@127.0.0.1:{}",
-                    container
-                        .get_host_port_ipv4(5432)
-                        .await
-                        .expect("Failed to get port")
-                );
-
-                DB_CONTAINER.set(container).ok();
-
-                let url = spawn_app(connection_string).await;
-                tx.send(url).unwrap();
                 std::future::pending::<()>().await;
             });
         });
 
         rx.recv().expect("Failed to start test server")
     })
+}
+
+async fn setup_with_external_infra() -> String {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set when using external infra");
+    let s3_endpoint = std::env::var("S3_ENDPOINT")
+        .expect("S3_ENDPOINT must be set when using external infra");
+
+    unsafe {
+        std::env::set_var("S3_BUCKET", std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()));
+        std::env::set_var("AWS_ACCESS_KEY_ID", std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()));
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()));
+        std::env::set_var("AWS_REGION", std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()));
+        std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+    }
+
+    let mock_server = MockServer::start().await;
+    setup_mock_appview(&mock_server).await;
+
+    unsafe {
+        std::env::set_var("APPVIEW_URL", mock_server.uri());
+    }
+    MOCK_APPVIEW.set(mock_server).ok();
+
+    spawn_app(database_url).await
+}
+
+#[cfg(not(feature = "external-infra"))]
+async fn setup_with_testcontainers() -> String {
+    let s3_container = GenericImage::new("minio/minio", "latest")
+        .with_exposed_port(ContainerPort::Tcp(9000))
+        .with_env_var("MINIO_ROOT_USER", "minioadmin")
+        .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
+        .with_cmd(vec!["server".to_string(), "/data".to_string()])
+        .with_label("bspds_test", "true")
+        .start()
+        .await
+        .expect("Failed to start MinIO");
+
+    let s3_port = s3_container
+        .get_host_port_ipv4(9000)
+        .await
+        .expect("Failed to get S3 port");
+    let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+
+    unsafe {
+        std::env::set_var("S3_BUCKET", "test-bucket");
+        std::env::set_var("AWS_ACCESS_KEY_ID", "minioadmin");
+        std::env::set_var("AWS_SECRET_ACCESS_KEY", "minioadmin");
+        std::env::set_var("AWS_REGION", "us-east-1");
+        std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+    }
+
+    let sdk_config = aws_config::defaults(BehaviorVersion::latest())
+        .region("us-east-1")
+        .endpoint_url(&s3_endpoint)
+        .credentials_provider(Credentials::new(
+            "minioadmin",
+            "minioadmin",
+            None,
+            None,
+            "test",
+        ))
+        .load()
+        .await;
+
+    let s3_config = aws_sdk_s3::config::Builder::from(&sdk_config)
+        .force_path_style(true)
+        .build();
+    let s3_client = S3Client::from_conf(s3_config);
+
+    let _ = s3_client.create_bucket().bucket("test-bucket").send().await;
+
+    let mock_server = MockServer::start().await;
+    setup_mock_appview(&mock_server).await;
+
+    unsafe {
+        std::env::set_var("APPVIEW_URL", mock_server.uri());
+    }
+    MOCK_APPVIEW.set(mock_server).ok();
+
+    S3_CONTAINER.set(s3_container).ok();
+
+    let container = Postgres::default()
+        .with_tag("18-alpine")
+        .with_label("bspds_test", "true")
+        .start()
+        .await
+        .expect("Failed to start Postgres");
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}",
+        container
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("Failed to get port")
+    );
+
+    DB_CONTAINER.set(container).ok();
+
+    spawn_app(connection_string).await
+}
+
+#[cfg(feature = "external-infra")]
+async fn setup_with_testcontainers() -> String {
+    panic!("Testcontainers disabled with external-infra feature. Set DATABASE_URL and S3_ENDPOINT.");
+}
+
+async fn setup_mock_appview(mock_server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/xrpc/app.bsky.actor.getProfile"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "handle": "mock.handle",
+            "did": "did:plc:mock",
+            "displayName": "Mock User"
+        })))
+        .mount(mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/xrpc/app.bsky.actor.searchActors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "actors": [],
+            "cursor": null
+        })))
+        .mount(mock_server)
+        .await;
 }
 
 async fn spawn_app(database_url: String) -> String {
@@ -214,9 +271,21 @@ async fn spawn_app(database_url: String) -> String {
 #[allow(dead_code)]
 pub async fn get_db_connection_string() -> String {
     base_url().await;
-    let container = DB_CONTAINER.get().expect("DB container not initialized");
-    let port = container.get_host_port_ipv4(5432).await.expect("Failed to get port");
-    format!("postgres://postgres:postgres@127.0.0.1:{}/postgres", port)
+
+    if has_external_infra() {
+        std::env::var("DATABASE_URL").expect("DATABASE_URL not set")
+    } else {
+        #[cfg(not(feature = "external-infra"))]
+        {
+            let container = DB_CONTAINER.get().expect("DB container not initialized");
+            let port = container.get_host_port_ipv4(5432).await.expect("Failed to get port");
+            format!("postgres://postgres:postgres@127.0.0.1:{}/postgres", port)
+        }
+        #[cfg(feature = "external-infra")]
+        {
+            panic!("DATABASE_URL must be set with external-infra feature");
+        }
+    }
 }
 
 #[allow(dead_code)]

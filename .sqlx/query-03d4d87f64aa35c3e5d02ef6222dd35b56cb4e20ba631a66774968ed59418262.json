@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO oauth_account_device (did, device_id, created_at, updated_at)\n        VALUES ($1, $2, NOW(), NOW())\n        ON CONFLICT (did, device_id) DO UPDATE SET updated_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "03d4d87f64aa35c3e5d02ef6222dd35b56cb4e20ba631a66774968ed59418262"
+}

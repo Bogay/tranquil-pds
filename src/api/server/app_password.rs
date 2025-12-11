@@ -26,45 +26,37 @@ pub async fn list_app_passwords(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in list_app_passwords: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -72,14 +64,6 @@ pub async fn list_app_passwords(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
 
     let result = sqlx::query!("SELECT name, created_at, privileged FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC", user_id)
         .fetch_all(&state.db)
@@ -131,45 +115,37 @@ pub async fn create_app_password(
     headers: axum::http::HeaderMap,
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in create_app_password: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -177,14 +153,6 @@ pub async fn create_app_password(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
 
     let name = input.name.trim();
     if name.is_empty() {
@@ -275,45 +243,37 @@ pub async fn revoke_app_password(
     headers: axum::http::HeaderMap,
     Json(input): Json<RevokeAppPasswordInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in revoke_app_password: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -321,14 +281,6 @@ pub async fn revoke_app_password(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
 
     let name = input.name.trim();
     if name.is_empty() {

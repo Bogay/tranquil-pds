@@ -27,14 +27,18 @@ pub async fn create_invite_code(
     headers: axum::http::HeaderMap,
     Json(input): Json<CreateInviteCodeInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationRequired"})),
+            )
+                .into_response();
+        }
+    };
 
     if input.use_count < 1 {
         return (
@@ -44,36 +48,24 @@ pub async fn create_invite_code(
             .into_response();
     }
 
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
-        Ok(None) => {
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
+        Err(e) => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": e})),
             )
                 .into_response();
         }
-        Err(e) => {
-            error!("DB error in create_invite_code: {:?}", e);
+    };
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -81,14 +73,6 @@ pub async fn create_invite_code(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
 
     let creator_user_id = if let Some(for_account) = &input.for_account {
         let target = sqlx::query!("SELECT id FROM users WHERE did = $1", for_account)
@@ -184,14 +168,18 @@ pub async fn create_invite_codes(
     headers: axum::http::HeaderMap,
     Json(input): Json<CreateInviteCodesInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "AuthenticationRequired"})),
+            )
+                .into_response();
+        }
+    };
 
     if input.use_count < 1 {
         return (
@@ -201,36 +189,24 @@ pub async fn create_invite_codes(
             .into_response();
     }
 
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
-        Ok(None) => {
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
+        Err(e) => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": e})),
             )
                 .into_response();
         }
-        Err(e) => {
-            error!("DB error in create_invite_codes: {:?}", e);
+    };
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -238,14 +214,6 @@ pub async fn create_invite_codes(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
 
     let code_count = input.code_count.unwrap_or(1).max(1);
     let for_accounts = input.for_accounts.unwrap_or_default();
@@ -374,45 +342,37 @@ pub async fn get_account_invite_codes(
     headers: axum::http::HeaderMap,
     axum::extract::Query(params): axum::extract::Query<GetAccountInviteCodesParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (did, key_bytes, user_id) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in get_account_invite_codes: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -420,14 +380,6 @@ pub async fn get_account_invite_codes(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
 
     let include_used = params.include_used.unwrap_or(true);
 

@@ -110,23 +110,53 @@ Lewis' corrected big boy todofile
 ## Temp Namespace (`com.atproto.temp`)
 - [ ] Implement `com.atproto.temp.checkSignupQueue` (signup queue status for gated signups).
 
-## OAuth 2.0 Support
-The reference PDS implements full OAuth 2.0 provider functionality for native app authentication.
-- [ ] OAuth Provider Core
-    - [ ] Implement `/.well-known/oauth-protected-resource` metadata endpoint.
-    - [ ] Implement `/.well-known/oauth-authorization-server` metadata endpoint.
-    - [ ] Implement `/oauth/authorize` authorization endpoint.
-    - [ ] Implement `/oauth/par` Pushed Authorization Request endpoint.
-    - [ ] Implement `/oauth/token` token endpoint.
-    - [ ] Implement `/oauth/jwks` JSON Web Key Set endpoint.
-- [ ] OAuth Database Tables
-    - [ ] Device table for tracking authorized devices.
-    - [ ] Authorization request table.
-    - [ ] Authorized client table.
-    - [ ] Token table for OAuth tokens.
-    - [ ] Used refresh token table.
-- [ ] DPoP (Demonstrating Proof-of-Possession) support.
-- [ ] Client metadata fetching and validation.
+## OAuth 2.1 Support
+Full OAuth 2.1 provider for ATProto native app authentication.
+- [x] OAuth Provider Core
+    - [x] Implement `/.well-known/oauth-protected-resource` metadata endpoint.
+    - [x] Implement `/.well-known/oauth-authorization-server` metadata endpoint.
+    - [x] Implement `/oauth/authorize` authorization endpoint (headless JSON mode).
+    - [x] Implement `/oauth/par` Pushed Authorization Request endpoint.
+    - [x] Implement `/oauth/token` token endpoint (authorization_code + refresh_token grants).
+    - [x] Implement `/oauth/jwks` JSON Web Key Set endpoint.
+    - [x] Implement `/oauth/revoke` token revocation endpoint.
+    - [x] Implement `/oauth/introspect` token introspection endpoint.
+- [x] OAuth Database Tables
+    - [x] Device table for tracking authorized devices.
+    - [x] Authorization request table.
+    - [x] Authorized client table.
+    - [x] Token table for OAuth tokens.
+    - [x] Used refresh token table (replay protection).
+    - [x] DPoP JTI tracking table.
+- [x] DPoP (Demonstrating Proof-of-Possession) support.
+- [x] Client metadata fetching and validation.
+- [x] PKCE (S256) enforcement.
+- [x] OAuth token verification extractor for protected resources.
+- [ ] Authorization UI templates (currently headless-only, returns JSON for programmatic flows).
+- [ ] Implement `private_key_jwt` signature verification (currently rejects with clear error).
+
+## OAuth Security Notes
+
+I've tried to ensure that this codebase is not vulnerable to the following:
+
+- Constant-time comparison for signature verification (prevents timing attacks)
+- HMAC-SHA256 for access token signing with configurable secret
+- Production secrets require 32+ character minimum
+- DPoP JTI replay protection via database
+- DPoP nonce validation with HMAC-based timestamps (5 min validity)
+- Refresh token rotation with reuse detection (revokes token family on reuse)
+- PKCE S256 enforced (plain not allowed)
+- Authorization code single-use enforcement
+- URL encoding for redirect parameters (prevents injection)
+- All database queries use parameterized statements (no SQL injection)
+- Deactivated/taken-down accounts blocked from OAuth authorization
+- Client ID validation on token exchange (defense-in-depth against cross-client attacks)
+
+### Auth Notes
+- Algorithm choice: Using ES256K (secp256k1 ECDSA) with per-user keys. Ref PDS uses HS256 (HMAC) with single server key. Our approach provides better key isolation but differs from reference implementation.
+    - [ ] Support the ref PDS HS256 system too.
+- Token storage: Now storing only token JTIs in session_tokens table (defense in depth against DB breaches). Refresh token family tracking enables detection of token reuse attacks.
+- Key encryption: User signing keys encrypted at rest using AES-256-GCM with keys derived via HKDF from MASTER_KEY environment variable. Migration-safe: supports both encrypted (version 1) and plaintext (version 0) keys.
 
 ## PDS-Level App Endpoints
 These endpoints need to be implemented at the PDS level (not just proxied to appview).

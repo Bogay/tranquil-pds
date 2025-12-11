@@ -1,0 +1,12 @@
+[store]
+dir = "target/nextest"
+
+[profile.default]
+retries = 0
+fail-fast = true
+test-threads = "num-cpus"
+
+[profile.ci]
+retries = 2
+fail-fast = false
+test-threads = "num-cpus"

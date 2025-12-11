@@ -18,15 +18,12 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- status & moderation
     deactivated_at TIMESTAMPTZ,
     invites_disabled BOOLEAN DEFAULT FALSE,
     takedown_ref TEXT,
 
-    -- notifs
     preferred_notification_channel notification_channel NOT NULL DEFAULT 'email',
 
-    -- auth & verification
     password_reset_code TEXT,
     password_reset_code_expires_at TIMESTAMPTZ,
 
@@ -54,11 +51,12 @@ CREATE TABLE IF NOT EXISTS invite_code_uses (
     UNIQUE(code, used_by_user)
 );
 
--- TODO: encrypt at rest!
 CREATE TABLE IF NOT EXISTS user_keys (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     key_bytes BYTEA NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    encrypted_at TIMESTAMPTZ,
+    encryption_version INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS repos (
@@ -68,14 +66,12 @@ CREATE TABLE IF NOT EXISTS repos (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- content addressable storage
 CREATE TABLE IF NOT EXISTS blocks (
     cid BYTEA PRIMARY KEY,
     data BYTEA NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- denormalized index for fast queries
 CREATE TABLE IF NOT EXISTS records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     repo_id UUID NOT NULL REFERENCES repos(user_id) ON DELETE CASCADE,
@@ -97,13 +93,6 @@ CREATE TABLE IF NOT EXISTS blobs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
-    access_jwt TEXT PRIMARY KEY,
-    refresh_jwt TEXT NOT NULL UNIQUE,
-    did TEXT NOT NULL REFERENCES users(did) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS app_passwords (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -114,7 +103,6 @@ CREATE TABLE IF NOT EXISTS app_passwords (
     UNIQUE(user_id, name)
 );
 
--- naughty list
 CREATE TABLE reports (
     id BIGINT PRIMARY KEY,
     reason_type TEXT NOT NULL,
@@ -155,3 +143,125 @@ CREATE INDEX idx_notification_queue_status_scheduled
     WHERE status = 'pending';
 
 CREATE INDEX idx_notification_queue_user_id ON notification_queue(user_id);
+
+CREATE TABLE IF NOT EXISTS reserved_signing_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    did TEXT,
+    public_key_did_key TEXT NOT NULL,
+    private_key_bytes BYTEA NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '24 hours',
+    used_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_reserved_signing_keys_did ON reserved_signing_keys(did) WHERE did IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_reserved_signing_keys_expires ON reserved_signing_keys(expires_at) WHERE used_at IS NULL;
+
+CREATE TABLE repo_seq (
+    seq BIGSERIAL PRIMARY KEY,
+    did TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    event_type TEXT NOT NULL,
+    commit_cid TEXT,
+    prev_cid TEXT,
+    ops JSONB,
+    blobs TEXT[],
+    blocks_cids TEXT[]
+);
+
+CREATE INDEX idx_repo_seq_seq ON repo_seq(seq);
+CREATE INDEX idx_repo_seq_did ON repo_seq(did);
+
+CREATE TABLE IF NOT EXISTS session_tokens (
+    id SERIAL PRIMARY KEY,
+    did TEXT NOT NULL REFERENCES users(did) ON DELETE CASCADE,
+    access_jti TEXT NOT NULL UNIQUE,
+    refresh_jti TEXT NOT NULL UNIQUE,
+    access_expires_at TIMESTAMPTZ NOT NULL,
+    refresh_expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_session_tokens_did ON session_tokens(did);
+CREATE INDEX idx_session_tokens_access_jti ON session_tokens(access_jti);
+CREATE INDEX idx_session_tokens_refresh_jti ON session_tokens(refresh_jti);
+
+CREATE TABLE IF NOT EXISTS used_refresh_tokens (
+    refresh_jti TEXT PRIMARY KEY,
+    session_id INTEGER NOT NULL REFERENCES session_tokens(id) ON DELETE CASCADE,
+    used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_used_refresh_tokens_session_id ON used_refresh_tokens(session_id);
+
+CREATE TABLE IF NOT EXISTS oauth_device (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL UNIQUE,
+    user_agent TEXT,
+    ip_address TEXT NOT NULL,
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS oauth_authorization_request (
+    id TEXT PRIMARY KEY,
+    did TEXT REFERENCES users(did) ON DELETE CASCADE,
+    device_id TEXT REFERENCES oauth_device(id) ON DELETE SET NULL,
+    client_id TEXT NOT NULL,
+    client_auth JSONB,
+    parameters JSONB NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    code TEXT UNIQUE
+);
+
+CREATE INDEX idx_oauth_auth_request_expires ON oauth_authorization_request(expires_at);
+CREATE INDEX idx_oauth_auth_request_code ON oauth_authorization_request(code) WHERE code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS oauth_token (
+    id SERIAL PRIMARY KEY,
+    did TEXT NOT NULL REFERENCES users(did) ON DELETE CASCADE,
+    token_id TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    client_id TEXT NOT NULL,
+    client_auth JSONB NOT NULL,
+    device_id TEXT REFERENCES oauth_device(id) ON DELETE SET NULL,
+    parameters JSONB NOT NULL,
+    details JSONB,
+    code TEXT UNIQUE,
+    current_refresh_token TEXT UNIQUE,
+    scope TEXT
+);
+
+CREATE INDEX idx_oauth_token_did ON oauth_token(did);
+CREATE INDEX idx_oauth_token_code ON oauth_token(code) WHERE code IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS oauth_account_device (
+    did TEXT NOT NULL REFERENCES users(did) ON DELETE CASCADE,
+    device_id TEXT NOT NULL REFERENCES oauth_device(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (did, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS oauth_authorized_client (
+    did TEXT NOT NULL REFERENCES users(did) ON DELETE CASCADE,
+    client_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    data JSONB NOT NULL,
+    PRIMARY KEY (did, client_id)
+);
+
+CREATE TABLE IF NOT EXISTS oauth_used_refresh_token (
+    refresh_token TEXT PRIMARY KEY,
+    token_id INTEGER NOT NULL REFERENCES oauth_token(id) ON DELETE CASCADE
+);
+
+CREATE TABLE oauth_dpop_jti (
+    jti TEXT PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_oauth_dpop_jti_created_at ON oauth_dpop_jti(created_at);

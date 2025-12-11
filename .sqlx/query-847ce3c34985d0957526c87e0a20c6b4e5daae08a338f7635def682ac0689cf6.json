@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM session_tokens WHERE access_jti = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "847ce3c34985d0957526c87e0a20c6b4e5daae08a338f7635def682ac0689cf6"
+}

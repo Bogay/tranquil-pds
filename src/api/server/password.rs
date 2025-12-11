@@ -211,7 +211,7 @@ pub async fn reset_password(
             .into_response();
     }
 
-    let _ = sqlx::query!("DELETE FROM sessions WHERE did = (SELECT did FROM users WHERE id = $1)", user_id)
+    let _ = sqlx::query!("DELETE FROM session_tokens WHERE did = (SELECT did FROM users WHERE id = $1)", user_id)
         .execute(&state.db)
         .await;
 

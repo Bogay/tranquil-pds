@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO oauth_dpop_jti (jti)\n        VALUES ($1)\n        ON CONFLICT (jti) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b9fbadc505176c4afdb8a55ffeefa9f6a38924a3577f0b3ff77f7373aba4974"
+}

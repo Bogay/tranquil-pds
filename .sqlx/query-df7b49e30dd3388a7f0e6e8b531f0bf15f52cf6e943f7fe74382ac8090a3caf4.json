@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM oauth_authorization_request\n        WHERE code = $1\n        RETURNING did, device_id, client_id, client_auth, parameters, expires_at, code\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "device_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "client_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "client_auth",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "parameters",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "code",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "df7b49e30dd3388a7f0e6e8b531f0bf15f52cf6e943f7fe74382ac8090a3caf4"
+}

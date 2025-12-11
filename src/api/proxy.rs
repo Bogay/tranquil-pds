@@ -43,17 +43,18 @@ pub async fn proxy_handler(
     let mut auth_header_val = headers.get("Authorization").map(|h| h.clone());
 
     if let Some(aud) = &proxy_header {
-        if let Some(auth_val) = &auth_header_val {
-            if let Ok(token) = auth_val.to_str() {
-                let token = token.replace("Bearer ", "");
-                if let Ok(did) = crate::auth::get_did_from_token(&token) {
-                    let key_row = sqlx::query!("SELECT k.key_bytes FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1", did)
-                        .fetch_optional(&state.db)
-                        .await;
+        if let Some(token) = crate::auth::extract_bearer_token_from_header(
+            headers.get("Authorization").and_then(|h| h.to_str().ok())
+        ) {
+            if let Ok(did) = crate::auth::get_did_from_token(&token) {
+                let key_row = sqlx::query!("SELECT k.key_bytes, k.encryption_version FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1", did)
+                    .fetch_optional(&state.db)
+                    .await;
 
-                    if let Ok(Some(row)) = key_row {
+                if let Ok(Some(row)) = key_row {
+                    if let Ok(decrypted_key) = crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
                         if let Ok(new_token) =
-                            crate::auth::create_service_token(&did, aud, &method, &row.key_bytes)
+                            crate::auth::create_service_token(&did, aud, &method, &decrypted_key)
                         {
                             if let Ok(val) =
                                 axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))

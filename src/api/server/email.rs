@@ -30,45 +30,37 @@ pub async fn request_email_update(
     headers: axum::http::HeaderMap,
     Json(input): Json<RequestEmailUpdateInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id, u.handle
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, user_id, handle) = match session {
-        Ok(Some(row)) => (row.did, row.key_bytes, row.user_id, row.handle),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in request_email_update: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -76,14 +68,8 @@ pub async fn request_email_update(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
+    let user_id = user.id;
+    let handle = user.handle;
 
     let email = input.email.trim().to_lowercase();
     if email.is_empty() {
@@ -159,52 +145,40 @@ pub async fn confirm_email(
     headers: axum::http::HeaderMap,
     Json(input): Json<ConfirmEmailInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id, u.email_confirmation_code, u.email_confirmation_code_expires_at, u.email_pending_verification
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (_did, key_bytes, user_id, stored_code, expires_at, email_pending_verification) = match session {
-        Ok(Some(row)) => (
-            row.did,
-            row.key_bytes,
-            row.user_id,
-            row.email_confirmation_code,
-            row.email_confirmation_code_expires_at,
-            row.email_pending_verification,
-        ),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in confirm_email: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user = match sqlx::query!(
+        "SELECT id, email_confirmation_code, email_confirmation_code_expires_at, email_pending_verification FROM users WHERE did = $1",
+        did
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -212,14 +186,10 @@ pub async fn confirm_email(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
+    let user_id = user.id;
+    let stored_code = user.email_confirmation_code;
+    let expires_at = user.email_confirmation_code_expires_at;
+    let email_pending_verification = user.email_pending_verification;
 
     let email = input.email.trim().to_lowercase();
     let confirmation_code = input.token.trim();
@@ -301,63 +271,40 @@ pub async fn update_email(
     headers: axum::http::HeaderMap,
     Json(input): Json<UpdateEmailInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
-    let token = auth_header
-        .unwrap()
-        .to_str()
-        .unwrap_or("")
-        .replace("Bearer ", "");
-
-    let session = sqlx::query!(
-        r#"
-        SELECT s.did, k.key_bytes, u.id as user_id, u.email as current_email,
-               u.email_confirmation_code, u.email_confirmation_code_expires_at,
-               u.email_pending_verification
-        FROM sessions s
-        JOIN users u ON s.did = u.did
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE s.access_jwt = $1
-        "#,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let (
-        _did,
-        key_bytes,
-        user_id,
-        current_email,
-        stored_code,
-        expires_at,
-        email_pending_verification,
-    ) = match session {
-        Ok(Some(row)) => (
-            row.did,
-            row.key_bytes,
-            row.user_id,
-            row.current_email,
-            row.email_confirmation_code,
-            row.email_confirmation_code_expires_at,
-            row.email_pending_verification,
-        ),
-        Ok(None) => {
+    let token = match crate::auth::extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok())
+    ) {
+        Some(t) => t,
+        None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
+                Json(json!({"error": "AuthenticationRequired"})),
             )
                 .into_response();
         }
+    };
+
+    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
+    let did = match auth_result {
+        Ok(user) => user.did,
         Err(e) => {
-            error!("DB error in update_email: {:?}", e);
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e})),
+            )
+                .into_response();
+        }
+    };
+
+    let user = match sqlx::query!(
+        "SELECT id, email, email_confirmation_code, email_confirmation_code_expires_at, email_pending_verification FROM users WHERE did = $1",
+        did
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -365,14 +312,11 @@ pub async fn update_email(
                 .into_response();
         }
     };
-
-    if let Err(_) = crate::auth::verify_token(&token, &key_bytes) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid token signature"})),
-        )
-            .into_response();
-    }
+    let user_id = user.id;
+    let current_email = user.email;
+    let stored_code = user.email_confirmation_code;
+    let expires_at = user.email_confirmation_code_expires_at;
+    let email_pending_verification = user.email_pending_verification;
 
     let new_email = input.email.trim().to_lowercase();
     if new_email.is_empty() {

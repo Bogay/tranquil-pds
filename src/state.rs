@@ -1,3 +1,4 @@
+use crate::config::AuthConfig;
 use crate::repo::PostgresBlockStore;
 use crate::storage::{BlobStorage, S3BlobStorage};
 use crate::sync::firehose::SequencedEvent;
@@ -15,6 +16,8 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(db: PgPool) -> Self {
+        AuthConfig::init();
+
         let block_store = PostgresBlockStore::new(db.clone());
         let blob_store = S3BlobStorage::new().await;
         let (firehose_tx, _) = broadcast::channel(1000);

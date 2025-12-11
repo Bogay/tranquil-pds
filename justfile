@@ -27,32 +27,27 @@ fmt-check:
 
 lint: fmt-check clippy
 
-test:
-    cargo test
+# Run tests (auto-starts and auto-cleans containers)
+test *args:
+    ./scripts/run-tests.sh {{args}}
 
-test-verbose:
-    cargo test -- --nocapture
+# Run a specific test file
+test-file file:
+    ./scripts/run-tests.sh --test {{file}}
 
-test-repo:
-    cargo test --test repo
+# Run tests with testcontainers (slower, no shared infra)
+test-standalone:
+    BSPDS_ALLOW_INSECURE_SECRETS=1 cargo test
 
-test-lifecycle:
-    cargo test --test lifecycle
+# Manually manage test infrastructure (for debugging)
+test-infra-start:
+    ./scripts/test-infra.sh start
 
-test-proxy:
-    cargo test --test proxy
+test-infra-stop:
+    ./scripts/test-infra.sh stop
 
-test-sync:
-    cargo test --test sync
-
-test-server:
-    cargo test --test server
-
-test-identity:
-    cargo test --test identity
-
-test-auth:
-    cargo test --test auth
+test-infra-status:
+    ./scripts/test-infra.sh status
 
 clean:
     cargo clean
