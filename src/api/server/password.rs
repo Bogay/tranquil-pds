@@ -7,17 +7,12 @@ use axum::{
 };
 use bcrypt::{hash, DEFAULT_COST};
 use chrono::{Duration, Utc};
-use rand::Rng;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
 
 fn generate_reset_code() -> String {
-    let mut rng = rand::thread_rng();
-    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz234567".chars().collect();
-    let part1: String = (0..5).map(|_| chars[rng.gen_range(0..chars.len())]).collect();
-    let part2: String = (0..5).map(|_| chars[rng.gen_range(0..chars.len())]).collect();
-    format!("{}-{}", part1, part2)
+    crate::util::generate_token_code()
 }
 
 #[derive(Deserialize)]
@@ -45,7 +40,7 @@ pub async fn request_password_reset(
     let user_id = match user {
         Ok(Some(row)) => row.id,
         Ok(None) => {
-            info!("Password reset requested for unknown email: {}", email);
+            info!("Password reset requested for unknown email");
             return (StatusCode::OK, Json(json!({}))).into_response();
         }
         Err(e) => {
@@ -151,12 +146,15 @@ pub async fn reset_password(
 
     if let Some(exp) = expires_at {
         if Utc::now() > exp {
-            let _ = sqlx::query!(
+            if let Err(e) = sqlx::query!(
                 "UPDATE users SET password_reset_code = NULL, password_reset_code_expires_at = NULL WHERE id = $1",
                 user_id
             )
             .execute(&state.db)
-            .await;
+            .await
+            {
+                error!("Failed to clear expired reset code: {:?}", e);
+            }
 
             return (
                 StatusCode::BAD_REQUEST,
@@ -184,15 +182,26 @@ pub async fn reset_password(
         }
     };
 
-    let update = sqlx::query!(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Failed to begin transaction: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) = sqlx::query!(
         "UPDATE users SET password_hash = $1, password_reset_code = NULL, password_reset_code_expires_at = NULL WHERE id = $2",
         password_hash,
         user_id
     )
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = update {
+    .execute(&mut *tx)
+    .await
+    {
         error!("DB error updating password: {:?}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -201,9 +210,26 @@ pub async fn reset_password(
             .into_response();
     }
 
-    let _ = sqlx::query!("DELETE FROM session_tokens WHERE did = (SELECT did FROM users WHERE id = $1)", user_id)
-        .execute(&state.db)
-        .await;
+    if let Err(e) = sqlx::query!("DELETE FROM session_tokens WHERE did = (SELECT did FROM users WHERE id = $1)", user_id)
+        .execute(&mut *tx)
+        .await
+    {
+        error!("Failed to invalidate sessions after password reset: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+
+    if let Err(e) = tx.commit().await {
+        error!("Failed to commit password reset transaction: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
 
     info!("Password reset completed for user {}", user_id);
 

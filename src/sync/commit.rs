@@ -98,7 +98,7 @@ pub async fn list_repos(
     State(state): State<AppState>,
     Query(params): Query<ListReposParams>,
 ) -> Response {
-    let limit = params.limit.unwrap_or(50).min(1000);
+    let limit = params.limit.unwrap_or(50).clamp(1, 1000);
     let cursor_did = params.cursor.as_deref().unwrap_or("");
 
     let result = sqlx::query!(

@@ -294,11 +294,20 @@ pub async fn put_record(
     };
 
     let new_mst = if existing_cid.is_some() {
-        mst.update(&key, record_cid).await.unwrap()
+        match mst.update(&key, record_cid).await {
+            Ok(m) => m,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to update MST"}))).into_response(),
+        }
     } else {
-        mst.add(&key, record_cid).await.unwrap()
+        match mst.add(&key, record_cid).await {
+            Ok(m) => m,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to add to MST"}))).into_response(),
+        }
     };
-    let new_mst_root = new_mst.persist().await.unwrap();
+    let new_mst_root = match new_mst.persist().await {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to persist MST"}))).into_response(),
+    };
 
     let op = if existing_cid.is_some() {
         RecordOp::Update { collection: input.collection.clone(), rkey: input.rkey.clone(), cid: record_cid }

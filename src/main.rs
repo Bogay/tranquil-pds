@@ -1,26 +1,42 @@
 use bspds::notifications::{EmailSender, NotificationService};
 use bspds::state::AppState;
 use std::net::SocketAddr;
+use std::process::ExitCode;
 use tokio::sync::watch;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
 
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!("Fatal error: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let database_url = std::env::var("DATABASE_URL")
+        .map_err(|_| "DATABASE_URL environment variable must be set")?;
 
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(20)
+        .min_connections(2)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .idle_timeout(std::time::Duration::from_secs(300))
+        .max_lifetime(std::time::Duration::from_secs(1800))
         .connect(&database_url)
         .await
-        .expect("Failed to connect to Postgres");
+        .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
 
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
-        .expect("Failed to run migrations");
+        .map_err(|e| format!("Failed to run migrations: {}", e))?;
 
     let state = AppState::new(pool.clone()).await;
 
@@ -50,7 +66,9 @@ async fn main() {
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     info!("listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
 
     let server_result = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(shutdown_tx))
@@ -59,23 +77,33 @@ async fn main() {
     notification_handle.await.ok();
 
     if let Err(e) = server_result {
-        tracing::error!("Server error: {}", e);
+        return Err(format!("Server error: {}", e).into());
     }
+
+    Ok(())
 }
 
 async fn shutdown_signal(shutdown_tx: watch::Sender<bool>) {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {}
+            Err(e) => {
+                error!("Failed to install Ctrl+C handler: {}", e);
+            }
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("Failed to install signal handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(e) => {
+                error!("Failed to install SIGTERM handler: {}", e);
+                std::future::pending::<()>().await;
+            }
+        }
     };
 
     #[cfg(not(unix))]

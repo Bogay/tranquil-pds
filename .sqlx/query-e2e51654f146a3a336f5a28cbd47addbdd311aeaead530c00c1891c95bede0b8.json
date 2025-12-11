@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT st.id, st.did, k.key_bytes, k.encryption_version\n           FROM session_tokens st\n           JOIN users u ON st.did = u.did\n           JOIN user_keys k ON u.id = k.user_id\n           WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()",
+  "query": "SELECT st.id, st.did, k.key_bytes, k.encryption_version\n           FROM session_tokens st\n           JOIN users u ON st.did = u.did\n           JOIN user_keys k ON u.id = k.user_id\n           WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()\n           FOR UPDATE OF st",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       true
     ]
   },
-  "hash": "3889903e58405370152b9ded229d843c0114e71454ea7da2b212519e98d09817"
+  "hash": "e2e51654f146a3a336f5a28cbd47addbdd311aeaead530c00c1891c95bede0b8"
 }

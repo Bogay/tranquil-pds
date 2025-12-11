@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const APP_BSKY_NAMESPACE: &str = "app.bsky";
+const MAX_PREFERENCES_COUNT: usize = 100;
+const MAX_PREFERENCE_SIZE: usize = 10_000;
 
 #[derive(Serialize)]
 pub struct GetPreferencesOutput {
@@ -141,7 +143,24 @@ pub async fn put_preferences(
             }
         };
 
+    if input.preferences.len() > MAX_PREFERENCES_COUNT {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": format!("Too many preferences: {} exceeds limit of {}", input.preferences.len(), MAX_PREFERENCES_COUNT)})),
+        )
+            .into_response();
+    }
+
     for pref in &input.preferences {
+        let pref_str = serde_json::to_string(pref).unwrap_or_default();
+        if pref_str.len() > MAX_PREFERENCE_SIZE {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidRequest", "message": format!("Preference too large: {} bytes exceeds limit of {}", pref_str.len(), MAX_PREFERENCE_SIZE)})),
+            )
+                .into_response();
+        }
+
         let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
             Some(t) => t,
             None => {
@@ -200,7 +219,10 @@ pub async fn put_preferences(
     }
 
     for pref in input.preferences {
-        let pref_type = pref.get("$type").and_then(|t| t.as_str()).unwrap();
+        let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
+            Some(t) => t,
+            None => continue,
+        };
 
         let insert_result = sqlx::query!(
             "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)",

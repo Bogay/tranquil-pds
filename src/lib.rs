@@ -8,6 +8,7 @@ pub mod repo;
 pub mod state;
 pub mod storage;
 pub mod sync;
+pub mod util;
 
 use axum::{
     Router,

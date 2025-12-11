@@ -15,11 +15,21 @@ use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use tracing::error;
 
+const MAX_BLOB_SIZE: usize = 1_000_000;
+
 pub async fn upload_blob(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
+    if body.len() > MAX_BLOB_SIZE {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({"error": "BlobTooLarge", "message": format!("Blob size {} exceeds maximum of {} bytes", body.len(), MAX_BLOB_SIZE)})),
+        )
+            .into_response();
+    }
+
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
@@ -57,7 +67,17 @@ pub async fn upload_blob(
     let mut hasher = Sha256::new();
     hasher.update(&data);
     let hash = hasher.finalize();
-    let multihash = Multihash::wrap(0x12, &hash).unwrap();
+    let multihash = match Multihash::wrap(0x12, &hash) {
+        Ok(mh) => mh,
+        Err(e) => {
+            error!("Failed to create multihash for blob: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to hash blob"})),
+            )
+                .into_response();
+        }
+    };
     let cid = Cid::new_v1(0x55, multihash);
     let cid_str = cid.to_string();
 
@@ -207,7 +227,7 @@ pub async fn list_missing_blobs(
         }
     };
 
-    let limit = params.limit.unwrap_or(500).min(1000);
+    let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor_str = params.cursor.unwrap_or_default();
     let (cursor_collection, cursor_rkey) = if cursor_str.contains('|') {
         let parts: Vec<&str> = cursor_str.split('|').collect();

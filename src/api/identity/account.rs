@@ -40,13 +40,21 @@ pub async fn create_account(
     State(state): State<AppState>,
     Json(input): Json<CreateAccountInput>,
 ) -> Response {
-    info!("create_account hit: {}", input.handle);
+    info!("create_account called");
     if input.handle.contains('!') || input.handle.contains('@') {
         return (
             StatusCode::BAD_REQUEST,
             Json(
                 json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"}),
             ),
+        )
+            .into_response();
+    }
+
+    if !crate::api::validation::is_valid_email(&input.email) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
         )
             .into_response();
     }

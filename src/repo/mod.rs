@@ -38,7 +38,8 @@ impl BlockStore for PostgresBlockStore {
         let mut hasher = Sha256::new();
         hasher.update(data);
         let hash = hasher.finalize();
-        let multihash = Multihash::wrap(0x12, &hash).unwrap();
+        let multihash = Multihash::wrap(0x12, &hash)
+            .map_err(|e| RepoError::storage(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Failed to wrap multihash: {:?}", e))))?;
         let cid = Cid::new_v1(0x71, multihash);
         let cid_bytes = cid.to_bytes();
 

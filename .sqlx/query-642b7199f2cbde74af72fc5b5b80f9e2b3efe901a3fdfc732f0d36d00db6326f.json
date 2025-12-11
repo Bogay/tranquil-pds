@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM invite_codes WHERE created_by_user = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "642b7199f2cbde74af72fc5b5b80f9e2b3efe901a3fdfc732f0d36d00db6326f"
+}

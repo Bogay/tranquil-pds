@@ -17,6 +17,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
 
+const MAX_BATCH_WRITES: usize = 200;
+
 #[derive(Deserialize)]
 #[serde(tag = "$type")]
 pub enum WriteOp {
@@ -115,10 +117,10 @@ pub async fn apply_writes(
             .into_response();
     }
 
-    if input.writes.len() > 200 {
+    if input.writes.len() > MAX_BATCH_WRITES {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Too many writes (max 200)"})),
+            Json(json!({"error": "InvalidRequest", "message": format!("Too many writes (max {})", MAX_BATCH_WRITES)})),
         )
             .into_response();
     }
@@ -213,11 +215,23 @@ pub async fn apply_writes(
                     .clone()
                     .unwrap_or_else(|| Utc::now().format("%Y%m%d%H%M%S%f").to_string());
                 let mut record_bytes = Vec::new();
-                serde_ipld_dagcbor::to_writer(&mut record_bytes, value).unwrap();
-                let record_cid = tracking_store.put(&record_bytes).await.unwrap();
+                if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
+                    return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();
+                }
+                let record_cid = match tracking_store.put(&record_bytes).await {
+                    Ok(c) => c,
+                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to store record"}))).into_response(),
+                };
 
-                let key = format!("{}/{}", collection.parse::<Nsid>().unwrap(), rkey);
-                mst = mst.add(&key, record_cid).await.unwrap();
+                let collection_nsid = match collection.parse::<Nsid>() {
+                    Ok(n) => n,
+                    Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidCollection", "message": "Invalid collection NSID"}))).into_response(),
+                };
+                let key = format!("{}/{}", collection_nsid, rkey);
+                mst = match mst.add(&key, record_cid).await {
+                    Ok(m) => m,
+                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to add to MST"}))).into_response(),
+                };
 
                 let uri = format!("at://{}/{}/{}", did, collection, rkey);
                 results.push(WriteResult::CreateResult {
@@ -236,11 +250,23 @@ pub async fn apply_writes(
                 value,
             } => {
                 let mut record_bytes = Vec::new();
-                serde_ipld_dagcbor::to_writer(&mut record_bytes, value).unwrap();
-                let record_cid = tracking_store.put(&record_bytes).await.unwrap();
+                if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
+                    return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();
+                }
+                let record_cid = match tracking_store.put(&record_bytes).await {
+                    Ok(c) => c,
+                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to store record"}))).into_response(),
+                };
 
-                let key = format!("{}/{}", collection.parse::<Nsid>().unwrap(), rkey);
-                mst = mst.update(&key, record_cid).await.unwrap();
+                let collection_nsid = match collection.parse::<Nsid>() {
+                    Ok(n) => n,
+                    Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidCollection", "message": "Invalid collection NSID"}))).into_response(),
+                };
+                let key = format!("{}/{}", collection_nsid, rkey);
+                mst = match mst.update(&key, record_cid).await {
+                    Ok(m) => m,
+                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to update MST"}))).into_response(),
+                };
 
                 let uri = format!("at://{}/{}/{}", did, collection, rkey);
                 results.push(WriteResult::UpdateResult {
@@ -254,8 +280,15 @@ pub async fn apply_writes(
                 });
             }
             WriteOp::Delete { collection, rkey } => {
-                let key = format!("{}/{}", collection.parse::<Nsid>().unwrap(), rkey);
-                mst = mst.delete(&key).await.unwrap();
+                let collection_nsid = match collection.parse::<Nsid>() {
+                    Ok(n) => n,
+                    Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidCollection", "message": "Invalid collection NSID"}))).into_response(),
+                };
+                let key = format!("{}/{}", collection_nsid, rkey);
+                mst = match mst.delete(&key).await {
+                    Ok(m) => m,
+                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to delete from MST"}))).into_response(),
+                };
 
                 results.push(WriteResult::DeleteResult {});
                 ops.push(RecordOp::Delete {
@@ -266,7 +299,10 @@ pub async fn apply_writes(
         }
     }
 
-    let new_mst_root = mst.persist().await.unwrap();
+    let new_mst_root = match mst.persist().await {
+        Ok(c) => c,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to persist MST"}))).into_response(),
+    };
     let written_cids = tracking_store.get_written_cids();
     let written_cids_str = written_cids
         .iter()

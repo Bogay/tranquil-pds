@@ -9,6 +9,8 @@ use futures::{sink::SinkExt, stream::StreamExt};
 use serde::Deserialize;
 use tracing::{error, info, warn};
 
+const BACKFILL_BATCH_SIZE: i64 = 1000;
+
 #[derive(Deserialize)]
 pub struct SubscribeReposParams {
     pub cursor: Option<i64>,
@@ -37,32 +39,44 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, params: Subscribe
     info!(cursor = ?params.cursor, "New firehose subscriber");
 
     if let Some(cursor) = params.cursor {
-        let events = sqlx::query_as!(
-            SequencedEvent,
-            r#"
-            SELECT seq, did, created_at, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids
-            FROM repo_seq
-            WHERE seq > $1
-            ORDER BY seq ASC
-            "#,
-            cursor
-        )
-        .fetch_all(&state.db)
-        .await;
+        let mut current_cursor = cursor;
+        loop {
+            let events = sqlx::query_as!(
+                SequencedEvent,
+                r#"
+                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids
+                FROM repo_seq
+                WHERE seq > $1
+                ORDER BY seq ASC
+                LIMIT $2
+                "#,
+                current_cursor,
+                BACKFILL_BATCH_SIZE
+            )
+            .fetch_all(&state.db)
+            .await;
 
-        match events {
-            Ok(events) => {
-                for event in events {
-                    if let Err(e) = send_event(&mut socket, &state, event).await {
-                        warn!("Failed to send backfill event: {}", e);
-                        return;
+            match events {
+                Ok(events) => {
+                    if events.is_empty() {
+                        break;
+                    }
+                    for event in &events {
+                        current_cursor = event.seq;
+                        if let Err(e) = send_event(&mut socket, &state, event.clone()).await {
+                            warn!("Failed to send backfill event: {}", e);
+                            return;
+                        }
+                    }
+                    if (events.len() as i64) < BACKFILL_BATCH_SIZE {
+                        break;
                     }
                 }
-            }
-            Err(e) => {
-                error!("Failed to fetch backfill events: {}", e);
-                socket.close().await.ok();
-                return;
+                Err(e) => {
+                    error!("Failed to fetch backfill events: {}", e);
+                    socket.close().await.ok();
+                    return;
+                }
             }
         }
     }

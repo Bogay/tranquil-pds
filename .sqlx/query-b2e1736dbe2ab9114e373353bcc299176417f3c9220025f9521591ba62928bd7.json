@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1",
+  "query": "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "fcd868a192d27fd4eccae92a884e881b8d6f09bf7ae08a9b431a44acbf2f91f3"
+  "hash": "b2e1736dbe2ab9114e373353bcc299176417f3c9220025f9521591ba62928bd7"
 }

@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::fmt;
 
 pub mod extractor;
 pub mod token;
 pub mod verify;
 
-pub use extractor::{BearerAuth, AuthError, extract_bearer_token_from_header};
+pub use extractor::{BearerAuth, BearerAuthAllowDeactivated, AuthError, extract_bearer_token_from_header};
 pub use token::{
     create_access_token, create_refresh_token, create_service_token,
     create_access_token_with_metadata, create_refresh_token_with_metadata,
@@ -14,6 +15,25 @@ pub use token::{
     SCOPE_ACCESS, SCOPE_REFRESH, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED,
 };
 pub use verify::{get_did_from_token, get_jti_from_token, verify_token, verify_access_token, verify_refresh_token};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenValidationError {
+    AccountDeactivated,
+    AccountTakedown,
+    KeyDecryptionFailed,
+    AuthenticationFailed,
+}
+
+impl fmt::Display for TokenValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AccountDeactivated => write!(f, "AccountDeactivated"),
+            Self::AccountTakedown => write!(f, "AccountTakedown"),
+            Self::KeyDecryptionFailed => write!(f, "KeyDecryptionFailed"),
+            Self::AuthenticationFailed => write!(f, "AuthenticationFailed"),
+        }
+    }
+}
 
 pub struct AuthenticatedUser {
     pub did: String,
@@ -24,14 +44,14 @@ pub struct AuthenticatedUser {
 pub async fn validate_bearer_token(
     db: &PgPool,
     token: &str,
-) -> Result<AuthenticatedUser, &'static str> {
+) -> Result<AuthenticatedUser, TokenValidationError> {
     validate_bearer_token_with_options(db, token, false).await
 }
 
 pub async fn validate_bearer_token_allow_deactivated(
     db: &PgPool,
     token: &str,
-) -> Result<AuthenticatedUser, &'static str> {
+) -> Result<AuthenticatedUser, TokenValidationError> {
     validate_bearer_token_with_options(db, token, true).await
 }
 
@@ -39,7 +59,7 @@ async fn validate_bearer_token_with_options(
     db: &PgPool,
     token: &str,
     allow_deactivated: bool,
-) -> Result<AuthenticatedUser, &'static str> {
+) -> Result<AuthenticatedUser, TokenValidationError> {
     let did_from_token = get_did_from_token(token).ok();
 
     if let Some(ref did) = did_from_token {
@@ -56,16 +76,14 @@ async fn validate_bearer_token_with_options(
         .flatten()
         {
             if !allow_deactivated && user.deactivated_at.is_some() {
-                return Err("AccountDeactivated");
+                return Err(TokenValidationError::AccountDeactivated);
             }
             if user.takedown_ref.is_some() {
-                return Err("AccountTakedown");
+                return Err(TokenValidationError::AccountTakedown);
             }
 
-            let decrypted_key = match crate::config::decrypt_key(&user.key_bytes, user.encryption_version) {
-                Ok(k) => k,
-                Err(_) => return Err("KeyDecryptionFailed"),
-            };
+            let decrypted_key = crate::config::decrypt_key(&user.key_bytes, user.encryption_version)
+                .map_err(|_| TokenValidationError::KeyDecryptionFailed)?;
 
             if let Ok(token_data) = verify_access_token(token, &decrypted_key) {
                 let session_exists = sqlx::query_scalar!(
@@ -103,10 +121,10 @@ async fn validate_bearer_token_with_options(
         .flatten()
         {
             if !allow_deactivated && oauth_token.deactivated_at.is_some() {
-                return Err("AccountDeactivated");
+                return Err(TokenValidationError::AccountDeactivated);
             }
             if oauth_token.takedown_ref.is_some() {
-                return Err("AccountTakedown");
+                return Err(TokenValidationError::AccountTakedown);
             }
 
             let now = chrono::Utc::now();
@@ -120,7 +138,7 @@ async fn validate_bearer_token_with_options(
         }
     }
 
-    Err("AuthenticationFailed")
+    Err(TokenValidationError::AuthenticationFailed)
 }
 
 #[derive(Debug, Serialize, Deserialize)]

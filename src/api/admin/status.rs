@@ -234,37 +234,75 @@ pub async fn update_subject_status(
         Some("com.atproto.admin.defs#repoRef") => {
             let did = input.subject.get("did").and_then(|d| d.as_str());
             if let Some(did) = did {
+                let mut tx = match state.db.begin().await {
+                    Ok(tx) => tx,
+                    Err(e) => {
+                        error!("Failed to begin transaction: {:?}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError"})),
+                        )
+                            .into_response();
+                    }
+                };
+
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.apply {
                         takedown.r#ref.clone()
                     } else {
                         None
                     };
-                    let _ = sqlx::query!(
+                    if let Err(e) = sqlx::query!(
                         "UPDATE users SET takedown_ref = $1 WHERE did = $2",
                         takedown_ref,
                         did
                     )
-                    .execute(&state.db)
-                    .await;
+                    .execute(&mut *tx)
+                    .await
+                    {
+                        error!("Failed to update user takedown status for {}: {:?}", did, e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError", "message": "Failed to update takedown status"})),
+                        )
+                            .into_response();
+                    }
                 }
 
                 if let Some(deactivated) = &input.deactivated {
-                    if deactivated.apply {
-                        let _ = sqlx::query!(
+                    let result = if deactivated.apply {
+                        sqlx::query!(
                             "UPDATE users SET deactivated_at = NOW() WHERE did = $1",
                             did
                         )
-                        .execute(&state.db)
-                        .await;
+                        .execute(&mut *tx)
+                        .await
                     } else {
-                        let _ = sqlx::query!(
+                        sqlx::query!(
                             "UPDATE users SET deactivated_at = NULL WHERE did = $1",
                             did
                         )
-                        .execute(&state.db)
-                        .await;
+                        .execute(&mut *tx)
+                        .await
+                    };
+
+                    if let Err(e) = result {
+                        error!("Failed to update user deactivation status for {}: {:?}", did, e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError", "message": "Failed to update deactivation status"})),
+                        )
+                            .into_response();
                     }
+                }
+
+                if let Err(e) = tx.commit().await {
+                    error!("Failed to commit transaction: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
                 }
 
                 return (
@@ -292,13 +330,21 @@ pub async fn update_subject_status(
                     } else {
                         None
                     };
-                    let _ = sqlx::query!(
+                    if let Err(e) = sqlx::query!(
                         "UPDATE records SET takedown_ref = $1 WHERE record_cid = $2",
                         takedown_ref,
                         uri
                     )
                     .execute(&state.db)
-                    .await;
+                    .await
+                    {
+                        error!("Failed to update record takedown status for {}: {:?}", uri, e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError", "message": "Failed to update takedown status"})),
+                        )
+                            .into_response();
+                    }
                 }
 
                 return (
@@ -323,13 +369,21 @@ pub async fn update_subject_status(
                     } else {
                         None
                     };
-                    let _ = sqlx::query!(
+                    if let Err(e) = sqlx::query!(
                         "UPDATE blobs SET takedown_ref = $1 WHERE cid = $2",
                         takedown_ref,
                         cid
                     )
                     .execute(&state.db)
-                    .await;
+                    .await
+                    {
+                        error!("Failed to update blob takedown status for {}: {:?}", cid, e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError", "message": "Failed to update takedown status"})),
+                        )
+                            .into_response();
+                    }
                 }
 
                 return (

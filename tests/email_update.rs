@@ -556,5 +556,5 @@ async fn test_update_email_invalid_format() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Invalid JSON");
-    assert_eq!(body["error"], "InvalidRequest");
+    assert_eq!(body["error"], "InvalidEmail");
 }

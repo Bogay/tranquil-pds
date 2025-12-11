@@ -15,6 +15,8 @@ use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
 
+const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
+
 #[derive(Deserialize)]
 pub struct GetBlocksQuery {
     pub did: String,
@@ -52,13 +54,19 @@ pub async fn get_blocks(
         }
     };
 
-    let root_cid = cids.first().cloned().unwrap_or_default();
-
     if cids.is_empty() {
          return (StatusCode::BAD_REQUEST, "No CIDs provided").into_response();
     }
 
-    let header = encode_car_header(&root_cid);
+    let root_cid = cids[0];
+
+    let header = match encode_car_header(&root_cid) {
+        Ok(h) => h,
+        Err(e) => {
+            error!("Failed to encode CAR header: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode CAR").into_response();
+        }
+    };
 
     let mut car_bytes = header;
 
@@ -69,9 +77,12 @@ pub async fn get_blocks(
             let total_len = cid_bytes.len() + block.len();
 
             let mut writer = Vec::new();
-            crate::sync::car::write_varint(&mut writer, total_len as u64).unwrap();
-            writer.write_all(&cid_bytes).unwrap();
-            writer.write_all(&block).unwrap();
+            crate::sync::car::write_varint(&mut writer, total_len as u64)
+                .expect("Writing to Vec<u8> should never fail");
+            writer.write_all(&cid_bytes)
+                .expect("Writing to Vec<u8> should never fail");
+            writer.write_all(&block)
+                .expect("Writing to Vec<u8> should never fail");
 
             car_bytes.extend_from_slice(&writer);
         }
@@ -143,27 +154,39 @@ pub async fn get_repo(
         }
     };
 
-    let mut car_bytes = encode_car_header(&head_cid);
+    let mut car_bytes = match encode_car_header(&head_cid) {
+        Ok(h) => h,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": format!("Failed to encode CAR header: {}", e)})),
+            )
+                .into_response();
+        }
+    };
 
     let mut stack = vec![head_cid];
     let mut visited = std::collections::HashSet::new();
-    let mut limit = 20000;
+    let mut remaining = MAX_REPO_BLOCKS_TRAVERSAL;
 
     while let Some(cid) = stack.pop() {
         if visited.contains(&cid) {
             continue;
         }
         visited.insert(cid);
-        if limit == 0 { break; }
-        limit -= 1;
+        if remaining == 0 { break; }
+        remaining -= 1;
 
         if let Ok(Some(block)) = state.block_store.get(&cid).await {
             let cid_bytes = cid.to_bytes();
             let total_len = cid_bytes.len() + block.len();
             let mut writer = Vec::new();
-            crate::sync::car::write_varint(&mut writer, total_len as u64).unwrap();
-            writer.write_all(&cid_bytes).unwrap();
-            writer.write_all(&block).unwrap();
+            crate::sync::car::write_varint(&mut writer, total_len as u64)
+                .expect("Writing to Vec<u8> should never fail");
+            writer.write_all(&cid_bytes)
+                .expect("Writing to Vec<u8> should never fail");
+            writer.write_all(&block)
+                .expect("Writing to Vec<u8> should never fail");
             car_bytes.extend_from_slice(&writer);
 
             if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
@@ -258,15 +281,23 @@ pub async fn get_record(
         _ => return (StatusCode::NOT_FOUND, "Block not found").into_response(),
     };
 
-    let header = encode_car_header(&cid);
+    let header = match encode_car_header(&cid) {
+        Ok(h) => h,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to encode CAR header: {}", e)).into_response();
+        }
+    };
     let mut car_bytes = header;
 
     let cid_bytes = cid.to_bytes();
     let total_len = cid_bytes.len() + block.len();
     let mut writer = Vec::new();
-    crate::sync::car::write_varint(&mut writer, total_len as u64).unwrap();
-    writer.write_all(&cid_bytes).unwrap();
-    writer.write_all(&block).unwrap();
+    crate::sync::car::write_varint(&mut writer, total_len as u64)
+        .expect("Writing to Vec<u8> should never fail");
+    writer.write_all(&cid_bytes)
+        .expect("Writing to Vec<u8> should never fail");
+    writer.write_all(&block)
+        .expect("Writing to Vec<u8> should never fail");
     car_bytes.extend_from_slice(&writer);
 
     (

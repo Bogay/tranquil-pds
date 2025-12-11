@@ -12,11 +12,10 @@ async fn run_relay_client(state: AppState, url: String, ready_tx: Option<mpsc::S
         match connect_async(&url).await {
             Ok((mut ws_stream, _)) => {
                 info!("Connected to firehose relay: {}", url);
+                let mut rx = state.firehose_tx.subscribe();
                 if let Some(tx) = ready_tx.as_ref() {
                     tx.send(()).await.ok();
                 }
-
-                let mut rx = state.firehose_tx.subscribe();
 
                 loop {
                     tokio::select! {

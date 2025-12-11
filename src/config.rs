@@ -62,13 +62,17 @@ impl AuthConfig {
             let seed = hasher.finalize();
 
             let signing_key = SigningKey::from_slice(&seed)
-                .expect("Failed to create signing key from seed");
+                .unwrap_or_else(|e| panic!("Failed to create signing key from seed: {}. This is a bug.", e));
 
             let verifying_key = signing_key.verifying_key();
             let point = verifying_key.to_encoded_point(false);
 
-            let signing_key_x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
-            let signing_key_y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
+            let signing_key_x = URL_SAFE_NO_PAD.encode(
+                point.x().expect("EC point missing X coordinate - this should never happen")
+            );
+            let signing_key_y = URL_SAFE_NO_PAD.encode(
+                point.y().expect("EC point missing Y coordinate - this should never happen")
+            );
 
             let mut kid_hasher = Sha256::new();
             kid_hasher.update(signing_key_x.as_bytes());

@@ -1,3 +1,4 @@
+use crate::api::ApiError;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -37,25 +38,12 @@ pub async fn create_report(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
 
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
+    let did = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let valid_reason_types = [

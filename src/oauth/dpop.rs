@@ -237,12 +237,11 @@ fn verify_es256(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         false,
     );
 
-    let affine = AffinePoint::from_encoded_point(&point);
-    if affine.is_none().into() {
-        return Err(OAuthError::InvalidDpopProof("Invalid EC point".to_string()));
-    }
+    let affine_opt: Option<AffinePoint> = AffinePoint::from_encoded_point(&point).into();
+    let affine = affine_opt
+        .ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
 
-    let verifying_key = VerifyingKey::from_affine(affine.unwrap())
+    let verifying_key = VerifyingKey::from_affine(affine)
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid verifying key".to_string()))?;
 
     let sig = Signature::from_slice(signature)
@@ -287,12 +286,11 @@ fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         false,
     );
 
-    let affine = AffinePoint::from_encoded_point(&point);
-    if affine.is_none().into() {
-        return Err(OAuthError::InvalidDpopProof("Invalid EC point".to_string()));
-    }
+    let affine_opt: Option<AffinePoint> = AffinePoint::from_encoded_point(&point).into();
+    let affine = affine_opt
+        .ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
 
-    let verifying_key = VerifyingKey::from_affine(affine.unwrap())
+    let verifying_key = VerifyingKey::from_affine(affine)
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid verifying key".to_string()))?;
 
     let sig = Signature::from_slice(signature)

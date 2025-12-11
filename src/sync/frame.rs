@@ -38,22 +38,26 @@ pub struct RepoOp {
     pub cid: Option<String>,
 }
 
-impl From<SequencedEvent> for CommitFrame {
-    fn from(event: SequencedEvent) -> Self {
+impl TryFrom<SequencedEvent> for CommitFrame {
+    type Error = &'static str;
+
+    fn try_from(event: SequencedEvent) -> Result<Self, Self::Error> {
         let ops = serde_json::from_value::<Vec<RepoOp>>(event.ops.unwrap_or_default())
             .unwrap_or_else(|_| vec![]);
 
-        CommitFrame {
+        let commit_cid = event.commit_cid.ok_or("Missing commit_cid in event")?;
+
+        Ok(CommitFrame {
             seq: event.seq,
             rebase: false,
             too_big: false,
             repo: event.did,
-            commit: event.commit_cid.unwrap_or_default(),
+            commit: commit_cid,
             prev: event.prev_cid,
             blocks: Vec::new(),
             ops,
             blobs: event.blobs.unwrap_or_default(),
             time: event.created_at.to_rfc3339(),
-        }
+        })
     }
 }

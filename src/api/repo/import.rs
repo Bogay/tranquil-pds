@@ -1,3 +1,4 @@
+use crate::api::ApiError;
 use crate::state::AppState;
 use crate::sync::import::{apply_import, parse_car, ImportError};
 use crate::sync::verify::CarVerifier;
@@ -54,24 +55,12 @@ pub async fn import_repo(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
 
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed", "message": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let did = &auth_user.did;

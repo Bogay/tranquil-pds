@@ -132,7 +132,7 @@ pub async fn list_blobs(
             .into_response();
     }
 
-    let limit = params.limit.unwrap_or(500).min(1000);
+    let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor_cid = params.cursor.as_deref().unwrap_or("");
 
     let user_result = sqlx::query!("SELECT id FROM users WHERE did = $1", did)

@@ -1,3 +1,4 @@
+use crate::api::ApiError;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -34,25 +35,12 @@ pub async fn check_account_status(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
 
-    let auth_result = crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await;
-    let did = match auth_result {
+    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
@@ -127,25 +115,12 @@ pub async fn activate_account(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
 
-    let auth_result = crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await;
-    let did = match auth_result {
+    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
@@ -180,25 +155,12 @@ pub async fn deactivate_account(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
 
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
+    let did = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let result = sqlx::query!("UPDATE users SET deactivated_at = NOW() WHERE did = $1", did)
@@ -226,25 +188,12 @@ pub async fn request_account_delete(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
 
-    let auth_result = crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await;
-    let did = match auth_result {
+    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)

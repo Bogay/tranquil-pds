@@ -21,7 +21,10 @@ impl TrackingBlockStore {
     }
 
     pub fn get_written_cids(&self) -> Vec<Cid> {
-        self.written_cids.lock().unwrap().clone()
+        match self.written_cids.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
     }
 }
 
@@ -32,7 +35,10 @@ impl BlockStore for TrackingBlockStore {
 
     async fn put(&self, data: &[u8]) -> Result<Cid, RepoError> {
         let cid = self.inner.put(data).await?;
-        self.written_cids.lock().unwrap().push(cid.clone());
+        match self.written_cids.lock() {
+            Ok(mut guard) => guard.push(cid.clone()),
+            Err(poisoned) => poisoned.into_inner().push(cid.clone()),
+        }
         Ok(cid)
     }
 
@@ -47,7 +53,10 @@ impl BlockStore for TrackingBlockStore {
         let blocks: Vec<_> = blocks.into_iter().collect();
         let cids: Vec<Cid> = blocks.iter().map(|(cid, _)| cid.clone()).collect();
         self.inner.put_many(blocks).await?;
-        self.written_cids.lock().unwrap().extend(cids);
+        match self.written_cids.lock() {
+            Ok(mut guard) => guard.extend(cids),
+            Err(poisoned) => poisoned.into_inner().extend(cids),
+        }
         Ok(())
     }
 

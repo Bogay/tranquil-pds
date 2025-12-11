@@ -253,25 +253,25 @@ Anyway... endpoints for PDS settings not covered by standard ATProto:
 ### Frontend Views
 Uses existing ATProto endpoints where possible:
 
-**User Dashboard**
+User Dashboard
 - [ ] Account overview (uses `com.atproto.server.getSession`, `com.atproto.admin.getAccountInfo`)
 - [ ] Active sessions view (needs new endpoint or extend existing)
 - [ ] App passwords (uses `com.atproto.server.listAppPasswords`, `createAppPassword`, `revokeAppPassword`)
 - [ ] Invite codes (uses `com.atproto.server.getAccountInviteCodes`, `createInviteCode`)
 
-**Notification Preferences**
+Notification Preferences
 - [ ] Channel selector (uses `com.bspds.account.*` endpoints above)
 - [ ] Verification flows for Discord/Telegram/Signal
 - [ ] Notification history view
 
-**Account Settings**
+Account Settings
 - [ ] Email change (uses `com.atproto.server.requestEmailUpdate`, `updateEmail`)
 - [ ] Password change (uses `com.atproto.server.requestPasswordReset`, `resetPassword`)
 - [ ] Handle change (uses `com.atproto.identity.updateHandle`)
 - [ ] Account deletion (uses `com.atproto.server.requestAccountDelete`, `deleteAccount`)
 - [ ] Data export (uses `com.atproto.sync.getRepo`)
 
-**Admin Dashboard** (privileged users only)
+Admin Dashboard (privileged users only)
 - [ ] User list (uses `com.atproto.admin.getAccountInfos` with pagination)
 - [ ] User detail/actions (uses `com.atproto.admin.*` endpoints)
 - [ ] Invite management (uses `com.atproto.admin.getInviteCodes`, `disableInviteCodes`)

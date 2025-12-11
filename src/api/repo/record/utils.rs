@@ -55,8 +55,11 @@ pub async fn commit_and_log(
     let new_root_cid = state.block_store.put(&new_commit_bytes).await
         .map_err(|e| format!("Failed to save commit block: {:?}", e))?;
 
+    let mut tx = state.db.begin().await
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
+
     sqlx::query!("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2", new_root_cid.to_string(), user_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("DB Error (repos): {}", e))?;
 
@@ -71,7 +74,7 @@ pub async fn commit_and_log(
                     rkey,
                     cid.to_string()
                 )
-                .execute(&state.db)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("DB Error (records): {}", e))?;
             }
@@ -82,7 +85,7 @@ pub async fn commit_and_log(
                     collection,
                     rkey
                 )
-                .execute(&state.db)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("DB Error (records): {}", e))?;
             }
@@ -126,16 +129,19 @@ pub async fn commit_and_log(
         &[] as &[String],
         blocks_cids,
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (repo_seq): {}", e))?;
 
     sqlx::query(
         &format!("NOTIFY repo_updates, '{}'", seq_row.seq)
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (notify): {}", e))?;
+
+    tx.commit().await
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
 
     Ok(CommitResult {
         commit_cid: new_root_cid,

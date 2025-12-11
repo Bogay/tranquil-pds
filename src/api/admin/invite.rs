@@ -104,7 +104,7 @@ pub async fn get_invite_codes(
             .into_response();
     }
 
-    let limit = params.limit.unwrap_or(100).min(500);
+    let limit = params.limit.unwrap_or(100).clamp(1, 500);
     let sort = params.sort.as_deref().unwrap_or("recent");
 
     let order_clause = match sort {

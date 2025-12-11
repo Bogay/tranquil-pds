@@ -1,3 +1,4 @@
+use crate::api::ApiError;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -6,17 +7,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Duration, Utc};
-use rand::Rng;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
 
 fn generate_confirmation_code() -> String {
-    let mut rng = rand::thread_rng();
-    let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz234567".chars().collect();
-    let part1: String = (0..5).map(|_| chars[rng.gen_range(0..chars.len())]).collect();
-    let part2: String = (0..5).map(|_| chars[rng.gen_range(0..chars.len())]).collect();
-    format!("{}-{}", part1, part2)
+    crate::util::generate_token_code()
 }
 
 #[derive(Deserialize)]
@@ -46,13 +42,7 @@ pub async fn request_email_update(
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
     let did = match auth_result {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let user = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
@@ -72,10 +62,10 @@ pub async fn request_email_update(
     let handle = user.handle;
 
     let email = input.email.trim().to_lowercase();
-    if email.is_empty() {
+    if !crate::api::validation::is_valid_email(&email) {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "email is required"})),
+            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
         )
             .into_response();
     }
@@ -161,13 +151,7 @@ pub async fn confirm_email(
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
     let did = match auth_result {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let user = match sqlx::query!(
@@ -194,16 +178,18 @@ pub async fn confirm_email(
     let email = input.email.trim().to_lowercase();
     let confirmation_code = input.token.trim();
 
-    if email_pending_verification.is_none() || stored_code.is_none() || expires_at.is_none() {
-         return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
-        )
-            .into_response();
-    }
+    let (pending_email, saved_code, expiry) = match (email_pending_verification, stored_code, expires_at) {
+        (Some(p), Some(c), Some(e)) => (p, c, e),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
+            )
+                .into_response();
+        }
+    };
 
-    let email_pending_verification = email_pending_verification.unwrap();
-    if email_pending_verification != email {
+    if pending_email != email {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidRequest", "message": "Email does not match pending update"})),
@@ -211,7 +197,7 @@ pub async fn confirm_email(
             .into_response();
     }
 
-    if stored_code.unwrap() != confirmation_code {
+    if saved_code != confirmation_code {
          return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidToken", "message": "Invalid token"})),
@@ -219,7 +205,7 @@ pub async fn confirm_email(
             .into_response();
     }
 
-    if Utc::now() > expires_at.unwrap() {
+    if Utc::now() > expiry {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
@@ -229,7 +215,7 @@ pub async fn confirm_email(
 
     let update = sqlx::query!(
         "UPDATE users SET email = $1, email_pending_verification = NULL, email_confirmation_code = NULL, email_confirmation_code_expires_at = NULL WHERE id = $2",
-        email_pending_verification,
+        pending_email,
         user_id
     )
     .execute(&state.db)
@@ -287,13 +273,7 @@ pub async fn update_email(
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
     let did = match auth_result {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let user = match sqlx::query!(
@@ -319,18 +299,10 @@ pub async fn update_email(
     let email_pending_verification = user.email_pending_verification;
 
     let new_email = input.email.trim().to_lowercase();
-    if new_email.is_empty() {
+    if !crate::api::validation::is_valid_email(&new_email) {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "email is required"})),
-        )
-            .into_response();
-    }
-
-    if !new_email.contains('@') || !new_email.contains('.') {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Invalid email format"})),
+            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
         )
             .into_response();
     }
@@ -353,7 +325,17 @@ pub async fn update_email(
             }
         };
 
-        let pending_email = email_pending_verification.unwrap();
+        let pending_email = match email_pending_verification {
+            Some(p) => p,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
+                )
+                    .into_response();
+            }
+        };
+
         if pending_email.to_lowercase() != new_email {
             return (
                 StatusCode::BAD_REQUEST,
@@ -362,7 +344,18 @@ pub async fn update_email(
                 .into_response();
         }
 
-        if stored_code.unwrap() != confirmation_token {
+        let saved_code = match stored_code {
+            Some(c) => c,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
+                )
+                    .into_response();
+            }
+        };
+
+        if saved_code != confirmation_token {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "InvalidToken", "message": "Invalid token"})),
@@ -415,7 +408,7 @@ pub async fn update_email(
 
     match update {
         Ok(_) => {
-            info!("Email updated to {} for user {}", new_email, user_id);
+            info!("Email updated for user {}", user_id);
             (StatusCode::OK, Json(json!({}))).into_response()
         }
         Err(e) => {

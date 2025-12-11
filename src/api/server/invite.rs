@@ -1,12 +1,13 @@
+use crate::api::ApiError;
+use crate::auth::BearerAuth;
 use crate::state::AppState;
+use crate::util::get_user_id_by_did;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::error;
 use uuid::Uuid;
 
@@ -24,77 +25,28 @@ pub struct CreateInviteCodeOutput {
 
 pub async fn create_invite_code(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    BearerAuth(auth_user): BearerAuth,
     Json(input): Json<CreateInviteCodeInput>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
-    ) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
-    };
-
     if input.use_count < 1 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "useCount must be at least 1"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
 
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
-        Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
-    };
-
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(id)) => id,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
+        Ok(id) => id,
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let creator_user_id = if let Some(for_account) = &input.for_account {
-        let target = sqlx::query!("SELECT id FROM users WHERE did = $1", for_account)
+        match sqlx::query!("SELECT id FROM users WHERE did = $1", for_account)
             .fetch_optional(&state.db)
-            .await;
-
-        match target {
+            .await
+        {
             Ok(Some(row)) => row.id,
-            Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "AccountNotFound", "message": "Target account not found"})),
-                )
-                    .into_response();
-            }
+            Ok(None) => return ApiError::AccountNotFound.into_response(),
             Err(e) => {
                 error!("DB error looking up target account: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError.into_response();
             }
         }
     } else {
@@ -103,43 +55,38 @@ pub async fn create_invite_code(
 
     let user_invites_disabled = sqlx::query_scalar!(
         "SELECT invites_disabled FROM users WHERE did = $1",
-        did
+        auth_user.did
     )
     .fetch_optional(&state.db)
     .await
+    .map_err(|e| {
+        error!("DB error checking invites_disabled: {:?}", e);
+        ApiError::InternalError
+    })
     .ok()
     .flatten()
     .flatten()
     .unwrap_or(false);
 
     if user_invites_disabled {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "InvitesDisabled", "message": "Invites are disabled for this account"})),
-        )
-            .into_response();
+        return ApiError::InvitesDisabled.into_response();
     }
 
     let code = Uuid::new_v4().to_string();
 
-    let result = sqlx::query!(
+    match sqlx::query!(
         "INSERT INTO invite_codes (code, available_uses, created_by_user) VALUES ($1, $2, $3)",
         code,
         input.use_count,
         creator_user_id
     )
     .execute(&state.db)
-    .await;
-
-    match result {
-        Ok(_) => (StatusCode::OK, Json(CreateInviteCodeOutput { code })).into_response(),
+    .await
+    {
+        Ok(_) => Json(CreateInviteCodeOutput { code }).into_response(),
         Err(e) => {
             error!("DB error creating invite code: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError.into_response()
         }
     }
 }
@@ -165,54 +112,16 @@ pub struct AccountCodes {
 
 pub async fn create_invite_codes(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    BearerAuth(auth_user): BearerAuth,
     Json(input): Json<CreateInviteCodesInput>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
-    ) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
-    };
-
     if input.use_count < 1 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "useCount must be at least 1"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
 
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
-        Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
-    };
-
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(id)) => id,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
+        Ok(id) => id,
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let code_count = input.code_count.unwrap_or(1).max(1);
@@ -225,22 +134,17 @@ pub async fn create_invite_codes(
         for _ in 0..code_count {
             let code = Uuid::new_v4().to_string();
 
-            let insert = sqlx::query!(
+            if let Err(e) = sqlx::query!(
                 "INSERT INTO invite_codes (code, available_uses, created_by_user) VALUES ($1, $2, $3)",
                 code,
                 input.use_count,
                 user_id
             )
             .execute(&state.db)
-            .await;
-
-            if let Err(e) = insert {
+            .await
+            {
                 error!("DB error creating invite code: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError.into_response();
             }
 
             codes.push(code);
@@ -252,22 +156,15 @@ pub async fn create_invite_codes(
         });
     } else {
         for account_did in for_accounts {
-            let target = sqlx::query!("SELECT id FROM users WHERE did = $1", account_did)
+            let target_user_id = match sqlx::query!("SELECT id FROM users WHERE did = $1", account_did)
                 .fetch_optional(&state.db)
-                .await;
-
-            let target_user_id = match target {
+                .await
+            {
                 Ok(Some(row)) => row.id,
-                Ok(None) => {
-                    continue;
-                }
+                Ok(None) => continue,
                 Err(e) => {
                     error!("DB error looking up target account: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError.into_response();
                 }
             };
 
@@ -275,22 +172,17 @@ pub async fn create_invite_codes(
             for _ in 0..code_count {
                 let code = Uuid::new_v4().to_string();
 
-                let insert = sqlx::query!(
+                if let Err(e) = sqlx::query!(
                     "INSERT INTO invite_codes (code, available_uses, created_by_user) VALUES ($1, $2, $3)",
                     code,
                     input.use_count,
                     target_user_id
                 )
                 .execute(&state.db)
-                .await;
-
-                if let Err(e) = insert {
+                .await
+                {
                     error!("DB error creating invite code: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError.into_response();
                 }
 
                 codes.push(code);
@@ -303,7 +195,7 @@ pub async fn create_invite_codes(
         }
     }
 
-    (StatusCode::OK, Json(CreateInviteCodesOutput { codes: result_codes })).into_response()
+    Json(CreateInviteCodesOutput { codes: result_codes }).into_response()
 }
 
 #[derive(Deserialize)]
@@ -339,51 +231,17 @@ pub struct GetAccountInviteCodesOutput {
 
 pub async fn get_account_invite_codes(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    BearerAuth(auth_user): BearerAuth,
     axum::extract::Query(params): axum::extract::Query<GetAccountInviteCodesParams>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
-    ) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
-    };
-
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
-        Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
-    };
-
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(id)) => id,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
+        Ok(id) => id,
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let include_used = params.include_used.unwrap_or(true);
 
-    let codes_result = sqlx::query!(
+    let codes_rows = match sqlx::query!(
         r#"
         SELECT code, available_uses, created_at, disabled
         FROM invite_codes
@@ -393,9 +251,8 @@ pub async fn get_account_invite_codes(
         user_id
     )
     .fetch_all(&state.db)
-    .await;
-
-    let codes_rows = match codes_result {
+    .await
+    {
         Ok(rows) => {
             if include_used {
                 rows
@@ -405,17 +262,13 @@ pub async fn get_account_invite_codes(
         }
         Err(e) => {
             error!("DB error fetching invite codes: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError.into_response();
         }
     };
 
     let mut codes = Vec::new();
     for row in codes_rows {
-        let uses_result = sqlx::query!(
+        let uses = sqlx::query!(
             r#"
             SELECT u.did, icu.used_at
             FROM invite_code_uses icu
@@ -426,29 +279,28 @@ pub async fn get_account_invite_codes(
             row.code
         )
         .fetch_all(&state.db)
-        .await;
-
-        let uses = match uses_result {
-            Ok(use_rows) => use_rows
+        .await
+        .map(|use_rows| {
+            use_rows
                 .iter()
                 .map(|u| InviteCodeUse {
                     used_by: u.did.clone(),
                     used_at: u.used_at.to_rfc3339(),
                 })
-                .collect(),
-            Err(_) => Vec::new(),
-        };
+                .collect()
+        })
+        .unwrap_or_default();
 
         codes.push(InviteCode {
             code: row.code,
             available: row.available_uses,
             disabled: row.disabled.unwrap_or(false),
-            for_account: did.clone(),
-            created_by: did.clone(),
+            for_account: auth_user.did.clone(),
+            created_by: auth_user.did.clone(),
             created_at: row.created_at.to_rfc3339(),
             uses,
         });
     }
 
-    (StatusCode::OK, Json(GetAccountInviteCodesOutput { codes })).into_response()
+    Json(GetAccountInviteCodesOutput { codes }).into_response()
 }

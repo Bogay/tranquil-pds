@@ -1,3 +1,4 @@
+use crate::api::ApiError;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -56,19 +57,21 @@ pub async fn resolve_handle(
     }
 }
 
-pub fn get_jwk(key_bytes: &[u8]) -> serde_json::Value {
-    let secret_key = SecretKey::from_slice(key_bytes).expect("Invalid key length");
+pub fn get_jwk(key_bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
+    let secret_key = SecretKey::from_slice(key_bytes).map_err(|_| "Invalid key length")?;
     let public_key = secret_key.public_key();
     let encoded = public_key.to_encoded_point(false);
-    let x = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(encoded.x().unwrap());
-    let y = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(encoded.y().unwrap());
+    let x = encoded.x().ok_or("Missing x coordinate")?;
+    let y = encoded.y().ok_or("Missing y coordinate")?;
+    let x_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(x);
+    let y_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(y);
 
-    json!({
+    Ok(json!({
         "kty": "EC",
         "crv": "secp256k1",
-        "x": x,
-        "y": y
-    })
+        "x": x_b64,
+        "y": y_b64
+    }))
 }
 
 pub async fn well_known_did(State(_state): State<AppState>) -> impl IntoResponse {
@@ -147,7 +150,17 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         }
     };
 
-    let jwk = get_jwk(&key_bytes);
+    let jwk = match get_jwk(&key_bytes) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!("Failed to generate JWK: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
 
     Json(json!({
         "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/jws-2020/v1"],
@@ -294,42 +307,22 @@ pub async fn get_recommended_did_credentials(
         }
     };
 
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
-        Ok(ref user) => user.did.clone(),
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+        Ok(user) => user,
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
-    let user = match sqlx::query!("SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1", did)
+    let user = match sqlx::query!("SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1", auth_user.did)
         .fetch_optional(&state.db)
         .await
     {
         Ok(Some(row)) => row,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError.into_response(),
     };
-    let handle = user.handle;
 
-    let key_bytes = match auth_result.ok().and_then(|u| u.key_bytes) {
+    let key_bytes = match auth_user.key_bytes {
         Some(kb) => kb,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed", "message": "OAuth tokens cannot get DID credentials"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationFailedMsg("OAuth tokens cannot get DID credentials".into()).into_response(),
     };
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -337,13 +330,7 @@ pub async fn get_recommended_did_credentials(
 
     let secret_key = match k256::SecretKey::from_slice(&key_bytes) {
         Ok(k) => k,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+        Err(_) => return ApiError::InternalError.into_response(),
     };
 
     let public_key = secret_key.public_key();
@@ -360,7 +347,7 @@ pub async fn get_recommended_did_credentials(
         StatusCode::OK,
         Json(GetRecommendedDidCredentialsOutput {
             rotation_keys: vec![did_key.clone()],
-            also_known_as: vec![format!("at://{}", handle)],
+            also_known_as: vec![format!("at://{}", user.handle)],
             verification_methods: VerificationMethods { atproto: did_key },
             services: Services {
                 atproto_pds: AtprotoPds {
@@ -387,25 +374,12 @@ pub async fn update_handle(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
 
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
+    let did = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user.did,
-        Err(e) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
 
     let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
@@ -413,22 +387,12 @@ pub async fn update_handle(
         .await
     {
         Ok(Some(id)) => id,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError.into_response(),
     };
 
     let new_handle = input.handle.trim();
     if new_handle.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "handle is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("handle is required".into()).into_response();
     }
 
     if !new_handle

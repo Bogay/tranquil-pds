@@ -7,7 +7,7 @@ use axum::{
 use serde_json::json;
 
 use crate::state::AppState;
-use super::{AuthenticatedUser, validate_bearer_token};
+use super::{AuthenticatedUser, TokenValidationError, validate_bearer_token, validate_bearer_token_allow_deactivated};
 
 pub struct BearerAuth(pub AuthenticatedUser);
 
@@ -112,8 +112,34 @@ impl FromRequestParts<AppState> for BearerAuth {
 
         match validate_bearer_token(&state.db, token).await {
             Ok(user) => Ok(BearerAuth(user)),
-            Err("AccountDeactivated") => Err(AuthError::AccountDeactivated),
-            Err("AccountTakedown") => Err(AuthError::AccountTakedown),
+            Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
+            Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+            Err(_) => Err(AuthError::AuthenticationFailed),
+        }
+    }
+}
+
+pub struct BearerAuthAllowDeactivated(pub AuthenticatedUser);
+
+impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let auth_header = parts
+            .headers
+            .get(AUTHORIZATION)
+            .ok_or(AuthError::MissingToken)?
+            .to_str()
+            .map_err(|_| AuthError::InvalidFormat)?;
+
+        let token = extract_bearer_token(auth_header)?;
+
+        match validate_bearer_token_allow_deactivated(&state.db, token).await {
+            Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
+            Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
             Err(_) => Err(AuthError::AuthenticationFailed),
         }
     }
