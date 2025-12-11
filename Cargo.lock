@@ -917,6 +917,7 @@ dependencies = [
  "futures",
  "hkdf",
  "hmac",
+ "ipld-core",
  "iroh-car",
  "jacquard",
  "jacquard-axum",

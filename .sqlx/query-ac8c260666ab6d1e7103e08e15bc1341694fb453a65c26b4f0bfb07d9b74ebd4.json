@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM plc_operation_tokens WHERE user_id = $1 OR expires_at < NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ac8c260666ab6d1e7103e08e15bc1341694fb453a65c26b4f0bfb07d9b74ebd4"
+}

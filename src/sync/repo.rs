@@ -7,6 +7,7 @@ use axum::{
     Json,
 };
 use cid::Cid;
+use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::Deserialize;
 use serde_json::json;
@@ -165,8 +166,8 @@ pub async fn get_repo(
             writer.write_all(&block).unwrap();
             car_bytes.extend_from_slice(&writer);
 
-             if let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block) {
-                extract_links_json(&value, &mut stack);
+            if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
+                extract_links_ipld(&value, &mut stack);
             }
         }
     }
@@ -179,26 +180,19 @@ pub async fn get_repo(
         .into_response()
 }
 
-fn extract_links_json(value: &serde_json::Value, stack: &mut Vec<Cid>) {
+fn extract_links_ipld(value: &Ipld, stack: &mut Vec<Cid>) {
     match value {
-        serde_json::Value::Object(map) => {
-            if let Some(serde_json::Value::String(s)) = map.get("/") {
-                if let Ok(cid) = Cid::from_str(s) {
-                    stack.push(cid);
-                }
-            } else if let Some(serde_json::Value::String(s)) = map.get("$link") {
-                 if let Ok(cid) = Cid::from_str(s) {
-                    stack.push(cid);
-                }
-            } else {
-                for v in map.values() {
-                    extract_links_json(v, stack);
-                }
+        Ipld::Link(cid) => {
+            stack.push(*cid);
+        }
+        Ipld::Map(map) => {
+            for v in map.values() {
+                extract_links_ipld(v, stack);
             }
         }
-        serde_json::Value::Array(arr) => {
+        Ipld::List(arr) => {
             for v in arr {
-                extract_links_json(v, stack);
+                extract_links_ipld(v, stack);
             }
         }
         _ => {}

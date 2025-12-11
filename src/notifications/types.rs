@@ -30,6 +30,7 @@ pub enum NotificationType {
     EmailUpdate,
     AccountDeletion,
     AdminEmail,
+    PlcOperation,
 }
 
 #[derive(Debug, Clone, FromRow)]

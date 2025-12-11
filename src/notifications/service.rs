@@ -416,3 +416,30 @@ pub async fn enqueue_account_deletion(
     )
     .await
 }
+
+pub async fn enqueue_plc_operation(
+    db: &PgPool,
+    user_id: Uuid,
+    token: &str,
+    hostname: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_notification_prefs(db, user_id).await?;
+
+    let body = format!(
+        "Hello @{},\n\nYou requested to sign a PLC operation for your account.\n\nYour verification token is: {}\n\nThis token will expire in 10 minutes.\n\nIf you did not request this, you can safely ignore this message.",
+        prefs.handle, token
+    );
+
+    enqueue_notification(
+        db,
+        NewNotification::new(
+            user_id,
+            prefs.channel,
+            super::types::NotificationType::PlcOperation,
+            prefs.email.clone(),
+            Some(format!("{} - PLC Operation Token", hostname)),
+            body,
+        ),
+    )
+    .await
+}

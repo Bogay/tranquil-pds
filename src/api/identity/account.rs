@@ -9,7 +9,7 @@ use axum::{
 use bcrypt::{DEFAULT_COST, hash};
 use jacquard::types::{did::Did, integer::LimitedU32, string::Tid};
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
-use k256::SecretKey;
+use k256::{ecdsa::SigningKey, SecretKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -302,9 +302,33 @@ pub async fn create_account(
 
     let rev = Tid::now(LimitedU32::MIN);
 
-    let commit = Commit::new_unsigned(did_obj, mst_root, rev, None);
+    let unsigned_commit = Commit::new_unsigned(did_obj, mst_root, rev, None);
 
-    let commit_bytes = match commit.to_cbor() {
+    let signing_key = match SigningKey::from_slice(&secret_key_bytes) {
+        Ok(k) => k,
+        Err(e) => {
+            error!("Error creating signing key: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let signed_commit = match unsigned_commit.sign(&signing_key) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Error signing genesis commit: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let commit_bytes = match signed_commit.to_cbor() {
         Ok(b) => b,
         Err(e) => {
             error!("Error serializing genesis commit: {:?}", e);

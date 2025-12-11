@@ -4,14 +4,17 @@ pub mod commit;
 pub mod crawl;
 pub mod firehose;
 pub mod frame;
+pub mod import;
 pub mod listener;
 pub mod relay_client;
 pub mod repo;
 pub mod subscribe_repos;
 pub mod util;
+pub mod verify;
 
 pub use blob::{get_blob, list_blobs};
 pub use commit::{get_latest_commit, get_repo_status, list_repos};
 pub use crawl::{notify_of_update, request_crawl};
 pub use repo::{get_blocks, get_repo, get_record};
 pub use subscribe_repos::subscribe_repos;
+pub use verify::{CarVerifier, VerifiedCar, VerifyError};

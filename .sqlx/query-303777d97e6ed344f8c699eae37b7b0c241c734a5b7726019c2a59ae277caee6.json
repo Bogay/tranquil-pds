@@ -35,7 +35,8 @@
                 "password_reset",
                 "email_update",
                 "account_deletion",
-                "admin_email"
+                "admin_email",
+                "plc_operation"
               ]
             }
           }

@@ -96,6 +96,7 @@ export AWS_SECRET_ACCESS_KEY="minioadmin"
 export AWS_REGION="us-east-1"
 export BSPDS_TEST_INFRA_READY="1"
 export BSPDS_ALLOW_INSECURE_SECRETS="1"
+export SKIP_IMPORT_VERIFICATION="true"
 EOF
 
     echo ""

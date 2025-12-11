@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO records (repo_id, collection, rkey, record_cid)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (repo_id, collection, rkey) DO UPDATE SET record_cid = $4\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5d1f9275037dd0cb03cefe1e4bbbf7dfaeecb1cc8469b4f0836fe5e52e046839"
+}

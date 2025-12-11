@@ -3,6 +3,7 @@ pub mod auth;
 pub mod config;
 pub mod notifications;
 pub mod oauth;
+pub mod plc;
 pub mod repo;
 pub mod state;
 pub mod storage;
@@ -193,6 +194,22 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.identity.updateHandle",
             post(api::identity::update_handle),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.requestPlcOperationSignature",
+            post(api::identity::request_plc_operation_signature),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.signPlcOperation",
+            post(api::identity::sign_plc_operation),
+        )
+        .route(
+            "/xrpc/com.atproto.identity.submitPlcOperation",
+            post(api::identity::submit_plc_operation),
+        )
+        .route(
+            "/xrpc/com.atproto.repo.importRepo",
+            post(api::repo::import_repo),
         )
         .route(
             "/xrpc/com.atproto.admin.deleteAccount",

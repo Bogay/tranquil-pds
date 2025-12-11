@@ -1,4 +1,5 @@
 use cid::Cid;
+use iroh_car::CarHeader;
 use std::io::Write;
 
 pub fn write_varint<W: Write>(mut writer: W, mut value: u64) -> std::io::Result<()> {
@@ -23,10 +24,11 @@ pub fn ld_write<W: Write>(mut writer: W, data: &[u8]) -> std::io::Result<()> {
 }
 
 pub fn encode_car_header(root_cid: &Cid) -> Vec<u8> {
-    let header = serde_ipld_dagcbor::to_vec(&serde_json::json!({
-        "version": 1u64,
-        "roots": [root_cid.to_bytes()]
-    }))
-    .unwrap_or_default();
-    header
+    let header = CarHeader::new_v1(vec![root_cid.clone()]);
+    let header_cbor = header.encode().unwrap_or_default();
+
+    let mut result = Vec::new();
+    write_varint(&mut result, header_cbor.len() as u64).unwrap();
+    result.extend_from_slice(&header_cbor);
+    result
 }

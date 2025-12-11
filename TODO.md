@@ -56,7 +56,7 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.repo.listRecords`.
     - [x] Implement `com.atproto.repo.describeRepo`.
     - [x] Implement `com.atproto.repo.applyWrites` (Batch writes).
-    - [ ] Implement `com.atproto.repo.importRepo` (Migration).
+    - [x] Implement `com.atproto.repo.importRepo` (Migration).
     - [x] Implement `com.atproto.repo.listMissingBlobs`.
 - [x] Blob Management
     - [x] Implement `com.atproto.repo.uploadBlob`.
@@ -83,10 +83,10 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.sync.requestCrawl` (Notify relays to index us).
 
 ## Identity (`com.atproto.identity`)
-- [ ] Resolution
+- [x] Resolution
     - [x] Implement `com.atproto.identity.resolveHandle` (Can be internal or proxy to PLC).
     - [x] Implement `com.atproto.identity.updateHandle`.
-    - [ ] Implement `com.atproto.identity.submitPlcOperation` / `signPlcOperation` / `requestPlcOperationSignature`.
+    - [x] Implement `com.atproto.identity.submitPlcOperation` / `signPlcOperation` / `requestPlcOperationSignature`.
     - [x] Implement `com.atproto.identity.getRecommendedDidCredentials`.
     - [x] Implement `/.well-known/did.json` (Depends on supporting did:web).
 
