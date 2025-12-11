@@ -44,13 +44,19 @@ pub enum ApiError {
     InvitesDisabled,
     DatabaseError,
     UpstreamFailure,
+    UpstreamTimeout,
+    UpstreamUnavailable(String),
+    UpstreamError { status: u16, error: Option<String>, message: Option<String> },
 }
 
 impl ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
-            Self::InternalError | Self::DatabaseError | Self::UpstreamFailure => {
-                StatusCode::INTERNAL_SERVER_ERROR
+            Self::InternalError | Self::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::UpstreamFailure | Self::UpstreamUnavailable(_) => StatusCode::BAD_GATEWAY,
+            Self::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
+            Self::UpstreamError { status, .. } => {
+                StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY)
             }
             Self::AuthenticationRequired
             | Self::AuthenticationFailed
@@ -83,7 +89,15 @@ impl ApiError {
 
     fn error_name(&self) -> &'static str {
         match self {
-            Self::InternalError | Self::DatabaseError | Self::UpstreamFailure => "InternalError",
+            Self::InternalError | Self::DatabaseError => "InternalError",
+            Self::UpstreamFailure | Self::UpstreamUnavailable(_) => "UpstreamFailure",
+            Self::UpstreamTimeout => "UpstreamTimeout",
+            Self::UpstreamError { error, .. } => {
+                if let Some(e) = error {
+                    return Box::leak(e.clone().into_boxed_str());
+                }
+                "UpstreamError"
+            }
             Self::AuthenticationRequired => "AuthenticationRequired",
             Self::AuthenticationFailed | Self::AuthenticationFailedMsg(_) => "AuthenticationFailed",
             Self::InvalidToken => "InvalidToken",
@@ -116,9 +130,24 @@ impl ApiError {
             Self::AuthenticationFailedMsg(msg)
             | Self::ExpiredTokenMsg(msg)
             | Self::InvalidRequest(msg)
-            | Self::RepoNotFoundMsg(msg) => Some(msg.clone()),
+            | Self::RepoNotFoundMsg(msg)
+            | Self::UpstreamUnavailable(msg) => Some(msg.clone()),
+            Self::UpstreamError { message, .. } => message.clone(),
+            Self::UpstreamTimeout => Some("Upstream service timed out".to_string()),
             _ => None,
         }
+    }
+
+    pub fn from_upstream_response(
+        status: u16,
+        body: &[u8],
+    ) -> Self {
+        if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(body) {
+            let error = parsed.get("error").and_then(|v| v.as_str()).map(String::from);
+            let message = parsed.get("message").and_then(|v| v.as_str()).map(String::from);
+            return Self::UpstreamError { status, error, message };
+        }
+        Self::UpstreamError { status, error: None, message: None }
     }
 }
 

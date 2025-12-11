@@ -168,15 +168,15 @@ These endpoints need to be implemented at the PDS level (not just proxied to app
 - [x] Implement `app.bsky.actor.getProfiles` (PDS-level with proxy fallback).
 
 ### Feed (`app.bsky.feed`)
-These are implemented at PDS level to enable local-first reads:
-- [ ] Implement `app.bsky.feed.getTimeline` (PDS-level with proxy).
-- [ ] Implement `app.bsky.feed.getAuthorFeed` (PDS-level with proxy).
-- [ ] Implement `app.bsky.feed.getActorLikes` (PDS-level with proxy).
-- [ ] Implement `app.bsky.feed.getPostThread` (PDS-level with proxy).
-- [ ] Implement `app.bsky.feed.getFeed` (PDS-level with proxy).
+These are implemented at PDS level to enable local-first reads (read-after-write pattern):
+- [x] Implement `app.bsky.feed.getTimeline` (PDS-level with proxy + RAW).
+- [x] Implement `app.bsky.feed.getAuthorFeed` (PDS-level with proxy + RAW).
+- [x] Implement `app.bsky.feed.getActorLikes` (PDS-level with proxy + RAW).
+- [x] Implement `app.bsky.feed.getPostThread` (PDS-level with proxy + RAW + NotFound handling).
+- [x] Implement `app.bsky.feed.getFeed` (proxy to feed generator).
 
 ### Notification (`app.bsky.notification`)
-- [ ] Implement `app.bsky.notification.registerPush` (push notification registration).
+- [x] Implement `app.bsky.notification.registerPush` (push notification registration, proxied).
 
 ## Deprecated Sync Endpoints (for compatibility)
 - [ ] Implement `com.atproto.sync.getCheckout` (deprecated, still needed for compatibility).

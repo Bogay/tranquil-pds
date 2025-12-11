@@ -125,10 +125,18 @@ pub async fn get_profile(
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
 
-    let auth_did = auth_header.and_then(|h| {
-        let token = crate::auth::extract_bearer_token_from_header(Some(h))?;
-        crate::auth::get_did_from_token(&token).ok()
-    });
+    let auth_did = if let Some(h) = auth_header {
+        if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
+            match crate::auth::validate_bearer_token(&state.db, &token).await {
+                Ok(user) => Some(user.did),
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let mut query_params = HashMap::new();
     query_params.insert("actor".to_string(), params.actor.clone());
@@ -167,10 +175,18 @@ pub async fn get_profiles(
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
 
-    let auth_did = auth_header.and_then(|h| {
-        let token = crate::auth::extract_bearer_token_from_header(Some(h))?;
-        crate::auth::get_did_from_token(&token).ok()
-    });
+    let auth_did = if let Some(h) = auth_header {
+        if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
+            match crate::auth::validate_bearer_token(&state.db, &token).await {
+                Ok(user) => Some(user.did),
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let mut query_params = HashMap::new();
     query_params.insert("actors".to_string(), params.actors.clone());

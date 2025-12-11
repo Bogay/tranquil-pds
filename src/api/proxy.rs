@@ -46,21 +46,15 @@ pub async fn proxy_handler(
         if let Some(token) = crate::auth::extract_bearer_token_from_header(
             headers.get("Authorization").and_then(|h| h.to_str().ok())
         ) {
-            if let Ok(did) = crate::auth::get_did_from_token(&token) {
-                let key_row = sqlx::query!("SELECT k.key_bytes, k.encryption_version FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1", did)
-                    .fetch_optional(&state.db)
-                    .await;
-
-                if let Ok(Some(row)) = key_row {
-                    if let Ok(decrypted_key) = crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
-                        if let Ok(new_token) =
-                            crate::auth::create_service_token(&did, aud, &method, &decrypted_key)
+            if let Ok(auth_user) = crate::auth::validate_bearer_token(&state.db, &token).await {
+                if let Some(key_bytes) = auth_user.key_bytes {
+                    if let Ok(new_token) =
+                        crate::auth::create_service_token(&auth_user.did, aud, &method, &key_bytes)
+                    {
+                        if let Ok(val) =
+                            axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))
                         {
-                            if let Ok(val) =
-                                axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))
-                            {
-                                auth_header_val = Some(val);
-                            }
+                            auth_header_val = Some(val);
                         }
                     }
                 }

@@ -23,7 +23,7 @@ fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
 async fn test_import_rejects_car_for_different_user() {
     let client = client();
 
-    let (token_a, did_a) = create_account_and_login(&client).await;
+    let (token_a, _did_a) = create_account_and_login(&client).await;
     let (_token_b, did_b) = create_account_and_login(&client).await;
 
     let export_res = client

@@ -296,10 +296,29 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/app.bsky.actor.getProfiles",
             get(api::actor::get_profiles),
         )
-        // I know I know, I'm not supposed to implement appview endpoints. Leave me be
         .route(
             "/xrpc/app.bsky.feed.getTimeline",
             get(api::feed::get_timeline),
+        )
+        .route(
+            "/xrpc/app.bsky.feed.getAuthorFeed",
+            get(api::feed::get_author_feed),
+        )
+        .route(
+            "/xrpc/app.bsky.feed.getActorLikes",
+            get(api::feed::get_actor_likes),
+        )
+        .route(
+            "/xrpc/app.bsky.feed.getPostThread",
+            get(api::feed::get_post_thread),
+        )
+        .route(
+            "/xrpc/app.bsky.feed.getFeed",
+            get(api::feed::get_feed),
+        )
+        .route(
+            "/xrpc/app.bsky.notification.registerPush",
+            post(api::notification::register_push),
         )
         .route("/.well-known/did.json", get(api::identity::well_known_did))
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))

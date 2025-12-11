@@ -25,7 +25,7 @@ pub async fn commit_and_log(
     current_root_cid: Option<Cid>,
     new_mst_root: Cid,
     ops: Vec<RecordOp>,
-    blocks_cids: &Vec<String>,
+    blocks_cids: &[String],
 ) -> Result<CommitResult, String> {
     let key_row = sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
@@ -63,16 +63,18 @@ pub async fn commit_and_log(
         .await
         .map_err(|e| format!("DB Error (repos): {}", e))?;
 
+    let rev_str = rev.to_string();
     for op in &ops {
         match op {
             RecordOp::Create { collection, rkey, cid } | RecordOp::Update { collection, rkey, cid } => {
                 sqlx::query!(
-                    "INSERT INTO records (repo_id, collection, rkey, record_cid) VALUES ($1, $2, $3, $4)
-                     ON CONFLICT (repo_id, collection, rkey) DO UPDATE SET record_cid = $4, created_at = NOW()",
+                    "INSERT INTO records (repo_id, collection, rkey, record_cid, repo_rev) VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT (repo_id, collection, rkey) DO UPDATE SET record_cid = $4, repo_rev = $5, created_at = NOW()",
                     user_id,
                     collection,
                     rkey,
-                    cid.to_string()
+                    cid.to_string(),
+                    rev_str
                 )
                 .execute(&mut *tx)
                 .await
