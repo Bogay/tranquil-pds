@@ -254,25 +254,57 @@ pub async fn enqueue_notification(db: &PgPool, notification: NewNotification) ->
     .await
 }
 
-pub async fn enqueue_welcome_email(
+pub struct UserNotificationPrefs {
+    pub channel: NotificationChannel,
+    pub email: String,
+    pub handle: String,
+}
+
+pub async fn get_user_notification_prefs(
     db: &PgPool,
     user_id: Uuid,
-    email: &str,
-    handle: &str,
+) -> Result<UserNotificationPrefs, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"
+        SELECT
+            email,
+            handle,
+            preferred_notification_channel as "channel: NotificationChannel"
+        FROM users
+        WHERE id = $1
+        "#,
+        user_id
+    )
+    .fetch_one(db)
+    .await?;
+
+    Ok(UserNotificationPrefs {
+        channel: row.channel,
+        email: row.email,
+        handle: row.handle,
+    })
+}
+
+pub async fn enqueue_welcome(
+    db: &PgPool,
+    user_id: Uuid,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_notification_prefs(db, user_id).await?;
+
     let body = format!(
         "Welcome to {}!\n\nYour handle is: @{}\n\nThank you for joining us.",
-        hostname, handle
+        hostname, prefs.handle
     );
 
     enqueue_notification(
         db,
-        NewNotification::email(
+        NewNotification::new(
             user_id,
+            prefs.channel,
             super::types::NotificationType::Welcome,
-            email.to_string(),
-            format!("Welcome to {}", hostname),
+            prefs.email.clone(),
+            Some(format!("Welcome to {}", hostname)),
             body,
         ),
     )
@@ -308,23 +340,24 @@ pub async fn enqueue_email_verification(
 pub async fn enqueue_password_reset(
     db: &PgPool,
     user_id: Uuid,
-    email: &str,
-    handle: &str,
     code: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_notification_prefs(db, user_id).await?;
+
     let body = format!(
-        "Hello @{},\n\nYour password reset code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this email.",
-        handle, code
+        "Hello @{},\n\nYour password reset code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this message.",
+        prefs.handle, code
     );
 
     enqueue_notification(
         db,
-        NewNotification::email(
+        NewNotification::new(
             user_id,
+            prefs.channel,
             super::types::NotificationType::PasswordReset,
-            email.to_string(),
-            format!("Password Reset - {}", hostname),
+            prefs.email.clone(),
+            Some(format!("Password Reset - {}", hostname)),
             body,
         ),
     )
@@ -360,23 +393,24 @@ pub async fn enqueue_email_update(
 pub async fn enqueue_account_deletion(
     db: &PgPool,
     user_id: Uuid,
-    email: &str,
-    handle: &str,
     code: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_notification_prefs(db, user_id).await?;
+
     let body = format!(
         "Hello @{},\n\nYour account deletion confirmation code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please secure your account immediately.",
-        handle, code
+        prefs.handle, code
     );
 
     enqueue_notification(
         db,
-        NewNotification::email(
+        NewNotification::new(
             user_id,
+            prefs.channel,
             super::types::NotificationType::AccountDeletion,
-            email.to_string(),
-            format!("Account Deletion Request - {}", hostname),
+            prefs.email.clone(),
+            Some(format!("Account Deletion Request - {}", hostname)),
             body,
         ),
     )

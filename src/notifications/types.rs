@@ -63,6 +63,25 @@ pub struct NewNotification {
 }
 
 impl NewNotification {
+    pub fn new(
+        user_id: Uuid,
+        channel: NotificationChannel,
+        notification_type: NotificationType,
+        recipient: String,
+        subject: Option<String>,
+        body: String,
+    ) -> Self {
+        Self {
+            user_id,
+            channel,
+            notification_type,
+            recipient,
+            subject,
+            body,
+            metadata: None,
+        }
+    }
+
     pub fn email(
         user_id: Uuid,
         notification_type: NotificationType,
@@ -70,14 +89,13 @@ impl NewNotification {
         subject: String,
         body: String,
     ) -> Self {
-        Self {
+        Self::new(
             user_id,
-            channel: NotificationChannel::Email,
+            NotificationChannel::Email,
             notification_type,
             recipient,
-            subject: Some(subject),
+            Some(subject),
             body,
-            metadata: None,
-        }
+        )
     }
 }

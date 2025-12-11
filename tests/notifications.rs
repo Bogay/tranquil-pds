@@ -1,7 +1,7 @@
 mod common;
 
 use bspds::notifications::{
-    enqueue_notification, enqueue_welcome_email, NewNotification, NotificationChannel,
+    enqueue_notification, enqueue_welcome, NewNotification, NotificationChannel,
     NotificationStatus, NotificationType,
 };
 use sqlx::PgPool;
@@ -64,19 +64,19 @@ async fn test_enqueue_notification() {
 }
 
 #[tokio::test]
-async fn test_enqueue_welcome_email() {
+async fn test_enqueue_welcome() {
     let pool = get_pool().await;
 
     let (_, did) = common::create_account_and_login(&common::client()).await;
 
-    let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+    let user_row = sqlx::query!("SELECT id, email, handle FROM users WHERE did = $1", did)
         .fetch_one(&pool)
         .await
         .expect("User not found");
 
-    let notification_id = enqueue_welcome_email(&pool, user_id, "user@example.com", "testhandle", "example.com")
+    let notification_id = enqueue_welcome(&pool, user_row.id, "example.com")
         .await
-        .expect("Failed to enqueue welcome email");
+        .expect("Failed to enqueue welcome notification");
 
     let row = sqlx::query!(
         r#"
@@ -92,9 +92,9 @@ async fn test_enqueue_welcome_email() {
     .await
     .expect("Notification not found");
 
-    assert_eq!(row.recipient, "user@example.com");
+    assert_eq!(row.recipient, user_row.email);
     assert_eq!(row.subject.as_deref(), Some("Welcome to example.com"));
-    assert!(row.body.contains("@testhandle"));
+    assert!(row.body.contains(&format!("@{}", user_row.handle)));
     assert_eq!(row.notification_type, NotificationType::Welcome);
 }
 

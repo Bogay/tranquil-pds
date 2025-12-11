@@ -415,16 +415,8 @@ pub async fn create_account(
     }
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_welcome_email(
-        &state.db,
-        user_id,
-        &input.email,
-        &input.handle,
-        &hostname,
-    )
-    .await
-    {
-        warn!("Failed to enqueue welcome email: {:?}", e);
+    if let Err(e) = crate::notifications::enqueue_welcome(&state.db, user_id, &hostname).await {
+        warn!("Failed to enqueue welcome notification: {:?}", e);
     }
 
     (

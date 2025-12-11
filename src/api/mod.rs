@@ -1,3 +1,4 @@
+pub mod actor;
 pub mod admin;
 pub mod feed;
 pub mod identity;

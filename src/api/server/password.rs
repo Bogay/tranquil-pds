@@ -38,15 +38,12 @@ pub async fn request_password_reset(
             .into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT id, handle FROM users WHERE LOWER(email) = $1",
-        email
-    )
-    .fetch_optional(&state.db)
-    .await;
+    let user = sqlx::query!("SELECT id FROM users WHERE LOWER(email) = $1", email)
+        .fetch_optional(&state.db)
+        .await;
 
-    let (user_id, handle) = match user {
-        Ok(Some(row)) => (row.id, row.handle),
+    let user_id = match user {
+        Ok(Some(row)) => row.id,
         Ok(None) => {
             info!("Password reset requested for unknown email: {}", email);
             return (StatusCode::OK, Json(json!({}))).into_response();
@@ -83,15 +80,8 @@ pub async fn request_password_reset(
     }
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_password_reset(
-        &state.db,
-        user_id,
-        &email,
-        &handle,
-        &code,
-        &hostname,
-    )
-    .await
+    if let Err(e) =
+        crate::notifications::enqueue_password_reset(&state.db, user_id, &code, &hostname).await
     {
         warn!("Failed to enqueue password reset notification: {:?}", e);
     }

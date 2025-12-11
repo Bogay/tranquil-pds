@@ -1,3 +1,4 @@
+#[allow(deprecated)]
 use aes_gcm::{
     Aes256Gcm, KeyInit, Nonce,
     aead::Aead,
@@ -127,6 +128,7 @@ impl AuthConfig {
 
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        #[allow(deprecated)]
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = cipher
@@ -148,6 +150,7 @@ impl AuthConfig {
         let cipher = Aes256Gcm::new_from_slice(&self.key_encryption_key)
             .map_err(|e| format!("Failed to create cipher: {}", e))?;
 
+        #[allow(deprecated)]
         let nonce = Nonce::from_slice(&encrypted[..12]);
         let ciphertext = &encrypted[12..];
 

@@ -1428,7 +1428,7 @@ async fn test_state_with_special_chars() {
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
 
-    let (code_verifier, code_challenge) = generate_pkce();
+    let (_code_verifier, code_challenge) = generate_pkce();
     let special_state = "state=with&special=chars&plus+more";
 
     let par_body: Value = http_client

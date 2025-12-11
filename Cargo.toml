@@ -46,6 +46,9 @@ tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 urlencoding = "2.1"
 uuid = { version = "1.19.0", features = ["v4", "fast-rng"] }
 
+[features]
+external-infra = []
+
 [dev-dependencies]
 ctor = "0.6.3"
 iroh-car = "0.5.1"

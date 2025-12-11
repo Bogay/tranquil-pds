@@ -247,11 +247,11 @@ pub async fn request_account_delete(
         }
     };
 
-    let user = match sqlx::query!("SELECT id, email, handle FROM users WHERE did = $1", did)
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
     {
-        Ok(Some(row)) => row,
+        Ok(Some(id)) => id,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -260,9 +260,6 @@ pub async fn request_account_delete(
                 .into_response();
         }
     };
-    let user_id = user.id;
-    let email = user.email;
-    let handle = user.handle;
 
     let confirmation_token = Uuid::new_v4().to_string();
     let expires_at = Utc::now() + Duration::minutes(15);
@@ -286,15 +283,8 @@ pub async fn request_account_delete(
     }
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_account_deletion(
-        &state.db,
-        user_id,
-        &email,
-        &handle,
-        &confirmation_token,
-        &hostname,
-    )
-    .await
+    if let Err(e) =
+        crate::notifications::enqueue_account_deletion(&state.db, user_id, &confirmation_token, &hostname).await
     {
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }

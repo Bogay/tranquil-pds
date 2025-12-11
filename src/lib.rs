@@ -262,6 +262,22 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.atproto.admin.sendEmail",
             post(api::admin::send_email),
         )
+        .route(
+            "/xrpc/app.bsky.actor.getPreferences",
+            get(api::actor::get_preferences),
+        )
+        .route(
+            "/xrpc/app.bsky.actor.putPreferences",
+            post(api::actor::put_preferences),
+        )
+        .route(
+            "/xrpc/app.bsky.actor.getProfile",
+            get(api::actor::get_profile),
+        )
+        .route(
+            "/xrpc/app.bsky.actor.getProfiles",
+            get(api::actor::get_profiles),
+        )
         // I know I know, I'm not supposed to implement appview endpoints. Leave me be
         .route(
             "/xrpc/app.bsky.feed.getTimeline",

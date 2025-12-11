@@ -11,7 +11,6 @@ fn create_dpop_proof(
     iat_offset_secs: i64,
 ) -> String {
     use p256::ecdsa::{SigningKey, Signature, signature::Signer};
-    use p256::elliptic_curve::sec1::ToEncodedPoint;
 
     let signing_key = SigningKey::random(&mut rand::thread_rng());
     let verifying_key = signing_key.verifying_key();

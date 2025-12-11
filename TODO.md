@@ -162,10 +162,10 @@ I've tried to ensure that this codebase is not vulnerable to the following:
 These endpoints need to be implemented at the PDS level (not just proxied to appview).
 
 ### Actor (`app.bsky.actor`)
-- [ ] Implement `app.bsky.actor.getPreferences` (user preferences storage).
-- [ ] Implement `app.bsky.actor.putPreferences` (update user preferences).
-- [ ] Implement `app.bsky.actor.getProfile` (PDS-level with proxy fallback).
-- [ ] Implement `app.bsky.actor.getProfiles` (PDS-level with proxy fallback).
+- [x] Implement `app.bsky.actor.getPreferences` (user preferences storage).
+- [x] Implement `app.bsky.actor.putPreferences` (update user preferences).
+- [x] Implement `app.bsky.actor.getProfile` (PDS-level with proxy fallback).
+- [x] Implement `app.bsky.actor.getProfiles` (PDS-level with proxy fallback).
 
 ### Feed (`app.bsky.feed`)
 These are implemented at PDS level to enable local-first reads:
@@ -190,9 +190,9 @@ These are implemented at PDS level to enable local-first reads:
 
 ## Preference Storage
 User preferences (for app.bsky.actor.getPreferences/putPreferences):
-- [ ] Create preferences table for storing user app preferences.
-- [ ] Implement `app.bsky.actor.getPreferences` handler (read from postgres, proxy fallback).
-- [ ] Implement `app.bsky.actor.putPreferences` handler (write to postgres).
+- [x] Create preferences table for storing user app preferences.
+- [x] Implement `app.bsky.actor.getPreferences` handler (read from postgres, proxy fallback).
+- [x] Implement `app.bsky.actor.putPreferences` handler (write to postgres).
 
 ## Infrastructure & Core Components
 - [x] Sequencer (Event Log)
@@ -221,6 +221,7 @@ User preferences (for app.bsky.actor.getPreferences/putPreferences):
     - [ ] Telegram bot sender
     - [ ] Signal bot sender
     - [x] Helper functions for common notification types (welcome, password reset, email verification, etc.)
+    - [x] Respect user's `preferred_notification_channel` setting for non-email-specific notifications
 - [ ] Image Processing
     - [ ] Implement image resize/formatting pipeline (for blob uploads).
 - [x] IPLD & MST
@@ -229,4 +230,50 @@ User preferences (for app.bsky.actor.getPreferences/putPreferences):
 - [ ] Validation
     - [ ] DID PLC Operations (Sign rotation keys).
 - [ ] Fix any remaining TODOs in the code, everywhere, full stop.
+
+## Web Management UI
+A single-page web app for account management. The frontend (JS framework) calls existing ATProto XRPC endpoints - no server-side rendering or bespoke HTML form handlers.
+
+### Architecture
+- [ ] Static SPA served from PDS (or separate static host)
+- [ ] Frontend authenticates via OAuth 2.1 flow (same as any ATProto client)
+- [ ] All operations use standard XRPC endpoints (existing + new PDS-specific ones below)
+- [ ] No server-side sessions or CSRF - pure API client
+
+### PDS-Specific XRPC Endpoints (new)
+Absolutely subject to change, "bspds" isn't even the real name of this pds thus far :D
+Anyway... endpoints for PDS settings not covered by standard ATProto:
+- [ ] `com.bspds.account.getNotificationPrefs` - get preferred channel, verified channels
+- [ ] `com.bspds.account.updateNotificationPrefs` - set preferred channel
+- [ ] `com.bspds.account.getNotificationHistory` - list past notifications
+- [ ] `com.bspds.account.verifyChannel` - initiate verification for Discord/Telegram/Signal
+- [ ] `com.bspds.account.confirmChannelVerification` - confirm with code
+- [ ] `com.bspds.admin.getServerStats` - user count, storage usage, etc.
+
+### Frontend Views
+Uses existing ATProto endpoints where possible:
+
+**User Dashboard**
+- [ ] Account overview (uses `com.atproto.server.getSession`, `com.atproto.admin.getAccountInfo`)
+- [ ] Active sessions view (needs new endpoint or extend existing)
+- [ ] App passwords (uses `com.atproto.server.listAppPasswords`, `createAppPassword`, `revokeAppPassword`)
+- [ ] Invite codes (uses `com.atproto.server.getAccountInviteCodes`, `createInviteCode`)
+
+**Notification Preferences**
+- [ ] Channel selector (uses `com.bspds.account.*` endpoints above)
+- [ ] Verification flows for Discord/Telegram/Signal
+- [ ] Notification history view
+
+**Account Settings**
+- [ ] Email change (uses `com.atproto.server.requestEmailUpdate`, `updateEmail`)
+- [ ] Password change (uses `com.atproto.server.requestPasswordReset`, `resetPassword`)
+- [ ] Handle change (uses `com.atproto.identity.updateHandle`)
+- [ ] Account deletion (uses `com.atproto.server.requestAccountDelete`, `deleteAccount`)
+- [ ] Data export (uses `com.atproto.sync.getRepo`)
+
+**Admin Dashboard** (privileged users only)
+- [ ] User list (uses `com.atproto.admin.getAccountInfos` with pagination)
+- [ ] User detail/actions (uses `com.atproto.admin.*` endpoints)
+- [ ] Invite management (uses `com.atproto.admin.getInviteCodes`, `disableInviteCodes`)
+- [ ] Server stats (uses `com.bspds.admin.getServerStats`)
 
