@@ -19,8 +19,6 @@ pub async fn notify_of_update(
     Query(params): Query<NotifyOfUpdateParams>,
 ) -> Response {
     info!("Received notifyOfUpdate from hostname: {}", params.hostname);
-    info!("TODO: Queue job for notifyOfUpdate (not implemented)");
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }
 
@@ -34,7 +32,5 @@ pub async fn request_crawl(
     Json(input): Json<RequestCrawlInput>,
 ) -> Response {
     info!("Received requestCrawl for hostname: {}", input.hostname);
-    info!("TODO: Queue job for requestCrawl (not implemented)");
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }

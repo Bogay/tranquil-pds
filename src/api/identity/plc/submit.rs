@@ -1,5 +1,6 @@
 use crate::api::ApiError;
-use crate::plc::{signing_key_to_did_key, validate_plc_operation, PlcClient};
+use crate::circuit_breaker::{with_circuit_breaker, CircuitBreakerError};
+use crate::plc::{signing_key_to_did_key, validate_plc_operation, PlcClient, PlcError};
 use crate::state::AppState;
 use axum::{
     extract::State,
@@ -183,16 +184,38 @@ pub async fn submit_plc_operation(
     }
 
     let plc_client = PlcClient::new(None);
-    if let Err(e) = plc_client.send_operation(did, &input.operation).await {
-        error!("Failed to submit PLC operation: {:?}", e);
-        return (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({
-                "error": "UpstreamError",
-                "message": format!("Failed to submit to PLC directory: {}", e)
-            })),
-        )
-            .into_response();
+    let operation_clone = input.operation.clone();
+    let did_clone = did.clone();
+    let result: Result<(), CircuitBreakerError<PlcError>> = with_circuit_breaker(
+        &state.circuit_breakers.plc_directory,
+        || async { plc_client.send_operation(&did_clone, &operation_clone).await },
+    )
+    .await;
+
+    match result {
+        Ok(()) => {}
+        Err(CircuitBreakerError::CircuitOpen(e)) => {
+            warn!("PLC directory circuit breaker open: {}", e);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": "ServiceUnavailable",
+                    "message": "PLC directory service temporarily unavailable"
+                })),
+            )
+                .into_response();
+        }
+        Err(CircuitBreakerError::OperationFailed(e)) => {
+            error!("Failed to submit PLC operation: {:?}", e);
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": "UpstreamError",
+                    "message": format!("Failed to submit to PLC directory: {}", e)
+                })),
+            )
+                .into_response();
+        }
     }
 
     if let Err(e) = sqlx::query!(

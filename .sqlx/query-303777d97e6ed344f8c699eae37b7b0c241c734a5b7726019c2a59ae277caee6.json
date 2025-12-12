@@ -36,7 +36,8 @@
                 "email_update",
                 "account_deletion",
                 "admin_email",
-                "plc_operation"
+                "plc_operation",
+                "two_factor_code"
               ]
             }
           }

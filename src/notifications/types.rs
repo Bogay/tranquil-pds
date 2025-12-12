@@ -31,6 +31,7 @@ pub enum NotificationType {
     AccountDeletion,
     AdminEmail,
     PlcOperation,
+    TwoFactorCode,
 }
 
 #[derive(Debug, Clone, FromRow)]

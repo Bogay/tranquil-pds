@@ -323,6 +323,7 @@ async fn test_authorize_get_with_valid_request_uri() {
 
     let auth_res = client
         .get(format!("{}/oauth/authorize", url))
+        .header("Accept", "application/json")
         .query(&[("request_uri", request_uri)])
         .send()
         .await
@@ -344,6 +345,7 @@ async fn test_authorize_rejects_invalid_request_uri() {
 
     let res = client
         .get(format!("{}/oauth/authorize", url))
+        .header("Accept", "application/json")
         .query(&[("request_uri", "urn:ietf:params:oauth:request_uri:nonexistent")])
         .send()
         .await
@@ -941,6 +943,7 @@ async fn test_wrong_credentials_denied() {
 
     let auth_res = http_client
         .post(format!("{}/oauth/authorize", url))
+        .header("Accept", "application/json")
         .form(&[
             ("request_uri", request_uri),
             ("username", &handle),
@@ -1162,6 +1165,7 @@ async fn test_deactivated_account_cannot_authorize() {
 
     let auth_res = http_client
         .post(format!("{}/oauth/authorize", url))
+        .header("Accept", "application/json")
         .form(&[
             ("request_uri", request_uri),
             ("username", &handle),
@@ -1184,6 +1188,7 @@ async fn test_expired_authorization_request() {
 
     let res = http_client
         .get(format!("{}/oauth/authorize", url))
+        .header("Accept", "application/json")
         .query(&[("request_uri", "urn:ietf:params:oauth:request_uri:expired-or-nonexistent")])
         .send()
         .await
@@ -1476,4 +1481,632 @@ async fn test_state_with_special_chars() {
         "State should be URL-encoded. Got: {}",
         location
     );
+}
+
+#[tokio::test]
+async fn test_2fa_required_when_enabled() {
+    let url = base_url().await;
+    let http_client = client();
+
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("2fa-required-{}", ts);
+    let email = format!("2fa-required-{}@example.com", ts);
+    let password = "2fa-test-password";
+
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap();
+
+    let db_url = common::get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
+        .bind(user_did)
+        .execute(&pool)
+        .await
+        .expect("Failed to enable 2FA");
+
+    let redirect_uri = "https://example.com/2fa-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+
+    let (_, code_challenge) = generate_pkce();
+
+    let par_body: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let auth_client = no_redirect_client();
+    let auth_res = auth_client
+        .post(format!("{}/oauth/authorize", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("username", &handle),
+            ("password", password),
+            ("remember_device", "false"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        auth_res.status().is_redirection(),
+        "Should redirect to 2FA page, got status: {}",
+        auth_res.status()
+    );
+
+    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.contains("/oauth/authorize/2fa"),
+        "Should redirect to 2FA page, got: {}",
+        location
+    );
+    assert!(
+        location.contains("request_uri="),
+        "2FA redirect should include request_uri"
+    );
+}
+
+#[tokio::test]
+async fn test_2fa_invalid_code_rejected() {
+    let url = base_url().await;
+    let http_client = client();
+
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("2fa-invalid-{}", ts);
+    let email = format!("2fa-invalid-{}@example.com", ts);
+    let password = "2fa-test-password";
+
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap();
+
+    let db_url = common::get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
+        .bind(user_did)
+        .execute(&pool)
+        .await
+        .expect("Failed to enable 2FA");
+
+    let redirect_uri = "https://example.com/2fa-invalid-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+
+    let (_, code_challenge) = generate_pkce();
+
+    let par_body: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let auth_client = no_redirect_client();
+    let auth_res = auth_client
+        .post(format!("{}/oauth/authorize", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("username", &handle),
+            ("password", password),
+            ("remember_device", "false"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(auth_res.status().is_redirection());
+    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.contains("/oauth/authorize/2fa"));
+
+    let twofa_res = http_client
+        .post(format!("{}/oauth/authorize/2fa", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("code", "000000"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(twofa_res.status(), StatusCode::OK);
+    let body = twofa_res.text().await.unwrap();
+    assert!(
+        body.contains("Invalid verification code") || body.contains("invalid"),
+        "Should show error for invalid code"
+    );
+}
+
+#[tokio::test]
+async fn test_2fa_valid_code_completes_auth() {
+    let url = base_url().await;
+    let http_client = client();
+
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("2fa-valid-{}", ts);
+    let email = format!("2fa-valid-{}@example.com", ts);
+    let password = "2fa-test-password";
+
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap();
+
+    let db_url = common::get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
+        .bind(user_did)
+        .execute(&pool)
+        .await
+        .expect("Failed to enable 2FA");
+
+    let redirect_uri = "https://example.com/2fa-valid-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+
+    let (code_verifier, code_challenge) = generate_pkce();
+
+    let par_body: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let auth_client = no_redirect_client();
+    let auth_res = auth_client
+        .post(format!("{}/oauth/authorize", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("username", &handle),
+            ("password", password),
+            ("remember_device", "false"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(auth_res.status().is_redirection());
+
+    let twofa_code: String = sqlx::query_scalar(
+        "SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1"
+    )
+    .bind(request_uri)
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get 2FA code from database");
+
+    let twofa_res = auth_client
+        .post(format!("{}/oauth/authorize/2fa", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("code", &twofa_code),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        twofa_res.status().is_redirection(),
+        "Valid 2FA code should redirect to success, got status: {}",
+        twofa_res.status()
+    );
+
+    let location = twofa_res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        location.starts_with(redirect_uri),
+        "Should redirect to client callback, got: {}",
+        location
+    );
+    assert!(
+        location.contains("code="),
+        "Redirect should include authorization code"
+    );
+
+    let auth_code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+
+    let token_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", auth_code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(token_res.status(), StatusCode::OK, "Token exchange should succeed");
+    let token_body: Value = token_res.json().await.unwrap();
+    assert!(token_body["access_token"].is_string());
+    assert_eq!(token_body["sub"], user_did);
+}
+
+#[tokio::test]
+async fn test_2fa_lockout_after_max_attempts() {
+    let url = base_url().await;
+    let http_client = client();
+
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("2fa-lockout-{}", ts);
+    let email = format!("2fa-lockout-{}@example.com", ts);
+    let password = "2fa-test-password";
+
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap();
+
+    let db_url = common::get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
+        .bind(user_did)
+        .execute(&pool)
+        .await
+        .expect("Failed to enable 2FA");
+
+    let redirect_uri = "https://example.com/2fa-lockout-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+
+    let (_, code_challenge) = generate_pkce();
+
+    let par_body: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let auth_client = no_redirect_client();
+    let auth_res = auth_client
+        .post(format!("{}/oauth/authorize", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("username", &handle),
+            ("password", password),
+            ("remember_device", "false"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(auth_res.status().is_redirection());
+
+    for i in 0..5 {
+        let res = http_client
+            .post(format!("{}/oauth/authorize/2fa", url))
+            .form(&[
+                ("request_uri", request_uri),
+                ("code", "999999"),
+            ])
+            .send()
+            .await
+            .unwrap();
+
+        if i < 4 {
+            assert_eq!(res.status(), StatusCode::OK, "Attempt {} should show error page", i + 1);
+            let body = res.text().await.unwrap();
+            assert!(
+                body.contains("Invalid verification code"),
+                "Should show invalid code error on attempt {}", i + 1
+            );
+        }
+    }
+
+    let lockout_res = http_client
+        .post(format!("{}/oauth/authorize/2fa", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("code", "999999"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(lockout_res.status(), StatusCode::OK);
+    let body = lockout_res.text().await.unwrap();
+    assert!(
+        body.contains("Too many failed attempts") || body.contains("No 2FA challenge found"),
+        "Should be locked out after max attempts. Body: {}",
+        &body[..body.len().min(500)]
+    );
+}
+
+#[tokio::test]
+async fn test_account_selector_with_2fa_requires_verification() {
+    let url = base_url().await;
+    let http_client = client();
+
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("selector-2fa-{}", ts);
+    let email = format!("selector-2fa-{}@example.com", ts);
+    let password = "selector-2fa-password";
+
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap().to_string();
+
+    let redirect_uri = "https://example.com/selector-2fa-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+
+    let (code_verifier, code_challenge) = generate_pkce();
+
+    let par_body: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let auth_client = no_redirect_client();
+    let auth_res = auth_client
+        .post(format!("{}/oauth/authorize", url))
+        .form(&[
+            ("request_uri", request_uri),
+            ("username", &handle),
+            ("password", password),
+            ("remember_device", "true"),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(auth_res.status().is_redirection());
+
+    let device_cookie = auth_res.headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or("").to_string())
+        .expect("Should have received device cookie");
+
+    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.contains("code="), "First auth should succeed");
+
+    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let _token_body: Value = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let db_url = common::get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
+        .bind(&user_did)
+        .execute(&pool)
+        .await
+        .expect("Failed to enable 2FA");
+
+    let (code_verifier2, code_challenge2) = generate_pkce();
+
+    let par_body2: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge2),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let request_uri2 = par_body2["request_uri"].as_str().unwrap();
+
+    let select_res = auth_client
+        .post(format!("{}/oauth/authorize/select", url))
+        .header("cookie", &device_cookie)
+        .form(&[
+            ("request_uri", request_uri2),
+            ("did", &user_did),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        select_res.status().is_redirection(),
+        "Account selector should redirect, got status: {}",
+        select_res.status()
+    );
+
+    let select_location = select_res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        select_location.contains("/oauth/authorize/2fa"),
+        "Account selector with 2FA enabled should redirect to 2FA page, got: {}",
+        select_location
+    );
+
+    let twofa_code: String = sqlx::query_scalar(
+        "SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1"
+    )
+    .bind(request_uri2)
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get 2FA code");
+
+    let twofa_res = auth_client
+        .post(format!("{}/oauth/authorize/2fa", url))
+        .header("cookie", &device_cookie)
+        .form(&[
+            ("request_uri", request_uri2),
+            ("code", &twofa_code),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(twofa_res.status().is_redirection());
+    let final_location = twofa_res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(
+        final_location.starts_with(redirect_uri) && final_location.contains("code="),
+        "After 2FA, should redirect to client with code, got: {}",
+        final_location
+    );
+
+    let final_code = final_location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let token_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", final_code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier2),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(token_res.status(), StatusCode::OK);
+    let final_token: Value = token_res.json().await.unwrap();
+    assert_eq!(final_token["sub"], user_did, "Token should be for the correct user");
 }

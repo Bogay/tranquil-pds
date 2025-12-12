@@ -10,6 +10,7 @@ pub mod proxy_client;
 pub mod read_after_write;
 pub mod repo;
 pub mod server;
+pub mod temp;
 pub mod validation;
 
 pub use error::ApiError;

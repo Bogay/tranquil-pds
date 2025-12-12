@@ -1,7 +1,9 @@
-use bspds::notifications::{EmailSender, NotificationService};
+use bspds::crawlers::{Crawlers, start_crawlers_service};
+use bspds::notifications::{DiscordSender, EmailSender, NotificationService, SignalSender, TelegramSender};
 use bspds::state::AppState;
 use std::net::SocketAddr;
 use std::process::ExitCode;
+use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
@@ -41,13 +43,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(pool.clone()).await;
 
     bspds::sync::listener::start_sequencer_listener(state.clone()).await;
-    let relays = std::env::var("RELAYS")
-        .unwrap_or_default()
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    bspds::sync::relay_client::start_relay_clients(state.clone(), relays, None).await;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -60,7 +55,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         warn!("Email notifications disabled (MAIL_FROM_ADDRESS not set)");
     }
 
-    let notification_handle = tokio::spawn(notification_service.run(shutdown_rx));
+    if let Some(discord_sender) = DiscordSender::from_env() {
+        info!("Discord notifications enabled");
+        notification_service = notification_service.register_sender(discord_sender);
+    }
+
+    if let Some(telegram_sender) = TelegramSender::from_env() {
+        info!("Telegram notifications enabled");
+        notification_service = notification_service.register_sender(telegram_sender);
+    }
+
+    if let Some(signal_sender) = SignalSender::from_env() {
+        info!("Signal notifications enabled");
+        notification_service = notification_service.register_sender(signal_sender);
+    }
+
+    let notification_handle = tokio::spawn(notification_service.run(shutdown_rx.clone()));
+
+    let crawlers_handle = if let Some(crawlers) = Crawlers::from_env() {
+        let crawlers = Arc::new(
+            crawlers.with_circuit_breaker(state.circuit_breakers.relay_notification.clone())
+        );
+        let firehose_rx = state.firehose_tx.subscribe();
+        info!("Crawlers notification service enabled");
+        Some(tokio::spawn(start_crawlers_service(crawlers, firehose_rx, shutdown_rx)))
+    } else {
+        warn!("Crawlers notification service disabled (PDS_HOSTNAME or CRAWLERS not set)");
+        None
+    };
 
     let app = bspds::app(state);
 
@@ -75,6 +97,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     notification_handle.await.ok();
+    if let Some(handle) = crawlers_handle {
+        handle.await.ok();
+    }
 
     if let Err(e) = server_result {
         return Err(format!("Server error: {}", e).into());

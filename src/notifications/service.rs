@@ -443,3 +443,39 @@ pub async fn enqueue_plc_operation(
     )
     .await
 }
+
+pub async fn enqueue_2fa_code(
+    db: &PgPool,
+    user_id: Uuid,
+    code: &str,
+    hostname: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_notification_prefs(db, user_id).await?;
+
+    let body = format!(
+        "Hello @{},\n\nYour sign-in verification code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please secure your account immediately.",
+        prefs.handle, code
+    );
+
+    enqueue_notification(
+        db,
+        NewNotification::new(
+            user_id,
+            prefs.channel,
+            super::types::NotificationType::TwoFactorCode,
+            prefs.email.clone(),
+            Some(format!("Sign-in Verification - {}", hostname)),
+            body,
+        ),
+    )
+    .await
+}
+
+pub fn channel_display_name(channel: NotificationChannel) -> &'static str {
+    match channel {
+        NotificationChannel::Email => "email",
+        NotificationChannel::Discord => "Discord",
+        NotificationChannel::Telegram => "Telegram",
+        NotificationChannel::Signal => "Signal",
+    }
+}

@@ -735,6 +735,7 @@ async fn test_security_deactivated_account_blocked() {
 
     let auth_res = http_client
         .post(format!("{}/oauth/authorize", url))
+        .header("Accept", "application/json")
         .form(&[
             ("request_uri", request_uri),
             ("username", &handle),

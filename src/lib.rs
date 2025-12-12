@@ -1,14 +1,19 @@
 pub mod api;
 pub mod auth;
+pub mod circuit_breaker;
 pub mod config;
+pub mod crawlers;
+pub mod image;
 pub mod notifications;
 pub mod oauth;
 pub mod plc;
+pub mod rate_limit;
 pub mod repo;
 pub mod state;
 pub mod storage;
 pub mod sync;
 pub mod util;
+pub mod validation;
 
 use axum::{
     Router,
@@ -20,6 +25,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(api::server::health))
         .route("/xrpc/_health", get(api::server::health))
+        .route("/robots.txt", get(api::server::robots_txt))
         .route(
             "/xrpc/com.atproto.server.describeServer",
             get(api::server::describe_server),
@@ -139,6 +145,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.sync.subscribeRepos",
             get(sync::subscribe_repos),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.getHead",
+            get(sync::get_head),
+        )
+        .route(
+            "/xrpc/com.atproto.sync.getCheckout",
+            get(sync::get_checkout),
         )
         .route(
             "/xrpc/com.atproto.moderation.createReport",
@@ -338,9 +352,17 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/oauth/authorize", get(oauth::endpoints::authorize_get))
         .route("/oauth/authorize", post(oauth::endpoints::authorize_post))
+        .route("/oauth/authorize/select", post(oauth::endpoints::authorize_select))
+        .route("/oauth/authorize/2fa", get(oauth::endpoints::authorize_2fa_get))
+        .route("/oauth/authorize/2fa", post(oauth::endpoints::authorize_2fa_post))
+        .route("/oauth/authorize/deny", post(oauth::endpoints::authorize_deny))
         .route("/oauth/token", post(oauth::endpoints::token_endpoint))
         .route("/oauth/revoke", post(oauth::endpoints::revoke_token))
         .route("/oauth/introspect", post(oauth::endpoints::introspect_token))
+        .route(
+            "/xrpc/com.atproto.temp.checkSignupQueue",
+            get(api::temp::check_signup_queue),
+        )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
         .with_state(state)
 }

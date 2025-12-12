@@ -255,6 +255,7 @@ async fn test_full_plc_operation_flow() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_sign_plc_operation_consumes_token -- --ignored --test-threads=1"]
 async fn test_sign_plc_operation_consumes_token() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
@@ -902,6 +903,7 @@ async fn test_migration_rejects_wrong_did_document() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_full_migration_flow_end_to_end -- --ignored --test-threads=1"]
 async fn test_full_migration_flow_end_to_end() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;

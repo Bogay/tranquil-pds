@@ -1,6 +1,14 @@
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use super::super::{DeviceData, OAuthError};
+
+pub struct DeviceAccountRow {
+    pub did: String,
+    pub handle: String,
+    pub email: String,
+    pub last_used_at: DateTime<Utc>,
+}
 
 pub async fn create_device(
     pool: &PgPool,
@@ -93,4 +101,58 @@ pub async fn upsert_account_device(
     .await?;
 
     Ok(())
+}
+
+pub async fn get_device_accounts(
+    pool: &PgPool,
+    device_id: &str,
+) -> Result<Vec<DeviceAccountRow>, OAuthError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT u.did, u.handle, u.email, ad.updated_at as last_used_at
+        FROM oauth_account_device ad
+        JOIN users u ON u.did = ad.did
+        WHERE ad.device_id = $1
+          AND u.deactivated_at IS NULL
+          AND u.takedown_ref IS NULL
+        ORDER BY ad.updated_at DESC
+        "#,
+        device_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| DeviceAccountRow {
+            did: r.did,
+            handle: r.handle,
+            email: r.email,
+            last_used_at: r.last_used_at,
+        })
+        .collect())
+}
+
+pub async fn verify_account_on_device(
+    pool: &PgPool,
+    device_id: &str,
+    did: &str,
+) -> Result<bool, OAuthError> {
+    let row = sqlx::query!(
+        r#"
+        SELECT 1 as exists
+        FROM oauth_account_device ad
+        JOIN users u ON u.did = ad.did
+        WHERE ad.device_id = $1
+          AND ad.did = $2
+          AND u.deactivated_at IS NULL
+          AND u.takedown_ref IS NULL
+        "#,
+        device_id,
+        did
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.is_some())
 }

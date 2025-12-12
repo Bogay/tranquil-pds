@@ -1,6 +1,7 @@
 use crate::api::ApiError;
+use crate::circuit_breaker::{with_circuit_breaker, CircuitBreakerError};
 use crate::plc::{
-    create_update_op, sign_operation, PlcClient, PlcError, PlcService,
+    create_update_op, sign_operation, PlcClient, PlcError, PlcOpOrTombstone, PlcService,
 };
 use crate::state::AppState;
 use axum::{
@@ -14,7 +15,7 @@ use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,9 +167,27 @@ pub async fn sign_plc_operation(
     };
 
     let plc_client = PlcClient::new(None);
-    let last_op = match plc_client.get_last_op(did).await {
+    let did_clone = did.clone();
+    let result: Result<PlcOpOrTombstone, CircuitBreakerError<PlcError>> = with_circuit_breaker(
+        &state.circuit_breakers.plc_directory,
+        || async { plc_client.get_last_op(&did_clone).await },
+    )
+    .await;
+
+    let last_op = match result {
         Ok(op) => op,
-        Err(PlcError::NotFound) => {
+        Err(CircuitBreakerError::CircuitOpen(e)) => {
+            warn!("PLC directory circuit breaker open: {}", e);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": "ServiceUnavailable",
+                    "message": "PLC directory service temporarily unavailable"
+                })),
+            )
+                .into_response();
+        }
+        Err(CircuitBreakerError::OperationFailed(PlcError::NotFound)) => {
             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({
@@ -178,7 +197,7 @@ pub async fn sign_plc_operation(
             )
                 .into_response();
         }
-        Err(e) => {
+        Err(CircuitBreakerError::OperationFailed(e)) => {
             error!("Failed to fetch PLC operation: {:?}", e);
             return (
                 StatusCode::BAD_GATEWAY,

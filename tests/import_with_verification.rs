@@ -217,6 +217,7 @@ async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_import_with_valid_signature_and_mock_plc -- --ignored --test-threads=1"]
 async fn test_import_with_valid_signature_and_mock_plc() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
@@ -266,6 +267,7 @@ async fn test_import_with_valid_signature_and_mock_plc() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_import_with_wrong_signing_key_fails -- --ignored --test-threads=1"]
 async fn test_import_with_wrong_signing_key_fails() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
@@ -322,6 +324,7 @@ async fn test_import_with_wrong_signing_key_fails() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_import_with_did_mismatch_fails -- --ignored --test-threads=1"]
 async fn test_import_with_did_mismatch_fails() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
@@ -373,6 +376,7 @@ async fn test_import_with_did_mismatch_fails() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_import_with_plc_resolution_failure -- --ignored --test-threads=1"]
 async fn test_import_with_plc_resolution_failure() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
@@ -424,6 +428,7 @@ async fn test_import_with_plc_resolution_failure() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_import_with_no_signing_key_in_did_doc -- --ignored --test-threads=1"]
 async fn test_import_with_no_signing_key_in_did_doc() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;

@@ -167,57 +167,57 @@ pub async fn list_records(
 
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
     let reverse = input.reverse.unwrap_or(false);
-
-    // Simplistic query construction - no sophisticated cursor handling or rkey ranges for now, just basic pagination
-    // TODO: Implement rkeyStart/End and correct cursor logic
-
     let limit_i64 = limit as i64;
-    let rows_res = if let Some(cursor) = &input.cursor {
-        if reverse {
-            sqlx::query!(
-                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey < $3 ORDER BY rkey DESC LIMIT $4",
-                user_id,
-                input.collection,
-                cursor,
-                limit_i64
-            )
+    let order = if reverse { "ASC" } else { "DESC" };
+
+    let rows_res: Result<Vec<(String, String)>, sqlx::Error> = if let Some(cursor) = &input.cursor {
+        let comparator = if reverse { ">" } else { "<" };
+        let query = format!(
+            "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey {} $3 ORDER BY rkey {} LIMIT $4",
+            comparator, order
+        );
+        sqlx::query_as(&query)
+            .bind(user_id)
+            .bind(&input.collection)
+            .bind(cursor)
+            .bind(limit_i64)
             .fetch_all(&state.db)
             .await
-            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
-        } else {
-            sqlx::query!(
-                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey > $3 ORDER BY rkey ASC LIMIT $4",
-                user_id,
-                input.collection,
-                cursor,
-                limit_i64
-            )
-            .fetch_all(&state.db)
-            .await
-            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
-        }
     } else {
-        if reverse {
-            sqlx::query!(
-                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 ORDER BY rkey DESC LIMIT $3",
-                user_id,
-                input.collection,
-                limit_i64
-            )
-            .fetch_all(&state.db)
-            .await
-            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
-        } else {
-            sqlx::query!(
-                "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 ORDER BY rkey ASC LIMIT $3",
-                user_id,
-                input.collection,
-                limit_i64
-            )
-            .fetch_all(&state.db)
-            .await
-            .map(|rows| rows.into_iter().map(|r| (r.rkey, r.record_cid)).collect::<Vec<_>>())
+        let mut conditions = vec!["repo_id = $1", "collection = $2"];
+        let mut param_idx = 3;
+
+        if input.rkey_start.is_some() {
+            conditions.push("rkey > $3");
+            param_idx += 1;
         }
+
+        if input.rkey_end.is_some() {
+            conditions.push(if param_idx == 3 { "rkey < $3" } else { "rkey < $4" });
+            param_idx += 1;
+        }
+
+        let limit_idx = param_idx;
+
+        let query = format!(
+            "SELECT rkey, record_cid FROM records WHERE {} ORDER BY rkey {} LIMIT ${}",
+            conditions.join(" AND "),
+            order,
+            limit_idx
+        );
+
+        let mut query_builder = sqlx::query_as::<_, (String, String)>(&query)
+            .bind(user_id)
+            .bind(&input.collection);
+
+        if let Some(start) = &input.rkey_start {
+            query_builder = query_builder.bind(start);
+        }
+        if let Some(end) = &input.rkey_end {
+            query_builder = query_builder.bind(end);
+        }
+
+        query_builder.bind(limit_i64).fetch_all(&state.db).await
     };
 
     let rows = match rows_res {

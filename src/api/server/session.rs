@@ -4,12 +4,29 @@ use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use bcrypt::verify;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
+
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(forwarded) = headers.get("x-forwarded-for") {
+        if let Ok(value) = forwarded.to_str() {
+            if let Some(first_ip) = value.split(',').next() {
+                return first_ip.trim().to_string();
+            }
+        }
+    }
+    if let Some(real_ip) = headers.get("x-real-ip") {
+        if let Ok(value) = real_ip.to_str() {
+            return value.trim().to_string();
+        }
+    }
+    "unknown".to_string()
+}
 
 #[derive(Deserialize)]
 pub struct CreateSessionInput {
@@ -28,9 +45,23 @@ pub struct CreateSessionOutput {
 
 pub async fn create_session(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<CreateSessionInput>,
 ) -> Response {
     info!("create_session called");
+
+    let client_ip = extract_client_ip(&headers);
+    if state.rate_limiters.login.check_key(&client_ip).is_err() {
+        warn!(ip = %client_ip, "Login rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many login attempts. Please try again later."
+            })),
+        )
+            .into_response();
+    }
 
     let row = match sqlx::query!(
         "SELECT u.id, u.did, u.handle, u.password_hash, k.key_bytes, k.encryption_version FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.handle = $1 OR u.email = $1",

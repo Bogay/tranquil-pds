@@ -54,7 +54,7 @@ pub async fn handle_authorization_code_grant(
         .get(&auth_request.client_id)
         .await?;
     let client_auth = auth_request.client_auth.clone().unwrap_or(ClientAuth::None);
-    verify_client_auth(&client_metadata, &client_auth)?;
+    verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
 
     verify_pkce(&auth_request.parameters.code_challenge, &code_verifier)?;
 

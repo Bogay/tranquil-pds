@@ -3,7 +3,7 @@ use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash};
@@ -15,6 +15,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{error, info, warn};
+
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(forwarded) = headers.get("x-forwarded-for") {
+        if let Ok(value) = forwarded.to_str() {
+            if let Some(first_ip) = value.split(',').next() {
+                return first_ip.trim().to_string();
+            }
+        }
+    }
+    if let Some(real_ip) = headers.get("x-real-ip") {
+        if let Ok(value) = real_ip.to_str() {
+            return value.trim().to_string();
+        }
+    }
+    "unknown".to_string()
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,9 +54,24 @@ pub struct CreateAccountOutput {
 
 pub async fn create_account(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<CreateAccountInput>,
 ) -> Response {
     info!("create_account called");
+
+    let client_ip = extract_client_ip(&headers);
+    if state.rate_limiters.account_creation.check_key(&client_ip).is_err() {
+        warn!(ip = %client_ip, "Account creation rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many account creation attempts. Please try again later."
+            })),
+        )
+            .into_response();
+    }
+
     if input.handle.contains('!') || input.handle.contains('@') {
         return (
             StatusCode::BAD_REQUEST,
@@ -184,8 +215,40 @@ pub async fn create_account(
     let user_id = match user_insert {
         Ok(row) => row.id,
         Err(e) => {
+            if let Some(db_err) = e.as_database_error() {
+                if db_err.code().as_deref() == Some("23505") {
+                    let constraint = db_err.constraint().unwrap_or("");
+                    if constraint.contains("handle") || constraint.contains("users_handle") {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "HandleNotAvailable",
+                                "message": "Handle already taken"
+                            })),
+                        )
+                            .into_response();
+                    } else if constraint.contains("email") || constraint.contains("users_email") {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "InvalidEmail",
+                                "message": "Email already registered"
+                            })),
+                        )
+                            .into_response();
+                    } else if constraint.contains("did") || constraint.contains("users_did") {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "AccountAlreadyExists",
+                                "message": "An account with this DID already exists"
+                            })),
+                        )
+                            .into_response();
+                    }
+                }
+            }
             error!("Error inserting user: {:?}", e);
-            // TODO: Check for unique constraint violation on email/did specifically
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),

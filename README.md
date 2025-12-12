@@ -1,75 +1,103 @@
-# Lewis' BS PDS Sandbox
+# BSPDS, a Personal Data Server
 
-When I'm actually done then yeah let's make this into a proper official-looking repo perhaps under an official-looking account or something.
+A production-grade Personal Data Server (PDS) implementation for the AT Protocol.
 
-This project implements a Personal Data Server (PDS) implementation for the AT Protocol.
+Uses PostgreSQL instead of SQLite, S3-compatible blob storage, and is designed to be a complete drop-in replacement for Bluesky's reference PDS implementation.
 
-Uses PostgreSQL instead of SQLite, S3-compatible blob storage, and aims to be a complete drop-in replacement for Bluesky's reference PDS implementation.
+## Features
 
-In fact I aim to also implement a plugin system soon, so that we can add things onto our own PDSes on top of the default BS.
+- Full AT Protocol support, all `com.atproto.*` endpoints implemented
+- OAuth 2.1 Provider. PKCE, DPoP, Pushed Authorization Requests
+- PostgreSQL, prod-ready database backend
+- S3-compatible object storage for blobs; works with AWS S3, UpCloud object storage, self-hosted MinIO, etc.
+- WebSocket `subscribeRepos` endpoint for real-time sync
+- Crawler notifications via `requestCrawl`
+- Multi-channel notifications: email, discord, telegram, signal
+- Per-IP rate limiting on sensitive endpoints
 
-I'm also taking ideas on what other PDSes lack, such as an on-PDS webpage that users can access to manage their records and preferences.
+## Running Locally
 
-:3
+Requires Rust installed locally.
 
-# Running locally
+Run PostgreSQL and S3-compatible object store (e.g., with podman/docker):
 
-The reader will need rust installed locally.
+```bash
+podman compose up db objsto -d
+```
 
-I personally run the postgres db, and an S3-compatible object store with podman compose up db objsto -d.
+Run the PDS:
 
-Run the PDS directly:
+```bash
+just run
+```
 
-    just run
+## Configuration
 
-Configuration is via environment variables:
+### Required
 
-    DATABASE_URL          postgres connection string
-    S3_BUCKET             blob storage bucket name
-    S3_ENDPOINT           S3 endpoint URL (for MinIO etc)
-    AWS_ACCESS_KEY_ID     S3 credentials
-    AWS_SECRET_ACCESS_KEY
-    AWS_REGION
-    PDS_HOSTNAME          public hostname of this PDS
-    APPVIEW_URL           appview to proxy unimplemented endpoints to
-    RELAYS                comma-separated list of relay WebSocket URLs
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `S3_BUCKET` | Blob storage bucket name |
+| `S3_ENDPOINT` | S3 endpoint URL (for MinIO, etc.) |
+| `AWS_ACCESS_KEY_ID` | S3 credentials |
+| `AWS_SECRET_ACCESS_KEY` | S3 credentials |
+| `AWS_REGION` | S3 region |
+| `PDS_HOSTNAME` | Public hostname of this PDS |
+| `JWT_SECRET` | Secret for OAuth token signing (HS256) |
+| `KEY_ENCRYPTION_KEY` | Key for encrypting user signing keys (AES-256-GCM) |
 
-Optional email stuff:
+### Optional
 
-    MAIL_FROM_ADDRESS     sender address (enables email notifications)
-    MAIL_FROM_NAME        sender name (default: BSPDS)
-    SENDMAIL_PATH         path to sendmail binary
+| Variable | Description |
+|----------|-------------|
+| `APPVIEW_URL` | Appview URL to proxy unimplemented endpoints to |
+| `CRAWLERS` | Comma-separated list of relay URLs to notify via `requestCrawl` |
 
-Development
+### Notifications
 
-    just              shows available commands
-    just test         run tests (spins up postgres and minio via testcontainers)
-    just lint         clippy + fmt check
-    just db-reset     drop and recreate local database
+At least one channel should be configured for user notifications (password reset, email verification, etc.):
 
-The test suite uses testcontainers so you don't need to set up anything manually for running tests.
+| Variable | Description |
+|----------|-------------|
+| `MAIL_FROM_ADDRESS` | Email sender address (enables email via sendmail) |
+| `MAIL_FROM_NAME` | Email sender name (default: "BSPDS") |
+| `SENDMAIL_PATH` | Path to sendmail binary (default: /usr/sbin/sendmail) |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL for notifications |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token for notifications |
+| `SIGNAL_CLI_PATH` | Path to signal-cli binary |
+| `SIGNAL_SENDER_NUMBER` | Signal sender phone number (+1234567890 format) |
 
-## What's implemented
+## Development
 
-Most of the com.atproto.* namespace is done. Server endpoints, repo operations, sync, identity, admin, moderation. The firehose websocket works. OAuth is not done yet.
+```bash
+just              # Show available commands
+just test         # Run tests (auto-starts postgres/minio, runs nextest)
+just lint         # Clippy + fmt check
+just db-reset     # Drop and recreate local database
+```
 
-See TODO.md for the full breakdown of what's done and what's left.
+## Project Structure
 
-Structure
+```
+src/
+  main.rs           Server entrypoint
+  lib.rs            Router setup
+  state.rs          AppState (db pool, stores, rate limiters, circuit breakers)
+  api/              XRPC handlers organized by namespace
+  auth/             JWT authentication (ES256K per-user keys)
+  oauth/            OAuth 2.1 provider (HS256 server-wide)
+  repo/             PostgreSQL block store
+  storage/          S3 blob storage
+  sync/             Firehose, CAR export, crawler notifications
+  notifications/    Multi-channel notification service
+  plc/              PLC directory client
+  circuit_breaker/  Circuit breaker for external services
+  rate_limit/       Per-IP rate limiting
+tests/              Integration tests
+migrations/         SQLx migrations
+```
 
-    src/
-      main.rs           server entrypoint
-      lib.rs            router setup
-      state.rs          app state (db pool, stores)
-      api/              XRPC handlers organized by namespace
-      auth/             JWT handling
-      repo/             postgres block store
-      storage/          S3 blob storage
-      sync/             firehose, relay clients
-      notifications/    email service
-    tests/              integration tests
-    migrations/         sqlx migrations
+## License
 
-License
-
-idk
+TBD

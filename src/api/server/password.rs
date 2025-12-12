@@ -2,7 +2,7 @@ use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use bcrypt::{hash, DEFAULT_COST};
@@ -15,6 +15,22 @@ fn generate_reset_code() -> String {
     crate::util::generate_token_code()
 }
 
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(forwarded) = headers.get("x-forwarded-for") {
+        if let Ok(value) = forwarded.to_str() {
+            if let Some(first_ip) = value.split(',').next() {
+                return first_ip.trim().to_string();
+            }
+        }
+    }
+    if let Some(real_ip) = headers.get("x-real-ip") {
+        if let Ok(value) = real_ip.to_str() {
+            return value.trim().to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
 #[derive(Deserialize)]
 pub struct RequestPasswordResetInput {
     pub email: String,
@@ -22,8 +38,22 @@ pub struct RequestPasswordResetInput {
 
 pub async fn request_password_reset(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<RequestPasswordResetInput>,
 ) -> Response {
+    let client_ip = extract_client_ip(&headers);
+    if state.rate_limiters.password_reset.check_key(&client_ip).is_err() {
+        warn!(ip = %client_ip, "Password reset rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many password reset requests. Please try again later."
+            })),
+        )
+            .into_response();
+    }
+
     let email = input.email.trim().to_lowercase();
     if email.is_empty() {
         return (

@@ -19,11 +19,35 @@ pub use introspect::{
 };
 pub use types::{TokenRequest, TokenResponse};
 
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(forwarded) = headers.get("x-forwarded-for") {
+        if let Ok(value) = forwarded.to_str() {
+            if let Some(first_ip) = value.split(',').next() {
+                return first_ip.trim().to_string();
+            }
+        }
+    }
+    if let Some(real_ip) = headers.get("x-real-ip") {
+        if let Ok(value) = real_ip.to_str() {
+            return value.trim().to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
 pub async fn token_endpoint(
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(request): Form<TokenRequest>,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
+    let client_ip = extract_client_ip(&headers);
+    if state.rate_limiters.oauth_token.check_key(&client_ip).is_err() {
+        tracing::warn!(ip = %client_ip, "OAuth token rate limit exceeded");
+        return Err(OAuthError::InvalidRequest(
+            "Too many requests. Please try again later.".to_string(),
+        ));
+    }
+
     let dpop_proof = headers
         .get("DPoP")
         .and_then(|v| v.to_str().ok())

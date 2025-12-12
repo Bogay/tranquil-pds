@@ -4,6 +4,14 @@ use serde_json::json;
 
 use tracing::error;
 
+pub async fn robots_txt() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain")],
+        "# Hello!\n\n# Crawling the public API is allowed\nUser-agent: *\nAllow: /\n",
+    )
+}
+
 pub async fn describe_server() -> impl IntoResponse {
     let domains_str =
         std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| "example.com".to_string());

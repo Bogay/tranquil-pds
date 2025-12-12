@@ -58,6 +58,34 @@ pub async fn commit_and_log(
     let mut tx = state.db.begin().await
         .map_err(|e| format!("Failed to begin transaction: {}", e))?;
 
+    let lock_result = sqlx::query!(
+        "SELECT repo_root_cid FROM repos WHERE user_id = $1 FOR UPDATE NOWAIT",
+        user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await;
+
+    match lock_result {
+        Err(e) => {
+            if let Some(db_err) = e.as_database_error() {
+                if db_err.code().as_deref() == Some("55P03") {
+                    return Err("ConcurrentModification: Another request is modifying this repo".to_string());
+                }
+            }
+            return Err(format!("Failed to acquire repo lock: {}", e));
+        }
+        Ok(Some(row)) => {
+            if let Some(expected_root) = &current_root_cid {
+                if row.repo_root_cid != expected_root.to_string() {
+                    return Err("ConcurrentModification: Repo has been modified since last read".to_string());
+                }
+            }
+        }
+        Ok(None) => {
+            return Err("Repo not found".to_string());
+        }
+    }
+
     sqlx::query!("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2", new_root_cid.to_string(), user_id)
         .execute(&mut *tx)
         .await

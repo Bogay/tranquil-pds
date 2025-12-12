@@ -81,6 +81,9 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.sync.listBlobs`.
 - [x] Crawler Interaction
     - [x] Implement `com.atproto.sync.requestCrawl` (Notify relays to index us).
+- [x] Deprecated Sync Endpoints (for compatibility)
+    - [x] Implement `com.atproto.sync.getCheckout` (deprecated).
+    - [x] Implement `com.atproto.sync.getHead` (deprecated).
 
 ## Identity (`com.atproto.identity`)
 - [x] Resolution
@@ -108,14 +111,17 @@ Lewis' corrected big boy todofile
 - [x] Implement `com.atproto.moderation.createReport`.
 
 ## Temp Namespace (`com.atproto.temp`)
-- [ ] Implement `com.atproto.temp.checkSignupQueue` (signup queue status for gated signups).
+- [x] Implement `com.atproto.temp.checkSignupQueue` (signup queue status for gated signups).
+
+## Misc HTTP Endpoints
+- [x] Implement `/robots.txt` endpoint.
 
 ## OAuth 2.1 Support
 Full OAuth 2.1 provider for ATProto native app authentication.
 - [x] OAuth Provider Core
     - [x] Implement `/.well-known/oauth-protected-resource` metadata endpoint.
     - [x] Implement `/.well-known/oauth-authorization-server` metadata endpoint.
-    - [x] Implement `/oauth/authorize` authorization endpoint (headless JSON mode).
+    - [x] Implement `/oauth/authorize` authorization endpoint (with login UI).
     - [x] Implement `/oauth/par` Pushed Authorization Request endpoint.
     - [x] Implement `/oauth/token` token endpoint (authorization_code + refresh_token grants).
     - [x] Implement `/oauth/jwks` JSON Web Key Set endpoint.
@@ -132,12 +138,13 @@ Full OAuth 2.1 provider for ATProto native app authentication.
 - [x] Client metadata fetching and validation.
 - [x] PKCE (S256) enforcement.
 - [x] OAuth token verification extractor for protected resources.
-- [ ] Authorization UI templates (currently headless-only, returns JSON for programmatic flows).
-- [ ] Implement `private_key_jwt` signature verification (currently rejects with clear error).
+- [x] Authorization UI templates (HTML login form).
+- [x] Implement `private_key_jwt` signature verification with async JWKS fetching.
+- [x] HS256 JWT support (matches reference PDS).
 
 ## OAuth Security Notes
 
-I've tried to ensure that this codebase is not vulnerable to the following:
+Security measures implemented:
 
 - Constant-time comparison for signature verification (prevents timing attacks)
 - HMAC-SHA256 for access token signing with configurable secret
@@ -151,12 +158,12 @@ I've tried to ensure that this codebase is not vulnerable to the following:
 - All database queries use parameterized statements (no SQL injection)
 - Deactivated/taken-down accounts blocked from OAuth authorization
 - Client ID validation on token exchange (defense-in-depth against cross-client attacks)
+- HTML escaping in OAuth templates (XSS prevention)
 
 ### Auth Notes
-- Algorithm choice: Using ES256K (secp256k1 ECDSA) with per-user keys. Ref PDS uses HS256 (HMAC) with single server key. Our approach provides better key isolation but differs from reference implementation.
-    - [ ] Support the ref PDS HS256 system too.
-- Token storage: Now storing only token JTIs in session_tokens table (defense in depth against DB breaches). Refresh token family tracking enables detection of token reuse attacks.
-- Key encryption: User signing keys encrypted at rest using AES-256-GCM with keys derived via HKDF from MASTER_KEY environment variable. Migration-safe: supports both encrypted (version 1) and plaintext (version 0) keys.
+- Dual algorithm support: ES256K (secp256k1 ECDSA) with per-user keys AND HS256 (HMAC) for compatibility with reference PDS.
+- Token storage: Storing only token JTIs in session_tokens table (defense in depth against DB breaches). Refresh token family tracking enables detection of token reuse attacks.
+- Key encryption: User signing keys encrypted at rest using AES-256-GCM with keys derived via HKDF from KEY_ENCRYPTION_KEY environment variable.
 
 ## PDS-Level App Endpoints
 These endpoints need to be implemented at the PDS level (not just proxied to appview).
@@ -178,22 +185,6 @@ These are implemented at PDS level to enable local-first reads (read-after-write
 ### Notification (`app.bsky.notification`)
 - [x] Implement `app.bsky.notification.registerPush` (push notification registration, proxied).
 
-## Deprecated Sync Endpoints (for compatibility)
-- [ ] Implement `com.atproto.sync.getCheckout` (deprecated, still needed for compatibility).
-- [ ] Implement `com.atproto.sync.getHead` (deprecated, still needed for compatibility).
-
-## Misc HTTP Endpoints
-- [ ] Implement `/robots.txt` endpoint.
-
-## Record Schema Validation
-- [ ] Handle this generically.
-
-## Preference Storage
-User preferences (for app.bsky.actor.getPreferences/putPreferences):
-- [x] Create preferences table for storing user app preferences.
-- [x] Implement `app.bsky.actor.getPreferences` handler (read from postgres, proxy fallback).
-- [x] Implement `app.bsky.actor.putPreferences` handler (write to postgres).
-
 ## Infrastructure & Core Components
 - [x] Sequencer (Event Log)
     - [x] Implement a `Sequencer` (backed by `repo_seq` table).
@@ -206,32 +197,53 @@ User preferences (for app.bsky.actor.getPreferences/putPreferences):
         - [x] Manage Repo Root in `repos` table.
     - [x] Implement Atomic Repo Transactions.
         - [x] Ensure `blocks` write, `repo_root` update, `records` index update, and `sequencer` event are committed in a single transaction.
-    - [ ] Implement concurrency control (row-level locking on `repos` table) to prevent concurrent writes to the same repo.
+    - [x] Implement concurrency control (row-level locking via FOR UPDATE).
 - [ ] DID Cache
     - [ ] Implement caching layer for DID resolution (Redis or in-memory).
     - [ ] Handle cache invalidation/expiry.
-- [ ] Background Jobs
-    - [ ] Implement `Crawlers` service (debounce notifications to relays).
+- [x] Crawlers Service
+    - [x] Implement `Crawlers` service (debounce notifications to relays).
+    - [x] 20-minute notification debounce.
+    - [x] Circuit breaker for relay failures.
 - [x] Notification Service
     - [x] Queue-based notification system with database table
     - [x] Background worker polling for pending notifications
     - [x] Extensible sender trait for multiple channels
     - [x] Email sender via OS sendmail/msmtp
-    - [ ] Discord bot sender
-    - [ ] Telegram bot sender
-    - [ ] Signal bot sender
+    - [x] Discord webhook sender
+    - [x] Telegram bot sender
+    - [x] Signal CLI sender
     - [x] Helper functions for common notification types (welcome, password reset, email verification, etc.)
     - [x] Respect user's `preferred_notification_channel` setting for non-email-specific notifications
-- [ ] Image Processing
-    - [ ] Implement image resize/formatting pipeline (for blob uploads).
+- [x] Image Processing
+    - [x] Implement image resize/formatting pipeline (for blob uploads).
+    - [x] WebP conversion for thumbnails.
+    - [x] EXIF stripping.
+    - [x] File size limits (10MB default).
 - [x] IPLD & MST
     - [x] Implement Merkle Search Tree logic for repo signing.
     - [x] Implement CAR (Content Addressable Archive) encoding/decoding.
-- [ ] Validation
-    - [ ] DID PLC Operations (Sign rotation keys).
-- [ ] Fix any remaining TODOs in the code, everywhere, full stop.
+    - [x] Cycle detection in CAR export.
+- [x] Rate Limiting
+    - [x] Per-IP rate limiting on login (10/min).
+    - [x] Per-IP rate limiting on OAuth token endpoint (30/min).
+    - [x] Per-IP rate limiting on password reset (5/hour).
+    - [x] Per-IP rate limiting on account creation (10/hour).
+- [x] Circuit Breakers
+    - [x] PLC directory circuit breaker (5 failures → open, 60s timeout).
+    - [x] Relay notification circuit breaker (10 failures → open, 30s timeout).
+- [x] Security Hardening
+    - [x] Email header injection prevention (CRLF sanitization).
+    - [x] Signal command injection prevention (phone number validation).
+    - [x] Constant-time signature comparison.
+    - [x] SSRF protection for outbound requests.
 
-## Web Management UI
+## Lewis' fabulous mini-list of remaining TODOs
+- [ ] DID resolution caching (valkey).
+- [ ] Record schema validation (generic validation framework).
+- [ ] Fix any remaining TODOs in the code.
+
+## Future: Web Management UI
 A single-page web app for account management. The frontend (JS framework) calls existing ATProto XRPC endpoints - no server-side rendering or bespoke HTML form handlers.
 
 ### Architecture
