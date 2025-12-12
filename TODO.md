@@ -239,6 +239,7 @@ These are implemented at PDS level to enable local-first reads (read-after-write
     - [x] SSRF protection for outbound requests.
 
 ## Lewis' fabulous mini-list of remaining TODOs
+- [ ] The OAuth authorize POST endpoint has no rate limiting, allowing password brute-forcing. Fix this and audit all oauth and 2fa surface again.
 - [ ] DID resolution caching (valkey).
 - [ ] Record schema validation (generic validation framework).
 - [ ] Fix any remaining TODOs in the code.
@@ -288,4 +289,11 @@ Admin Dashboard (privileged users only)
 - [ ] User detail/actions (uses `com.atproto.admin.*` endpoints)
 - [ ] Invite management (uses `com.atproto.admin.getInviteCodes`, `disableInviteCodes`)
 - [ ] Server stats (uses `com.bspds.admin.getServerStats`)
+
+## Future: private data
+I will see where the discourse about encrypted/privileged private data is at the current moment, and make an implementation that matches what the bsky team will likely do in their pds whenever they get around to it.
+Then when they come out with theirs, I can make adjustments to mine and be ready on day 1. Or 2.
+
+We want records that only authorized parties can see and decrypt. This requires some sort of federation of keys and communication between PDSes?
+Gotta figure all of this out as a first step.
 
