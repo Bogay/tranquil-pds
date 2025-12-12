@@ -65,7 +65,19 @@ pub async fn send_email(
     .await;
 
     let (user_id, email, handle) = match user {
-        Ok(Some(row)) => (row.id, row.email, row.handle),
+        Ok(Some(row)) => {
+            let email = match row.email {
+                Some(e) => e,
+                None => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "NoEmail", "message": "Recipient has no email address"})),
+                    )
+                        .into_response();
+                }
+            };
+            (row.id, email, row.handle)
+        }
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,

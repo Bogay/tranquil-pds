@@ -477,7 +477,7 @@ pub fn login_page(
 pub struct DeviceAccount {
     pub did: String,
     pub handle: String,
-    pub email: String,
+    pub email: Option<String>,
     pub last_used_at: DateTime<Utc>,
 }
 
@@ -493,6 +493,7 @@ pub fn account_selector_page(
         .iter()
         .map(|account| {
             let initials = get_initials(&account.handle);
+            let email_display = account.email.as_deref().unwrap_or("");
             format!(
                 r#"<form method="POST" action="/oauth/authorize/select" style="margin:0">
                     <input type="hidden" name="request_uri" value="{request_uri}">
@@ -510,7 +511,7 @@ pub fn account_selector_page(
                 did = html_escape(&account.did),
                 initials = html_escape(&initials),
                 handle = html_escape(&account.handle),
-                email = html_escape(&account.email),
+                email = html_escape(email_display),
             )
         })
         .collect();

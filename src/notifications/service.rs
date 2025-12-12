@@ -256,7 +256,7 @@ pub async fn enqueue_notification(db: &PgPool, notification: NewNotification) ->
 
 pub struct UserNotificationPrefs {
     pub channel: NotificationChannel,
-    pub email: String,
+    pub email: Option<String>,
     pub handle: String,
 }
 
@@ -303,7 +303,7 @@ pub async fn enqueue_welcome(
             user_id,
             prefs.channel,
             super::types::NotificationType::Welcome,
-            prefs.email.clone(),
+            prefs.email.clone().unwrap_or_default(),
             Some(format!("Welcome to {}", hostname)),
             body,
         ),
@@ -356,7 +356,7 @@ pub async fn enqueue_password_reset(
             user_id,
             prefs.channel,
             super::types::NotificationType::PasswordReset,
-            prefs.email.clone(),
+            prefs.email.clone().unwrap_or_default(),
             Some(format!("Password Reset - {}", hostname)),
             body,
         ),
@@ -409,7 +409,7 @@ pub async fn enqueue_account_deletion(
             user_id,
             prefs.channel,
             super::types::NotificationType::AccountDeletion,
-            prefs.email.clone(),
+            prefs.email.clone().unwrap_or_default(),
             Some(format!("Account Deletion Request - {}", hostname)),
             body,
         ),
@@ -436,7 +436,7 @@ pub async fn enqueue_plc_operation(
             user_id,
             prefs.channel,
             super::types::NotificationType::PlcOperation,
-            prefs.email.clone(),
+            prefs.email.clone().unwrap_or_default(),
             Some(format!("{} - PLC Operation Token", hostname)),
             body,
         ),
@@ -463,7 +463,7 @@ pub async fn enqueue_2fa_code(
             user_id,
             prefs.channel,
             super::types::NotificationType::TwoFactorCode,
-            prefs.email.clone(),
+            prefs.email.clone().unwrap_or_default(),
             Some(format!("Sign-in Verification - {}", hostname)),
             body,
         ),
@@ -478,4 +478,45 @@ pub fn channel_display_name(channel: NotificationChannel) -> &'static str {
         NotificationChannel::Telegram => "Telegram",
         NotificationChannel::Signal => "Signal",
     }
+}
+
+pub async fn enqueue_signup_verification(
+    db: &PgPool,
+    user_id: Uuid,
+    channel: &str,
+    recipient: &str,
+    code: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+
+    let notification_channel = match channel {
+        "email" => NotificationChannel::Email,
+        "discord" => NotificationChannel::Discord,
+        "telegram" => NotificationChannel::Telegram,
+        "signal" => NotificationChannel::Signal,
+        _ => NotificationChannel::Email,
+    };
+
+    let body = format!(
+        "Welcome! Your account verification code is: {}\n\nThis code will expire in 30 minutes.\n\nEnter this code to complete your registration on {}.",
+        code, hostname
+    );
+
+    let subject = match notification_channel {
+        NotificationChannel::Email => Some(format!("Verify your account - {}", hostname)),
+        _ => None,
+    };
+
+    enqueue_notification(
+        db,
+        NewNotification::new(
+            user_id,
+            notification_channel,
+            super::types::NotificationType::EmailVerification,
+            recipient.to_string(),
+            subject,
+            body,
+        ),
+    )
+    .await
 }

@@ -106,9 +106,13 @@ impl Crawlers {
                                 cb.record_success().await;
                             }
                         } else {
+                            let status = response.status();
+                            let body = response.text().await.unwrap_or_default();
                             warn!(
                                 crawler = %url,
-                                status = %response.status(),
+                                status = %status,
+                                body = %body,
+                                hostname = %hostname,
                                 "Crawler notification returned non-success status"
                             );
                             if let Some(cb) = cb {

@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::verify;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -64,7 +65,13 @@ pub async fn create_session(
     }
 
     let row = match sqlx::query!(
-        "SELECT u.id, u.did, u.handle, u.password_hash, k.key_bytes, k.encryption_version FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.handle = $1 OR u.email = $1",
+        r#"SELECT
+            u.id, u.did, u.handle, u.password_hash,
+            u.email_confirmed, u.discord_verified, u.telegram_verified, u.signal_verified,
+            k.key_bytes, k.encryption_version
+        FROM users u
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE u.handle = $1 OR u.email = $1"#,
         input.identifier
     )
     .fetch_optional(&state.db)
@@ -101,6 +108,23 @@ pub async fn create_session(
     if !password_valid {
         warn!("Password verification failed for login attempt");
         return ApiError::AuthenticationFailedMsg("Invalid identifier or password".into()).into_response();
+    }
+
+    let is_verified = row.email_confirmed
+        || row.discord_verified
+        || row.telegram_verified
+        || row.signal_verified;
+
+    if !is_verified {
+        warn!("Login attempt for unverified account: {}", row.did);
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "AccountNotVerified",
+                "message": "Please verify your account before logging in",
+                "did": row.did
+            })),
+        ).into_response();
     }
 
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
@@ -360,4 +384,231 @@ pub async fn refresh_session(
             ApiError::InternalError.into_response()
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmSignupInput {
+    pub did: String,
+    pub verification_code: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmSignupOutput {
+    pub access_jwt: String,
+    pub refresh_jwt: String,
+    pub handle: String,
+    pub did: String,
+}
+
+pub async fn confirm_signup(
+    State(state): State<AppState>,
+    Json(input): Json<ConfirmSignupInput>,
+) -> Response {
+    info!("confirm_signup called for DID: {}", input.did);
+
+    let row = match sqlx::query!(
+        r#"SELECT
+            u.id, u.did, u.handle,
+            u.email_confirmation_code,
+            u.email_confirmation_code_expires_at,
+            u.preferred_notification_channel as "channel: crate::notifications::NotificationChannel",
+            k.key_bytes, k.encryption_version
+        FROM users u
+        JOIN user_keys k ON u.id = k.user_id
+        WHERE u.did = $1"#,
+        input.did
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            warn!("User not found for confirm_signup: {}", input.did);
+            return ApiError::InvalidRequest("Invalid DID or verification code".into()).into_response();
+        }
+        Err(e) => {
+            error!("Database error in confirm_signup: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+    };
+
+    let stored_code = match &row.email_confirmation_code {
+        Some(code) => code,
+        None => {
+            warn!("No verification code found for user: {}", input.did);
+            return ApiError::InvalidRequest("No pending verification".into()).into_response();
+        }
+    };
+
+    if stored_code != &input.verification_code {
+        warn!("Invalid verification code for user: {}", input.did);
+        return ApiError::InvalidRequest("Invalid verification code".into()).into_response();
+    }
+
+    if let Some(expires_at) = row.email_confirmation_code_expires_at {
+        if expires_at < Utc::now() {
+            warn!("Verification code expired for user: {}", input.did);
+            return ApiError::ExpiredTokenMsg("Verification code has expired".into()).into_response();
+        }
+    }
+
+    let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+        Ok(k) => k,
+        Err(e) => {
+            error!("Failed to decrypt user key: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+    };
+
+    let verified_column = match row.channel {
+        crate::notifications::NotificationChannel::Email => "email_confirmed",
+        crate::notifications::NotificationChannel::Discord => "discord_verified",
+        crate::notifications::NotificationChannel::Telegram => "telegram_verified",
+        crate::notifications::NotificationChannel::Signal => "signal_verified",
+    };
+
+    let update_query = format!(
+        "UPDATE users SET {} = TRUE, email_confirmation_code = NULL, email_confirmation_code_expires_at = NULL WHERE did = $1",
+        verified_column
+    );
+
+    if let Err(e) = sqlx::query(&update_query)
+        .bind(&input.did)
+        .execute(&state.db)
+        .await
+    {
+        error!("Failed to update verification status: {:?}", e);
+        return ApiError::InternalError.into_response();
+    }
+
+    let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to create access token: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+    };
+
+    let refresh_meta = match crate::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to create refresh token: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+    };
+
+    if let Err(e) = sqlx::query!(
+        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+        row.did,
+        access_meta.jti,
+        refresh_meta.jti,
+        access_meta.expires_at,
+        refresh_meta.expires_at
+    )
+    .execute(&state.db)
+    .await
+    {
+        error!("Failed to insert session: {:?}", e);
+        return ApiError::InternalError.into_response();
+    }
+
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    if let Err(e) = crate::notifications::enqueue_welcome(&state.db, row.id, &hostname).await {
+        warn!("Failed to enqueue welcome notification: {:?}", e);
+    }
+
+    Json(ConfirmSignupOutput {
+        access_jwt: access_meta.token,
+        refresh_jwt: refresh_meta.token,
+        handle: row.handle,
+        did: row.did,
+    }).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResendVerificationInput {
+    pub did: String,
+}
+
+pub async fn resend_verification(
+    State(state): State<AppState>,
+    Json(input): Json<ResendVerificationInput>,
+) -> Response {
+    info!("resend_verification called for DID: {}", input.did);
+
+    let row = match sqlx::query!(
+        r#"SELECT
+            id, handle, email,
+            preferred_notification_channel as "channel: crate::notifications::NotificationChannel",
+            discord_id, telegram_username, signal_number,
+            email_confirmed, discord_verified, telegram_verified, signal_verified
+        FROM users
+        WHERE did = $1"#,
+        input.did
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return ApiError::InvalidRequest("User not found".into()).into_response();
+        }
+        Err(e) => {
+            error!("Database error in resend_verification: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+    };
+
+    let is_verified = row.email_confirmed
+        || row.discord_verified
+        || row.telegram_verified
+        || row.signal_verified;
+
+    if is_verified {
+        return ApiError::InvalidRequest("Account is already verified".into()).into_response();
+    }
+
+    let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
+    let code_expires_at = Utc::now() + chrono::Duration::minutes(30);
+
+    if let Err(e) = sqlx::query!(
+        "UPDATE users SET email_confirmation_code = $1, email_confirmation_code_expires_at = $2 WHERE did = $3",
+        verification_code,
+        code_expires_at,
+        input.did
+    )
+    .execute(&state.db)
+    .await
+    {
+        error!("Failed to update verification code: {:?}", e);
+        return ApiError::InternalError.into_response();
+    }
+
+    let (channel_str, recipient) = match row.channel {
+        crate::notifications::NotificationChannel::Email => ("email", row.email.clone().unwrap_or_default()),
+        crate::notifications::NotificationChannel::Discord => {
+            ("discord", row.discord_id.unwrap_or_default())
+        }
+        crate::notifications::NotificationChannel::Telegram => {
+            ("telegram", row.telegram_username.unwrap_or_default())
+        }
+        crate::notifications::NotificationChannel::Signal => {
+            ("signal", row.signal_number.unwrap_or_default())
+        }
+    };
+
+    if let Err(e) = crate::notifications::enqueue_signup_verification(
+        &state.db,
+        row.id,
+        channel_str,
+        &recipient,
+        &verification_code,
+    ).await {
+        warn!("Failed to enqueue verification notification: {:?}", e);
+    }
+
+    Json(json!({"success": true})).into_response()
 }

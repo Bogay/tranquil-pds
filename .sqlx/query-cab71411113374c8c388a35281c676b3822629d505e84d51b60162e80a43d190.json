@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            u.id, u.did, u.handle,\n            u.email_confirmation_code,\n            u.email_confirmation_code_expires_at,\n            u.preferred_notification_channel as \"channel: crate::notifications::NotificationChannel\",\n            k.key_bytes, k.encryption_version\n        FROM users u\n        JOIN user_keys k ON u.id = k.user_id\n        WHERE u.did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "email_confirmation_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "email_confirmation_code_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "channel: crate::notifications::NotificationChannel",
+        "type_info": {
+          "Custom": {
+            "name": "notification_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "key_bytes",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 7,
+        "name": "encryption_version",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "cab71411113374c8c388a35281c676b3822629d505e84d51b60162e80a43d190"
+}

@@ -18,5 +18,5 @@ pub use invite::{create_invite_code, create_invite_codes, get_account_invite_cod
 pub use meta::{describe_server, health, robots_txt};
 pub use password::{request_password_reset, reset_password};
 pub use service_auth::get_service_auth;
-pub use session::{create_session, delete_session, get_session, refresh_session};
+pub use session::{confirm_signup, create_session, delete_session, get_session, refresh_session, resend_verification};
 pub use signing_key::reserve_signing_key;

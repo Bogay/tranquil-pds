@@ -6,7 +6,7 @@ use super::super::{DeviceData, OAuthError};
 pub struct DeviceAccountRow {
     pub did: String,
     pub handle: String,
-    pub email: String,
+    pub email: Option<String>,
     pub last_used_at: DateTime<Utc>,
 }
 

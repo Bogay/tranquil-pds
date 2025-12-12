@@ -343,8 +343,10 @@ pub async fn update_email(
             .into_response();
     }
 
-    if new_email == current_email.to_lowercase() {
-        return (StatusCode::OK, Json(json!({}))).into_response();
+    if let Some(ref current) = current_email {
+        if new_email == current.to_lowercase() {
+            return (StatusCode::OK, Json(json!({}))).into_response();
+        }
     }
 
     let email_confirmed = stored_code.is_some() && email_pending_verification.is_some();

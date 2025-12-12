@@ -74,7 +74,7 @@ pub async fn get_account_info(
                 Json(AccountInfo {
                     did: row.did,
                     handle: row.handle,
-                    email: Some(row.email),
+                    email: row.email,
                     indexed_at: row.created_at.to_rfc3339(),
                     invite_note: None,
                     invites_disabled: false,
@@ -150,7 +150,7 @@ pub async fn get_account_infos(
             infos.push(AccountInfo {
                 did: row.did,
                 handle: row.handle,
-                email: Some(row.email),
+                email: row.email,
                 indexed_at: row.created_at.to_rfc3339(),
                 invite_note: None,
                 invites_disabled: false,

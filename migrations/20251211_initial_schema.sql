@@ -6,13 +6,15 @@ CREATE TYPE notification_type AS ENUM (
     'password_reset',
     'email_update',
     'account_deletion',
-    'admin_email'
+    'admin_email',
+    'plc_operation',
+    'two_factor_code'
 );
 
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     handle TEXT NOT NULL UNIQUE,
-    email TEXT NOT NULL UNIQUE,
+    email TEXT UNIQUE,
     did TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -29,11 +31,26 @@ CREATE TABLE IF NOT EXISTS users (
 
     email_pending_verification TEXT,
     email_confirmation_code TEXT,
-    email_confirmation_code_expires_at TIMESTAMPTZ
+    email_confirmation_code_expires_at TIMESTAMPTZ,
+    email_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+
+    two_factor_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+
+    discord_id TEXT,
+    discord_verified BOOLEAN NOT NULL DEFAULT FALSE,
+
+    telegram_username TEXT,
+    telegram_verified BOOLEAN NOT NULL DEFAULT FALSE,
+
+    signal_number TEXT,
+    signal_verified BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_password_reset_code ON users(password_reset_code) WHERE password_reset_code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_email_confirmation_code ON users(email_confirmation_code) WHERE email_confirmation_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id) WHERE discord_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_telegram_username ON users(telegram_username) WHERE telegram_username IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_signal_number ON users(signal_number) WHERE signal_number IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS invite_codes (
     code TEXT PRIMARY KEY,
@@ -62,6 +79,7 @@ CREATE TABLE IF NOT EXISTS user_keys (
 CREATE TABLE IF NOT EXISTS repos (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     repo_root_cid TEXT NOT NULL,
+    repo_rev TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -79,9 +97,12 @@ CREATE TABLE IF NOT EXISTS records (
     rkey TEXT NOT NULL,
     record_cid TEXT NOT NULL,
     takedown_ref TEXT,
+    repo_rev TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(repo_id, collection, rkey)
 );
+
+CREATE INDEX idx_records_repo_rev ON records(repo_rev);
 
 CREATE TABLE IF NOT EXISTS blobs (
     cid TEXT PRIMARY KEY,
@@ -265,3 +286,40 @@ CREATE TABLE oauth_dpop_jti (
 );
 
 CREATE INDEX idx_oauth_dpop_jti_created_at ON oauth_dpop_jti(created_at);
+
+CREATE TABLE plc_operation_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_plc_op_tokens_user ON plc_operation_tokens(user_id);
+CREATE INDEX idx_plc_op_tokens_expires ON plc_operation_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS account_preferences (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    value_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_preferences_user_id ON account_preferences(user_id);
+CREATE INDEX IF NOT EXISTS idx_account_preferences_name ON account_preferences(name);
+
+CREATE TABLE oauth_2fa_challenge (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    did TEXT NOT NULL REFERENCES users(did) ON DELETE CASCADE,
+    request_uri TEXT NOT NULL,
+    code TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '10 minutes'
+);
+
+CREATE INDEX idx_oauth_2fa_challenge_request_uri ON oauth_2fa_challenge(request_uri);
+CREATE INDEX idx_oauth_2fa_challenge_expires ON oauth_2fa_challenge(expires_at);

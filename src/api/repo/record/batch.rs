@@ -1,4 +1,5 @@
 use super::validation::validate_record;
+use super::write::has_verified_notification_channel;
 use crate::api::repo::record::utils::{commit_and_log, RecordOp};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -108,6 +109,28 @@ pub async fn apply_writes(
             Json(json!({"error": "InvalidRepo", "message": "Repo does not match authenticated user"})),
         )
             .into_response();
+    }
+
+    match has_verified_notification_channel(&state.db, &did).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "AccountNotVerified",
+                    "message": "You must verify at least one notification channel (email, Discord, Telegram, or Signal) before creating records"
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error checking notification channels: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
     }
 
     if input.writes.is_empty() {

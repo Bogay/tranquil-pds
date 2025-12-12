@@ -13,12 +13,19 @@ pub async fn robots_txt() -> impl IntoResponse {
 }
 
 pub async fn describe_server() -> impl IntoResponse {
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let domains_str =
-        std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| "example.com".to_string());
+        std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| pds_hostname.clone());
     let domains: Vec<&str> = domains_str.split(',').map(|s| s.trim()).collect();
 
+    let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
     Json(json!({
-        "availableUserDomains": domains
+        "availableUserDomains": domains,
+        "inviteCodeRequired": invite_code_required,
+        "did": format!("did:web:{}", pds_hostname)
     }))
 }
 

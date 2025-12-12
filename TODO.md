@@ -258,16 +258,16 @@ These are implemented at PDS level to enable local-first reads (read-after-write
 A single-page web app for account management. The frontend (JS framework) calls existing ATProto XRPC endpoints - no server-side rendering or bespoke HTML form handlers.
 
 ### Architecture
-- [ ] Static SPA served from PDS (or separate static host)
+- [x] Static SPA served from PDS (or separate static host)
 - [ ] Frontend authenticates via OAuth 2.1 flow (same as any ATProto client)
-- [ ] All operations use standard XRPC endpoints (existing + new PDS-specific ones below)
-- [ ] No server-side sessions or CSRF - pure API client
+- [x] All operations use standard XRPC endpoints (existing + new PDS-specific ones below)
+- [x] No server-side sessions or CSRF - pure API client
 
 ### PDS-Specific XRPC Endpoints (new)
 Absolutely subject to change, "bspds" isn't even the real name of this pds thus far :D
 Anyway... endpoints for PDS settings not covered by standard ATProto:
-- [ ] `com.bspds.account.getNotificationPrefs` - get preferred channel, verified channels
-- [ ] `com.bspds.account.updateNotificationPrefs` - set preferred channel
+- [x] `com.bspds.account.getNotificationPrefs` - get preferred channel, verified channels
+- [x] `com.bspds.account.updateNotificationPrefs` - set preferred channel
 - [ ] `com.bspds.account.getNotificationHistory` - list past notifications
 - [ ] `com.bspds.account.verifyChannel` - initiate verification for Discord/Telegram/Signal
 - [ ] `com.bspds.account.confirmChannelVerification` - confirm with code
@@ -276,23 +276,32 @@ Anyway... endpoints for PDS settings not covered by standard ATProto:
 ### Frontend Views
 Uses existing ATProto endpoints where possible:
 
+Authentication
+- [x] Login page (uses `com.atproto.server.createSession`)
+- [x] Registration page (uses `com.atproto.server.createAccount`)
+- [x] Signup verification flow (uses `com.atproto.server.confirmSignup`, `resendVerification`)
+- [ ] Password reset flow (uses `com.atproto.server.requestPasswordReset`, `resetPassword`)
+
 User Dashboard
-- [ ] Account overview (uses `com.atproto.server.getSession`, `com.atproto.admin.getAccountInfo`)
+- [x] Account overview (uses `com.atproto.server.getSession`, `com.atproto.admin.getAccountInfo`)
 - [ ] Active sessions view (needs new endpoint or extend existing)
-- [ ] App passwords (uses `com.atproto.server.listAppPasswords`, `createAppPassword`, `revokeAppPassword`)
-- [ ] Invite codes (uses `com.atproto.server.getAccountInviteCodes`, `createInviteCode`)
+- [x] App passwords (uses `com.atproto.server.listAppPasswords`, `createAppPassword`, `revokeAppPassword`)
+- [x] Invite codes (uses `com.atproto.server.getAccountInviteCodes`, `createInviteCode`)
 
 Notification Preferences
-- [ ] Channel selector (uses `com.bspds.account.*` endpoints above)
+- [x] Channel selector (uses `com.bspds.account.*` endpoints above)
 - [ ] Verification flows for Discord/Telegram/Signal
 - [ ] Notification history view
 
 Account Settings
-- [ ] Email change (uses `com.atproto.server.requestEmailUpdate`, `updateEmail`)
-- [ ] Password change (uses `com.atproto.server.requestPasswordReset`, `resetPassword`)
-- [ ] Handle change (uses `com.atproto.identity.updateHandle`)
-- [ ] Account deletion (uses `com.atproto.server.requestAccountDelete`, `deleteAccount`)
-- [ ] Data export (uses `com.atproto.sync.getRepo`)
+- [x] Email change (uses `com.atproto.server.requestEmailUpdate`, `updateEmail`)
+- [ ] Password change while logged in (needs new endpoint - change password with current password)
+- [x] Handle change (uses `com.atproto.identity.updateHandle`)
+- [x] Account deletion (uses `com.atproto.server.requestAccountDelete`, `deleteAccount`)
+
+Data Management
+- [x] Repo browser (browse collections, view/create/delete records via `com.atproto.repo.*`)
+- [ ] Data export/download (CAR file download via `com.atproto.sync.getRepo`)
 
 Admin Dashboard (privileged users only)
 - [ ] User list (uses `com.atproto.admin.getAccountInfos` with pagination)

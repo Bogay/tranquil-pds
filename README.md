@@ -14,6 +14,7 @@ Uses PostgreSQL instead of SQLite, S3-compatible blob storage, and is designed t
 - Crawler notifications via `requestCrawl`
 - Multi-channel notifications: email, discord, telegram, signal
 - Per-IP rate limiting on sensitive endpoints
+- Built-in web UI for account management
 
 ## Running Locally
 
@@ -77,6 +78,25 @@ just lint         # Clippy + fmt check
 just db-reset     # Drop and recreate local database
 ```
 
+## Web UI
+
+BSPDS includes a built-in web frontend for users to manage their accounts. Users can:
+
+- Sign in and register new accounts
+- Manage app passwords
+- View and create invite codes
+- Update email and handle
+- Configure notification preferences
+- Browse their repository data
+
+The frontend is built with svelte and deno, and is served directly by the PDS.
+
+```bash
+just frontend-dev      # Run frontend dev server
+just frontend-build    # Build for production
+just frontend-test     # Run frontend tests
+```
+
 ## Project Structure
 
 ```
@@ -94,6 +114,7 @@ src/
   plc/              PLC directory client
   circuit_breaker/  Circuit breaker for external services
   rate_limit/       Per-IP rate limiting
+frontend/           Svelte web UI (deno)
 tests/              Integration tests
 migrations/         SQLx migrations
 ```

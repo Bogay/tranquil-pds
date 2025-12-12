@@ -21,9 +21,10 @@ use axum::{
     routing::{any, get, post},
 };
 use state::AppState;
+use tower_http::services::{ServeDir, ServeFile};
 
 pub fn app(state: AppState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/health", get(api::server::health))
         .route("/xrpc/_health", get(api::server::health))
         .route("/robots.txt", get(api::server::robots_txt))
@@ -50,6 +51,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.server.refreshSession",
             post(api::server::refresh_session),
+        )
+        .route(
+            "/xrpc/com.atproto.server.confirmSignup",
+            post(api::server::confirm_signup),
+        )
+        .route(
+            "/xrpc/com.atproto.server.resendVerification",
+            post(api::server::resend_verification),
         )
         .route(
             "/xrpc/com.atproto.server.getServiceAuth",
@@ -364,6 +373,26 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.atproto.temp.checkSignupQueue",
             get(api::temp::check_signup_queue),
         )
+        .route(
+            "/xrpc/com.bspds.account.getNotificationPrefs",
+            get(api::notification_prefs::get_notification_prefs),
+        )
+        .route(
+            "/xrpc/com.bspds.account.updateNotificationPrefs",
+            post(api::notification_prefs::update_notification_prefs),
+        )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
-        .with_state(state)
+        .with_state(state);
+
+    let frontend_dir = std::env::var("FRONTEND_DIR")
+        .unwrap_or_else(|_| "./frontend/dist".to_string());
+
+    if std::path::Path::new(&frontend_dir).join("index.html").exists() {
+        let index_path = format!("{}/index.html", frontend_dir);
+        let serve_dir = ServeDir::new(&frontend_dir)
+            .not_found_service(ServeFile::new(index_path));
+        router.fallback_service(serve_dir)
+    } else {
+        router
+    }
 }

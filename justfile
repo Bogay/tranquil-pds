@@ -77,3 +77,32 @@ docker-logs:
 
 docker-build:
     docker compose build
+
+# Frontend commands (Deno)
+frontend-dev:
+    . ~/.deno/env && cd frontend && deno task dev
+
+frontend-build:
+    . ~/.deno/env && cd frontend && deno task build
+
+frontend-clean:
+    rm -rf frontend/dist frontend/node_modules
+
+# Frontend tests
+frontend-test *args:
+    . ~/.deno/env && cd frontend && VITEST=true deno task test:run {{args}}
+
+frontend-test-watch:
+    . ~/.deno/env && cd frontend && VITEST=true deno task test:watch
+
+frontend-test-ui:
+    . ~/.deno/env && cd frontend && VITEST=true deno task test:ui
+
+frontend-test-coverage:
+    . ~/.deno/env && cd frontend && VITEST=true deno task test:run --coverage
+
+# Build all (frontend + backend)
+build-all: frontend-build build
+
+# Test all (backend + frontend)
+test-all: test frontend-test

@@ -36,20 +36,24 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountInput {
     pub handle: String,
-    pub email: String,
+    pub email: Option<String>,
     pub password: String,
     pub invite_code: Option<String>,
     pub did: Option<String>,
     pub signing_key: Option<String>,
+    pub verification_channel: Option<String>,
+    pub discord_id: Option<String>,
+    pub telegram_username: Option<String>,
+    pub signal_number: Option<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountOutput {
-    pub access_jwt: String,
-    pub refresh_jwt: String,
     pub handle: String,
     pub did: String,
+    pub verification_required: bool,
+    pub verification_channel: String,
 }
 
 pub async fn create_account(
@@ -82,12 +86,17 @@ pub async fn create_account(
             .into_response();
     }
 
-    if !crate::api::validation::is_valid_email(&input.email) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
-        )
-            .into_response();
+    let email: Option<String> = input.email.as_ref()
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty());
+    if let Some(ref email) = email {
+        if !crate::api::validation::is_valid_email(email) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
+            )
+                .into_response();
+        }
     }
 
     let did = if let Some(d) = &input.did {
@@ -202,18 +211,77 @@ pub async fn create_account(
         }
     };
 
-    let user_insert = sqlx::query!(
-        "INSERT INTO users (handle, email, did, password_hash) VALUES ($1, $2, $3, $4) RETURNING id",
-        input.handle,
-        input.email,
-        did,
-        password_hash
+    let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
+    let valid_channels = ["email", "discord", "telegram", "signal"];
+    if !valid_channels.contains(&verification_channel) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel. Must be one of: email, discord, telegram, signal"})),
+        )
+            .into_response();
+    }
+
+    let verification_recipient = match verification_channel {
+        "email" => match &input.email {
+            Some(email) if !email.trim().is_empty() => email.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingEmail", "message": "Email is required when using email verification"})),
+            ).into_response(),
+        },
+        "discord" => match &input.discord_id {
+            Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingDiscordId", "message": "Discord ID is required when using Discord verification"})),
+            ).into_response(),
+        },
+        "telegram" => match &input.telegram_username {
+            Some(username) if !username.trim().is_empty() => username.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingTelegramUsername", "message": "Telegram username is required when using Telegram verification"})),
+            ).into_response(),
+        },
+        "signal" => match &input.signal_number {
+            Some(number) if !number.trim().is_empty() => number.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingSignalNumber", "message": "Signal phone number is required when using Signal verification"})),
+            ).into_response(),
+        },
+        _ => return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
+        ).into_response(),
+    };
+
+    let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
+    let code_expires_at = chrono::Utc::now() + chrono::Duration::minutes(30);
+
+    let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
+        r#"INSERT INTO users (
+            handle, email, did, password_hash,
+            email_confirmation_code, email_confirmation_code_expires_at,
+            preferred_notification_channel,
+            discord_id, telegram_username, signal_number
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::notification_channel, $8, $9, $10) RETURNING id"#,
     )
+        .bind(&input.handle)
+        .bind(&email)
+        .bind(&did)
+        .bind(&password_hash)
+        .bind(&verification_code)
+        .bind(&code_expires_at)
+        .bind(verification_channel)
+        .bind(input.discord_id.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()))
+        .bind(input.telegram_username.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()))
+        .bind(input.signal_number.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()))
         .fetch_one(&mut *tx)
         .await;
 
     let user_id = match user_insert {
-        Ok(row) => row.id,
+        Ok((id,)) => id,
         Err(e) => {
             if let Some(db_err) = e.as_database_error() {
                 if db_err.code().as_deref() == Some("23505") {
@@ -453,53 +521,6 @@ pub async fn create_account(
         }
     }
 
-    let access_meta = crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes[..]).map_err(|e| {
-        error!("Error creating access token: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response()
-    });
-    let access_meta = match access_meta {
-        Ok(m) => m,
-        Err(r) => return r,
-    };
-
-    let refresh_meta = crate::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes[..]).map_err(|e| {
-        error!("Error creating refresh token: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response()
-    });
-    let refresh_meta = match refresh_meta {
-        Ok(m) => m,
-        Err(r) => return r,
-    };
-
-    let session_insert =
-        sqlx::query!(
-            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
-            did,
-            access_meta.jti,
-            refresh_meta.jti,
-            access_meta.expires_at,
-            refresh_meta.expires_at
-        )
-            .execute(&mut *tx)
-            .await;
-
-    if let Err(e) = session_insert {
-        error!("Error inserting session: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
-    }
-
     if let Err(e) = tx.commit().await {
         error!("Error committing transaction: {:?}", e);
         return (
@@ -509,18 +530,23 @@ pub async fn create_account(
             .into_response();
     }
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_welcome(&state.db, user_id, &hostname).await {
-        warn!("Failed to enqueue welcome notification: {:?}", e);
+    if let Err(e) = crate::notifications::enqueue_signup_verification(
+        &state.db,
+        user_id,
+        verification_channel,
+        &verification_recipient,
+        &verification_code,
+    ).await {
+        warn!("Failed to enqueue signup verification notification: {:?}", e);
     }
 
     (
         StatusCode::OK,
         Json(CreateAccountOutput {
-            access_jwt: access_meta.token,
-            refresh_jwt: refresh_meta.token,
             handle: input.handle,
             did,
+            verification_required: true,
+            verification_channel: verification_channel.to_string(),
         }),
     )
         .into_response()
