@@ -19,6 +19,7 @@ pub enum OAuthError {
     InvalidDpopProof(String),
     ExpiredToken(String),
     InvalidToken(String),
+    RateLimited,
 }
 
 #[derive(Serialize)]
@@ -73,6 +74,9 @@ impl IntoResponse for OAuthError {
             }
             OAuthError::InvalidToken(msg) => {
                 (StatusCode::UNAUTHORIZED, "invalid_token", Some(msg))
+            }
+            OAuthError::RateLimited => {
+                (StatusCode::TOO_MANY_REQUESTS, "rate_limited", Some("Too many requests. Please try again later.".to_string()))
             }
         };
 

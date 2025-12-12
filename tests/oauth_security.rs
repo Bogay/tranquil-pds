@@ -1447,3 +1447,67 @@ async fn test_security_revoked_token_rejected() {
     let introspect_body: Value = introspect_res.json().await.unwrap();
     assert_eq!(introspect_body["active"], false, "Revoked token should be inactive");
 }
+
+#[tokio::test]
+async fn test_security_oauth_authorize_rate_limiting() {
+    let url = base_url().await;
+    let http_client = no_redirect_client();
+
+    let ts = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let unique_ip = format!("10.{}.{}.{}", (ts >> 16) & 0xFF, (ts >> 8) & 0xFF, ts & 0xFF);
+
+    let redirect_uri = "https://example.com/rate-limit-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+
+    let (_, code_challenge) = generate_pkce();
+
+    let client_for_par = client();
+    let par_body: Value = client_for_par
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let mut rate_limited_count = 0;
+    let mut other_count = 0;
+
+    for _ in 0..15 {
+        let res = http_client
+            .post(format!("{}/oauth/authorize", url))
+            .header("X-Forwarded-For", &unique_ip)
+            .form(&[
+                ("request_uri", request_uri),
+                ("username", "nonexistent_user"),
+                ("password", "wrong_password"),
+                ("remember_device", "false"),
+            ])
+            .send()
+            .await
+            .unwrap();
+
+        match res.status() {
+            StatusCode::TOO_MANY_REQUESTS => rate_limited_count += 1,
+            _ => other_count += 1,
+        }
+    }
+
+    assert!(
+        rate_limited_count > 0,
+        "Expected at least one rate-limited response after 15 OAuth authorize attempts. Got {} other and {} rate limited.",
+        other_count,
+        rate_limited_count
+    );
+}

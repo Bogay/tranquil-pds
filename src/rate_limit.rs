@@ -24,8 +24,15 @@ pub type GlobalRateLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 pub struct RateLimiters {
     pub login: Arc<KeyedRateLimiter>,
     pub oauth_token: Arc<KeyedRateLimiter>,
+    pub oauth_authorize: Arc<KeyedRateLimiter>,
     pub password_reset: Arc<KeyedRateLimiter>,
     pub account_creation: Arc<KeyedRateLimiter>,
+    pub refresh_session: Arc<KeyedRateLimiter>,
+    pub reset_password: Arc<KeyedRateLimiter>,
+    pub oauth_par: Arc<KeyedRateLimiter>,
+    pub oauth_introspect: Arc<KeyedRateLimiter>,
+    pub app_password: Arc<KeyedRateLimiter>,
+    pub email_update: Arc<KeyedRateLimiter>,
 }
 
 impl Default for RateLimiters {
@@ -43,11 +50,32 @@ impl RateLimiters {
             oauth_token: Arc::new(RateLimiter::keyed(
                 Quota::per_minute(NonZeroU32::new(30).unwrap())
             )),
+            oauth_authorize: Arc::new(RateLimiter::keyed(
+                Quota::per_minute(NonZeroU32::new(10).unwrap())
+            )),
             password_reset: Arc::new(RateLimiter::keyed(
                 Quota::per_hour(NonZeroU32::new(5).unwrap())
             )),
             account_creation: Arc::new(RateLimiter::keyed(
                 Quota::per_hour(NonZeroU32::new(10).unwrap())
+            )),
+            refresh_session: Arc::new(RateLimiter::keyed(
+                Quota::per_minute(NonZeroU32::new(60).unwrap())
+            )),
+            reset_password: Arc::new(RateLimiter::keyed(
+                Quota::per_minute(NonZeroU32::new(10).unwrap())
+            )),
+            oauth_par: Arc::new(RateLimiter::keyed(
+                Quota::per_minute(NonZeroU32::new(30).unwrap())
+            )),
+            oauth_introspect: Arc::new(RateLimiter::keyed(
+                Quota::per_minute(NonZeroU32::new(30).unwrap())
+            )),
+            app_password: Arc::new(RateLimiter::keyed(
+                Quota::per_minute(NonZeroU32::new(10).unwrap())
+            )),
+            email_update: Arc::new(RateLimiter::keyed(
+                Quota::per_hour(NonZeroU32::new(5).unwrap())
             )),
         }
     }
@@ -62,6 +90,13 @@ impl RateLimiters {
     pub fn with_oauth_token_limit(mut self, per_minute: u32) -> Self {
         self.oauth_token = Arc::new(RateLimiter::keyed(
             Quota::per_minute(NonZeroU32::new(per_minute).unwrap_or(NonZeroU32::new(30).unwrap()))
+        ));
+        self
+    }
+
+    pub fn with_oauth_authorize_limit(mut self, per_minute: u32) -> Self {
+        self.oauth_authorize = Arc::new(RateLimiter::keyed(
+            Quota::per_minute(NonZeroU32::new(per_minute).unwrap_or(NonZeroU32::new(10).unwrap()))
         ));
         self
     }
@@ -81,7 +116,7 @@ impl RateLimiters {
     }
 }
 
-fn extract_client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
+pub fn extract_client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
             if let Some(first_ip) = value.split(',').next() {

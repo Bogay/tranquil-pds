@@ -123,12 +123,23 @@ pub async fn activate_account(
         Err(e) => return ApiError::from(e).into_response(),
     };
 
+    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
     let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
         .execute(&state.db)
         .await;
 
     match result {
-        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Ok(_) => {
+            if let Some(h) = handle {
+                let _ = state.cache.delete(&format!("handle:{}", h)).await;
+            }
+            (StatusCode::OK, Json(json!({}))).into_response()
+        }
         Err(e) => {
             error!("DB error activating account: {:?}", e);
             (
@@ -163,12 +174,23 @@ pub async fn deactivate_account(
         Err(e) => return ApiError::from(e).into_response(),
     };
 
+    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
     let result = sqlx::query!("UPDATE users SET deactivated_at = NOW() WHERE did = $1", did)
         .execute(&state.db)
         .await;
 
     match result {
-        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Ok(_) => {
+            if let Some(h) = handle {
+                let _ = state.cache.delete(&format!("handle:{}", h)).await;
+            }
+            (StatusCode::OK, Json(json!({}))).into_response()
+        }
         Err(e) => {
             error!("DB error deactivating account: {:?}", e);
             (
@@ -283,14 +305,14 @@ pub async fn delete_account(
     }
 
     let user = sqlx::query!(
-        "SELECT id, password_hash FROM users WHERE did = $1",
+        "SELECT id, password_hash, handle FROM users WHERE did = $1",
         did
     )
     .fetch_optional(&state.db)
     .await;
 
-    let (user_id, password_hash) = match user {
-        Ok(Some(row)) => (row.id, row.password_hash),
+    let (user_id, password_hash, handle) = match user {
+        Ok(Some(row)) => (row.id, row.password_hash, row.handle),
         Ok(None) => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -437,6 +459,7 @@ pub async fn delete_account(
                 )
                     .into_response();
             }
+            let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             info!("Account {} deleted successfully", did);
             (StatusCode::OK, Json(json!({}))).into_response()
         }

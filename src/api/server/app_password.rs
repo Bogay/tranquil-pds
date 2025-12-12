@@ -5,11 +5,12 @@ use crate::util::get_user_id_by_did;
 use axum::{
     Json,
     extract::State,
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,9 +77,28 @@ pub struct CreateAppPasswordOutput {
 
 pub async fn create_app_password(
     State(state): State<AppState>,
+    headers: HeaderMap,
     BearerAuth(auth_user): BearerAuth,
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("app_password:{}", client_ip),
+        10,
+        60_000,
+    ).await {
+        if state.rate_limiters.app_password.check_key(&client_ip).is_err() {
+            warn!(ip = %client_ip, "App password creation rate limit exceeded");
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({
+                    "error": "RateLimitExceeded",
+                    "message": "Too many requests. Please try again later."
+                })),
+            ).into_response();
+        }
+    }
+
     let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
         Ok(id) => id,
         Err(e) => return ApiError::from(e).into_response(),

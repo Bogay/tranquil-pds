@@ -1,3 +1,4 @@
+use super::validation::validate_record;
 use crate::api::repo::record::utils::{commit_and_log, RecordOp};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -211,6 +212,11 @@ pub async fn apply_writes(
                 rkey,
                 value,
             } => {
+                if input.validate.unwrap_or(true) {
+                    if let Err(err_response) = validate_record(value, collection) {
+                        return err_response;
+                    }
+                }
                 let rkey = rkey
                     .clone()
                     .unwrap_or_else(|| Utc::now().format("%Y%m%d%H%M%S%f").to_string());
@@ -249,6 +255,11 @@ pub async fn apply_writes(
                 rkey,
                 value,
             } => {
+                if input.validate.unwrap_or(true) {
+                    if let Err(err_response) = validate_record(value, collection) {
+                        return err_response;
+                    }
+                }
                 let mut record_bytes = Vec::new();
                 if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();

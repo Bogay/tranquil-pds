@@ -2,6 +2,7 @@ pub mod batch;
 pub mod delete;
 pub mod read;
 pub mod utils;
+pub mod validation;
 pub mod write;
 
 pub use batch::apply_writes;

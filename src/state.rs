@@ -1,3 +1,4 @@
+use crate::cache::{Cache, DistributedRateLimiter, create_cache};
 use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
 use crate::rate_limit::RateLimiters;
@@ -16,6 +17,8 @@ pub struct AppState {
     pub firehose_tx: broadcast::Sender<SequencedEvent>,
     pub rate_limiters: Arc<RateLimiters>,
     pub circuit_breakers: Arc<CircuitBreakers>,
+    pub cache: Arc<dyn Cache>,
+    pub distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
 }
 
 impl AppState {
@@ -27,6 +30,7 @@ impl AppState {
         let (firehose_tx, _) = broadcast::channel(1000);
         let rate_limiters = Arc::new(RateLimiters::new());
         let circuit_breakers = Arc::new(CircuitBreakers::new());
+        let (cache, distributed_rate_limiter) = create_cache().await;
         Self {
             db,
             block_store,
@@ -34,6 +38,8 @@ impl AppState {
             firehose_tx,
             rate_limiters,
             circuit_breakers,
+            cache,
+            distributed_rate_limiter,
         }
     }
 

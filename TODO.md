@@ -198,9 +198,10 @@ These are implemented at PDS level to enable local-first reads (read-after-write
     - [x] Implement Atomic Repo Transactions.
         - [x] Ensure `blocks` write, `repo_root` update, `records` index update, and `sequencer` event are committed in a single transaction.
     - [x] Implement concurrency control (row-level locking via FOR UPDATE).
-- [ ] DID Cache
-    - [ ] Implement caching layer for DID resolution (Redis or in-memory).
-    - [ ] Handle cache invalidation/expiry.
+- [x] DID Cache
+    - [x] Implement caching layer for DID resolution (valkey).
+    - [x] Handle cache invalidation/expiry.
+    - [x] Graceful fallback to no-cache when Valkey unavailable.
 - [x] Crawlers Service
     - [x] Implement `Crawlers` service (debounce notifications to relays).
     - [x] 20-minute notification debounce.
@@ -229,6 +230,14 @@ These are implemented at PDS level to enable local-first reads (read-after-write
     - [x] Per-IP rate limiting on OAuth token endpoint (30/min).
     - [x] Per-IP rate limiting on password reset (5/hour).
     - [x] Per-IP rate limiting on account creation (10/hour).
+    - [x] Per-IP rate limiting on refreshSession (60/min).
+    - [x] Per-IP rate limiting on OAuth authorize POST (10/min).
+    - [x] Per-IP rate limiting on OAuth 2FA POST (10/min).
+    - [x] Per-IP rate limiting on OAuth PAR (30/min).
+    - [x] Per-IP rate limiting on OAuth revoke/introspect (30/min).
+    - [x] Per-IP rate limiting on createAppPassword (10/min).
+    - [x] Per-IP rate limiting on email endpoints (5/hour).
+    - [x] Distributed rate limiting via Valkey/Redis (with in-memory fallback).
 - [x] Circuit Breakers
     - [x] PLC directory circuit breaker (5 failures → open, 60s timeout).
     - [x] Relay notification circuit breaker (10 failures → open, 30s timeout).
@@ -237,12 +246,13 @@ These are implemented at PDS level to enable local-first reads (read-after-write
     - [x] Signal command injection prevention (phone number validation).
     - [x] Constant-time signature comparison.
     - [x] SSRF protection for outbound requests.
+    - [x] Timing attack protection (dummy bcrypt on user-not-found prevents account enumeration).
 
 ## Lewis' fabulous mini-list of remaining TODOs
-- [ ] The OAuth authorize POST endpoint has no rate limiting, allowing password brute-forcing. Fix this and audit all oauth and 2fa surface again.
-- [ ] DID resolution caching (valkey).
-- [ ] Record schema validation (generic validation framework).
-- [ ] Fix any remaining TODOs in the code.
+- [x] The OAuth authorize POST endpoint has no rate limiting, allowing password brute-forcing. Fix this and audit all oauth and 2fa surface again.
+- [x] DID resolution caching (valkey).
+- [x] Record schema validation (generic validation framework).
+- [x] Fix any remaining TODOs in the code.
 
 ## Future: Web Management UI
 A single-page web app for account management. The frontend (JS framework) calls existing ATProto XRPC endpoints - no server-side rendering or bespoke HTML form handlers.

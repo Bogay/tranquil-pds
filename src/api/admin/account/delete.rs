@@ -37,12 +37,12 @@ pub async fn delete_account(
             .into_response();
     }
 
-    let user = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
+    let user = sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
 
-    let user_id = match user {
-        Ok(Some(row)) => row.id,
+    let (user_id, handle) = match user {
+        Ok(Some(row)) => (row.id, row.handle),
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -185,6 +185,8 @@ pub async fn delete_account(
         )
             .into_response();
     }
+
+    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
 
     (StatusCode::OK, Json(json!({}))).into_response()
 }

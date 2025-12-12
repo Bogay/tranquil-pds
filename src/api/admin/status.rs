@@ -305,6 +305,13 @@ pub async fn update_subject_status(
                         .into_response();
                 }
 
+                if let Ok(Some(handle)) = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+                    .fetch_optional(&state.db)
+                    .await
+                {
+                    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+                }
+
                 return (
                     StatusCode::OK,
                     Json(json!({

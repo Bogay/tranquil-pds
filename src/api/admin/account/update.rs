@@ -108,6 +108,12 @@ pub async fn update_account_handle(
             .into_response();
     }
 
+    let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
     let existing = sqlx::query!("SELECT id FROM users WHERE handle = $1 AND did != $2", handle, did)
         .fetch_optional(&state.db)
         .await;
@@ -133,6 +139,10 @@ pub async fn update_account_handle(
                 )
                     .into_response();
             }
+            if let Some(old) = old_handle {
+                let _ = state.cache.delete(&format!("handle:{}", old)).await;
+            }
+            let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             (StatusCode::OK, Json(json!({}))).into_response()
         }
         Err(e) => {

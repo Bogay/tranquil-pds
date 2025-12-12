@@ -11,9 +11,11 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/pds
       S3_ENDPOINT: http://objsto:9000
+      VALKEY_URL: redis://cache:6379
     depends_on:
       - db
       - objsto
+      - cache
 
   db:
     image: postgres:latest
@@ -38,6 +40,14 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
 
+  cache:
+    image: valkey/valkey:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+
 volumes:
   postgres_data:
   minio_data:
+  valkey_data:

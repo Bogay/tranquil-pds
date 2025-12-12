@@ -272,6 +272,27 @@ pub async fn authorize_post(
 ) -> Response {
     let json_response = wants_json(&headers);
 
+    let client_ip = extract_client_ip(&headers);
+    if state.rate_limiters.oauth_authorize.check_key(&client_ip).is_err() {
+        tracing::warn!(ip = %client_ip, "OAuth authorize rate limit exceeded");
+        if json_response {
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({
+                    "error": "RateLimitExceeded",
+                    "error_description": "Too many login attempts. Please try again later."
+                })),
+            ).into_response();
+        }
+        return (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Html(templates::error_page(
+                "RateLimitExceeded",
+                Some("Too many login attempts. Please try again later."),
+            )),
+        ).into_response();
+    }
+
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
         Ok(Some(data)) => data,
         Ok(None) => {
@@ -357,7 +378,10 @@ pub async fn authorize_post(
     .await
     {
         Ok(Some(u)) => u,
-        Ok(None) => return show_login_error("Invalid handle/email or password.", json_response),
+        Ok(None) => {
+            let _ = bcrypt::verify(&form.password, "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK");
+            return show_login_error("Invalid handle/email or password.", json_response);
+        }
         Err(_) => return show_login_error("An error occurred. Please try again.", json_response),
     };
 
@@ -736,6 +760,18 @@ pub async fn authorize_2fa_post(
     headers: HeaderMap,
     Form(form): Form<Authorize2faSubmit>,
 ) -> Response {
+    let client_ip = extract_client_ip(&headers);
+    if state.rate_limiters.oauth_authorize.check_key(&client_ip).is_err() {
+        tracing::warn!(ip = %client_ip, "OAuth 2FA rate limit exceeded");
+        return (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Html(templates::error_page(
+                "RateLimitExceeded",
+                Some("Too many attempts. Please try again later."),
+            )),
+        ).into_response();
+    }
+
     let challenge = match db::get_2fa_challenge(&state.db, &form.request_uri).await {
         Ok(Some(c)) => c,
         Ok(None) => {

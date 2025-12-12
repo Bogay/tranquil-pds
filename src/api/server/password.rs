@@ -124,8 +124,27 @@ pub struct ResetPasswordInput {
 
 pub async fn reset_password(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<ResetPasswordInput>,
 ) -> Response {
+    let client_ip = extract_client_ip(&headers);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("reset_password:{}", client_ip),
+        10,
+        60_000,
+    ).await {
+        if state.rate_limiters.reset_password.check_key(&client_ip).is_err() {
+            warn!(ip = %client_ip, "Reset password rate limit exceeded");
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({
+                    "error": "RateLimitExceeded",
+                    "message": "Too many requests. Please try again later."
+                })),
+            ).into_response();
+        }
+    }
+
     let token = input.token.trim();
     let password = &input.password;
 

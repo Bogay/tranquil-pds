@@ -1,3 +1,4 @@
+use super::validation::validate_record;
 use crate::api::repo::record::utils::{commit_and_log, RecordOp};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -156,14 +157,8 @@ pub async fn create_record(
     };
 
     if input.validate.unwrap_or(true) {
-        if input.collection == "app.bsky.feed.post" {
-            if input.record.get("text").is_none() || input.record.get("createdAt").is_none() {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRecord", "message": "Record validation failed"})),
-                )
-                    .into_response();
-            }
+        if let Err(err_response) = validate_record(&input.record, &input.collection) {
+            return err_response;
         }
     }
 
@@ -263,14 +258,8 @@ pub async fn put_record(
     let key = format!("{}/{}", collection_nsid, input.rkey);
 
     if input.validate.unwrap_or(true) {
-        if input.collection == "app.bsky.feed.post" {
-            if input.record.get("text").is_none() || input.record.get("createdAt").is_none() {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRecord", "message": "Record validation failed"})),
-                )
-                    .into_response();
-            }
+        if let Err(err_response) = validate_record(&input.record, &input.collection) {
+            return err_response;
         }
     }
 

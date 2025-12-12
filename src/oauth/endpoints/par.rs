@@ -1,6 +1,7 @@
 use axum::{
     Form, Json,
     extract::State,
+    http::HeaderMap,
 };
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -49,8 +50,21 @@ pub struct ParResponse {
 
 pub async fn pushed_authorization_request(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Form(request): Form<ParRequest>,
 ) -> Result<Json<ParResponse>, OAuthError> {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("oauth_par:{}", client_ip),
+        30,
+        60_000,
+    ).await {
+        if state.rate_limiters.oauth_par.check_key(&client_ip).is_err() {
+            tracing::warn!(ip = %client_ip, "OAuth PAR rate limit exceeded");
+            return Err(OAuthError::RateLimited);
+        }
+    }
+
     if request.response_type != "code" {
         return Err(OAuthError::InvalidRequest(
             "response_type must be 'code'".to_string(),

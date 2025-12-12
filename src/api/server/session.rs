@@ -72,6 +72,7 @@ pub async fn create_session(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
+            let _ = verify(&input.password, "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK");
             warn!("User not found for login attempt");
             return ApiError::AuthenticationFailedMsg("Invalid identifier or password".into()).into_response();
         }
@@ -196,6 +197,24 @@ pub async fn refresh_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("refresh_session:{}", client_ip),
+        60,
+        60_000,
+    ).await {
+        if state.rate_limiters.refresh_session.check_key(&client_ip).is_err() {
+            tracing::warn!(ip = %client_ip, "Refresh session rate limit exceeded");
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                axum::Json(serde_json::json!({
+                    "error": "RateLimitExceeded",
+                    "message": "Too many requests. Please try again later."
+                })),
+            ).into_response();
+        }
+    }
+
     let refresh_token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {

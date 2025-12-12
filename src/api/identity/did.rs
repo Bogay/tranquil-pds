@@ -33,12 +33,18 @@ pub async fn resolve_handle(
             .into_response();
     }
 
+    let cache_key = format!("handle:{}", handle);
+    if let Some(did) = state.cache.get(&cache_key).await {
+        return (StatusCode::OK, Json(json!({ "did": did }))).into_response();
+    }
+
     let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
         .fetch_optional(&state.db)
         .await;
 
     match user {
         Ok(Some(row)) => {
+            let _ = state.cache.set(&cache_key, &row.did, std::time::Duration::from_secs(300)).await;
             (StatusCode::OK, Json(json!({ "did": row.did }))).into_response()
         }
         Ok(None) => (
@@ -406,6 +412,12 @@ pub async fn update_handle(
             .into_response();
     }
 
+    let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE id = $1", user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
     let existing = sqlx::query!("SELECT id FROM users WHERE handle = $1 AND id != $2", new_handle, user_id)
         .fetch_optional(&state.db)
         .await;
@@ -423,7 +435,13 @@ pub async fn update_handle(
         .await;
 
     match result {
-        Ok(_) => (StatusCode::OK, Json(json!({}))).into_response(),
+        Ok(_) => {
+            if let Some(old) = old_handle {
+                let _ = state.cache.delete(&format!("handle:{}", old)).await;
+            }
+            let _ = state.cache.delete(&format!("handle:{}", new_handle)).await;
+            (StatusCode::OK, Json(json!({}))).into_response()
+        }
         Err(e) => {
             error!("DB error updating handle: {:?}", e);
             (

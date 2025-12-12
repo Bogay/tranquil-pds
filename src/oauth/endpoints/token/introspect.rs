@@ -1,6 +1,6 @@
 use axum::{Form, Json};
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
@@ -18,8 +18,21 @@ pub struct RevokeRequest {
 
 pub async fn revoke_token(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Form(request): Form<RevokeRequest>,
 ) -> Result<StatusCode, OAuthError> {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("oauth_revoke:{}", client_ip),
+        30,
+        60_000,
+    ).await {
+        if state.rate_limiters.oauth_introspect.check_key(&client_ip).is_err() {
+            tracing::warn!(ip = %client_ip, "OAuth revoke rate limit exceeded");
+            return Err(OAuthError::RateLimited);
+        }
+    }
+
     if let Some(token) = &request.token {
         if let Some((db_id, _)) = db::get_token_by_refresh_token(&state.db, token).await? {
             db::delete_token_family(&state.db, db_id).await?;
@@ -67,8 +80,21 @@ pub struct IntrospectResponse {
 
 pub async fn introspect_token(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Form(request): Form<IntrospectRequest>,
-) -> Json<IntrospectResponse> {
+) -> Result<Json<IntrospectResponse>, OAuthError> {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("oauth_introspect:{}", client_ip),
+        30,
+        60_000,
+    ).await {
+        if state.rate_limiters.oauth_introspect.check_key(&client_ip).is_err() {
+            tracing::warn!(ip = %client_ip, "OAuth introspect rate limit exceeded");
+            return Err(OAuthError::RateLimited);
+        }
+    }
+
     let inactive_response = IntrospectResponse {
         active: false,
         scope: None,
@@ -86,22 +112,22 @@ pub async fn introspect_token(
 
     let token_info = match extract_token_claims(&request.token) {
         Ok(info) => info,
-        Err(_) => return Json(inactive_response),
+        Err(_) => return Ok(Json(inactive_response)),
     };
 
     let token_data = match db::get_token_by_id(&state.db, &token_info.jti).await {
         Ok(Some(data)) => data,
-        _ => return Json(inactive_response),
+        _ => return Ok(Json(inactive_response)),
     };
 
     if token_data.expires_at < Utc::now() {
-        return Json(inactive_response);
+        return Ok(Json(inactive_response));
     }
 
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let issuer = format!("https://{}", pds_hostname);
 
-    Json(IntrospectResponse {
+    Ok(Json(IntrospectResponse {
         active: true,
         scope: token_data.scope,
         client_id: Some(token_data.client_id),
@@ -118,5 +144,5 @@ pub async fn introspect_token(
         aud: Some(issuer.clone()),
         iss: Some(issuer),
         jti: Some(token_info.jti),
-    })
+    }))
 }

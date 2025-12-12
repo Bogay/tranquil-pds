@@ -38,7 +38,7 @@ start_infra() {
         rm -f "$INFRA_FILE"
     fi
 
-    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" 2>/dev/null || true
+    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" "${CONTAINER_PREFIX}-valkey" 2>/dev/null || true
 
     echo "Starting PostgreSQL..."
     $CONTAINER_CMD run -d \
@@ -59,11 +59,19 @@ start_infra() {
         --label bspds_test=true \
         minio/minio:latest server /data >/dev/null
 
+    echo "Starting Valkey..."
+    $CONTAINER_CMD run -d \
+        --name "${CONTAINER_PREFIX}-valkey" \
+        -P \
+        --label bspds_test=true \
+        valkey/valkey:8-alpine >/dev/null
+
     echo "Waiting for services to be ready..."
     sleep 2
 
     PG_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-postgres" 5432 | head -1 | cut -d: -f2)
     MINIO_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-minio" 9000 | head -1 | cut -d: -f2)
+    VALKEY_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-valkey" 6379 | head -1 | cut -d: -f2)
 
     for i in {1..30}; do
         if $CONTAINER_CMD exec "${CONTAINER_PREFIX}-postgres" pg_isready -U postgres >/dev/null 2>&1; then
@@ -81,6 +89,14 @@ start_infra() {
         sleep 1
     done
 
+    for i in {1..30}; do
+        if $CONTAINER_CMD exec "${CONTAINER_PREFIX}-valkey" valkey-cli ping 2>/dev/null | grep -q PONG; then
+            break
+        fi
+        echo "Waiting for Valkey... ($i/30)"
+        sleep 1
+    done
+
     echo "Creating MinIO bucket..."
     $CONTAINER_CMD run --rm --network host \
         -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
@@ -94,6 +110,7 @@ export S3_BUCKET="test-bucket"
 export AWS_ACCESS_KEY_ID="minioadmin"
 export AWS_SECRET_ACCESS_KEY="minioadmin"
 export AWS_REGION="us-east-1"
+export VALKEY_URL="redis://127.0.0.1:${VALKEY_PORT}"
 export BSPDS_TEST_INFRA_READY="1"
 export BSPDS_ALLOW_INSECURE_SECRETS="1"
 export SKIP_IMPORT_VERIFICATION="true"
@@ -108,7 +125,7 @@ EOF
 
 stop_infra() {
     echo "Stopping test infrastructure..."
-    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" 2>/dev/null || true
+    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" "${CONTAINER_PREFIX}-valkey" 2>/dev/null || true
     rm -f "$INFRA_FILE"
     echo "Infrastructure stopped."
 }
@@ -157,7 +174,7 @@ case "${1:-}" in
         echo "Usage: $0 {start|stop|restart|status|env}"
         echo ""
         echo "Commands:"
-        echo "  start   - Start test infrastructure (Postgres, MinIO)"
+        echo "  start   - Start test infrastructure (Postgres, MinIO, Valkey)"
         echo "  stop    - Stop and remove test containers"
         echo "  restart - Stop then start infrastructure"
         echo "  status  - Show infrastructure status"

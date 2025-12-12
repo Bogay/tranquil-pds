@@ -26,6 +26,24 @@ pub async fn request_email_update(
     headers: axum::http::HeaderMap,
     Json(input): Json<RequestEmailUpdateInput>,
 ) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("email_update:{}", client_ip),
+        5,
+        3_600_000,
+    ).await {
+        if state.rate_limiters.email_update.check_key(&client_ip).is_err() {
+            warn!(ip = %client_ip, "Email update rate limit exceeded");
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({
+                    "error": "RateLimitExceeded",
+                    "message": "Too many requests. Please try again later."
+                })),
+            ).into_response();
+        }
+    }
+
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
@@ -135,6 +153,24 @@ pub async fn confirm_email(
     headers: axum::http::HeaderMap,
     Json(input): Json<ConfirmEmailInput>,
 ) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state.distributed_rate_limiter.check_rate_limit(
+        &format!("confirm_email:{}", client_ip),
+        10,
+        60_000,
+    ).await {
+        if state.rate_limiters.app_password.check_key(&client_ip).is_err() {
+            warn!(ip = %client_ip, "Confirm email rate limit exceeded");
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({
+                    "error": "RateLimitExceeded",
+                    "message": "Too many requests. Please try again later."
+                })),
+            ).into_response();
+        }
+    }
+
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
