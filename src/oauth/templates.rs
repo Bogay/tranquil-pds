@@ -67,13 +67,6 @@ fn base_styles() -> &'static str {
         .container {
             width: 100%;
             max-width: 400px;
-            padding-top: 15vh;
-        }
-
-        @media (max-width: 640px) {
-            .container {
-                padding-top: 2rem;
-            }
         }
 
         .card {
@@ -234,12 +227,12 @@ fn base_styles() -> &'static str {
         }
 
         .btn-secondary {
-            background: var(--contrast-500);
-            color: white;
+            background: var(--contrast-200);
+            color: var(--contrast-800);
         }
 
         .btn-secondary:hover {
-            background: var(--contrast-600);
+            background: var(--contrast-300);
         }
 
         .footer {
