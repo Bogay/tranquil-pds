@@ -1,3 +1,4 @@
+use base32::Alphabet;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{SigningKey, Signature, signature::Signer};
 use reqwest::Client;
@@ -306,6 +307,68 @@ pub fn signing_key_to_did_key(signing_key: &SigningKey) -> String {
 
     let encoded = multibase::encode(multibase::Base::Base58Btc, &prefixed);
     format!("did:key:{}", encoded)
+}
+
+pub struct GenesisResult {
+    pub did: String,
+    pub signed_operation: Value,
+}
+
+pub fn create_genesis_operation(
+    signing_key: &SigningKey,
+    rotation_key: &str,
+    handle: &str,
+    pds_endpoint: &str,
+) -> Result<GenesisResult, PlcError> {
+    let signing_did_key = signing_key_to_did_key(signing_key);
+
+    let mut verification_methods = HashMap::new();
+    verification_methods.insert("atproto".to_string(), signing_did_key.clone());
+
+    let mut services = HashMap::new();
+    services.insert(
+        "atproto_pds".to_string(),
+        PlcService {
+            service_type: "AtprotoPersonalDataServer".to_string(),
+            endpoint: pds_endpoint.to_string(),
+        },
+    );
+
+    let genesis_op = PlcOperation {
+        op_type: "plc_operation".to_string(),
+        rotation_keys: vec![rotation_key.to_string()],
+        verification_methods,
+        also_known_as: vec![format!("at://{}", handle)],
+        services,
+        prev: None,
+        sig: None,
+    };
+
+    let genesis_value = serde_json::to_value(&genesis_op)
+        .map_err(|e| PlcError::Serialization(e.to_string()))?;
+
+    let signed_op = sign_operation(&genesis_value, signing_key)?;
+
+    let did = did_for_genesis_op(&signed_op)?;
+
+    Ok(GenesisResult {
+        did,
+        signed_operation: signed_op,
+    })
+}
+
+pub fn did_for_genesis_op(signed_op: &Value) -> Result<String, PlcError> {
+    let cbor_bytes = serde_ipld_dagcbor::to_vec(signed_op)
+        .map_err(|e| PlcError::Serialization(e.to_string()))?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(&cbor_bytes);
+    let hash = hasher.finalize();
+
+    let encoded = base32::encode(Alphabet::Rfc4648Lower { padding: false }, &hash);
+    let truncated = &encoded[..24];
+
+    Ok(format!("did:plc:{}", truncated))
 }
 
 pub fn validate_plc_operation(op: &Value) -> Result<(), PlcError> {

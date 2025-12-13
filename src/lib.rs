@@ -19,10 +19,12 @@ pub mod validation;
 
 use axum::{
     Router,
+    http::Method,
     middleware,
     routing::{any, get, post},
 };
 use state::AppState;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
 pub fn app(state: AppState) -> Router {
@@ -348,6 +350,7 @@ pub fn app(state: AppState) -> Router {
             post(api::notification::register_push),
         )
         .route("/.well-known/did.json", get(api::identity::well_known_did))
+        .route("/.well-known/atproto-did", get(api::identity::well_known_atproto_did))
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))
         // OAuth 2.1 endpoints
         .route(
@@ -386,6 +389,12 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
         .layer(middleware::from_fn(metrics::metrics_middleware))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+                .allow_headers(Any),
+        )
         .with_state(state);
 
     let frontend_dir = std::env::var("FRONTEND_DIR")

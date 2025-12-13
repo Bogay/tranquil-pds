@@ -79,15 +79,18 @@
 
   async function handleSubmit(e: Event) {
     e.preventDefault()
+    console.log('[Register] handleSubmit called')
 
     const validationError = validateForm()
     if (validationError) {
+      console.log('[Register] validation error:', validationError)
       error = validationError
       return
     }
 
     submitting = true
     error = null
+    console.log('[Register] starting registration...')
 
     try {
       const result = await register({
@@ -100,17 +103,22 @@
         telegramUsername: telegramUsername.trim() || undefined,
         signalNumber: signalNumber.trim() || undefined,
       })
+      console.log('[Register] registration result:', result)
 
       if (result.verificationRequired) {
+        console.log('[Register] setting pendingVerification')
         pendingVerification = {
           did: result.did,
           handle: result.handle,
           channel: result.verificationChannel,
         }
+        console.log('[Register] pendingVerification set to:', pendingVerification)
       } else {
+        console.log('[Register] no verification required, navigating to dashboard')
         navigate('/dashboard')
       }
     } catch (err: any) {
+      console.error('[Register] error:', err)
       if (err instanceof ApiError) {
         error = err.message || 'Registration failed'
       } else if (err instanceof Error) {
@@ -120,6 +128,7 @@
       }
     } finally {
       submitting = false
+      console.log('[Register] finished, submitting=false')
     }
   }
 

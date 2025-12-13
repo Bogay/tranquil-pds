@@ -17,13 +17,21 @@ pub async fn describe_repo(
     State(state): State<AppState>,
     Query(input): Query<DescribeRepoInput>,
 ) -> Response {
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+
     let user_row = if input.repo.starts_with("did:") {
         sqlx::query!("SELECT id, handle, did FROM users WHERE did = $1", input.repo)
             .fetch_optional(&state.db)
             .await
             .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
     } else {
-        sqlx::query!("SELECT id, handle, did FROM users WHERE handle = $1", input.repo)
+        let suffix = format!(".{}", hostname);
+        let short_handle = if input.repo.ends_with(&suffix) {
+            input.repo.strip_suffix(&suffix).unwrap_or(&input.repo)
+        } else {
+            &input.repo
+        };
+        sqlx::query!("SELECT id, handle, did FROM users WHERE handle = $1", short_handle)
             .fetch_optional(&state.db)
             .await
             .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
@@ -50,13 +58,14 @@ pub async fn describe_repo(
         Err(_) => Vec::new(),
     };
 
+    let full_handle = format!("{}.{}", handle, hostname);
     let did_doc = json!({
         "id": did,
-        "alsoKnownAs": [format!("at://{}", handle)]
+        "alsoKnownAs": [format!("at://{}", full_handle)]
     });
 
     Json(json!({
-        "handle": handle,
+        "handle": full_handle,
         "did": did,
         "didDoc": did_doc,
         "collections": collections,

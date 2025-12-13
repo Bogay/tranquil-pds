@@ -22,6 +22,98 @@ if ! grep -qi "debian" /etc/os-release 2>/dev/null; then
     log_warn "This script is designed for Debian. Proceed with caution on other distros."
 fi
 
+nuke_installation() {
+    echo -e "${RED}"
+    echo "╔═══════════════════════════════════════════════════════════════════╗"
+    echo "║                    NUKING EXISTING INSTALLATION                   ║"
+    echo "╚═══════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+
+    log_info "Stopping services..."
+    systemctl stop bspds 2>/dev/null || true
+    systemctl disable bspds 2>/dev/null || true
+
+    log_info "Removing BSPDS files..."
+    rm -rf /opt/bspds
+    rm -rf /var/lib/bspds
+    rm -f /usr/local/bin/bspds
+    rm -f /usr/local/bin/bspds-sendmail
+    rm -f /usr/local/bin/bspds-mailq
+    rm -rf /var/spool/bspds-mail
+    rm -f /etc/systemd/system/bspds.service
+    systemctl daemon-reload
+
+    log_info "Removing BSPDS configuration..."
+    rm -rf /etc/bspds
+
+    log_info "Dropping postgres database and user..."
+    sudo -u postgres psql -c "DROP DATABASE IF EXISTS pds;" 2>/dev/null || true
+    sudo -u postgres psql -c "DROP USER IF EXISTS bspds;" 2>/dev/null || true
+
+    log_info "Removing minio bucket and resetting minio..."
+    if command -v mc &>/dev/null; then
+        mc rb local/pds-blobs --force 2>/dev/null || true
+        mc alias remove local 2>/dev/null || true
+    fi
+    systemctl stop minio 2>/dev/null || true
+    rm -rf /var/lib/minio/data/.minio.sys 2>/dev/null || true
+    rm -f /etc/default/minio 2>/dev/null || true
+
+    log_info "Removing nginx config..."
+    rm -f /etc/nginx/sites-enabled/bspds
+    rm -f /etc/nginx/sites-available/bspds
+    systemctl reload nginx 2>/dev/null || true
+
+    log_success "Previous installation nuked!"
+    echo ""
+}
+
+if [[ -f /etc/bspds/bspds.env ]] || [[ -d /opt/bspds ]] || [[ -f /usr/local/bin/bspds ]]; then
+    echo -e "${YELLOW}"
+    echo "╔═══════════════════════════════════════════════════════════════════╗"
+    echo "║              EXISTING INSTALLATION DETECTED                       ║"
+    echo "╚═══════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo "Options:"
+    echo "  1) Nuke everything and start fresh (destroys database!)"
+    echo "  2) Continue with existing installation (idempotent update)"
+    echo "  3) Exit"
+    echo ""
+    read -p "Choose an option [1/2/3]: " INSTALL_CHOICE
+
+    case "$INSTALL_CHOICE" in
+        1)
+            echo ""
+            echo -e "${RED}WARNING: This will DELETE:${NC}"
+            echo "  - PostgreSQL database 'pds' and all data"
+            echo "  - All BSPDS configuration and credentials"
+            echo "  - All source code in /opt/bspds"
+            echo "  - MinIO bucket 'pds-blobs' and all blobs"
+            echo "  - Mail queue contents"
+            echo ""
+            read -p "Type 'NUKE' to confirm destruction: " CONFIRM_NUKE
+            if [[ "$CONFIRM_NUKE" == "NUKE" ]]; then
+                nuke_installation
+            else
+                log_error "Nuke cancelled. Exiting."
+                exit 1
+            fi
+            ;;
+        2)
+            log_info "Continuing with existing installation..."
+            ;;
+        3)
+            log_info "Exiting."
+            exit 0
+            ;;
+        *)
+            log_error "Invalid option. Exiting."
+            exit 1
+            ;;
+    esac
+fi
+
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════════════════════════════╗"
 echo "║              BSPDS Installation Script for Debian                 ║"

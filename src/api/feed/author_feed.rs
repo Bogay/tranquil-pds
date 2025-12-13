@@ -104,7 +104,14 @@ pub async fn get_author_feed(
     let actor_did = if params.actor.starts_with("did:") {
         params.actor.clone()
     } else {
-        match sqlx::query_scalar!("SELECT did FROM users WHERE handle = $1", params.actor)
+        let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let suffix = format!(".{}", hostname);
+        let short_handle = if params.actor.ends_with(&suffix) {
+            params.actor.strip_suffix(&suffix).unwrap_or(&params.actor)
+        } else {
+            &params.actor
+        };
+        match sqlx::query_scalar!("SELECT did FROM users WHERE handle = $1", short_handle)
             .fetch_optional(&state.db)
             .await
         {

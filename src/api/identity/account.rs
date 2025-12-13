@@ -1,4 +1,5 @@
 use super::did::verify_did_web;
+use crate::plc::{create_genesis_operation, signing_key_to_did_key, PlcClient};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
@@ -99,12 +100,147 @@ pub async fn create_account(
         }
     }
 
+    let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
+    let valid_channels = ["email", "discord", "telegram", "signal"];
+    if !valid_channels.contains(&verification_channel) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel. Must be one of: email, discord, telegram, signal"})),
+        )
+            .into_response();
+    }
+
+    let verification_recipient = match verification_channel {
+        "email" => match &input.email {
+            Some(email) if !email.trim().is_empty() => email.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingEmail", "message": "Email is required when using email verification"})),
+            ).into_response(),
+        },
+        "discord" => match &input.discord_id {
+            Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingDiscordId", "message": "Discord ID is required when using Discord verification"})),
+            ).into_response(),
+        },
+        "telegram" => match &input.telegram_username {
+            Some(username) if !username.trim().is_empty() => username.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingTelegramUsername", "message": "Telegram username is required when using Telegram verification"})),
+            ).into_response(),
+        },
+        "signal" => match &input.signal_number {
+            Some(number) if !number.trim().is_empty() => number.trim().to_string(),
+            _ => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "MissingSignalNumber", "message": "Signal phone number is required when using Signal verification"})),
+            ).into_response(),
+        },
+        _ => return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
+        ).into_response(),
+    };
+
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_endpoint = format!("https://{}", hostname);
+    let full_handle = format!("{}.{}", input.handle, hostname);
+
+    let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
+        if let Some(signing_key_did) = &input.signing_key {
+            let reserved = sqlx::query!(
+                r#"
+                SELECT id, private_key_bytes
+                FROM reserved_signing_keys
+                WHERE public_key_did_key = $1
+                  AND used_at IS NULL
+                  AND expires_at > NOW()
+                FOR UPDATE
+                "#,
+                signing_key_did
+            )
+            .fetch_optional(&state.db)
+            .await;
+
+            match reserved {
+                Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
+                Ok(None) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "InvalidSigningKey",
+                            "message": "Signing key not found, already used, or expired"
+                        })),
+                    )
+                        .into_response();
+                }
+                Err(e) => {
+                    error!("Error looking up reserved signing key: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            }
+        } else {
+            let secret_key = SecretKey::random(&mut OsRng);
+            (secret_key.to_bytes().to_vec(), None)
+        };
+
+    let signing_key = match SigningKey::from_slice(&secret_key_bytes) {
+        Ok(k) => k,
+        Err(e) => {
+            error!("Error creating signing key: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
     let did = if let Some(d) = &input.did {
         if d.trim().is_empty() {
-            format!("did:plc:{}", uuid::Uuid::new_v4())
-        } else {
-            let hostname =
-                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+            let rotation_key = std::env::var("PLC_ROTATION_KEY")
+                .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
+
+            let genesis_result = match create_genesis_operation(
+                &signing_key,
+                &rotation_key,
+                &full_handle,
+                &pds_endpoint,
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Error creating PLC genesis operation: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
+                    )
+                        .into_response();
+                }
+            };
+
+            let plc_client = PlcClient::new(None);
+            if let Err(e) = plc_client.send_operation(&genesis_result.did, &genesis_result.signed_operation).await {
+                error!("Failed to submit PLC genesis operation: {:?}", e);
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({
+                        "error": "UpstreamError",
+                        "message": format!("Failed to register DID with PLC directory: {}", e)
+                    })),
+                )
+                    .into_response();
+            }
+
+            info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
+            genesis_result.did
+        } else if d.starts_with("did:web:") {
             if let Err(e) = verify_did_web(d, &hostname, &input.handle).await {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -113,9 +249,49 @@ pub async fn create_account(
                     .into_response();
             }
             d.clone()
+        } else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidDid", "message": "Only did:web DIDs can be provided; leave empty for did:plc"})),
+            )
+                .into_response();
         }
     } else {
-        format!("did:plc:{}", uuid::Uuid::new_v4())
+        let rotation_key = std::env::var("PLC_ROTATION_KEY")
+            .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
+
+        let genesis_result = match create_genesis_operation(
+            &signing_key,
+            &rotation_key,
+            &full_handle,
+            &pds_endpoint,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Error creating PLC genesis operation: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
+                )
+                    .into_response();
+            }
+        };
+
+        let plc_client = PlcClient::new(None);
+        if let Err(e) = plc_client.send_operation(&genesis_result.did, &genesis_result.signed_operation).await {
+            error!("Failed to submit PLC genesis operation: {:?}", e);
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": "UpstreamError",
+                    "message": format!("Failed to register DID with PLC directory: {}", e)
+                })),
+            )
+                .into_response();
+        }
+
+        info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
+        genesis_result.did
     };
 
     let mut tx = match state.db.begin().await {
@@ -211,51 +387,6 @@ pub async fn create_account(
         }
     };
 
-    let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
-    let valid_channels = ["email", "discord", "telegram", "signal"];
-    if !valid_channels.contains(&verification_channel) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel. Must be one of: email, discord, telegram, signal"})),
-        )
-            .into_response();
-    }
-
-    let verification_recipient = match verification_channel {
-        "email" => match &input.email {
-            Some(email) if !email.trim().is_empty() => email.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingEmail", "message": "Email is required when using email verification"})),
-            ).into_response(),
-        },
-        "discord" => match &input.discord_id {
-            Some(id) if !id.trim().is_empty() => id.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingDiscordId", "message": "Discord ID is required when using Discord verification"})),
-            ).into_response(),
-        },
-        "telegram" => match &input.telegram_username {
-            Some(username) if !username.trim().is_empty() => username.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingTelegramUsername", "message": "Telegram username is required when using Telegram verification"})),
-            ).into_response(),
-        },
-        "signal" => match &input.signal_number {
-            Some(number) if !number.trim().is_empty() => number.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingSignalNumber", "message": "Signal phone number is required when using Signal verification"})),
-            ).into_response(),
-        },
-        _ => return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
-        ).into_response(),
-    };
-
     let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let code_expires_at = chrono::Utc::now() + chrono::Duration::minutes(30);
 
@@ -324,48 +455,6 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
-    let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
-        if let Some(signing_key_did) = &input.signing_key {
-            let reserved = sqlx::query!(
-                r#"
-                SELECT id, private_key_bytes
-                FROM reserved_signing_keys
-                WHERE public_key_did_key = $1
-                  AND used_at IS NULL
-                  AND expires_at > NOW()
-                FOR UPDATE
-                "#,
-                signing_key_did
-            )
-            .fetch_optional(&mut *tx)
-            .await;
-
-            match reserved {
-                Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
-                Ok(None) => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "InvalidSigningKey",
-                            "message": "Signing key not found, already used, or expired"
-                        })),
-                    )
-                        .into_response();
-                }
-                Err(e) => {
-                    error!("Error looking up reserved signing key: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
-                }
-            }
-        } else {
-            let secret_key = SecretKey::random(&mut OsRng);
-            (secret_key.to_bytes().to_vec(), None)
-        };
 
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(enc) => enc,
@@ -442,18 +531,6 @@ pub async fn create_account(
     let rev = Tid::now(LimitedU32::MIN);
 
     let unsigned_commit = Commit::new_unsigned(did_obj, mst_root, rev, None);
-
-    let signing_key = match SigningKey::from_slice(&secret_key_bytes) {
-        Ok(k) => k,
-        Err(e) => {
-            error!("Error creating signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
 
     let signed_commit = match unsigned_commit.sign(&signing_key) {
         Ok(c) => c,

@@ -3,7 +3,7 @@ use crate::state::AppState;
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use base64::Engine;
@@ -38,7 +38,15 @@ pub async fn resolve_handle(
         return (StatusCode::OK, Json(json!({ "did": did }))).into_response();
     }
 
-    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let suffix = format!(".{}", hostname);
+    let short_handle = if handle.ends_with(&suffix) {
+        handle.strip_suffix(&suffix).unwrap_or(handle)
+    } else {
+        handle
+    };
+
+    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", short_handle)
         .fetch_optional(&state.db)
         .await;
 
@@ -449,6 +457,40 @@ pub async fn update_handle(
                 Json(json!({"error": "InternalError"})),
             )
                 .into_response()
+        }
+    }
+}
+
+pub async fn well_known_atproto_did(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    let host = match headers.get("host").and_then(|h| h.to_str().ok()) {
+        Some(h) => h,
+        None => return (StatusCode::BAD_REQUEST, "Missing host header").into_response(),
+    };
+
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let suffix = format!(".{}", hostname);
+
+    let handle = host.split(':').next().unwrap_or(host);
+
+    let short_handle = if handle.ends_with(&suffix) {
+        handle.strip_suffix(&suffix).unwrap_or(handle)
+    } else {
+        return (StatusCode::NOT_FOUND, "Handle not found").into_response();
+    };
+
+    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", short_handle)
+        .fetch_optional(&state.db)
+        .await;
+
+    match user {
+        Ok(Some(row)) => row.did.into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Handle not found").into_response(),
+        Err(e) => {
+            error!("DB error in well-known atproto-did: {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
         }
     }
 }
