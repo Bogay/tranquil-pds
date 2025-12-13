@@ -32,6 +32,29 @@ just test      # run tests
 just lint      # clippy + fmt
 ```
 
+## Production Deployment
+
+### Quick Deploy (Docker/Podman Compose)
+
+```bash
+cp .env.prod.example .env.prod
+# Edit .env.prod with your values (generate secrets with: openssl rand -base64 48)
+podman-compose -f docker-compose.prod.yml up -d
+```
+
+### Full Installation Guides
+
+| Guide | Best For |
+|-------|----------|
+| **Native Installation** | Maximum performance, full control |
+| [Debian](docs/install-debian.md) | Debian 13+ with systemd |
+| [Alpine](docs/install-alpine.md) | Alpine 3.23+ with OpenRC |
+| [OpenBSD](docs/install-openbsd.md) | OpenBSD 7.8+ with rc.d |
+| **Containerized** | Easier updates, isolation |
+| [Containers](docs/install-containers.md) | Podman with quadlets (Debian) or OpenRC (Alpine) |
+| **Orchestrated** | High availability, auto-scaling |
+| [Kubernetes](docs/install-kubernetes.md) | Multi-node k8s cluster deployment |
+
 ## License
 
 TBD

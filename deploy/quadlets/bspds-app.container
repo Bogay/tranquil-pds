@@ -1,0 +1,28 @@
+[Unit]
+Description=BSPDS AT Protocol PDS
+After=bspds-db.service bspds-minio.service bspds-valkey.service
+
+[Container]
+ContainerName=bspds-app
+Image=localhost/bspds:latest
+Pod=bspds.pod
+EnvironmentFile=/srv/bspds/config/bspds.env
+Environment=SERVER_HOST=0.0.0.0
+Environment=SERVER_PORT=3000
+Environment=S3_ENDPOINT=http://localhost:9000
+Environment=AWS_REGION=us-east-1
+Environment=S3_BUCKET=pds-blobs
+Environment=VALKEY_URL=redis://localhost:6379
+Environment=FRONTEND_DIR=/app/frontend/dist
+HealthCmd=wget -q --spider http://localhost:3000/xrpc/_health
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=15s
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

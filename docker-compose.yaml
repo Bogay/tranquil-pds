@@ -18,7 +18,7 @@ services:
       - cache
 
   db:
-    image: postgres:latest
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -48,7 +48,7 @@ services:
       - valkey_data:/data
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.8.0
     ports:
       - "9090:9090"
     volumes:

@@ -57,7 +57,7 @@ start_infra() {
         -e MINIO_ROOT_PASSWORD=minioadmin \
         -P \
         --label bspds_test=true \
-        minio/minio:latest server /data >/dev/null
+        minio/minio:RELEASE.2025-10-15T17-29-55Z server /data >/dev/null
 
     echo "Starting Valkey..."
     $CONTAINER_CMD run -d \
@@ -100,7 +100,7 @@ start_infra() {
     echo "Creating MinIO bucket..."
     $CONTAINER_CMD run --rm --network host \
         -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
-        minio/mc:latest mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
+        minio/mc:RELEASE.2025-07-16T15-35-03Z mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
 
     cat > "$INFRA_FILE" << EOF
 export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
