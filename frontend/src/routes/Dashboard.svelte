@@ -32,7 +32,27 @@
         <dt>DID</dt>
         <dd class="mono">{auth.session.did}</dd>
 
-        {#if auth.session.email}
+        {#if auth.session.preferredChannel}
+          <dt>Primary Contact</dt>
+          <dd>
+            {#if auth.session.preferredChannel === 'email'}
+              {auth.session.email || 'Email'}
+            {:else if auth.session.preferredChannel === 'discord'}
+              Discord
+            {:else if auth.session.preferredChannel === 'telegram'}
+              Telegram
+            {:else if auth.session.preferredChannel === 'signal'}
+              Signal
+            {:else}
+              {auth.session.preferredChannel}
+            {/if}
+            {#if auth.session.preferredChannelVerified}
+              <span class="badge success">Verified</span>
+            {:else}
+              <span class="badge warning">Unverified</span>
+            {/if}
+          </dd>
+        {:else if auth.session.email}
           <dt>Email</dt>
           <dd>
             {auth.session.email}

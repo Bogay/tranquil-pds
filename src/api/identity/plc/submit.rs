@@ -218,14 +218,24 @@ pub async fn submit_plc_operation(
         }
     }
 
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO repo_seq (did, event_type) VALUES ($1, 'identity')",
+    match sqlx::query!(
+        "INSERT INTO repo_seq (did, event_type) VALUES ($1, 'identity') RETURNING seq",
         did
     )
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await
     {
-        warn!("Failed to sequence identity event: {:?}", e);
+        Ok(row) => {
+            if let Err(e) = sqlx::query(&format!("NOTIFY repo_updates, '{}'", row.seq))
+                .execute(&state.db)
+                .await
+            {
+                warn!("Failed to notify identity event: {:?}", e);
+            }
+        }
+        Err(e) => {
+            warn!("Failed to sequence identity event: {:?}", e);
+        }
     }
 
     info!("Submitted PLC operation for user {}", did);

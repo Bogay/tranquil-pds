@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            handle, email, email_confirmed,\n            preferred_notification_channel as \"preferred_channel: crate::notifications::NotificationChannel\",\n            discord_verified, telegram_verified, signal_verified\n        FROM users WHERE did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email_confirmed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "preferred_channel: crate::notifications::NotificationChannel",
+        "type_info": {
+          "Custom": {
+            "name": "notification_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "discord_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "telegram_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "signal_verified",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3727afe601beffcb4551c23eb59fa1c25ca59150c90d4866050b3a073bbe7b4b"
+}

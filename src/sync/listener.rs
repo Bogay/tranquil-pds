@@ -57,6 +57,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
     loop {
         let notification = listener.recv().await?;
         let payload = notification.payload();
+        debug!(payload = %payload, "Received postgres notification");
 
         let seq_id: i64 = match payload.parse() {
             Ok(id) => id,
@@ -110,7 +111,14 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         .await?;
 
         if let Some(event) = event {
-            let _ = state.firehose_tx.send(event);
+            match state.firehose_tx.send(event) {
+                Ok(receiver_count) => {
+                    debug!(seq = seq_id, receivers = receiver_count, "Broadcast event to firehose");
+                }
+                Err(e) => {
+                    warn!(seq = seq_id, error = %e, "Failed to broadcast event (no receivers?)");
+                }
+            }
             LAST_BROADCAST_SEQ.store(seq_id, Ordering::SeqCst);
         } else {
             warn!(seq = seq_id, "Received notification but could not find row in repo_seq");

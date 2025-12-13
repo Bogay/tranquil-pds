@@ -205,7 +205,7 @@
           disabled={submitting}
           required
           maxlength="6"
-          pattern="[0-9]{6}"
+          inputmode="numeric"
           autocomplete="one-time-code"
         />
       </div>

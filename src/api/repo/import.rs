@@ -390,10 +390,11 @@ async fn sequence_import_event(
     let blobs: Vec<String> = vec![];
     let blocks_cids: Vec<String> = vec![];
 
-    sqlx::query!(
+    let seq_row = sqlx::query!(
         r#"
         INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids)
         VALUES ($1, 'commit', $2, $3, $4, $5, $6)
+        RETURNING seq
         "#,
         did,
         commit_cid,
@@ -402,8 +403,12 @@ async fn sequence_import_event(
         &blobs,
         &blocks_cids
     )
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await?;
+
+    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
+        .execute(&state.db)
+        .await?;
 
     Ok(())
 }

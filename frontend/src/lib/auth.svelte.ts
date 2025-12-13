@@ -108,6 +108,10 @@ export async function confirmSignup(did: string, verificationCode: string): Prom
       handle: result.handle,
       accessJwt: result.accessJwt,
       refreshJwt: result.refreshJwt,
+      email: result.email,
+      emailConfirmed: result.emailConfirmed,
+      preferredChannel: result.preferredChannel,
+      preferredChannelVerified: result.preferredChannelVerified,
     }
     state.session = session
     saveSession(session)

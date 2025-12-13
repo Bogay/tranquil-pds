@@ -92,7 +92,7 @@ cp /opt/bspds/deploy/nginx/nginx-quadlet.conf /srv/bspds/config/nginx.conf
 
 ```bash
 cd /opt
-git clone https://tangled.org/lewis.moe/bspds.git
+git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
 cd bspds
 podman build -t bspds:latest .
 ```
@@ -208,7 +208,7 @@ mkdir -p /srv/bspds/data/{postgres,minio,valkey,certs,acme}
 
 ```sh
 cd /opt
-git clone https://tangled.org/lewis.moe/bspds.git
+git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
 cd bspds
 podman build -t bspds:latest .
 ```

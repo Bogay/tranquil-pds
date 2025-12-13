@@ -176,16 +176,34 @@ pub async fn get_session(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
 ) -> Response {
-    match sqlx::query!("SELECT handle, email FROM users WHERE did = $1", auth_user.did)
-        .fetch_optional(&state.db)
-        .await
+    match sqlx::query!(
+        r#"SELECT
+            handle, email, email_confirmed,
+            preferred_notification_channel as "preferred_channel: crate::notifications::NotificationChannel",
+            discord_verified, telegram_verified, signal_verified
+        FROM users WHERE did = $1"#,
+        auth_user.did
+    )
+    .fetch_optional(&state.db)
+    .await
     {
-        Ok(Some(row)) => Json(json!({
-            "handle": row.handle,
-            "did": auth_user.did,
-            "email": row.email,
-            "didDoc": {}
-        })).into_response(),
+        Ok(Some(row)) => {
+            let (preferred_channel, preferred_channel_verified) = match row.preferred_channel {
+                crate::notifications::NotificationChannel::Email => ("email", row.email_confirmed),
+                crate::notifications::NotificationChannel::Discord => ("discord", row.discord_verified),
+                crate::notifications::NotificationChannel::Telegram => ("telegram", row.telegram_verified),
+                crate::notifications::NotificationChannel::Signal => ("signal", row.signal_verified),
+            };
+            Json(json!({
+                "handle": row.handle,
+                "did": auth_user.did,
+                "email": row.email,
+                "emailConfirmed": row.email_confirmed,
+                "preferredChannel": preferred_channel,
+                "preferredChannelVerified": preferred_channel_verified,
+                "didDoc": {}
+            })).into_response()
+        }
         Ok(None) => ApiError::AuthenticationFailed.into_response(),
         Err(e) => {
             error!("Database error in get_session: {:?}", e);
@@ -373,16 +391,35 @@ pub async fn refresh_session(
         return ApiError::InternalError.into_response();
     }
 
-    match sqlx::query!("SELECT handle FROM users WHERE did = $1", session_row.did)
-        .fetch_optional(&state.db)
-        .await
+    match sqlx::query!(
+        r#"SELECT
+            handle, email, email_confirmed,
+            preferred_notification_channel as "preferred_channel: crate::notifications::NotificationChannel",
+            discord_verified, telegram_verified, signal_verified
+        FROM users WHERE did = $1"#,
+        session_row.did
+    )
+    .fetch_optional(&state.db)
+    .await
     {
-        Ok(Some(u)) => Json(json!({
-            "accessJwt": new_access_meta.token,
-            "refreshJwt": new_refresh_meta.token,
-            "handle": u.handle,
-            "did": session_row.did
-        })).into_response(),
+        Ok(Some(u)) => {
+            let (preferred_channel, preferred_channel_verified) = match u.preferred_channel {
+                crate::notifications::NotificationChannel::Email => ("email", u.email_confirmed),
+                crate::notifications::NotificationChannel::Discord => ("discord", u.discord_verified),
+                crate::notifications::NotificationChannel::Telegram => ("telegram", u.telegram_verified),
+                crate::notifications::NotificationChannel::Signal => ("signal", u.signal_verified),
+            };
+            Json(json!({
+                "accessJwt": new_access_meta.token,
+                "refreshJwt": new_refresh_meta.token,
+                "handle": u.handle,
+                "did": session_row.did,
+                "email": u.email,
+                "emailConfirmed": u.email_confirmed,
+                "preferredChannel": preferred_channel,
+                "preferredChannelVerified": preferred_channel_verified
+            })).into_response()
+        }
         Ok(None) => {
             error!("User not found for existing session: {}", session_row.did);
             ApiError::InternalError.into_response()
@@ -408,6 +445,10 @@ pub struct ConfirmSignupOutput {
     pub refresh_jwt: String,
     pub handle: String,
     pub did: String,
+    pub email: Option<String>,
+    pub email_confirmed: bool,
+    pub preferred_channel: String,
+    pub preferred_channel_verified: bool,
 }
 
 pub async fn confirm_signup(
@@ -418,7 +459,7 @@ pub async fn confirm_signup(
 
     let row = match sqlx::query!(
         r#"SELECT
-            u.id, u.did, u.handle,
+            u.id, u.did, u.handle, u.email,
             u.email_confirmation_code,
             u.email_confirmation_code_expires_at,
             u.preferred_notification_channel as "channel: crate::notifications::NotificationChannel",
@@ -527,11 +568,23 @@ pub async fn confirm_signup(
         warn!("Failed to enqueue welcome notification: {:?}", e);
     }
 
+    let email_confirmed = matches!(row.channel, crate::notifications::NotificationChannel::Email);
+    let preferred_channel = match row.channel {
+        crate::notifications::NotificationChannel::Email => "email",
+        crate::notifications::NotificationChannel::Discord => "discord",
+        crate::notifications::NotificationChannel::Telegram => "telegram",
+        crate::notifications::NotificationChannel::Signal => "signal",
+    };
+
     Json(ConfirmSignupOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
         handle: row.handle,
         did: row.did,
+        email: row.email,
+        email_confirmed,
+        preferred_channel: preferred_channel.to_string(),
+        preferred_channel_verified: true,
     }).into_response()
 }
 

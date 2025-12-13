@@ -51,6 +51,8 @@ export interface Session {
   handle: string
   email?: string
   emailConfirmed?: boolean
+  preferredChannel?: string
+  preferredChannelVerified?: boolean
   accessJwt: string
   refreshJwt: string
 }
@@ -95,6 +97,10 @@ export interface ConfirmSignupResult {
   refreshJwt: string
   handle: string
   did: string
+  email?: string
+  emailConfirmed?: boolean
+  preferredChannel?: string
+  preferredChannelVerified?: boolean
 }
 
 export const api = {

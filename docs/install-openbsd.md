@@ -139,7 +139,7 @@ echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.profile
 
 ```sh
 mkdir -p /opt && cd /opt
-git clone https://tangled.org/lewis.moe/bspds.git
+git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
 cd bspds
 
 cd frontend
