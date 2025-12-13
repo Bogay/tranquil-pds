@@ -9,7 +9,7 @@ use axum::{
     http::HeaderMap,
 };
 
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use crate::oauth::OAuthError;
 
 pub use grants::{handle_authorization_code_grant, handle_refresh_token_grant};
@@ -41,7 +41,7 @@ pub async fn token_endpoint(
     Form(request): Form<TokenRequest>,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
     let client_ip = extract_client_ip(&headers);
-    if state.rate_limiters.oauth_token.check_key(&client_ip).is_err() {
+    if !state.check_rate_limit(RateLimitKind::OAuthToken, &client_ip).await {
         tracing::warn!(ip = %client_ip, "OAuth token rate limit exceeded");
         return Err(OAuthError::InvalidRequest(
             "Too many requests. Please try again later.".to_string(),

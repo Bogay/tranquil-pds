@@ -1,4 +1,4 @@
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
     extract::State,
@@ -42,7 +42,7 @@ pub async fn request_password_reset(
     Json(input): Json<RequestPasswordResetInput>,
 ) -> Response {
     let client_ip = extract_client_ip(&headers);
-    if state.rate_limiters.password_reset.check_key(&client_ip).is_err() {
+    if !state.check_rate_limit(RateLimitKind::PasswordReset, &client_ip).await {
         warn!(ip = %client_ip, "Password reset rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -128,21 +128,15 @@ pub async fn reset_password(
     Json(input): Json<ResetPasswordInput>,
 ) -> Response {
     let client_ip = extract_client_ip(&headers);
-    if !state.distributed_rate_limiter.check_rate_limit(
-        &format!("reset_password:{}", client_ip),
-        10,
-        60_000,
-    ).await {
-        if state.rate_limiters.reset_password.check_key(&client_ip).is_err() {
-            warn!(ip = %client_ip, "Reset password rate limit exceeded");
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({
-                    "error": "RateLimitExceeded",
-                    "message": "Too many requests. Please try again later."
-                })),
-            ).into_response();
-        }
+    if !state.check_rate_limit(RateLimitKind::ResetPassword, &client_ip).await {
+        warn!(ip = %client_ip, "Reset password rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many requests. Please try again later."
+            })),
+        ).into_response();
     }
 
     let token = input.token.trim();
@@ -259,7 +253,39 @@ pub async fn reset_password(
             .into_response();
     }
 
-    if let Err(e) = sqlx::query!("DELETE FROM session_tokens WHERE did = (SELECT did FROM users WHERE id = $1)", user_id)
+    let user_did = match sqlx::query_scalar!(
+        "SELECT did FROM users WHERE id = $1",
+        user_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(did) => did,
+        Err(e) => {
+            error!("Failed to get DID for user {}: {:?}", user_id, e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    let session_jtis: Vec<String> = match sqlx::query_scalar!(
+        "SELECT access_jti FROM session_tokens WHERE did = $1",
+        user_did
+    )
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(jtis) => jtis,
+        Err(e) => {
+            error!("Failed to fetch session JTIs: {:?}", e);
+            vec![]
+        }
+    };
+
+    if let Err(e) = sqlx::query!("DELETE FROM session_tokens WHERE did = $1", user_did)
         .execute(&mut *tx)
         .await
     {
@@ -278,6 +304,13 @@ pub async fn reset_password(
             Json(json!({"error": "InternalError"})),
         )
             .into_response();
+    }
+
+    for jti in session_jtis {
+        let cache_key = format!("auth:session:{}:{}", user_did, jti);
+        if let Err(e) = state.cache.delete(&cache_key).await {
+            warn!("Failed to invalidate session cache for {}: {:?}", cache_key, e);
+        }
     }
 
     info!("Password reset completed for user {}", user_id);

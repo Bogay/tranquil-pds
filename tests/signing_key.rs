@@ -1,8 +1,10 @@
 mod common;
+mod helpers;
 
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use sqlx::PgPool;
+use helpers::verify_new_account;
 
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
@@ -200,8 +202,11 @@ async fn test_create_account_with_reserved_signing_key() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
-    assert!(body["accessJwt"].is_string());
     assert!(body["did"].is_string());
+    let did = body["did"].as_str().unwrap();
+
+    let access_jwt = verify_new_account(&client, did).await;
+    assert!(!access_jwt.is_empty());
 
     let reserved = sqlx::query!(
         "SELECT used_at FROM reserved_signing_keys WHERE public_key_did_key = $1",
@@ -337,14 +342,16 @@ async fn test_reserved_key_tokens_work() {
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
-    let access_jwt = body["accessJwt"].as_str().unwrap();
+    let did = body["did"].as_str().unwrap();
+
+    let access_jwt = verify_new_account(&client, did).await;
 
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.server.getSession",
             base_url
         ))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .send()
         .await
         .expect("Failed to get session");

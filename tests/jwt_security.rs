@@ -10,7 +10,7 @@ use bspds::auth::{
     SCOPE_ACCESS, SCOPE_REFRESH, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED,
 };
 use chrono::{Duration, Utc};
-use common::{base_url, client, create_account_and_login};
+use common::{base_url, client, create_account_and_login, get_db_connection_string};
 use k256::SecretKey;
 use k256::ecdsa::{SigningKey, Signature, signature::Signer};
 use rand::rngs::OsRng;
@@ -906,7 +906,37 @@ async fn test_jwt_security_refresh_token_replay_protection() {
 
     assert_eq!(create_res.status(), StatusCode::OK);
     let account: Value = create_res.json().await.unwrap();
-    let refresh_jwt = account["refreshJwt"].as_str().unwrap().to_string();
+    let did = account["did"].as_str().unwrap();
+
+    let conn_str = get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&conn_str)
+        .await
+        .expect("Failed to connect to test database");
+
+    let verification_code: String = sqlx::query_scalar!(
+        "SELECT email_confirmation_code FROM users WHERE did = $1",
+        did
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get verification code")
+    .expect("No verification code found");
+
+    let confirm_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.confirmSignup", url))
+        .json(&json!({
+            "did": did,
+            "verificationCode": verification_code
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(confirm_res.status(), StatusCode::OK);
+    let confirmed: Value = confirm_res.json().await.unwrap();
+    let refresh_jwt = confirmed["refreshJwt"].as_str().unwrap().to_string();
 
     let first_refresh = http_client
         .post(format!("{}/xrpc/com.atproto.server.refreshSession", url))
@@ -980,24 +1010,7 @@ async fn test_jwt_security_deleted_session_rejected() {
     let url = base_url().await;
     let http_client = client();
 
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("del-sess-{}", ts);
-    let email = format!("del-sess-{}@example.com", ts);
-    let password = "test-password-123";
-
-    let create_res = http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
-
-    let account: Value = create_res.json().await.unwrap();
-    let access_jwt = account["accessJwt"].as_str().unwrap().to_string();
+    let (access_jwt, _did) = create_account_and_login(&http_client).await;
 
     let get_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
@@ -1029,24 +1042,7 @@ async fn test_jwt_security_deactivated_account_rejected() {
     let url = base_url().await;
     let http_client = client();
 
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("deact-jwt-{}", ts);
-    let email = format!("deact-jwt-{}@example.com", ts);
-    let password = "test-password-123";
-
-    let create_res = http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
-
-    let account: Value = create_res.json().await.unwrap();
-    let access_jwt = account["accessJwt"].as_str().unwrap().to_string();
+    let (access_jwt, _did) = create_account_and_login(&http_client).await;
 
     let deact_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", url))

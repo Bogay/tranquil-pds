@@ -352,6 +352,8 @@ async fn setup_mock_appview(mock_server: &MockServer) {
 }
 
 async fn spawn_app(database_url: String) -> String {
+    use bspds::rate_limit::RateLimiters;
+
     let pool = PgPoolOptions::new()
         .max_connections(50)
         .connect(&database_url)
@@ -371,7 +373,15 @@ async fn spawn_app(database_url: String) -> String {
         std::env::set_var("PDS_HOSTNAME", addr.to_string());
     }
 
-    let state = AppState::new(pool).await;
+    let rate_limiters = RateLimiters::new()
+        .with_login_limit(10000)
+        .with_account_creation_limit(10000)
+        .with_password_reset_limit(10000)
+        .with_email_update_limit(10000)
+        .with_oauth_authorize_limit(10000)
+        .with_oauth_token_limit(10000);
+
+    let state = AppState::new(pool).await.with_rate_limiters(rate_limiters);
 
     bspds::sync::listener::start_sequencer_listener(state.clone()).await;
 
@@ -402,6 +412,47 @@ pub async fn get_db_connection_string() -> String {
             panic!("DATABASE_URL must be set with external-infra feature");
         }
     }
+}
+
+#[allow(dead_code)]
+pub async fn verify_new_account(client: &Client, did: &str) -> String {
+    let conn_str = get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&conn_str)
+        .await
+        .expect("Failed to connect to test database");
+
+    let verification_code: String = sqlx::query_scalar!(
+        "SELECT email_confirmation_code FROM users WHERE did = $1",
+        did
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get verification code")
+    .expect("No verification code found");
+
+    let confirm_payload = json!({
+        "did": did,
+        "verificationCode": verification_code
+    });
+
+    let confirm_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.confirmSignup",
+            base_url().await
+        ))
+        .json(&confirm_payload)
+        .send()
+        .await
+        .expect("confirmSignup request failed");
+
+    assert_eq!(confirm_res.status(), StatusCode::OK, "confirmSignup failed");
+    let confirm_body: Value = confirm_res.json().await.expect("Invalid JSON from confirmSignup");
+    confirm_body["accessJwt"]
+        .as_str()
+        .expect("No accessJwt in confirmSignup response")
+        .to_string()
 }
 
 #[allow(dead_code)]
@@ -514,12 +565,56 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
 
         if res.status() == StatusCode::OK {
             let body: Value = res.json().await.expect("Invalid JSON");
-            let access_jwt = body["accessJwt"]
-                .as_str()
-                .expect("No accessJwt")
-                .to_string();
+
+            if let Some(access_jwt) = body["accessJwt"].as_str() {
+                let did = body["did"].as_str().expect("No did").to_string();
+                return (access_jwt.to_string(), did);
+            }
+
             let did = body["did"].as_str().expect("No did").to_string();
-            return (access_jwt, did);
+
+            let conn_str = get_db_connection_string().await;
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&conn_str)
+                .await
+                .expect("Failed to connect to test database");
+
+            let verification_code: String = sqlx::query_scalar!(
+                "SELECT email_confirmation_code FROM users WHERE did = $1",
+                &did
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to get verification code")
+            .expect("No verification code found");
+
+            let confirm_payload = json!({
+                "did": did,
+                "verificationCode": verification_code
+            });
+
+            let confirm_res = client
+                .post(format!(
+                    "{}/xrpc/com.atproto.server.confirmSignup",
+                    base_url().await
+                ))
+                .json(&confirm_payload)
+                .send()
+                .await
+                .expect("confirmSignup request failed");
+
+            if confirm_res.status() == StatusCode::OK {
+                let confirm_body: Value = confirm_res.json().await.expect("Invalid JSON from confirmSignup");
+                let access_jwt = confirm_body["accessJwt"]
+                    .as_str()
+                    .expect("No accessJwt in confirmSignup response")
+                    .to_string();
+                return (access_jwt, did);
+            }
+
+            last_error = format!("confirmSignup failed: {:?}", confirm_res.text().await);
+            continue;
         }
 
         last_error = format!("Status {}: {:?}", res.status(), res.text().await);

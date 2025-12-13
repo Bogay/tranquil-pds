@@ -21,11 +21,21 @@ pub struct NotificationService {
 
 impl NotificationService {
     pub fn new(db: PgPool) -> Self {
+        let poll_interval_ms: u64 = std::env::var("NOTIFICATION_POLL_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1000);
+
+        let batch_size: i64 = std::env::var("NOTIFICATION_BATCH_SIZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100);
+
         Self {
             db,
             senders: HashMap::new(),
-            poll_interval: Duration::from_secs(5),
-            batch_size: 10,
+            poll_interval: Duration::from_millis(poll_interval_ms),
+            batch_size,
         }
     }
 

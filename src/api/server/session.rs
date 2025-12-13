@@ -1,6 +1,6 @@
 use crate::api::ApiError;
 use crate::auth::BearerAuth;
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
     extract::State,
@@ -52,7 +52,7 @@ pub async fn create_session(
     info!("create_session called");
 
     let client_ip = extract_client_ip(&headers);
-    if state.rate_limiters.login.check_key(&client_ip).is_err() {
+    if !state.check_rate_limit(RateLimitKind::Login, &client_ip).await {
         warn!(ip = %client_ip, "Login rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -97,13 +97,19 @@ pub async fn create_session(
         }
     };
 
-    let password_valid = verify(&input.password, &row.password_hash).unwrap_or(false)
-        || sqlx::query!("SELECT password_hash FROM app_passwords WHERE user_id = $1", row.id)
-            .fetch_all(&state.db)
-            .await
-            .unwrap_or_default()
-            .iter()
-            .any(|app| verify(&input.password, &app.password_hash).unwrap_or(false));
+    let password_valid = if verify(&input.password, &row.password_hash).unwrap_or(false) {
+        true
+    } else {
+        let app_passwords = sqlx::query!(
+            "SELECT password_hash FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
+            row.id
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        app_passwords.iter().any(|app| verify(&input.password, &app.password_hash).unwrap_or(false))
+    };
 
     if !password_valid {
         warn!("Password verification failed for login attempt");
@@ -204,11 +210,19 @@ pub async fn delete_session(
         Err(_) => return ApiError::AuthenticationFailed.into_response(),
     };
 
+    let did = crate::auth::get_did_from_token(&token).ok();
+
     match sqlx::query!("DELETE FROM session_tokens WHERE access_jti = $1", jti)
         .execute(&state.db)
         .await
     {
-        Ok(res) if res.rows_affected() > 0 => Json(json!({})).into_response(),
+        Ok(res) if res.rows_affected() > 0 => {
+            if let Some(did) = did {
+                let session_cache_key = format!("auth:session:{}:{}", did, jti);
+                let _ = state.cache.delete(&session_cache_key).await;
+            }
+            Json(json!({})).into_response()
+        }
         Ok(_) => ApiError::AuthenticationFailed.into_response(),
         Err(e) => {
             error!("Database error in delete_session: {:?}", e);
@@ -222,21 +236,15 @@ pub async fn refresh_session(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.distributed_rate_limiter.check_rate_limit(
-        &format!("refresh_session:{}", client_ip),
-        60,
-        60_000,
-    ).await {
-        if state.rate_limiters.refresh_session.check_key(&client_ip).is_err() {
-            tracing::warn!(ip = %client_ip, "Refresh session rate limit exceeded");
-            return (
-                axum::http::StatusCode::TOO_MANY_REQUESTS,
-                axum::Json(serde_json::json!({
-                    "error": "RateLimitExceeded",
-                    "message": "Too many requests. Please try again later."
-                })),
-            ).into_response();
-        }
+    if !state.check_rate_limit(RateLimitKind::RefreshSession, &client_ip).await {
+        tracing::warn!(ip = %client_ip, "Refresh session rate limit exceeded");
+        return (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(serde_json::json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many requests. Please try again later."
+            })),
+        ).into_response();
     }
 
     let refresh_token = match crate::auth::extract_bearer_token_from_header(

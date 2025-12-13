@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO blocks (cid, data)\n            SELECT * FROM UNNEST($1::bytea[], $2::bytea[])\n            ON CONFLICT (cid) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "ByteaArray",
+        "ByteaArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c9b624a9987dd263e908fcff4612e1cd446552c93d80254d9e15c2e51a95a596"
+}

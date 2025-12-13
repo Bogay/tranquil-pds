@@ -20,6 +20,12 @@ use std::{
 pub type KeyedRateLimiter = RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>;
 pub type GlobalRateLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
+// NOTE: For production deployments with high traffic, prefer using the distributed rate
+// limiter (Redis/Valkey-based) via AppState::distributed_rate_limiter. The in-memory
+// rate limiters here don't automatically clean up expired entries, which can cause
+// memory growth over time with many unique client IPs. The distributed rate limiter
+// uses Redis TTL for automatic cleanup and works correctly across multiple instances.
+
 #[derive(Clone)]
 pub struct RateLimiters {
     pub login: Arc<KeyedRateLimiter>,
@@ -111,6 +117,13 @@ impl RateLimiters {
     pub fn with_account_creation_limit(mut self, per_hour: u32) -> Self {
         self.account_creation = Arc::new(RateLimiter::keyed(
             Quota::per_hour(NonZeroU32::new(per_hour).unwrap_or(NonZeroU32::new(10).unwrap()))
+        ));
+        self
+    }
+
+    pub fn with_email_update_limit(mut self, per_hour: u32) -> Self {
+        self.email_update = Arc::new(RateLimiter::keyed(
+            Quota::per_hour(NonZeroU32::new(per_hour).unwrap_or(NonZeroU32::new(5).unwrap()))
         ));
         self
     }

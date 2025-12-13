@@ -13,6 +13,23 @@ async fn get_pool() -> PgPool {
         .expect("Failed to connect to test database")
 }
 
+async fn create_verified_account(client: &reqwest::Client, base_url: &str, handle: &str, email: &str) -> String {
+    let res = client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": "password"
+        }))
+        .send()
+        .await
+        .expect("Failed to create account");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Invalid JSON");
+    let did = body["did"].as_str().expect("No did");
+    common::verify_new_account(client, did).await
+}
+
 #[tokio::test]
 async fn test_email_update_flow_success() {
     let client = common::client();
@@ -21,26 +38,12 @@ async fn test_email_update_flow_success() {
 
     let handle = format!("emailup_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let payload = json!({
-        "handle": handle,
-        "email": email,
-        "password": "password"
-    });
-
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&payload)
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let new_email = format!("new_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
         .await
@@ -63,7 +66,7 @@ async fn test_email_update_flow_success() {
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.confirmEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({
             "email": new_email,
             "token": code
@@ -81,7 +84,7 @@ async fn test_email_update_flow_success() {
     .await
     .expect("User not found");
 
-    assert_eq!(user.email, new_email);
+    assert_eq!(user.email, Some(new_email));
     assert!(user.email_pending_verification.is_none());
     assert!(user.email_confirmation_code.is_none());
 }
@@ -93,37 +96,15 @@ async fn test_request_email_update_taken_email() {
 
     let handle1 = format!("emailup_taken1_{}", uuid::Uuid::new_v4());
     let email1 = format!("{}@example.com", handle1);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle1,
-            "email": email1,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account 1");
-    assert_eq!(res.status(), StatusCode::OK);
+    let _ = create_verified_account(&client, &base_url, &handle1, &email1).await;
 
     let handle2 = format!("emailup_taken2_{}", uuid::Uuid::new_v4());
     let email2 = format!("{}@example.com", handle2);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle2,
-            "email": email2,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account 2");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt2 = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt2 = create_verified_account(&client, &base_url, &handle2, &email2).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
-        .bearer_auth(access_jwt2)
+        .bearer_auth(&access_jwt2)
         .json(&json!({"email": email1}))
         .send()
         .await
@@ -141,24 +122,12 @@ async fn test_confirm_email_invalid_token() {
 
     let handle = format!("emailup_inv_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let new_email = format!("new_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
         .await
@@ -167,7 +136,7 @@ async fn test_confirm_email_invalid_token() {
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.confirmEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({
             "email": new_email,
             "token": "wrong-token"
@@ -189,24 +158,12 @@ async fn test_confirm_email_wrong_email() {
 
     let handle = format!("emailup_wrong_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let new_email = format!("new_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
         .await
@@ -221,7 +178,7 @@ async fn test_confirm_email_wrong_email() {
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.confirmEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({
             "email": "another_random@example.com",
             "token": code
@@ -243,24 +200,12 @@ async fn test_update_email_success_no_token_required() {
 
     let handle = format!("emailup_direct_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let new_email = format!("direct_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({ "email": new_email }))
         .send()
         .await
@@ -272,7 +217,7 @@ async fn test_update_email_success_no_token_required() {
         .fetch_one(&pool)
         .await
         .expect("User not found");
-    assert_eq!(user.email, new_email);
+    assert_eq!(user.email, Some(new_email));
 }
 
 #[tokio::test]
@@ -282,23 +227,11 @@ async fn test_update_email_same_email_noop() {
 
     let handle = format!("emailup_same_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({ "email": email }))
         .send()
         .await
@@ -314,24 +247,12 @@ async fn test_update_email_requires_token_after_pending() {
 
     let handle = format!("emailup_token_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let new_email = format!("pending_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
         .await
@@ -340,7 +261,7 @@ async fn test_update_email_requires_token_after_pending() {
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({ "email": new_email }))
         .send()
         .await
@@ -359,24 +280,12 @@ async fn test_update_email_with_valid_token() {
 
     let handle = format!("emailup_valid_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let new_email = format!("valid_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
         .await
@@ -394,7 +303,7 @@ async fn test_update_email_with_valid_token() {
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({
             "email": new_email,
             "token": code
@@ -409,7 +318,7 @@ async fn test_update_email_with_valid_token() {
         .fetch_one(&pool)
         .await
         .expect("User not found");
-    assert_eq!(user.email, new_email);
+    assert_eq!(user.email, Some(new_email));
     assert!(user.email_pending_verification.is_none());
 }
 
@@ -420,24 +329,12 @@ async fn test_update_email_invalid_token() {
 
     let handle = format!("emailup_badtok_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let new_email = format!("badtok_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
         .await
@@ -446,7 +343,7 @@ async fn test_update_email_invalid_token() {
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({
             "email": new_email,
             "token": "wrong-token-12345"
@@ -467,37 +364,15 @@ async fn test_update_email_already_taken() {
 
     let handle1 = format!("emailup_dup1_{}", uuid::Uuid::new_v4());
     let email1 = format!("{}@example.com", handle1);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle1,
-            "email": email1,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account 1");
-    assert_eq!(res.status(), StatusCode::OK);
+    let _ = create_verified_account(&client, &base_url, &handle1, &email1).await;
 
     let handle2 = format!("emailup_dup2_{}", uuid::Uuid::new_v4());
     let email2 = format!("{}@example.com", handle2);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle2,
-            "email": email2,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account 2");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt2 = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt2 = create_verified_account(&client, &base_url, &handle2, &email2).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
-        .bearer_auth(access_jwt2)
+        .bearer_auth(&access_jwt2)
         .json(&json!({ "email": email1 }))
         .send()
         .await
@@ -532,23 +407,11 @@ async fn test_update_email_invalid_format() {
 
     let handle = format!("emailup_fmt_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": "password"
-        }))
-        .send()
-        .await
-        .expect("Failed to create account");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt");
+    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({ "email": "not-an-email" }))
         .send()
         .await

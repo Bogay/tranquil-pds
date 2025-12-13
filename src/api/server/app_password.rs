@@ -1,6 +1,6 @@
 use crate::api::ApiError;
 use crate::auth::BearerAuth;
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use crate::util::get_user_id_by_did;
 use axum::{
     Json,
@@ -82,21 +82,15 @@ pub async fn create_app_password(
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.distributed_rate_limiter.check_rate_limit(
-        &format!("app_password:{}", client_ip),
-        10,
-        60_000,
-    ).await {
-        if state.rate_limiters.app_password.check_key(&client_ip).is_err() {
-            warn!(ip = %client_ip, "App password creation rate limit exceeded");
-            return (
-                axum::http::StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({
-                    "error": "RateLimitExceeded",
-                    "message": "Too many requests. Please try again later."
-                })),
-            ).into_response();
-        }
+    if !state.check_rate_limit(RateLimitKind::AppPassword, &client_ip).await {
+        warn!(ip = %client_ip, "App password creation rate limit exceeded");
+        return (
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many requests. Please try again later."
+            })),
+        ).into_response();
     }
 
     let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {

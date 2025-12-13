@@ -12,6 +12,8 @@ async fn main() -> ExitCode {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
 
+    bspds::metrics::init_metrics();
+
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -25,10 +27,28 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "DATABASE_URL environment variable must be set")?;
 
+    let max_connections: u32 = std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100);
+    let min_connections: u32 = std::env::var("DATABASE_MIN_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    let acquire_timeout_secs: u64 = std::env::var("DATABASE_ACQUIRE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+
+    info!(
+        "Configuring database pool: max={}, min={}, acquire_timeout={}s",
+        max_connections, min_connections, acquire_timeout_secs
+    );
+
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(20)
-        .min_connections(2)
-        .acquire_timeout(std::time::Duration::from_secs(10))
+        .max_connections(max_connections)
+        .min_connections(min_connections)
+        .acquire_timeout(std::time::Duration::from_secs(acquire_timeout_secs))
         .idle_timeout(std::time::Duration::from_secs(300))
         .max_lifetime(std::time::Duration::from_secs(1800))
         .connect(&database_url)

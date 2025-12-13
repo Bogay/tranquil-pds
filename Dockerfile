@@ -5,7 +5,7 @@ COPY frontend/ ./
 RUN deno task build
 
 # Stage 2: Build Rust backend
-FROM rust:1.91.1-alpine AS builder
+FROM rust:1.92-alpine AS builder
 
 RUN apk add ca-certificates openssl openssl-dev pkgconfig
 

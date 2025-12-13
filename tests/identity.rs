@@ -264,23 +264,7 @@ async fn test_did_web_lifecycle() {
     let create_body: Value = res.json().await.expect("Not JSON");
     assert_eq!(create_body["did"], did);
 
-    let login_payload = json!({
-        "identifier": handle,
-        "password": "password"
-    });
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createSession",
-            base_url().await
-        ))
-        .json(&login_payload)
-        .send()
-        .await
-        .expect("Failed createSession");
-
-    assert_eq!(res.status(), StatusCode::OK);
-    let session_body: Value = res.json().await.expect("Not JSON");
-    let _jwt = session_body["accessJwt"].as_str().unwrap();
+    let _jwt = verify_new_account(&client, &did).await;
 
     /*
     let profile_payload = json!({

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,6 +16,15 @@ pub trait Cache: Send + Sync {
     async fn get(&self, key: &str) -> Option<String>;
     async fn set(&self, key: &str, value: &str, ttl: Duration) -> Result<(), CacheError>;
     async fn delete(&self, key: &str) -> Result<(), CacheError>;
+
+    async fn get_bytes(&self, key: &str) -> Option<Vec<u8>> {
+        self.get(key).await.and_then(|s| BASE64.decode(&s).ok())
+    }
+
+    async fn set_bytes(&self, key: &str, value: &[u8], ttl: Duration) -> Result<(), CacheError> {
+        let encoded = BASE64.encode(value);
+        self.set(key, &encoded, ttl).await
+    }
 }
 
 #[derive(Clone)]

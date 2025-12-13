@@ -1,5 +1,5 @@
 use crate::api::ApiError;
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
     extract::State,
@@ -27,21 +27,15 @@ pub async fn request_email_update(
     Json(input): Json<RequestEmailUpdateInput>,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.distributed_rate_limiter.check_rate_limit(
-        &format!("email_update:{}", client_ip),
-        5,
-        3_600_000,
-    ).await {
-        if state.rate_limiters.email_update.check_key(&client_ip).is_err() {
-            warn!(ip = %client_ip, "Email update rate limit exceeded");
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({
-                    "error": "RateLimitExceeded",
-                    "message": "Too many requests. Please try again later."
-                })),
-            ).into_response();
-        }
+    if !state.check_rate_limit(RateLimitKind::EmailUpdate, &client_ip).await {
+        warn!(ip = %client_ip, "Email update rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many requests. Please try again later."
+            })),
+        ).into_response();
     }
 
     let token = match crate::auth::extract_bearer_token_from_header(
@@ -154,21 +148,15 @@ pub async fn confirm_email(
     Json(input): Json<ConfirmEmailInput>,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.distributed_rate_limiter.check_rate_limit(
-        &format!("confirm_email:{}", client_ip),
-        10,
-        60_000,
-    ).await {
-        if state.rate_limiters.app_password.check_key(&client_ip).is_err() {
-            warn!(ip = %client_ip, "Confirm email rate limit exceeded");
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({
-                    "error": "RateLimitExceeded",
-                    "message": "Too many requests. Please try again later."
-                })),
-            ).into_response();
-        }
+    if !state.check_rate_limit(RateLimitKind::AppPassword, &client_ip).await {
+        warn!(ip = %client_ip, "Confirm email rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many requests. Please try again later."
+            })),
+        ).into_response();
     }
 
     let token = match crate::auth::extract_bearer_token_from_header(

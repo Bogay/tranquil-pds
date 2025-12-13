@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO records (repo_id, collection, rkey, record_cid, repo_rev)\n            SELECT $1, collection, rkey, record_cid, $5\n            FROM UNNEST($2::text[], $3::text[], $4::text[]) AS t(collection, rkey, record_cid)\n            ON CONFLICT (repo_id, collection, rkey) DO UPDATE\n            SET record_cid = EXCLUDED.record_cid, repo_rev = EXCLUDED.repo_rev, created_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e1066ab3a86852164e39848733c0f7e837657ea6595ea0094a6135673ea924a5"
+}

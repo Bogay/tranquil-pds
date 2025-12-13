@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -21,6 +22,10 @@ pub enum PlcError {
     Serialization(String),
     #[error("Signing error: {0}")]
     Signing(String),
+    #[error("Request timeout")]
+    Timeout,
+    #[error("Service unavailable (circuit breaker open)")]
+    CircuitBreakerOpen,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,9 +87,27 @@ impl PlcClient {
             std::env::var("PLC_DIRECTORY_URL")
                 .unwrap_or_else(|_| "https://plc.directory".to_string())
         });
+
+        let timeout_secs: u64 = std::env::var("PLC_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+
+        let connect_timeout_secs: u64 = std::env::var("PLC_CONNECT_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5);
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            .connect_timeout(Duration::from_secs(connect_timeout_secs))
+            .pool_max_idle_per_host(5)
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
         Self {
             base_url,
-            client: Client::new(),
+            client,
         }
     }
 

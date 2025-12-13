@@ -58,6 +58,10 @@ async fn test_session_lifecycle_multiple_sessions() {
         .await
         .expect("Failed to create account");
     assert_eq!(create_res.status(), StatusCode::OK);
+    let create_body: Value = create_res.json().await.unwrap();
+    let did = create_body["did"].as_str().unwrap();
+
+    let _ = verify_new_account(&client, did).await;
 
     let login_payload = json!({
         "identifier": handle,
@@ -128,7 +132,7 @@ async fn test_session_lifecycle_refresh_invalidates_old() {
         "email": email,
         "password": password
     });
-    client
+    let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
             base_url().await
@@ -137,6 +141,10 @@ async fn test_session_lifecycle_refresh_invalidates_old() {
         .send()
         .await
         .expect("Failed to create account");
+    let create_body: Value = create_res.json().await.unwrap();
+    let did = create_body["did"].as_str().unwrap();
+
+    let _ = verify_new_account(&client, did).await;
 
     let login_payload = json!({
         "identifier": handle,
@@ -209,14 +217,16 @@ async fn test_app_password_lifecycle() {
 
     assert_eq!(create_res.status(), StatusCode::OK);
     let account: Value = create_res.json().await.unwrap();
-    let jwt = account["accessJwt"].as_str().unwrap();
+    let did = account["did"].as_str().unwrap();
+
+    let jwt = verify_new_account(&client, did).await;
 
     let create_app_pass_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAppPassword",
             base_url().await
         ))
-        .bearer_auth(jwt)
+        .bearer_auth(&jwt)
         .json(&json!({ "name": "Test App" }))
         .send()
         .await
@@ -232,7 +242,7 @@ async fn test_app_password_lifecycle() {
             "{}/xrpc/com.atproto.server.listAppPasswords",
             base_url().await
         ))
-        .bearer_auth(jwt)
+        .bearer_auth(&jwt)
         .send()
         .await
         .expect("Failed to list app passwords");
@@ -263,7 +273,7 @@ async fn test_app_password_lifecycle() {
             "{}/xrpc/com.atproto.server.revokeAppPassword",
             base_url().await
         ))
-        .bearer_auth(jwt)
+        .bearer_auth(&jwt)
         .json(&json!({ "name": "Test App" }))
         .send()
         .await
@@ -295,7 +305,7 @@ async fn test_app_password_lifecycle() {
             "{}/xrpc/com.atproto.server.listAppPasswords",
             base_url().await
         ))
-        .bearer_auth(jwt)
+        .bearer_auth(&jwt)
         .send()
         .await
         .expect("Failed to list after revoke");
@@ -330,7 +340,8 @@ async fn test_account_deactivation_lifecycle() {
     assert_eq!(create_res.status(), StatusCode::OK);
     let account: Value = create_res.json().await.unwrap();
     let did = account["did"].as_str().unwrap().to_string();
-    let jwt = account["accessJwt"].as_str().unwrap().to_string();
+
+    let jwt = verify_new_account(&client, &did).await;
 
     let (post_uri, _) = create_post(&client, &did, &jwt, "Post before deactivation").await;
     let post_rkey = post_uri.split('/').last().unwrap();

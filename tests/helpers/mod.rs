@@ -43,10 +43,8 @@ pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
         .as_str()
         .expect("setup_new_user: Response had no DID")
         .to_string();
-    let new_jwt = create_body["accessJwt"]
-        .as_str()
-        .expect("setup_new_user: Response had no accessJwt")
-        .to_string();
+
+    let new_jwt = verify_new_account(&client, &new_did).await;
 
     (new_did, new_jwt)
 }

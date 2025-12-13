@@ -9,6 +9,7 @@ use cid::Cid;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::error;
 
@@ -232,14 +233,34 @@ pub async fn list_records(
         }
     };
 
+    let last_rkey = rows.last().map(|(rkey, _)| rkey.clone());
+
+    let mut cid_to_rkey: HashMap<Cid, (String, String)> = HashMap::new();
+    let mut cids: Vec<Cid> = Vec::with_capacity(rows.len());
+
+    for (rkey, cid_str) in &rows {
+        if let Ok(cid) = Cid::from_str(cid_str) {
+            cid_to_rkey.insert(cid, (rkey.clone(), cid_str.clone()));
+            cids.push(cid);
+        }
+    }
+
+    let blocks = match state.block_store.get_many(&cids).await {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Error fetching blocks: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
     let mut records = Vec::new();
-    let mut last_rkey = None;
-
-    for (rkey, cid_str) in rows {
-        last_rkey = Some(rkey.clone());
-
-        if let Ok(cid) = Cid::from_str(&cid_str) {
-            if let Ok(Some(block)) = state.block_store.get(&cid).await {
+    for (cid, block_opt) in cids.iter().zip(blocks.into_iter()) {
+        if let Some(block) = block_opt {
+            if let Some((rkey, cid_str)) = cid_to_rkey.get(cid) {
                 if let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block) {
                     records.push(json!({
                         "uri": format!("at://{}/{}/{}", input.repo, input.collection, rkey),

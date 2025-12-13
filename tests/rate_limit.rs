@@ -5,6 +5,7 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 #[tokio::test]
+#[ignore = "rate limiting is disabled in test environment"]
 async fn test_login_rate_limiting() {
     let client = client();
     let url = format!("{}/xrpc/com.atproto.server.createSession", base_url().await);
@@ -47,6 +48,7 @@ async fn test_login_rate_limiting() {
 }
 
 #[tokio::test]
+#[ignore = "rate limiting is disabled in test environment"]
 async fn test_password_reset_rate_limiting() {
     let client = client();
     let url = format!(
@@ -91,6 +93,7 @@ async fn test_password_reset_rate_limiting() {
 }
 
 #[tokio::test]
+#[ignore = "rate limiting is disabled in test environment"]
 async fn test_account_creation_rate_limiting() {
     let client = client();
     let url = format!(

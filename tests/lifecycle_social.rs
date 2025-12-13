@@ -441,7 +441,8 @@ async fn test_account_to_post_full_lifecycle() {
     assert_eq!(create_account_res.status(), StatusCode::OK);
     let account_body: Value = create_account_res.json().await.unwrap();
     let did = account_body["did"].as_str().unwrap().to_string();
-    let access_jwt = account_body["accessJwt"].as_str().unwrap().to_string();
+
+    let access_jwt = verify_new_account(&client, &did).await;
 
     let get_session_res = client
         .get(format!(

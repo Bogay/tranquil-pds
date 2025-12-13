@@ -1,5 +1,5 @@
 use super::did::verify_did_web;
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
     extract::State,
@@ -64,7 +64,7 @@ pub async fn create_account(
     info!("create_account called");
 
     let client_ip = extract_client_ip(&headers);
-    if state.rate_limiters.account_creation.check_key(&client_ip).is_err() {
+    if !state.check_rate_limit(RateLimitKind::AccountCreation, &client_ip).await {
         warn!(ip = %client_ip, "Account creation rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,

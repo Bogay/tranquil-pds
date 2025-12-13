@@ -1,8 +1,10 @@
 mod common;
+mod helpers;
 
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use sqlx::PgPool;
+use helpers::verify_new_account;
 
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
@@ -99,6 +101,10 @@ async fn test_reset_password_with_valid_token() {
         .await
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.unwrap();
+    let did = body["did"].as_str().unwrap();
+
+    let _ = verify_new_account(&client, did).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
@@ -270,7 +276,9 @@ async fn test_reset_password_invalidates_sessions() {
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
-    let original_token = body["accessJwt"].as_str().expect("No accessJwt").to_string();
+    let did = body["did"].as_str().expect("No did");
+
+    let original_token = verify_new_account(&client, did).await;
 
     let res = client
         .get(format!("{}/xrpc/com.atproto.server.getSession", base_url))

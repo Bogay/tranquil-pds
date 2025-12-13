@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM records\n            WHERE repo_id = $1\n            AND (collection, rkey) IN (SELECT * FROM UNNEST($2::text[], $3::text[]))\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9806777e3db4db9e9a905a6ce26375f026aa8a6db2c5534cf5ccf9758a07ee39"
+}

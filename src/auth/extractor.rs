@@ -7,7 +7,7 @@ use axum::{
 use serde_json::json;
 
 use crate::state::AppState;
-use super::{AuthenticatedUser, TokenValidationError, validate_bearer_token, validate_bearer_token_allow_deactivated};
+use super::{AuthenticatedUser, TokenValidationError, validate_bearer_token_cached, validate_bearer_token_cached_allow_deactivated};
 
 pub struct BearerAuth(pub AuthenticatedUser);
 
@@ -110,7 +110,7 @@ impl FromRequestParts<AppState> for BearerAuth {
 
         let token = extract_bearer_token(auth_header)?;
 
-        match validate_bearer_token(&state.db, token).await {
+        match validate_bearer_token_cached(&state.db, &state.cache, token).await {
             Ok(user) => Ok(BearerAuth(user)),
             Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
             Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
@@ -137,7 +137,7 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
 
         let token = extract_bearer_token(auth_header)?;
 
-        match validate_bearer_token_allow_deactivated(&state.db, token).await {
+        match validate_bearer_token_cached_allow_deactivated(&state.db, &state.cache, token).await {
             Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
             Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
             Err(_) => Err(AuthError::AuthenticationFailed),

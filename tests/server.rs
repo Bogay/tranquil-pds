@@ -1,5 +1,7 @@
 mod common;
+mod helpers;
 use common::*;
+use helpers::verify_new_account;
 
 use reqwest::StatusCode;
 use serde_json::{Value, json};
@@ -44,14 +46,21 @@ async fn test_create_session() {
         "email": format!("{}@example.com", handle),
         "password": "password"
     });
-    let _ = client
+    let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
             base_url().await
         ))
         .json(&payload)
         .send()
-        .await;
+        .await
+        .expect("Failed to create account");
+
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let create_body: Value = create_res.json().await.unwrap();
+    let did = create_body["did"].as_str().unwrap();
+
+    let _ = verify_new_account(&client, did).await;
 
     let payload = json!({
         "identifier": handle,
@@ -149,14 +158,21 @@ async fn test_refresh_session() {
         "email": format!("{}@example.com", handle),
         "password": "password"
     });
-    let _ = client
+    let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
             base_url().await
         ))
         .json(&payload)
         .send()
-        .await;
+        .await
+        .expect("Failed to create account");
+
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let create_body: Value = create_res.json().await.unwrap();
+    let did = create_body["did"].as_str().unwrap();
+
+    let _ = verify_new_account(&client, did).await;
 
     let login_payload = json!({
         "identifier": handle,

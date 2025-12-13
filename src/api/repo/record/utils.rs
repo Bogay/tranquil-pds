@@ -92,34 +92,62 @@ pub async fn commit_and_log(
         .map_err(|e| format!("DB Error (repos): {}", e))?;
 
     let rev_str = rev.to_string();
+
+    let mut upsert_collections: Vec<String> = Vec::new();
+    let mut upsert_rkeys: Vec<String> = Vec::new();
+    let mut upsert_cids: Vec<String> = Vec::new();
+
+    let mut delete_collections: Vec<String> = Vec::new();
+    let mut delete_rkeys: Vec<String> = Vec::new();
+
     for op in &ops {
         match op {
             RecordOp::Create { collection, rkey, cid } | RecordOp::Update { collection, rkey, cid } => {
-                sqlx::query!(
-                    "INSERT INTO records (repo_id, collection, rkey, record_cid, repo_rev) VALUES ($1, $2, $3, $4, $5)
-                     ON CONFLICT (repo_id, collection, rkey) DO UPDATE SET record_cid = $4, repo_rev = $5, created_at = NOW()",
-                    user_id,
-                    collection,
-                    rkey,
-                    cid.to_string(),
-                    rev_str
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("DB Error (records): {}", e))?;
+                upsert_collections.push(collection.clone());
+                upsert_rkeys.push(rkey.clone());
+                upsert_cids.push(cid.to_string());
             }
             RecordOp::Delete { collection, rkey } => {
-                sqlx::query!(
-                    "DELETE FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
-                    user_id,
-                    collection,
-                    rkey
-                )
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("DB Error (records): {}", e))?;
+                delete_collections.push(collection.clone());
+                delete_rkeys.push(rkey.clone());
             }
         }
+    }
+
+    if !upsert_collections.is_empty() {
+        sqlx::query!(
+            r#"
+            INSERT INTO records (repo_id, collection, rkey, record_cid, repo_rev)
+            SELECT $1, collection, rkey, record_cid, $5
+            FROM UNNEST($2::text[], $3::text[], $4::text[]) AS t(collection, rkey, record_cid)
+            ON CONFLICT (repo_id, collection, rkey) DO UPDATE
+            SET record_cid = EXCLUDED.record_cid, repo_rev = EXCLUDED.repo_rev, created_at = NOW()
+            "#,
+            user_id,
+            &upsert_collections,
+            &upsert_rkeys,
+            &upsert_cids,
+            rev_str
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("DB Error (records batch upsert): {}", e))?;
+    }
+
+    if !delete_collections.is_empty() {
+        sqlx::query!(
+            r#"
+            DELETE FROM records
+            WHERE repo_id = $1
+            AND (collection, rkey) IN (SELECT * FROM UNNEST($2::text[], $3::text[]))
+            "#,
+            user_id,
+            &delete_collections,
+            &delete_rkeys
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("DB Error (records batch delete): {}", e))?;
     }
 
     let ops_json = ops.iter().map(|op| {

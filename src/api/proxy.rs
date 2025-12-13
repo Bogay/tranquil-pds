@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
-use reqwest::Client;
+use crate::api::proxy_client::proxy_client;
 use std::collections::HashMap;
 use tracing::{error, info};
 
@@ -36,7 +36,7 @@ pub async fn proxy_handler(
 
     info!("Proxying {} request to {}", method_verb, target_url);
 
-    let client = Client::new();
+    let client = proxy_client();
 
     let mut request_builder = client.request(method_verb, &target_url).query(&params);
 

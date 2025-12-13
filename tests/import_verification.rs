@@ -5,6 +5,57 @@ use iroh_car::CarHeader;
 use reqwest::StatusCode;
 use serde_json::json;
 
+#[tokio::test]
+async fn test_import_repo_requires_auth() {
+    let client = client();
+
+    let res = client
+        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .header("Content-Type", "application/vnd.ipld.car")
+        .body(vec![0u8; 100])
+        .send()
+        .await
+        .expect("Request failed");
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_import_repo_invalid_car() {
+    let client = client();
+    let (token, _did) = create_account_and_login(&client).await;
+
+    let res = client
+        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .bearer_auth(&token)
+        .header("Content-Type", "application/vnd.ipld.car")
+        .body(vec![0u8; 100])
+        .send()
+        .await
+        .expect("Request failed");
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "InvalidRequest");
+}
+
+#[tokio::test]
+async fn test_import_repo_empty_body() {
+    let client = client();
+    let (token, _did) = create_account_and_login(&client).await;
+
+    let res = client
+        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .bearer_auth(&token)
+        .header("Content-Type", "application/vnd.ipld.car")
+        .body(vec![])
+        .send()
+        .await
+        .expect("Request failed");
+
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
 fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
     loop {
         let mut byte = (value & 0x7F) as u8;

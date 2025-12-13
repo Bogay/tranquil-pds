@@ -5,6 +5,7 @@ pub mod circuit_breaker;
 pub mod config;
 pub mod crawlers;
 pub mod image;
+pub mod metrics;
 pub mod notifications;
 pub mod oauth;
 pub mod plc;
@@ -18,6 +19,7 @@ pub mod validation;
 
 use axum::{
     Router,
+    middleware,
     routing::{any, get, post},
 };
 use state::AppState;
@@ -25,6 +27,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 pub fn app(state: AppState) -> Router {
     let router = Router::new()
+        .route("/metrics", get(metrics::metrics_handler))
         .route("/health", get(api::server::health))
         .route("/xrpc/_health", get(api::server::health))
         .route("/robots.txt", get(api::server::robots_txt))
@@ -382,6 +385,7 @@ pub fn app(state: AppState) -> Router {
             post(api::notification_prefs::update_notification_prefs),
         )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
+        .layer(middleware::from_fn(metrics::metrics_middleware))
         .with_state(state);
 
     let frontend_dir = std::env::var("FRONTEND_DIR")

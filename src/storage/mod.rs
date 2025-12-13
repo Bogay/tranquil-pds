@@ -3,6 +3,7 @@ use aws_config::BehaviorVersion;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::primitives::ByteStream;
+use bytes::Bytes;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -18,7 +19,9 @@ pub enum StorageError {
 #[async_trait]
 pub trait BlobStorage: Send + Sync {
     async fn put(&self, key: &str, data: &[u8]) -> Result<(), StorageError>;
+    async fn put_bytes(&self, key: &str, data: Bytes) -> Result<(), StorageError>;
     async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError>;
+    async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError>;
     async fn delete(&self, key: &str) -> Result<(), StorageError>;
 }
 
@@ -55,18 +58,32 @@ impl S3BlobStorage {
 #[async_trait]
 impl BlobStorage for S3BlobStorage {
     async fn put(&self, key: &str, data: &[u8]) -> Result<(), StorageError> {
-        self.client
+        self.put_bytes(key, Bytes::copy_from_slice(data)).await
+    }
+
+    async fn put_bytes(&self, key: &str, data: Bytes) -> Result<(), StorageError> {
+        let result = self.client
             .put_object()
             .bucket(&self.bucket)
             .key(key)
-            .body(ByteStream::from(data.to_vec()))
+            .body(ByteStream::from(data))
             .send()
             .await
-            .map_err(|e| StorageError::S3(e.to_string()))?;
+            .map_err(|e| StorageError::S3(e.to_string()));
+
+        match &result {
+            Ok(_) => crate::metrics::record_s3_operation("put", "success"),
+            Err(_) => crate::metrics::record_s3_operation("put", "error"),
+        }
+        result?;
         Ok(())
     }
 
     async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError> {
+        self.get_bytes(key).await.map(|b| b.to_vec())
+    }
+
+    async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError> {
         let resp = self
             .client
             .get_object()
@@ -74,26 +91,39 @@ impl BlobStorage for S3BlobStorage {
             .key(key)
             .send()
             .await
-            .map_err(|e| StorageError::S3(e.to_string()))?;
+            .map_err(|e| {
+                crate::metrics::record_s3_operation("get", "error");
+                StorageError::S3(e.to_string())
+            })?;
 
         let data = resp
             .body
             .collect()
             .await
-            .map_err(|e| StorageError::S3(e.to_string()))?
+            .map_err(|e| {
+                crate::metrics::record_s3_operation("get", "error");
+                StorageError::S3(e.to_string())
+            })?
             .into_bytes();
 
-        Ok(data.to_vec())
+        crate::metrics::record_s3_operation("get", "success");
+        Ok(data)
     }
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        self.client
+        let result = self.client
             .delete_object()
             .bucket(&self.bucket)
             .key(key)
             .send()
             .await
-            .map_err(|e| StorageError::S3(e.to_string()))?;
+            .map_err(|e| StorageError::S3(e.to_string()));
+
+        match &result {
+            Ok(_) => crate::metrics::record_s3_operation("delete", "success"),
+            Err(_) => crate::metrics::record_s3_operation("delete", "error"),
+        }
+        result?;
         Ok(())
     }
 }

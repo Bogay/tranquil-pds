@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use jacquard_repo::storage::BlockStore;
-use reqwest::Client;
+use crate::api::proxy_client::proxy_client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -89,7 +89,7 @@ async fn proxy_to_appview(
     let target_url = format!("{}/xrpc/{}", appview_url, method);
     info!("Proxying GET request to {}", target_url);
 
-    let client = Client::new();
+    let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(params);
 
     if let Some(auth) = auth_header {

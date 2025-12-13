@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use urlencoding::encode as url_encode;
 
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use crate::oauth::{Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, db, templates};
 use crate::notifications::{NotificationChannel, channel_display_name, enqueue_2fa_code};
 
@@ -273,7 +273,7 @@ pub async fn authorize_post(
     let json_response = wants_json(&headers);
 
     let client_ip = extract_client_ip(&headers);
-    if state.rate_limiters.oauth_authorize.check_key(&client_ip).is_err() {
+    if !state.check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip).await {
         tracing::warn!(ip = %client_ip, "OAuth authorize rate limit exceeded");
         if json_response {
             return (
@@ -761,7 +761,7 @@ pub async fn authorize_2fa_post(
     Form(form): Form<Authorize2faSubmit>,
 ) -> Response {
     let client_ip = extract_client_ip(&headers);
-    if state.rate_limiters.oauth_authorize.check_key(&client_ip).is_err() {
+    if !state.check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip).await {
         tracing::warn!(ip = %client_ip, "OAuth 2FA rate limit exceeded");
         return (
             axum::http::StatusCode::TOO_MANY_REQUESTS,

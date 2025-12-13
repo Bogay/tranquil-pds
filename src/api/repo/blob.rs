@@ -83,15 +83,6 @@ pub async fn upload_blob(
 
     let storage_key = format!("blobs/{}", cid_str);
 
-    if let Err(e) = state.blob_store.put(&storage_key, &data).await {
-        error!("Failed to upload blob to storage: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
-        )
-            .into_response();
-    }
-
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
@@ -107,19 +98,60 @@ pub async fn upload_blob(
         }
     };
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Failed to begin transaction: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
     let insert = sqlx::query!(
-        "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cid) DO NOTHING",
+        "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cid) DO NOTHING RETURNING cid",
         cid_str,
         mime_type,
         size,
         user_id,
         storage_key
     )
-    .execute(&state.db)
+    .fetch_optional(&mut *tx)
     .await;
 
-    if let Err(e) = insert {
-        error!("Failed to insert blob record: {:?}", e);
+    let was_inserted = match insert {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(e) => {
+            error!("Failed to insert blob record: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if was_inserted {
+        if let Err(e) = state.blob_store.put_bytes(&storage_key, bytes::Bytes::from(data)).await {
+            error!("Failed to upload blob to storage: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
+            )
+                .into_response();
+        }
+    }
+
+    if let Err(e) = tx.commit().await {
+        error!("Failed to commit blob transaction: {:?}", e);
+        if was_inserted {
+            if let Err(cleanup_err) = state.blob_store.delete(&storage_key).await {
+                error!("Failed to cleanup orphaned blob {}: {:?}", storage_key, cleanup_err);
+            }
+        }
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),

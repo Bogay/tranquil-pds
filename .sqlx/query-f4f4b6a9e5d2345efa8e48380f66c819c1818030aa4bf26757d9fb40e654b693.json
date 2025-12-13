@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref\n             FROM users u\n             JOIN user_keys k ON u.id = k.user_id\n             WHERE u.did = $1",
+  "query": "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref\n                 FROM users u\n                 JOIN user_keys k ON u.id = k.user_id\n                 WHERE u.did = $1",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       true
     ]
   },
-  "hash": "6b67b2b6759f01be11d5997a3ad68d381f59a02235a6940877f62193af8d9761"
+  "hash": "f4f4b6a9e5d2345efa8e48380f66c819c1818030aa4bf26757d9fb40e654b693"
 }

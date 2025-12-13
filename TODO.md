@@ -201,7 +201,7 @@ These are implemented at PDS level to enable local-first reads (read-after-write
 - [x] DID Cache
     - [x] Implement caching layer for DID resolution (valkey).
     - [x] Handle cache invalidation/expiry.
-    - [x] Graceful fallback to no-cache when Valkey unavailable.
+    - [x] Graceful fallback to no-cache when valkey unavailable.
 - [x] Crawlers Service
     - [x] Implement `Crawlers` service (debounce notifications to relays).
     - [x] 20-minute notification debounce.
@@ -237,7 +237,7 @@ These are implemented at PDS level to enable local-first reads (read-after-write
     - [x] Per-IP rate limiting on OAuth revoke/introspect (30/min).
     - [x] Per-IP rate limiting on createAppPassword (10/min).
     - [x] Per-IP rate limiting on email endpoints (5/hour).
-    - [x] Distributed rate limiting via Valkey/Redis (with in-memory fallback).
+    - [x] Distributed rate limiting via valkey (with in-memory fallback).
 - [x] Circuit Breakers
     - [x] PLC directory circuit breaker (5 failures → open, 60s timeout).
     - [x] Relay notification circuit breaker (10 failures → open, 30s timeout).

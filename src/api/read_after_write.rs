@@ -8,7 +8,9 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use cid::Cid;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -137,46 +139,67 @@ pub async fn get_records_since_rev(
         return Ok(result);
     }
 
-    for row in rows {
+    struct RowData {
+        cid_str: String,
+        collection: String,
+        rkey: String,
+        created_at: DateTime<Utc>,
+    }
+
+    let mut row_data: Vec<RowData> = Vec::with_capacity(rows.len());
+    let mut cids: Vec<Cid> = Vec::with_capacity(rows.len());
+
+    for row in &rows {
+        if let Ok(cid) = row.record_cid.parse::<Cid>() {
+            cids.push(cid);
+            row_data.push(RowData {
+                cid_str: row.record_cid.clone(),
+                collection: row.collection.clone(),
+                rkey: row.rkey.clone(),
+                created_at: row.created_at,
+            });
+        }
+    }
+
+    let blocks: Vec<Option<Bytes>> = state
+        .block_store
+        .get_many(&cids)
+        .await
+        .map_err(|e| format!("Error fetching blocks: {}", e))?;
+
+    for (data, block_opt) in row_data.into_iter().zip(blocks.into_iter()) {
+        let block_bytes = match block_opt {
+            Some(b) => b,
+            None => continue,
+        };
+
         result.count += 1;
+        let uri = format!("at://{}/{}/{}", did, data.collection, data.rkey);
 
-        let cid: cid::Cid = match row.record_cid.parse() {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        let block_bytes = match state.block_store.get(&cid).await {
-            Ok(Some(b)) => b,
-            _ => continue,
-        };
-
-        let uri = format!("at://{}/{}/{}", did, row.collection, row.rkey);
-        let indexed_at = row.created_at;
-
-        if row.collection == "app.bsky.actor.profile" && row.rkey == "self" {
+        if data.collection == "app.bsky.actor.profile" && data.rkey == "self" {
             if let Ok(record) = serde_ipld_dagcbor::from_slice::<ProfileRecord>(&block_bytes) {
                 result.profile = Some(RecordDescript {
                     uri,
-                    cid: row.record_cid,
-                    indexed_at,
+                    cid: data.cid_str,
+                    indexed_at: data.created_at,
                     record,
                 });
             }
-        } else if row.collection == "app.bsky.feed.post" {
+        } else if data.collection == "app.bsky.feed.post" {
             if let Ok(record) = serde_ipld_dagcbor::from_slice::<PostRecord>(&block_bytes) {
                 result.posts.push(RecordDescript {
                     uri,
-                    cid: row.record_cid,
-                    indexed_at,
+                    cid: data.cid_str,
+                    indexed_at: data.created_at,
                     record,
                 });
             }
-        } else if row.collection == "app.bsky.feed.like" {
+        } else if data.collection == "app.bsky.feed.like" {
             if let Ok(record) = serde_ipld_dagcbor::from_slice::<LikeRecord>(&block_bytes) {
                 result.likes.push(RecordDescript {
                     uri,
-                    cid: row.record_cid,
-                    indexed_at,
+                    cid: data.cid_str,
+                    indexed_at: data.created_at,
                     record,
                 });
             }

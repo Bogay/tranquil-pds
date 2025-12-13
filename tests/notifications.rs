@@ -92,7 +92,7 @@ async fn test_enqueue_welcome() {
     .await
     .expect("Notification not found");
 
-    assert_eq!(row.recipient, user_row.email);
+    assert_eq!(Some(row.recipient), user_row.email);
     assert_eq!(row.subject.as_deref(), Some("Welcome to example.com"));
     assert!(row.body.contains(&format!("@{}", user_row.handle)));
     assert_eq!(row.notification_type, NotificationType::Welcome);

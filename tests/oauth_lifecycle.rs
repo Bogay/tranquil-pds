@@ -4,6 +4,7 @@ mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use common::{base_url, client};
+use helpers::verify_new_account;
 use reqwest::{redirect, StatusCode};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -82,6 +83,8 @@ async fn create_user_and_oauth_session(handle_prefix: &str, redirect_uri: &str) 
     assert_eq!(create_res.status(), StatusCode::OK);
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap().to_string();
+
+    let _ = verify_new_account(&http_client, &user_did).await;
 
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
@@ -588,6 +591,8 @@ async fn test_oauth_multiple_clients_same_user() {
     assert_eq!(create_res.status(), StatusCode::OK);
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap();
+
+    let _ = verify_new_account(&http_client, user_did).await;
 
     let mock_client1 = setup_mock_client_metadata("https://client1.example.com/callback").await;
     let client1_id = mock_client1.uri();

@@ -51,6 +51,8 @@ iroh-car = "0.5.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 tower-http = { version = "0.6", features = ["fs"] }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 
 [features]
 external-infra = []
