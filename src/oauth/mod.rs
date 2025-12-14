@@ -7,7 +7,6 @@ pub mod endpoints;
 pub mod error;
 pub mod templates;
 pub mod verify;
-
 pub use types::*;
 pub use error::OAuthError;
 pub use verify::{verify_oauth_access_token, generate_dpop_nonce, VerifyResult, OAuthUser, OAuthAuthError};

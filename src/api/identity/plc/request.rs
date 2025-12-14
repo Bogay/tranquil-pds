@@ -9,11 +9,9 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde_json::json;
 use tracing::{error, info, warn};
-
 fn generate_plc_token() -> String {
     crate::util::generate_token_code()
 }
-
 pub async fn request_plc_operation_signature(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -24,12 +22,10 @@ pub async fn request_plc_operation_signature(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", auth_user.did)
         .fetch_optional(&state.db)
         .await
@@ -41,17 +37,14 @@ pub async fn request_plc_operation_signature(
             return ApiError::InternalError.into_response();
         }
     };
-
     let _ = sqlx::query!(
         "DELETE FROM plc_operation_tokens WHERE user_id = $1 OR expires_at < NOW()",
         user.id
     )
     .execute(&state.db)
     .await;
-
     let plc_token = generate_plc_token();
     let expires_at = Utc::now() + Duration::minutes(10);
-
     if let Err(e) = sqlx::query!(
         r#"
         INSERT INTO plc_operation_tokens (user_id, token, expires_at)
@@ -71,9 +64,7 @@ pub async fn request_plc_operation_signature(
         )
             .into_response();
     }
-
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-
     if let Err(e) = crate::notifications::enqueue_plc_operation(
         &state.db,
         user.id,
@@ -84,8 +75,6 @@ pub async fn request_plc_operation_signature(
     {
         warn!("Failed to enqueue PLC operation notification: {:?}", e);
     }
-
     info!("PLC operation signature requested for user {}", auth_user.did);
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }

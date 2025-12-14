@@ -7,29 +7,25 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::error;
-
+use tracing::{error, warn};
 #[derive(Deserialize)]
 pub struct GetSubjectStatusParams {
     pub did: Option<String>,
     pub uri: Option<String>,
     pub blob: Option<String>,
 }
-
 #[derive(Serialize)]
 pub struct SubjectStatus {
     pub subject: serde_json::Value,
     pub takedown: Option<StatusAttr>,
     pub deactivated: Option<StatusAttr>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusAttr {
     pub applied: bool,
     pub r#ref: Option<String>,
 }
-
 pub async fn get_subject_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -43,7 +39,6 @@ pub async fn get_subject_status(
         )
             .into_response();
     }
-
     if params.did.is_none() && params.uri.is_none() && params.blob.is_none() {
         return (
             StatusCode::BAD_REQUEST,
@@ -51,7 +46,6 @@ pub async fn get_subject_status(
         )
             .into_response();
     }
-
     if let Some(did) = &params.did {
         let user = sqlx::query!(
             "SELECT did, deactivated_at, takedown_ref FROM users WHERE did = $1",
@@ -59,7 +53,6 @@ pub async fn get_subject_status(
         )
         .fetch_optional(&state.db)
         .await;
-
         match user {
             Ok(Some(row)) => {
                 let deactivated = row.deactivated_at.map(|_| StatusAttr {
@@ -70,7 +63,6 @@ pub async fn get_subject_status(
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-
                 return (
                     StatusCode::OK,
                     Json(SubjectStatus {
@@ -101,7 +93,6 @@ pub async fn get_subject_status(
             }
         }
     }
-
     if let Some(uri) = &params.uri {
         let record = sqlx::query!(
             "SELECT r.id, r.takedown_ref FROM records r WHERE r.record_cid = $1",
@@ -109,14 +100,12 @@ pub async fn get_subject_status(
         )
         .fetch_optional(&state.db)
         .await;
-
         match record {
             Ok(Some(row)) => {
                 let takedown = row.takedown_ref.as_ref().map(|r| StatusAttr {
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-
                 return (
                     StatusCode::OK,
                     Json(SubjectStatus {
@@ -148,19 +137,16 @@ pub async fn get_subject_status(
             }
         }
     }
-
     if let Some(blob_cid) = &params.blob {
         let blob = sqlx::query!("SELECT cid, takedown_ref FROM blobs WHERE cid = $1", blob_cid)
             .fetch_optional(&state.db)
             .await;
-
         match blob {
             Ok(Some(row)) => {
                 let takedown = row.takedown_ref.as_ref().map(|r| StatusAttr {
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-
                 return (
                     StatusCode::OK,
                     Json(SubjectStatus {
@@ -192,14 +178,12 @@ pub async fn get_subject_status(
             }
         }
     }
-
     (
         StatusCode::BAD_REQUEST,
         Json(json!({"error": "InvalidRequest", "message": "Invalid subject type"})),
     )
         .into_response()
 }
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSubjectStatusInput {
@@ -207,13 +191,11 @@ pub struct UpdateSubjectStatusInput {
     pub takedown: Option<StatusAttrInput>,
     pub deactivated: Option<StatusAttrInput>,
 }
-
 #[derive(Deserialize)]
 pub struct StatusAttrInput {
     pub apply: bool,
     pub r#ref: Option<String>,
 }
-
 pub async fn update_subject_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -227,9 +209,7 @@ pub async fn update_subject_status(
         )
             .into_response();
     }
-
     let subject_type = input.subject.get("$type").and_then(|t| t.as_str());
-
     match subject_type {
         Some("com.atproto.admin.defs#repoRef") => {
             let did = input.subject.get("did").and_then(|d| d.as_str());
@@ -245,7 +225,6 @@ pub async fn update_subject_status(
                             .into_response();
                     }
                 };
-
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.apply {
                         takedown.r#ref.clone()
@@ -268,7 +247,6 @@ pub async fn update_subject_status(
                             .into_response();
                     }
                 }
-
                 if let Some(deactivated) = &input.deactivated {
                     let result = if deactivated.apply {
                         sqlx::query!(
@@ -285,7 +263,6 @@ pub async fn update_subject_status(
                         .execute(&mut *tx)
                         .await
                     };
-
                     if let Err(e) = result {
                         error!("Failed to update user deactivation status for {}: {:?}", did, e);
                         return (
@@ -295,7 +272,6 @@ pub async fn update_subject_status(
                             .into_response();
                     }
                 }
-
                 if let Err(e) = tx.commit().await {
                     error!("Failed to commit transaction: {:?}", e);
                     return (
@@ -304,14 +280,24 @@ pub async fn update_subject_status(
                     )
                         .into_response();
                 }
-
+                if let Some(takedown) = &input.takedown {
+                    let status = if takedown.apply { Some("takendown") } else { None };
+                    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, did, !takedown.apply, status).await {
+                        warn!("Failed to sequence account event for takedown: {}", e);
+                    }
+                }
+                if let Some(deactivated) = &input.deactivated {
+                    let status = if deactivated.apply { Some("deactivated") } else { None };
+                    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, did, !deactivated.apply, status).await {
+                        warn!("Failed to sequence account event for deactivation: {}", e);
+                    }
+                }
                 if let Ok(Some(handle)) = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
                     .fetch_optional(&state.db)
                     .await
                 {
                     let _ = state.cache.delete(&format!("handle:{}", handle)).await;
                 }
-
                 return (
                     StatusCode::OK,
                     Json(json!({
@@ -353,7 +339,6 @@ pub async fn update_subject_status(
                             .into_response();
                     }
                 }
-
                 return (
                     StatusCode::OK,
                     Json(json!({
@@ -392,7 +377,6 @@ pub async fn update_subject_status(
                             .into_response();
                     }
                 }
-
                 return (
                     StatusCode::OK,
                     Json(json!({
@@ -408,7 +392,6 @@ pub async fn update_subject_status(
         }
         _ => {}
     }
-
     (
         StatusCode::BAD_REQUEST,
         Json(json!({"error": "InvalidRequest", "message": "Invalid subject type"})),

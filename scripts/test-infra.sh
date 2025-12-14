@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 INFRA_FILE="${TMPDIR:-/tmp}/bspds_test_infra.env"
 CONTAINER_PREFIX="bspds-test"
-
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
-
 if command_exists podman; then
     CONTAINER_CMD="podman"
     if [[ -z "${DOCKER_HOST:-}" ]]; then
@@ -23,10 +20,8 @@ else
     echo "Error: Neither podman nor docker found" >&2
     exit 1
 fi
-
 start_infra() {
     echo "Starting test infrastructure..."
-
     if [[ -f "$INFRA_FILE" ]]; then
         source "$INFRA_FILE"
         if $CONTAINER_CMD ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_PREFIX}-postgres$"; then
@@ -37,9 +32,7 @@ start_infra() {
         echo "Stale infra file found, cleaning up..."
         rm -f "$INFRA_FILE"
     fi
-
     $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" "${CONTAINER_PREFIX}-valkey" 2>/dev/null || true
-
     echo "Starting PostgreSQL..."
     $CONTAINER_CMD run -d \
         --name "${CONTAINER_PREFIX}-postgres" \
@@ -49,7 +42,6 @@ start_infra() {
         -P \
         --label bspds_test=true \
         postgres:18-alpine >/dev/null
-
     echo "Starting MinIO..."
     $CONTAINER_CMD run -d \
         --name "${CONTAINER_PREFIX}-minio" \
@@ -57,22 +49,18 @@ start_infra() {
         -e MINIO_ROOT_PASSWORD=minioadmin \
         -P \
         --label bspds_test=true \
-        minio/minio:RELEASE.2025-10-15T17-29-55Z server /data >/dev/null
-
+        minio/minio:latest server /data >/dev/null
     echo "Starting Valkey..."
     $CONTAINER_CMD run -d \
         --name "${CONTAINER_PREFIX}-valkey" \
         -P \
         --label bspds_test=true \
         valkey/valkey:8-alpine >/dev/null
-
     echo "Waiting for services to be ready..."
     sleep 2
-
     PG_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-postgres" 5432 | head -1 | cut -d: -f2)
     MINIO_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-minio" 9000 | head -1 | cut -d: -f2)
     VALKEY_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-valkey" 6379 | head -1 | cut -d: -f2)
-
     for i in {1..30}; do
         if $CONTAINER_CMD exec "${CONTAINER_PREFIX}-postgres" pg_isready -U postgres >/dev/null 2>&1; then
             break
@@ -80,7 +68,6 @@ start_infra() {
         echo "Waiting for PostgreSQL... ($i/30)"
         sleep 1
     done
-
     for i in {1..30}; do
         if curl -s "http://127.0.0.1:${MINIO_PORT}/minio/health/live" >/dev/null 2>&1; then
             break
@@ -88,7 +75,6 @@ start_infra() {
         echo "Waiting for MinIO... ($i/30)"
         sleep 1
     done
-
     for i in {1..30}; do
         if $CONTAINER_CMD exec "${CONTAINER_PREFIX}-valkey" valkey-cli ping 2>/dev/null | grep -q PONG; then
             break
@@ -96,12 +82,10 @@ start_infra() {
         echo "Waiting for Valkey... ($i/30)"
         sleep 1
     done
-
     echo "Creating MinIO bucket..."
     $CONTAINER_CMD run --rm --network host \
         -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
-        minio/mc:RELEASE.2025-07-16T15-35-03Z mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
-
+        minio/mc:latest mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
     cat > "$INFRA_FILE" << EOF
 export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
 export TEST_DB_PORT="${PG_PORT}"
@@ -116,25 +100,21 @@ export BSPDS_ALLOW_INSECURE_SECRETS="1"
 export SKIP_IMPORT_VERIFICATION="true"
 export DISABLE_RATE_LIMITING="1"
 EOF
-
     echo ""
     echo "Infrastructure ready!"
     echo "Config written to: $INFRA_FILE"
     echo ""
     cat "$INFRA_FILE"
 }
-
 stop_infra() {
     echo "Stopping test infrastructure..."
     $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" "${CONTAINER_PREFIX}-valkey" 2>/dev/null || true
     rm -f "$INFRA_FILE"
     echo "Infrastructure stopped."
 }
-
 status_infra() {
     echo "Test Infrastructure Status:"
     echo "============================"
-
     if [[ -f "$INFRA_FILE" ]]; then
         echo "Config file: $INFRA_FILE"
         source "$INFRA_FILE"
@@ -143,12 +123,10 @@ status_infra() {
     else
         echo "Config file: NOT FOUND"
     fi
-
     echo ""
     echo "Containers:"
     $CONTAINER_CMD ps -a --filter "label=bspds_test=true" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  (none)"
 }
-
 case "${1:-}" in
     start)
         start_infra

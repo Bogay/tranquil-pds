@@ -3,7 +3,6 @@ mod author_feed;
 mod custom_feed;
 mod post_thread;
 mod timeline;
-
 pub use actor_likes::get_actor_likes;
 pub use author_feed::get_author_feed;
 pub use custom_feed::get_feed;

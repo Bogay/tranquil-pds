@@ -10,11 +10,9 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
-
 fn generate_reset_code() -> String {
     crate::util::generate_token_code()
 }
-
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
@@ -30,12 +28,10 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "unknown".to_string()
 }
-
 #[derive(Deserialize)]
 pub struct RequestPasswordResetInput {
     pub email: String,
 }
-
 pub async fn request_password_reset(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -53,7 +49,6 @@ pub async fn request_password_reset(
         )
             .into_response();
     }
-
     let email = input.email.trim().to_lowercase();
     if email.is_empty() {
         return (
@@ -62,11 +57,9 @@ pub async fn request_password_reset(
         )
             .into_response();
     }
-
     let user = sqlx::query!("SELECT id FROM users WHERE LOWER(email) = $1", email)
         .fetch_optional(&state.db)
         .await;
-
     let user_id = match user {
         Ok(Some(row)) => row.id,
         Ok(None) => {
@@ -82,10 +75,8 @@ pub async fn request_password_reset(
                 .into_response();
         }
     };
-
     let code = generate_reset_code();
     let expires_at = Utc::now() + Duration::minutes(10);
-
     let update = sqlx::query!(
         "UPDATE users SET password_reset_code = $1, password_reset_code_expires_at = $2 WHERE id = $3",
         code,
@@ -94,7 +85,6 @@ pub async fn request_password_reset(
     )
     .execute(&state.db)
     .await;
-
     if let Err(e) = update {
         error!("DB error setting reset code: {:?}", e);
         return (
@@ -103,25 +93,20 @@ pub async fn request_password_reset(
         )
             .into_response();
     }
-
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) =
         crate::notifications::enqueue_password_reset(&state.db, user_id, &code, &hostname).await
     {
         warn!("Failed to enqueue password reset notification: {:?}", e);
     }
-
     info!("Password reset requested for user {}", user_id);
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }
-
 #[derive(Deserialize)]
 pub struct ResetPasswordInput {
     pub token: String,
     pub password: String,
 }
-
 pub async fn reset_password(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -138,10 +123,8 @@ pub async fn reset_password(
             })),
         ).into_response();
     }
-
     let token = input.token.trim();
     let password = &input.password;
-
     if token.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -149,7 +132,6 @@ pub async fn reset_password(
         )
             .into_response();
     }
-
     if password.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -157,14 +139,12 @@ pub async fn reset_password(
         )
             .into_response();
     }
-
     let user = sqlx::query!(
         "SELECT id, password_reset_code, password_reset_code_expires_at FROM users WHERE password_reset_code = $1",
         token
     )
     .fetch_optional(&state.db)
     .await;
-
     let (user_id, expires_at) = match user {
         Ok(Some(row)) => {
             let expires = row.password_reset_code_expires_at;
@@ -186,7 +166,6 @@ pub async fn reset_password(
                 .into_response();
         }
     };
-
     if let Some(exp) = expires_at {
         if Utc::now() > exp {
             if let Err(e) = sqlx::query!(
@@ -198,7 +177,6 @@ pub async fn reset_password(
             {
                 error!("Failed to clear expired reset code: {:?}", e);
             }
-
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
@@ -212,7 +190,6 @@ pub async fn reset_password(
         )
             .into_response();
     }
-
     let password_hash = match hash(password, DEFAULT_COST) {
         Ok(h) => h,
         Err(e) => {
@@ -224,7 +201,6 @@ pub async fn reset_password(
                 .into_response();
         }
     };
-
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -236,7 +212,6 @@ pub async fn reset_password(
                 .into_response();
         }
     };
-
     if let Err(e) = sqlx::query!(
         "UPDATE users SET password_hash = $1, password_reset_code = NULL, password_reset_code_expires_at = NULL WHERE id = $2",
         password_hash,
@@ -252,7 +227,6 @@ pub async fn reset_password(
         )
             .into_response();
     }
-
     let user_did = match sqlx::query_scalar!(
         "SELECT did FROM users WHERE id = $1",
         user_id
@@ -270,7 +244,6 @@ pub async fn reset_password(
                 .into_response();
         }
     };
-
     let session_jtis: Vec<String> = match sqlx::query_scalar!(
         "SELECT access_jti FROM session_tokens WHERE did = $1",
         user_did
@@ -284,7 +257,6 @@ pub async fn reset_password(
             vec![]
         }
     };
-
     if let Err(e) = sqlx::query!("DELETE FROM session_tokens WHERE did = $1", user_did)
         .execute(&mut *tx)
         .await
@@ -296,7 +268,6 @@ pub async fn reset_password(
         )
             .into_response();
     }
-
     if let Err(e) = tx.commit().await {
         error!("Failed to commit password reset transaction: {:?}", e);
         return (
@@ -305,15 +276,12 @@ pub async fn reset_password(
         )
             .into_response();
     }
-
     for jti in session_jtis {
         let cache_key = format!("auth:session:{}:{}", user_did, jti);
         if let Err(e) = state.cache.delete(&cache_key).await {
             warn!("Failed to invalidate session cache for {}: {:?}", cache_key, e);
         }
     }
-
     info!("Password reset completed for user {}", user_id);
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }

@@ -11,7 +11,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppPassword {
@@ -19,12 +18,10 @@ pub struct AppPassword {
     pub created_at: String,
     pub privileged: bool,
 }
-
 #[derive(Serialize)]
 pub struct ListAppPasswordsOutput {
     pub passwords: Vec<AppPassword>,
 }
-
 pub async fn list_app_passwords(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
@@ -33,7 +30,6 @@ pub async fn list_app_passwords(
         Ok(id) => id,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     match sqlx::query!(
         "SELECT name, created_at, privileged FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
         user_id
@@ -50,7 +46,6 @@ pub async fn list_app_passwords(
                     privileged: row.privileged,
                 })
                 .collect();
-
             Json(ListAppPasswordsOutput { passwords }).into_response()
         }
         Err(e) => {
@@ -59,13 +54,11 @@ pub async fn list_app_passwords(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct CreateAppPasswordInput {
     pub name: String,
     pub privileged: Option<bool>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAppPasswordOutput {
@@ -74,7 +67,6 @@ pub struct CreateAppPasswordOutput {
     pub created_at: String,
     pub privileged: bool,
 }
-
 pub async fn create_app_password(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -92,17 +84,14 @@ pub async fn create_app_password(
             })),
         ).into_response();
     }
-
     let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
         Ok(id) => id,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     let name = input.name.trim();
     if name.is_empty() {
         return ApiError::InvalidRequest("name is required".into()).into_response();
     }
-
     let existing = sqlx::query!(
         "SELECT id FROM app_passwords WHERE user_id = $1 AND name = $2",
         user_id,
@@ -110,11 +99,9 @@ pub async fn create_app_password(
     )
     .fetch_optional(&state.db)
     .await;
-
     if let Ok(Some(_)) = existing {
         return ApiError::DuplicateAppPassword.into_response();
     }
-
     let password: String = (0..4)
         .map(|_| {
             use rand::Rng;
@@ -126,7 +113,6 @@ pub async fn create_app_password(
         })
         .collect::<Vec<String>>()
         .join("-");
-
     let password_hash = match bcrypt::hash(&password, bcrypt::DEFAULT_COST) {
         Ok(h) => h,
         Err(e) => {
@@ -134,10 +120,8 @@ pub async fn create_app_password(
             return ApiError::InternalError.into_response();
         }
     };
-
     let privileged = input.privileged.unwrap_or(false);
     let created_at = chrono::Utc::now();
-
     match sqlx::query!(
         "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged) VALUES ($1, $2, $3, $4, $5)",
         user_id,
@@ -162,12 +146,10 @@ pub async fn create_app_password(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct RevokeAppPasswordInput {
     pub name: String,
 }
-
 pub async fn revoke_app_password(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
@@ -177,12 +159,10 @@ pub async fn revoke_app_password(
         Ok(id) => id,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     let name = input.name.trim();
     if name.is_empty() {
         return ApiError::InvalidRequest("name is required".into()).into_response();
     }
-
     match sqlx::query!(
         "DELETE FROM app_passwords WHERE user_id = $1 AND name = $2",
         user_id,

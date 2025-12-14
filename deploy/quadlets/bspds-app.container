@@ -1,7 +1,6 @@
 [Unit]
 Description=BSPDS AT Protocol PDS
 After=bspds-db.service bspds-minio.service bspds-valkey.service
-
 [Container]
 ContainerName=bspds-app
 Image=localhost/bspds:latest
@@ -19,10 +18,8 @@ HealthInterval=30s
 HealthTimeout=10s
 HealthRetries=3
 HealthStartPeriod=15s
-
 [Service]
 Restart=always
 RestartSec=10
-
 [Install]
 WantedBy=default.target

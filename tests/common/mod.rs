@@ -14,23 +14,19 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static APP_PORT: OnceLock<u16> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
-
 #[cfg(not(feature = "external-infra"))]
 use testcontainers::core::ContainerPort;
 #[cfg(not(feature = "external-infra"))]
 use testcontainers::{ContainerAsync, GenericImage, ImageExt, runners::AsyncRunner};
 #[cfg(not(feature = "external-infra"))]
 use testcontainers_modules::postgres::Postgres;
-
 #[cfg(not(feature = "external-infra"))]
 static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
 #[cfg(not(feature = "external-infra"))]
 static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
-
 #[allow(dead_code)]
 pub const AUTH_TOKEN: &str = "test-token";
 #[allow(dead_code)]
@@ -39,44 +35,36 @@ pub const BAD_AUTH_TOKEN: &str = "bad-token";
 pub const AUTH_DID: &str = "did:plc:fake";
 #[allow(dead_code)]
 pub const TARGET_DID: &str = "did:plc:target";
-
 fn has_external_infra() -> bool {
     std::env::var("BSPDS_TEST_INFRA_READY").is_ok()
         || (std::env::var("DATABASE_URL").is_ok() && std::env::var("S3_ENDPOINT").is_ok())
 }
-
 #[cfg(test)]
 #[ctor::dtor]
 fn cleanup() {
     if has_external_infra() {
         return;
     }
-
     if std::env::var("XDG_RUNTIME_DIR").is_ok() {
          let _ = std::process::Command::new("podman")
             .args(&["rm", "-f", "--filter", "label=bspds_test=true"])
             .output();
     }
-
     let _ = std::process::Command::new("docker")
         .args(&["container", "prune", "-f", "--filter", "label=bspds_test=true"])
         .output();
 }
-
 #[allow(dead_code)]
 pub fn client() -> Client {
     Client::new()
 }
-
 #[allow(dead_code)]
 pub fn app_port() -> u16 {
     *APP_PORT.get().expect("APP_PORT not initialized")
 }
-
 pub async fn base_url() -> &'static str {
     SERVER_URL.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel();
-
         std::thread::spawn(move || {
             if std::env::var("DOCKER_HOST").is_err() {
                 if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
@@ -91,7 +79,6 @@ pub async fn base_url() -> &'static str {
                     }
                 }
             }
-
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async move {
                 if has_external_infra() {
@@ -104,17 +91,14 @@ pub async fn base_url() -> &'static str {
                 std::future::pending::<()>().await;
             });
         });
-
         rx.recv().expect("Failed to start test server")
     })
 }
-
 async fn setup_with_external_infra() -> String {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set when using external infra");
     let s3_endpoint = std::env::var("S3_ENDPOINT")
         .expect("S3_ENDPOINT must be set when using external infra");
-
     unsafe {
         std::env::set_var("S3_BUCKET", std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()));
         std::env::set_var("AWS_ACCESS_KEY_ID", std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()));
@@ -122,18 +106,14 @@ async fn setup_with_external_infra() -> String {
         std::env::set_var("AWS_REGION", std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()));
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
     }
-
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
-
     unsafe {
         std::env::set_var("APPVIEW_URL", mock_server.uri());
     }
     MOCK_APPVIEW.set(mock_server).ok();
-
     spawn_app(database_url).await
 }
-
 #[cfg(not(feature = "external-infra"))]
 async fn setup_with_testcontainers() -> String {
     let s3_container = GenericImage::new("minio/minio", "latest")
@@ -145,13 +125,11 @@ async fn setup_with_testcontainers() -> String {
         .start()
         .await
         .expect("Failed to start MinIO");
-
     let s3_port = s3_container
         .get_host_port_ipv4(9000)
         .await
         .expect("Failed to get S3 port");
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
-
     unsafe {
         std::env::set_var("S3_BUCKET", "test-bucket");
         std::env::set_var("AWS_ACCESS_KEY_ID", "minioadmin");
@@ -159,7 +137,6 @@ async fn setup_with_testcontainers() -> String {
         std::env::set_var("AWS_REGION", "us-east-1");
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
     }
-
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region("us-east-1")
         .endpoint_url(&s3_endpoint)
@@ -172,24 +149,18 @@ async fn setup_with_testcontainers() -> String {
         ))
         .load()
         .await;
-
     let s3_config = aws_sdk_s3::config::Builder::from(&sdk_config)
         .force_path_style(true)
         .build();
     let s3_client = S3Client::from_conf(s3_config);
-
     let _ = s3_client.create_bucket().bucket("test-bucket").send().await;
-
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
-
     unsafe {
         std::env::set_var("APPVIEW_URL", mock_server.uri());
     }
     MOCK_APPVIEW.set(mock_server).ok();
-
     S3_CONTAINER.set(s3_container).ok();
-
     let container = Postgres::default()
         .with_tag("18-alpine")
         .with_label("bspds_test", "true")
@@ -203,17 +174,13 @@ async fn setup_with_testcontainers() -> String {
             .await
             .expect("Failed to get port")
     );
-
     DB_CONTAINER.set(container).ok();
-
     spawn_app(connection_string).await
 }
-
 #[cfg(feature = "external-infra")]
 async fn setup_with_testcontainers() -> String {
     panic!("Testcontainers disabled with external-infra feature. Set DATABASE_URL and S3_ENDPOINT.");
 }
-
 async fn setup_mock_appview(mock_server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.actor.getProfile"))
@@ -224,7 +191,6 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         })))
         .mount(mock_server)
         .await;
-
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.actor.searchActors"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -233,7 +199,6 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         })))
         .mount(mock_server)
         .await;
-
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.feed.getTimeline"))
         .respond_with(
@@ -246,7 +211,6 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         )
         .mount(mock_server)
         .await;
-
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
         .respond_with(
@@ -271,7 +235,6 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         )
         .mount(mock_server)
         .await;
-
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.feed.getActorLikes"))
         .respond_with(
@@ -296,7 +259,6 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         )
         .mount(mock_server)
         .await;
-
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.feed.getPostThread"))
         .respond_with(
@@ -322,7 +284,6 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         )
         .mount(mock_server)
         .await;
-
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.feed.getFeed"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -343,36 +304,29 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         })))
         .mount(mock_server)
         .await;
-
     Mock::given(method("POST"))
         .and(path("/xrpc/app.bsky.notification.registerPush"))
         .respond_with(ResponseTemplate::new(200))
         .mount(mock_server)
         .await;
 }
-
 async fn spawn_app(database_url: String) -> String {
     use bspds::rate_limit::RateLimiters;
-
     let pool = PgPoolOptions::new()
         .max_connections(50)
         .connect(&database_url)
         .await
         .expect("Failed to connect to Postgres. Make sure the database is running.");
-
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .expect("Failed to run migrations");
-
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     APP_PORT.set(addr.port()).ok();
-
     unsafe {
         std::env::set_var("PDS_HOSTNAME", addr.to_string());
     }
-
     let rate_limiters = RateLimiters::new()
         .with_login_limit(10000)
         .with_account_creation_limit(10000)
@@ -380,24 +334,17 @@ async fn spawn_app(database_url: String) -> String {
         .with_email_update_limit(10000)
         .with_oauth_authorize_limit(10000)
         .with_oauth_token_limit(10000);
-
     let state = AppState::new(pool).await.with_rate_limiters(rate_limiters);
-
     bspds::sync::listener::start_sequencer_listener(state.clone()).await;
-
     let app = bspds::app(state);
-
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-
     format!("http://{}", addr)
 }
-
 #[allow(dead_code)]
 pub async fn get_db_connection_string() -> String {
     base_url().await;
-
     if has_external_infra() {
         std::env::var("DATABASE_URL").expect("DATABASE_URL not set")
     } else {
@@ -413,7 +360,6 @@ pub async fn get_db_connection_string() -> String {
         }
     }
 }
-
 #[allow(dead_code)]
 pub async fn verify_new_account(client: &Client, did: &str) -> String {
     let conn_str = get_db_connection_string().await;
@@ -422,7 +368,6 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
         .connect(&conn_str)
         .await
         .expect("Failed to connect to test database");
-
     let verification_code: String = sqlx::query_scalar!(
         "SELECT email_confirmation_code FROM users WHERE did = $1",
         did
@@ -431,12 +376,10 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
     .await
     .expect("Failed to get verification code")
     .expect("No verification code found");
-
     let confirm_payload = json!({
         "did": did,
         "verificationCode": verification_code
     });
-
     let confirm_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.confirmSignup",
@@ -446,7 +389,6 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
         .send()
         .await
         .expect("confirmSignup request failed");
-
     assert_eq!(confirm_res.status(), StatusCode::OK, "confirmSignup failed");
     let confirm_body: Value = confirm_res.json().await.expect("Invalid JSON from confirmSignup");
     confirm_body["accessJwt"]
@@ -454,7 +396,6 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
         .expect("No accessJwt in confirmSignup response")
         .to_string()
 }
-
 #[allow(dead_code)]
 pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'static str) -> Value {
     let res = client
@@ -468,12 +409,10 @@ pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'stati
         .send()
         .await
         .expect("Failed to send uploadBlob request");
-
     assert_eq!(res.status(), StatusCode::OK, "Failed to upload blob");
     let body: Value = res.json().await.expect("Blob upload response was not JSON");
     body["blob"].clone()
 }
-
 #[allow(dead_code)]
 pub async fn create_test_post(
     client: &Client,
@@ -486,17 +425,14 @@ pub async fn create_test_post(
         "text": text,
         "createdAt": Utc::now().to_rfc3339()
     });
-
     if let Some(reply_obj) = reply_to {
         record["reply"] = reply_obj;
     }
-
     let payload = json!({
         "repo": AUTH_DID,
         "collection": collection,
         "record": record
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.createRecord",
@@ -507,13 +443,11 @@ pub async fn create_test_post(
         .send()
         .await
         .expect("Failed to send createRecord");
-
     assert_eq!(res.status(), StatusCode::OK, "Failed to create post record");
     let body: Value = res
         .json()
         .await
         .expect("createRecord response was not JSON");
-
     let uri = body["uri"]
         .as_str()
         .expect("Response had no URI")
@@ -527,26 +461,21 @@ pub async fn create_test_post(
         .last()
         .expect("URI was malformed")
         .to_string();
-
     (uri, cid, rkey)
 }
-
 #[allow(dead_code)]
 pub async fn create_account_and_login(client: &Client) -> (String, String) {
     let mut last_error = String::new();
-
     for attempt in 0..3 {
         if attempt > 0 {
             tokio::time::sleep(Duration::from_millis(100 * (attempt as u64 + 1))).await;
         }
-
         let handle = format!("user_{}", uuid::Uuid::new_v4());
         let payload = json!({
             "handle": handle,
             "email": format!("{}@example.com", handle),
             "password": "password"
         });
-
         let res = match client
             .post(format!(
                 "{}/xrpc/com.atproto.server.createAccount",
@@ -562,24 +491,19 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
                 continue;
             }
         };
-
         if res.status() == StatusCode::OK {
             let body: Value = res.json().await.expect("Invalid JSON");
-
             if let Some(access_jwt) = body["accessJwt"].as_str() {
                 let did = body["did"].as_str().expect("No did").to_string();
                 return (access_jwt.to_string(), did);
             }
-
             let did = body["did"].as_str().expect("No did").to_string();
-
             let conn_str = get_db_connection_string().await;
             let pool = sqlx::postgres::PgPoolOptions::new()
                 .max_connections(2)
                 .connect(&conn_str)
                 .await
                 .expect("Failed to connect to test database");
-
             let verification_code: String = sqlx::query_scalar!(
                 "SELECT email_confirmation_code FROM users WHERE did = $1",
                 &did
@@ -588,12 +512,10 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
             .await
             .expect("Failed to get verification code")
             .expect("No verification code found");
-
             let confirm_payload = json!({
                 "did": did,
                 "verificationCode": verification_code
             });
-
             let confirm_res = client
                 .post(format!(
                     "{}/xrpc/com.atproto.server.confirmSignup",
@@ -603,7 +525,6 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
                 .send()
                 .await
                 .expect("confirmSignup request failed");
-
             if confirm_res.status() == StatusCode::OK {
                 let confirm_body: Value = confirm_res.json().await.expect("Invalid JSON from confirmSignup");
                 let access_jwt = confirm_body["accessJwt"]
@@ -612,13 +533,10 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
                     .to_string();
                 return (access_jwt, did);
             }
-
             last_error = format!("confirmSignup failed: {:?}", confirm_res.text().await);
             continue;
         }
-
         last_error = format!("Status {}: {:?}", res.status(), res.text().await);
     }
-
     panic!("Failed to create account after 3 attempts: {}", last_error);
 }

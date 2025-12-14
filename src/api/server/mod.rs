@@ -7,7 +7,6 @@ pub mod password;
 pub mod service_auth;
 pub mod session;
 pub mod signing_key;
-
 pub use account_status::{
     activate_account, check_account_status, deactivate_account, delete_account,
     request_account_delete,

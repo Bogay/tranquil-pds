@@ -1,9 +1,7 @@
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-
 use crate::state::AppState;
 use crate::oauth::jwks::{JwkSet, create_jwk_set};
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProtectedResourceMetadata {
     pub resource: String,
@@ -13,7 +11,6 @@ pub struct ProtectedResourceMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_documentation: Option<String>,
 }
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthorizationServerMetadata {
     pub issuer: String,
@@ -46,13 +43,11 @@ pub struct AuthorizationServerMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub introspection_endpoint: Option<String>,
 }
-
 pub async fn oauth_protected_resource(
     State(_state): State<AppState>,
 ) -> Json<ProtectedResourceMetadata> {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let public_url = format!("https://{}", pds_hostname);
-
     Json(ProtectedResourceMetadata {
         resource: public_url.clone(),
         authorization_servers: vec![public_url],
@@ -61,13 +56,11 @@ pub async fn oauth_protected_resource(
         resource_documentation: Some("https://atproto.com".to_string()),
     })
 }
-
 pub async fn oauth_authorization_server(
     State(_state): State<AppState>,
 ) -> Json<AuthorizationServerMetadata> {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let issuer = format!("https://{}", pds_hostname);
-
     Json(AuthorizationServerMetadata {
         issuer: issuer.clone(),
         authorization_endpoint: format!("{}/oauth/authorize", issuer),
@@ -103,13 +96,10 @@ pub async fn oauth_authorization_server(
         introspection_endpoint: Some(format!("{}/oauth/introspect", issuer)),
     })
 }
-
 pub async fn oauth_jwks(State(_state): State<AppState>) -> Json<JwkSet> {
     use crate::config::AuthConfig;
     use crate::oauth::jwks::Jwk;
-
     let config = AuthConfig::get();
-
     let server_key = Jwk {
         kty: "EC".to_string(),
         key_use: Some("sig".to_string()),
@@ -119,6 +109,5 @@ pub async fn oauth_jwks(State(_state): State<AppState>) -> Json<JwkSet> {
         x: Some(config.signing_key_x.clone()),
         y: Some(config.signing_key_y.clone()),
     };
-
     Json(create_jwk_set(vec![server_key]))
 }

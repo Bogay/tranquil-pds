@@ -1,6 +1,5 @@
 [Unit]
 Description=BSPDS valkey cache
-
 [Container]
 ContainerName=bspds-valkey
 Image=docker.io/valkey/valkey:9-alpine
@@ -12,10 +11,8 @@ HealthInterval=10s
 HealthTimeout=5s
 HealthRetries=3
 HealthStartPeriod=5s
-
 [Service]
 Restart=always
 RestartSec=10
-
 [Install]
 WantedBy=default.target

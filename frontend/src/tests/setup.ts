@@ -1,9 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { vi, beforeEach, afterEach } from 'vitest'
 import { _testReset } from '../lib/auth.svelte'
-
 let locationHash = ''
-
 Object.defineProperty(window, 'location', {
   value: {
     get hash() { return locationHash },
@@ -21,7 +19,6 @@ Object.defineProperty(window, 'location', {
   writable: true,
   configurable: true,
 })
-
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
@@ -29,7 +26,6 @@ beforeEach(() => {
   locationHash = ''
   _testReset()
 })
-
 afterEach(() => {
   vi.restoreAllMocks()
 })

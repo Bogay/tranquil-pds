@@ -11,14 +11,12 @@ use axum::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use tracing::{error, info};
-
 #[derive(Deserialize)]
 pub struct GetFeedParams {
     pub feed: String,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
-
 pub async fn get_feed(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -30,17 +28,13 @@ pub async fn get_feed(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     if let Err(e) = crate::auth::validate_bearer_token(&state.db, &token).await {
         return ApiError::from(e).into_response();
     };
-
     if let Err(e) = validate_at_uri(&params.feed) {
         return ApiError::InvalidRequest(format!("Invalid feed URI: {}", e)).into_response();
     }
-
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
-
     let appview_url = match std::env::var("APPVIEW_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -48,13 +42,11 @@ pub async fn get_feed(
                 .into_response();
         }
     };
-
     if let Err(e) = is_ssrf_safe(&appview_url) {
         error!("SSRF check failed for appview URL: {}", e);
         return ApiError::UpstreamUnavailable(format!("Invalid upstream URL: {}", e))
             .into_response();
     }
-
     let limit = validate_limit(params.limit, 50, 100);
     let mut query_params = HashMap::new();
     query_params.insert("feed".to_string(), params.feed.clone());
@@ -62,22 +54,17 @@ pub async fn get_feed(
     if let Some(cursor) = &params.cursor {
         query_params.insert("cursor".to_string(), cursor.clone());
     }
-
     let target_url = format!("{}/xrpc/app.bsky.feed.getFeed", appview_url);
     info!(target = %target_url, feed = %params.feed, "Proxying getFeed request");
-
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(&query_params);
-
     if let Some(auth) = auth_header {
         request_builder = request_builder.header("Authorization", auth);
     }
-
     match request_builder.send().await {
         Ok(resp) => {
             let status =
                 StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-
             let content_length = resp.content_length().unwrap_or(0);
             if content_length > MAX_RESPONSE_SIZE {
                 error!(
@@ -87,7 +74,6 @@ pub async fn get_feed(
                 );
                 return ApiError::UpstreamFailure.into_response();
             }
-
             let resp_headers = resp.headers().clone();
             let body = match resp.bytes().await {
                 Ok(b) => {
@@ -102,12 +88,10 @@ pub async fn get_feed(
                     return ApiError::UpstreamFailure.into_response();
                 }
             };
-
             let mut response_builder = axum::response::Response::builder().status(status);
             if let Some(ct) = resp_headers.get("content-type") {
                 response_builder = response_builder.header("content-type", ct);
             }
-
             match response_builder.body(axum::body::Body::from(body)) {
                 Ok(r) => r,
                 Err(e) => {

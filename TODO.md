@@ -1,7 +1,5 @@
 # PDS Implementation TODOs
-
 Lewis' corrected big boy todofile
-
 ## Server Infrastructure & Proxying
 - [x] Health Check
     - [x] Implement `GET /health` endpoint (returns "OK").
@@ -12,7 +10,6 @@ Lewis' corrected big boy todofile
     - [x] Implement strict forwarding for all `app.bsky.*` and `chat.bsky.*` requests to an appview.
     - [x] Forward auth headers correctly.
     - [x] Handle appview errors/timeouts gracefully.
-
 ## Authentication & Account Management (`com.atproto.server`)
 - [x] Account Creation
     - [x] Implement `com.atproto.server.createAccount`.
@@ -43,7 +40,6 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.server.revokeAppPassword`.
     - [x] Implement `com.atproto.server.updateEmail`.
     - [x] Implement `com.atproto.server.confirmEmail`.
-
 ## Repository Operations (`com.atproto.repo`)
 - [x] Record CRUD
     - [x] Implement `com.atproto.repo.createRecord`.
@@ -62,7 +58,6 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.repo.uploadBlob`.
         - [x] Store blob (S3).
         - [x] return `blob` ref (CID + MimeType).
-
 ## Sync & Federation (`com.atproto.sync`)
 - [x] The Firehose (WebSocket)
     - [x] Implement `com.atproto.sync.subscribeRepos`.
@@ -84,7 +79,6 @@ Lewis' corrected big boy todofile
 - [x] Deprecated Sync Endpoints (for compatibility)
     - [x] Implement `com.atproto.sync.getCheckout` (deprecated).
     - [x] Implement `com.atproto.sync.getHead` (deprecated).
-
 ## Identity (`com.atproto.identity`)
 - [x] Resolution
     - [x] Implement `com.atproto.identity.resolveHandle` (Can be internal or proxy to PLC).
@@ -92,7 +86,6 @@ Lewis' corrected big boy todofile
     - [x] Implement `com.atproto.identity.submitPlcOperation` / `signPlcOperation` / `requestPlcOperationSignature`.
     - [x] Implement `com.atproto.identity.getRecommendedDidCredentials`.
     - [x] Implement `/.well-known/did.json` (Depends on supporting did:web).
-
 ## Admin Management (`com.atproto.admin`)
 - [x] Implement `com.atproto.admin.deleteAccount`.
 - [x] Implement `com.atproto.admin.disableAccountInvites`.
@@ -106,16 +99,12 @@ Lewis' corrected big boy todofile
 - [x] Implement `com.atproto.admin.updateAccountHandle`.
 - [x] Implement `com.atproto.admin.updateAccountPassword`.
 - [x] Implement `com.atproto.admin.updateSubjectStatus`.
-
 ## Moderation (`com.atproto.moderation`)
 - [x] Implement `com.atproto.moderation.createReport`.
-
 ## Temp Namespace (`com.atproto.temp`)
 - [x] Implement `com.atproto.temp.checkSignupQueue` (signup queue status for gated signups).
-
 ## Misc HTTP Endpoints
 - [x] Implement `/robots.txt` endpoint.
-
 ## OAuth 2.1 Support
 Full OAuth 2.1 provider for ATProto native app authentication.
 - [x] OAuth Provider Core
@@ -141,11 +130,8 @@ Full OAuth 2.1 provider for ATProto native app authentication.
 - [x] Authorization UI templates (HTML login form).
 - [x] Implement `private_key_jwt` signature verification with async JWKS fetching.
 - [x] HS256 JWT support (matches reference PDS).
-
 ## OAuth Security Notes
-
 Security measures implemented:
-
 - Constant-time comparison for signature verification (prevents timing attacks)
 - HMAC-SHA256 for access token signing with configurable secret
 - Production secrets require 32+ character minimum
@@ -159,21 +145,17 @@ Security measures implemented:
 - Deactivated/taken-down accounts blocked from OAuth authorization
 - Client ID validation on token exchange (defense-in-depth against cross-client attacks)
 - HTML escaping in OAuth templates (XSS prevention)
-
 ### Auth Notes
 - Dual algorithm support: ES256K (secp256k1 ECDSA) with per-user keys AND HS256 (HMAC) for compatibility with reference PDS.
 - Token storage: Storing only token JTIs in session_tokens table (defense in depth against DB breaches). Refresh token family tracking enables detection of token reuse attacks.
 - Key encryption: User signing keys encrypted at rest using AES-256-GCM with keys derived via HKDF from KEY_ENCRYPTION_KEY environment variable.
-
 ## PDS-Level App Endpoints
 These endpoints need to be implemented at the PDS level (not just proxied to appview).
-
 ### Actor (`app.bsky.actor`)
 - [x] Implement `app.bsky.actor.getPreferences` (user preferences storage).
 - [x] Implement `app.bsky.actor.putPreferences` (update user preferences).
 - [x] Implement `app.bsky.actor.getProfile` (PDS-level with proxy fallback).
 - [x] Implement `app.bsky.actor.getProfiles` (PDS-level with proxy fallback).
-
 ### Feed (`app.bsky.feed`)
 These are implemented at PDS level to enable local-first reads (read-after-write pattern):
 - [x] Implement `app.bsky.feed.getTimeline` (PDS-level with proxy + RAW).
@@ -181,10 +163,8 @@ These are implemented at PDS level to enable local-first reads (read-after-write
 - [x] Implement `app.bsky.feed.getActorLikes` (PDS-level with proxy + RAW).
 - [x] Implement `app.bsky.feed.getPostThread` (PDS-level with proxy + RAW + NotFound handling).
 - [x] Implement `app.bsky.feed.getFeed` (proxy to feed generator).
-
 ### Notification (`app.bsky.notification`)
 - [x] Implement `app.bsky.notification.registerPush` (push notification registration, proxied).
-
 ## Infrastructure & Core Components
 - [x] Sequencer (Event Log)
     - [x] Implement a `Sequencer` (backed by `repo_seq` table).
@@ -247,22 +227,18 @@ These are implemented at PDS level to enable local-first reads (read-after-write
     - [x] Constant-time signature comparison.
     - [x] SSRF protection for outbound requests.
     - [x] Timing attack protection (dummy bcrypt on user-not-found prevents account enumeration).
-
 ## Lewis' fabulous mini-list of remaining TODOs
 - [x] The OAuth authorize POST endpoint has no rate limiting, allowing password brute-forcing. Fix this and audit all oauth and 2fa surface again.
 - [x] DID resolution caching (valkey).
 - [x] Record schema validation (generic validation framework).
 - [x] Fix any remaining TODOs in the code.
-
 ## Future: Web Management UI
 A single-page web app for account management. The frontend (JS framework) calls existing ATProto XRPC endpoints - no server-side rendering or bespoke HTML form handlers.
-
 ### Architecture
 - [x] Static SPA served from PDS (or separate static host)
 - [ ] Frontend authenticates via OAuth 2.1 flow (same as any ATProto client)
 - [x] All operations use standard XRPC endpoints (existing + new PDS-specific ones below)
 - [x] No server-side sessions or CSRF - pure API client
-
 ### PDS-Specific XRPC Endpoints (new)
 Absolutely subject to change, "bspds" isn't even the real name of this pds thus far :D
 Anyway... endpoints for PDS settings not covered by standard ATProto:
@@ -272,47 +248,37 @@ Anyway... endpoints for PDS settings not covered by standard ATProto:
 - [ ] `com.bspds.account.verifyChannel` - initiate verification for Discord/Telegram/Signal
 - [ ] `com.bspds.account.confirmChannelVerification` - confirm with code
 - [ ] `com.bspds.admin.getServerStats` - user count, storage usage, etc.
-
 ### Frontend Views
 Uses existing ATProto endpoints where possible:
-
 Authentication
 - [x] Login page (uses `com.atproto.server.createSession`)
 - [x] Registration page (uses `com.atproto.server.createAccount`)
 - [x] Signup verification flow (uses `com.atproto.server.confirmSignup`, `resendVerification`)
 - [ ] Password reset flow (uses `com.atproto.server.requestPasswordReset`, `resetPassword`)
-
 User Dashboard
 - [x] Account overview (uses `com.atproto.server.getSession`, `com.atproto.admin.getAccountInfo`)
 - [ ] Active sessions view (needs new endpoint or extend existing)
 - [x] App passwords (uses `com.atproto.server.listAppPasswords`, `createAppPassword`, `revokeAppPassword`)
 - [x] Invite codes (uses `com.atproto.server.getAccountInviteCodes`, `createInviteCode`)
-
 Notification Preferences
 - [x] Channel selector (uses `com.bspds.account.*` endpoints above)
 - [ ] Verification flows for Discord/Telegram/Signal
 - [ ] Notification history view
-
 Account Settings
 - [x] Email change (uses `com.atproto.server.requestEmailUpdate`, `updateEmail`)
 - [ ] Password change while logged in (needs new endpoint - change password with current password)
 - [x] Handle change (uses `com.atproto.identity.updateHandle`)
 - [x] Account deletion (uses `com.atproto.server.requestAccountDelete`, `deleteAccount`)
-
 Data Management
 - [x] Repo browser (browse collections, view/create/delete records via `com.atproto.repo.*`)
 - [ ] Data export/download (CAR file download via `com.atproto.sync.getRepo`)
-
 Admin Dashboard (privileged users only)
 - [ ] User list (uses `com.atproto.admin.getAccountInfos` with pagination)
 - [ ] User detail/actions (uses `com.atproto.admin.*` endpoints)
 - [ ] Invite management (uses `com.atproto.admin.getInviteCodes`, `disableInviteCodes`)
 - [ ] Server stats (uses `com.bspds.admin.getServerStats`)
-
 ## Future: private data
 I will see where the discourse about encrypted/privileged private data is at the current moment, and make an implementation that matches what the bsky team will likely do in their pds whenever they get around to it.
 Then when they come out with theirs, I can make adjustments to mine and be ready on day 1. Or 2.
-
 We want records that only authorized parties can see and decrypt. This requires some sort of federation of keys and communication between PDSes?
 Gotta figure all of this out as a first step.
-

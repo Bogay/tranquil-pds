@@ -13,7 +13,6 @@ use axum::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use tracing::warn;
-
 #[derive(Deserialize)]
 pub struct GetAuthorFeedParams {
     pub actor: String,
@@ -23,7 +22,6 @@ pub struct GetAuthorFeedParams {
     #[serde(rename = "includePins")]
     pub include_pins: Option<bool>,
 }
-
 fn update_author_profile_in_feed(
     feed: &mut [FeedViewPost],
     author_did: &str,
@@ -37,14 +35,12 @@ fn update_author_profile_in_feed(
         }
     }
 }
-
 pub async fn get_author_feed(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Query(params): Query<GetAuthorFeedParams>,
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
-
     let auth_did = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
             match crate::auth::validate_bearer_token(&state.db, &token).await {
@@ -57,7 +53,6 @@ pub async fn get_author_feed(
     } else {
         None
     };
-
     let mut query_params = HashMap::new();
     query_params.insert("actor".to_string(), params.actor.clone());
     if let Some(limit) = params.limit {
@@ -72,22 +67,18 @@ pub async fn get_author_feed(
     if let Some(include_pins) = params.include_pins {
         query_params.insert("includePins".to_string(), include_pins.to_string());
     }
-
     let proxy_result =
         match proxy_to_appview("app.bsky.feed.getAuthorFeed", &query_params, auth_header).await {
             Ok(r) => r,
             Err(e) => return e,
         };
-
     if !proxy_result.status.is_success() {
         return (proxy_result.status, proxy_result.body).into_response();
     }
-
     let rev = match extract_repo_rev(&proxy_result.headers) {
         Some(r) => r,
         None => return (proxy_result.status, proxy_result.body).into_response(),
     };
-
     let mut feed_output: FeedOutput = match serde_json::from_slice(&proxy_result.body) {
         Ok(f) => f,
         Err(e) => {
@@ -95,12 +86,10 @@ pub async fn get_author_feed(
             return (proxy_result.status, proxy_result.body).into_response();
         }
     };
-
     let requester_did = match auth_did {
         Some(d) => d,
         None => return (StatusCode::OK, Json(feed_output)).into_response(),
     };
-
     let actor_did = if params.actor.starts_with("did:") {
         params.actor.clone()
     } else {
@@ -123,11 +112,9 @@ pub async fn get_author_feed(
             }
         }
     };
-
     if actor_did != requester_did {
         return (StatusCode::OK, Json(feed_output)).into_response();
     }
-
     let local_records = match get_records_since_rev(&state, &requester_did, &rev).await {
         Ok(r) => r,
         Err(e) => {
@@ -135,11 +122,9 @@ pub async fn get_author_feed(
             return (proxy_result.status, proxy_result.body).into_response();
         }
     };
-
     if local_records.count == 0 {
         return (StatusCode::OK, Json(feed_output)).into_response();
     }
-
     let handle = match sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", requester_did)
         .fetch_optional(&state.db)
         .await
@@ -151,11 +136,9 @@ pub async fn get_author_feed(
             requester_did.clone()
         }
     };
-
     if let Some(ref local_profile) = local_records.profile {
         update_author_profile_in_feed(&mut feed_output.feed, &requester_did, local_profile);
     }
-
     let local_posts: Vec<_> = local_records
         .posts
         .iter()
@@ -168,9 +151,7 @@ pub async fn get_author_feed(
             )
         })
         .collect();
-
     insert_posts_into_feed(&mut feed_output.feed, local_posts);
-
     let lag = get_local_lag(&local_records);
     format_munged_response(feed_output, lag)
 }

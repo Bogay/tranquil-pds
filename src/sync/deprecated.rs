@@ -14,25 +14,20 @@ use serde_json::json;
 use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
-
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
-
 #[derive(Deserialize)]
 pub struct GetHeadParams {
     pub did: String,
 }
-
 #[derive(Serialize)]
 pub struct GetHeadOutput {
     pub root: String,
 }
-
 pub async fn get_head(
     State(state): State<AppState>,
     Query(params): Query<GetHeadParams>,
 ) -> Response {
     let did = params.did.trim();
-
     if did.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -40,7 +35,6 @@ pub async fn get_head(
         )
             .into_response();
     }
-
     let result = sqlx::query!(
         r#"
         SELECT r.repo_root_cid
@@ -52,7 +46,6 @@ pub async fn get_head(
     )
     .fetch_optional(&state.db)
     .await;
-
     match result {
         Ok(Some(row)) => (StatusCode::OK, Json(GetHeadOutput { root: row.repo_root_cid })).into_response(),
         Ok(None) => (
@@ -70,18 +63,15 @@ pub async fn get_head(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct GetCheckoutParams {
     pub did: String,
 }
-
 pub async fn get_checkout(
     State(state): State<AppState>,
     Query(params): Query<GetCheckoutParams>,
 ) -> Response {
     let did = params.did.trim();
-
     if did.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -89,7 +79,6 @@ pub async fn get_checkout(
         )
             .into_response();
     }
-
     let repo_row = sqlx::query!(
         r#"
         SELECT r.repo_root_cid
@@ -102,7 +91,6 @@ pub async fn get_checkout(
     .fetch_optional(&state.db)
     .await
     .unwrap_or(None);
-
     let head_str = match repo_row {
         Some(r) => r.repo_root_cid,
         None => {
@@ -110,7 +98,6 @@ pub async fn get_checkout(
                 .fetch_optional(&state.db)
                 .await
                 .unwrap_or(None);
-
             if user_exists.is_none() {
                 return (
                     StatusCode::NOT_FOUND,
@@ -126,7 +113,6 @@ pub async fn get_checkout(
             }
         }
     };
-
     let head_cid = match Cid::from_str(&head_str) {
         Ok(c) => c,
         Err(_) => {
@@ -137,7 +123,6 @@ pub async fn get_checkout(
                 .into_response();
         }
     };
-
     let mut car_bytes = match encode_car_header(&head_cid) {
         Ok(h) => h,
         Err(e) => {
@@ -148,11 +133,9 @@ pub async fn get_checkout(
                 .into_response();
         }
     };
-
     let mut stack = vec![head_cid];
     let mut visited = std::collections::HashSet::new();
     let mut remaining = MAX_REPO_BLOCKS_TRAVERSAL;
-
     while let Some(cid) = stack.pop() {
         if visited.contains(&cid) {
             continue;
@@ -162,7 +145,6 @@ pub async fn get_checkout(
             break;
         }
         remaining -= 1;
-
         if let Ok(Some(block)) = state.block_store.get(&cid).await {
             let cid_bytes = cid.to_bytes();
             let total_len = cid_bytes.len() + block.len();
@@ -174,13 +156,11 @@ pub async fn get_checkout(
             writer.write_all(&block)
                 .expect("Writing to Vec<u8> should never fail");
             car_bytes.extend_from_slice(&writer);
-
             if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
                 extract_links_ipld(&value, &mut stack);
             }
         }
     }
-
     (
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
@@ -188,7 +168,6 @@ pub async fn get_checkout(
     )
         .into_response()
 }
-
 fn extract_links_ipld(value: &Ipld, stack: &mut Vec<Cid>) {
     match value {
         Ipld::Link(cid) => {

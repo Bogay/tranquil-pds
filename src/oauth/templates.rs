@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-
 fn base_styles() -> &'static str {
     r#"
         :root {
@@ -26,7 +25,6 @@ fn base_styles() -> &'static str {
             --success: #059669;
             --success-bg: #ecfdf5;
         }
-
         @media (prefers-color-scheme: dark) {
             :root {
                 --contrast-0: #111827;
@@ -45,13 +43,11 @@ fn base_styles() -> &'static str {
                 --success-bg: #064e3b;
             }
         }
-
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
-
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             background: var(--contrast-50);
@@ -63,12 +59,10 @@ fn base_styles() -> &'static str {
             padding: 1rem;
             line-height: 1.5;
         }
-
         .container {
             width: 100%;
             max-width: 400px;
         }
-
         .card {
             background: var(--contrast-0);
             border: 1px solid var(--contrast-100);
@@ -76,49 +70,41 @@ fn base_styles() -> &'static str {
             padding: 1.5rem;
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
         }
-
         @media (prefers-color-scheme: dark) {
             .card {
                 box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
             }
         }
-
         h1 {
             font-size: 1.5rem;
             font-weight: 600;
             color: var(--contrast-900);
             margin-bottom: 0.5rem;
         }
-
         .subtitle {
             color: var(--contrast-500);
             font-size: 0.875rem;
             margin-bottom: 1.5rem;
         }
-
         .subtitle strong {
             color: var(--contrast-700);
         }
-
         .client-info {
             background: var(--contrast-25);
             border-radius: 0.5rem;
             padding: 1rem;
             margin-bottom: 1.5rem;
         }
-
         .client-info .client-name {
             font-weight: 500;
             color: var(--contrast-900);
             display: block;
             margin-bottom: 0.25rem;
         }
-
         .client-info .scope {
             color: var(--contrast-500);
             font-size: 0.875rem;
         }
-
         .error-banner {
             background: var(--error-bg);
             color: var(--error);
@@ -127,11 +113,9 @@ fn base_styles() -> &'static str {
             margin-bottom: 1rem;
             font-size: 0.875rem;
         }
-
         .form-group {
             margin-bottom: 1.25rem;
         }
-
         label {
             display: block;
             font-size: 0.875rem;
@@ -139,7 +123,6 @@ fn base_styles() -> &'static str {
             color: var(--contrast-700);
             margin-bottom: 0.375rem;
         }
-
         input[type="text"],
         input[type="email"],
         input[type="password"] {
@@ -152,7 +135,6 @@ fn base_styles() -> &'static str {
             background: var(--contrast-0);
             transition: border-color 0.15s, box-shadow 0.15s;
         }
-
         input[type="text"]:focus,
         input[type="email"]:focus,
         input[type="password"]:focus {
@@ -160,38 +142,32 @@ fn base_styles() -> &'static str {
             border-color: var(--primary);
             box-shadow: 0 0 0 3px var(--primary-600-30);
         }
-
         input[type="text"]::placeholder,
         input[type="email"]::placeholder,
         input[type="password"]::placeholder {
             color: var(--contrast-400);
         }
-
         .checkbox-group {
             display: flex;
             align-items: center;
             gap: 0.5rem;
             margin-bottom: 1.5rem;
         }
-
         .checkbox-group input[type="checkbox"] {
             width: 1.125rem;
             height: 1.125rem;
             accent-color: var(--primary);
         }
-
         .checkbox-group label {
             margin-bottom: 0;
             font-weight: normal;
             color: var(--contrast-600);
             cursor: pointer;
         }
-
         .buttons {
             display: flex;
             gap: 0.75rem;
         }
-
         .btn {
             flex: 1;
             padding: 0.625rem 1.25rem;
@@ -207,48 +183,39 @@ fn base_styles() -> &'static str {
             align-items: center;
             justify-content: center;
         }
-
         .btn:active {
             transform: scale(0.98);
         }
-
         .btn-primary {
             background: var(--primary);
             color: var(--primary-contrast);
         }
-
         .btn-primary:hover {
             background: var(--primary-hover);
         }
-
         .btn-primary:disabled {
             background: var(--primary-400);
             cursor: not-allowed;
         }
-
         .btn-secondary {
             background: var(--contrast-200);
             color: var(--contrast-800);
         }
-
         .btn-secondary:hover {
             background: var(--contrast-300);
         }
-
         .footer {
             text-align: center;
             margin-top: 1.5rem;
             font-size: 0.75rem;
             color: var(--contrast-400);
         }
-
         .accounts {
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
             margin-bottom: 1rem;
         }
-
         .account-item {
             display: flex;
             align-items: center;
@@ -262,12 +229,10 @@ fn base_styles() -> &'static str {
             transition: background-color 0.15s, border-color 0.15s;
             text-align: left;
         }
-
         .account-item:hover {
             background: var(--contrast-50);
             border-color: var(--contrast-200);
         }
-
         .avatar {
             width: 2.5rem;
             height: 2.5rem;
@@ -281,12 +246,10 @@ fn base_styles() -> &'static str {
             font-size: 0.875rem;
             flex-shrink: 0;
         }
-
         .account-info {
             flex: 1;
             min-width: 0;
         }
-
         .account-info .handle {
             display: block;
             font-weight: 500;
@@ -295,7 +258,6 @@ fn base_styles() -> &'static str {
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-
         .account-info .email {
             display: block;
             font-size: 0.875rem;
@@ -304,19 +266,16 @@ fn base_styles() -> &'static str {
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-
         .chevron {
             color: var(--contrast-400);
             font-size: 1.25rem;
             flex-shrink: 0;
         }
-
         .divider {
             height: 1px;
             background: var(--contrast-100);
             margin: 1rem 0;
         }
-
         .link-button {
             background: none;
             border: none;
@@ -326,11 +285,9 @@ fn base_styles() -> &'static str {
             padding: 0;
             text-decoration: underline;
         }
-
         .link-button:hover {
             color: var(--primary-hover);
         }
-
         .new-account-link {
             display: block;
             text-align: center;
@@ -338,23 +295,19 @@ fn base_styles() -> &'static str {
             text-decoration: none;
             font-size: 0.875rem;
         }
-
         .new-account-link:hover {
             text-decoration: underline;
         }
-
         .help-text {
             text-align: center;
             margin-top: 1rem;
             font-size: 0.875rem;
             color: var(--contrast-500);
         }
-
         .icon {
             font-size: 3rem;
             margin-bottom: 1rem;
         }
-
         .error-code {
             background: var(--error-bg);
             color: var(--error);
@@ -364,7 +317,6 @@ fn base_styles() -> &'static str {
             display: inline-block;
             margin-bottom: 1rem;
         }
-
         .success-icon {
             width: 3rem;
             height: 3rem;
@@ -377,11 +329,9 @@ fn base_styles() -> &'static str {
             font-size: 1.5rem;
             margin: 0 auto 1rem;
         }
-
         .text-center {
             text-align: center;
         }
-
         .code-input {
             letter-spacing: 0.5em;
             text-align: center;
@@ -390,7 +340,6 @@ fn base_styles() -> &'static str {
         }
     "#
 }
-
 pub fn login_page(
     client_id: &str,
     client_name: Option<&str>,
@@ -401,13 +350,10 @@ pub fn login_page(
 ) -> String {
     let client_display = client_name.unwrap_or(client_id);
     let scope_display = scope.unwrap_or("access your account");
-
     let error_html = error_message
         .map(|msg| format!(r#"<div class="error-banner">{}</div>"#, html_escape(msg)))
         .unwrap_or_default();
-
     let login_hint_value = login_hint.unwrap_or("");
-
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -423,41 +369,33 @@ pub fn login_page(
         <div class="card">
             <h1>Sign in</h1>
             <p class="subtitle">to continue to <strong>{client_display}</strong></p>
-
             <div class="client-info">
                 <span class="client-name">{client_display}</span>
                 <span class="scope">wants to {scope_display}</span>
             </div>
-
             {error_html}
-
             <form method="POST" action="/oauth/authorize">
                 <input type="hidden" name="request_uri" value="{request_uri}">
-
                 <div class="form-group">
                     <label for="username">Handle or Email</label>
                     <input type="text" id="username" name="username" value="{login_hint_value}"
                            required autocomplete="username" autofocus
                            placeholder="you@example.com">
                 </div>
-
                 <div class="form-group">
                     <label for="password">Password</label>
                     <input type="password" id="password" name="password" required
                            autocomplete="current-password" placeholder="Enter your password">
                 </div>
-
                 <div class="checkbox-group">
                     <input type="checkbox" id="remember_device" name="remember_device" value="true">
                     <label for="remember_device">Remember this device</label>
                 </div>
-
                 <div class="buttons">
                     <button type="submit" formaction="/oauth/authorize/deny" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Sign in</button>
                 </div>
             </form>
-
             <div class="footer">
                 By signing in, you agree to share your account information with this application.
             </div>
@@ -473,14 +411,12 @@ pub fn login_page(
         login_hint_value = html_escape(login_hint_value),
     )
 }
-
 pub struct DeviceAccount {
     pub did: String,
     pub handle: String,
     pub email: Option<String>,
     pub last_used_at: DateTime<Utc>,
 }
-
 pub fn account_selector_page(
     client_id: &str,
     client_name: Option<&str>,
@@ -488,7 +424,6 @@ pub fn account_selector_page(
     accounts: &[DeviceAccount],
 ) -> String {
     let client_display = client_name.unwrap_or(client_id);
-
     let accounts_html: String = accounts
         .iter()
         .map(|account| {
@@ -515,7 +450,6 @@ pub fn account_selector_page(
             )
         })
         .collect();
-
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -531,13 +465,10 @@ pub fn account_selector_page(
         <div class="card">
             <h1>Choose an account</h1>
             <p class="subtitle">to continue to <strong>{client_display}</strong></p>
-
             <div class="accounts">
                 {accounts_html}
             </div>
-
             <div class="divider"></div>
-
             <a href="/oauth/authorize?request_uri={request_uri_encoded}&new_account=true" class="new-account-link">
                 Sign in with another account
             </a>
@@ -551,7 +482,6 @@ pub fn account_selector_page(
         request_uri_encoded = urlencoding::encode(request_uri),
     )
 }
-
 pub fn two_factor_page(
     request_uri: &str,
     channel: &str,
@@ -560,7 +490,6 @@ pub fn two_factor_page(
     let error_html = error_message
         .map(|msg| format!(r#"<div class="error-banner">{}</div>"#, html_escape(msg)))
         .unwrap_or_default();
-
     let (title, subtitle) = match channel {
         "email" => ("Check your email", "We sent a verification code to your email"),
         "Discord" => ("Check Discord", "We sent a verification code to your Discord"),
@@ -568,7 +497,6 @@ pub fn two_factor_page(
         "Signal" => ("Check Signal", "We sent a verification code to your Signal"),
         _ => ("Check your messages", "We sent you a verification code"),
     };
-
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -584,12 +512,9 @@ pub fn two_factor_page(
         <div class="card">
             <h1>{title}</h1>
             <p class="subtitle">{subtitle}</p>
-
             {error_html}
-
             <form method="POST" action="/oauth/authorize/2fa">
                 <input type="hidden" name="request_uri" value="{request_uri}">
-
                 <div class="form-group">
                     <label for="code">Verification code</label>
                     <input type="text" id="code" name="code" class="code-input"
@@ -598,10 +523,8 @@ pub fn two_factor_page(
                            inputmode="numeric" autocomplete="one-time-code"
                            autofocus required>
                 </div>
-
                 <button type="submit" class="btn btn-primary" style="width:100%">Verify</button>
             </form>
-
             <p class="help-text">
                 Code expires in 10 minutes.
             </p>
@@ -616,10 +539,8 @@ pub fn two_factor_page(
         error_html = error_html,
     )
 }
-
 pub fn error_page(error: &str, error_description: Option<&str>) -> String {
     let description = error_description.unwrap_or("An error occurred during the authorization process.");
-
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -649,10 +570,8 @@ pub fn error_page(error: &str, error_description: Option<&str>) -> String {
         description = html_escape(description),
     )
 }
-
 pub fn success_page(client_name: Option<&str>) -> String {
     let client_display = client_name.unwrap_or("The application");
-
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -678,7 +597,6 @@ pub fn success_page(client_name: Option<&str>) -> String {
         client_display = html_escape(client_display),
     )
 }
-
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -686,7 +604,6 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
 }
-
 fn get_initials(handle: &str) -> String {
     let clean = handle.trim_start_matches('@');
     if clean.is_empty() {
@@ -694,12 +611,10 @@ fn get_initials(handle: &str) -> String {
     }
     clean.chars().next().unwrap_or('?').to_uppercase().to_string()
 }
-
 pub fn mask_email(email: &str) -> String {
     if let Some(at_pos) = email.find('@') {
         let local = &email[..at_pos];
         let domain = &email[at_pos..];
-
         if local.len() <= 2 {
             format!("{}***{}", local.chars().next().unwrap_or('*'), domain)
         } else {

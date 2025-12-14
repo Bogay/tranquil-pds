@@ -12,7 +12,6 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
-
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
@@ -28,13 +27,11 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "unknown".to_string()
 }
-
 #[derive(Deserialize)]
 pub struct CreateSessionInput {
     pub identifier: String,
     pub password: String,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionOutput {
@@ -43,14 +40,12 @@ pub struct CreateSessionOutput {
     pub handle: String,
     pub did: String,
 }
-
 pub async fn create_session(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(input): Json<CreateSessionInput>,
 ) -> Response {
     info!("create_session called");
-
     let client_ip = extract_client_ip(&headers);
     if !state.check_rate_limit(RateLimitKind::Login, &client_ip).await {
         warn!(ip = %client_ip, "Login rate limit exceeded");
@@ -63,7 +58,6 @@ pub async fn create_session(
         )
             .into_response();
     }
-
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.password_hash,
@@ -88,7 +82,6 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
         Ok(k) => k,
         Err(e) => {
@@ -96,7 +89,6 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     let password_valid = if verify(&input.password, &row.password_hash).unwrap_or(false) {
         true
     } else {
@@ -107,20 +99,16 @@ pub async fn create_session(
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
-
         app_passwords.iter().any(|app| verify(&input.password, &app.password_hash).unwrap_or(false))
     };
-
     if !password_valid {
         warn!("Password verification failed for login attempt");
         return ApiError::AuthenticationFailedMsg("Invalid identifier or password".into()).into_response();
     }
-
     let is_verified = row.email_confirmed
         || row.discord_verified
         || row.telegram_verified
         || row.signal_verified;
-
     if !is_verified {
         warn!("Login attempt for unverified account: {}", row.did);
         return (
@@ -132,7 +120,6 @@ pub async fn create_session(
             })),
         ).into_response();
     }
-
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -140,7 +127,6 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     let refresh_meta = match crate::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -148,7 +134,6 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     if let Err(e) = sqlx::query!(
         "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
         row.did,
@@ -163,7 +148,6 @@ pub async fn create_session(
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-
     Json(CreateSessionOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
@@ -171,7 +155,6 @@ pub async fn create_session(
         did: row.did,
     }).into_response()
 }
-
 pub async fn get_session(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
@@ -211,7 +194,6 @@ pub async fn get_session(
         }
     }
 }
-
 pub async fn delete_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -222,14 +204,11 @@ pub async fn delete_session(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let jti = match crate::auth::get_jti_from_token(&token) {
         Ok(jti) => jti,
         Err(_) => return ApiError::AuthenticationFailed.into_response(),
     };
-
     let did = crate::auth::get_did_from_token(&token).ok();
-
     match sqlx::query!("DELETE FROM session_tokens WHERE access_jti = $1", jti)
         .execute(&state.db)
         .await
@@ -248,7 +227,6 @@ pub async fn delete_session(
         }
     }
 }
-
 pub async fn refresh_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -264,19 +242,16 @@ pub async fn refresh_session(
             })),
         ).into_response();
     }
-
     let refresh_token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let refresh_jti = match crate::auth::get_jti_from_token(&refresh_token) {
         Ok(jti) => jti,
         Err(_) => return ApiError::AuthenticationFailedMsg("Invalid token format".into()).into_response(),
     };
-
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -284,7 +259,6 @@ pub async fn refresh_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     if let Ok(Some(session_id)) = sqlx::query_scalar!(
         "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1 FOR UPDATE",
         refresh_jti
@@ -299,7 +273,6 @@ pub async fn refresh_session(
         let _ = tx.commit().await;
         return ApiError::ExpiredTokenMsg("Refresh token has been revoked due to suspected compromise".into()).into_response();
     }
-
     let session_row = match sqlx::query!(
         r#"SELECT st.id, st.did, k.key_bytes, k.encryption_version
            FROM session_tokens st
@@ -319,7 +292,6 @@ pub async fn refresh_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     let key_bytes = match crate::config::decrypt_key(&session_row.key_bytes, session_row.encryption_version) {
         Ok(k) => k,
         Err(e) => {
@@ -327,11 +299,9 @@ pub async fn refresh_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     if crate::auth::verify_refresh_token(&refresh_token, &key_bytes).is_err() {
         return ApiError::AuthenticationFailedMsg("Invalid refresh token".into()).into_response();
     }
-
     let new_access_meta = match crate::auth::create_access_token_with_metadata(&session_row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -339,7 +309,6 @@ pub async fn refresh_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     let new_refresh_meta = match crate::auth::create_refresh_token_with_metadata(&session_row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -347,7 +316,6 @@ pub async fn refresh_session(
             return ApiError::InternalError.into_response();
         }
     };
-
     match sqlx::query!(
         "INSERT INTO used_refresh_tokens (refresh_jti, session_id) VALUES ($1, $2) ON CONFLICT (refresh_jti) DO NOTHING",
         refresh_jti,
@@ -370,7 +338,6 @@ pub async fn refresh_session(
         }
         Ok(_) => {}
     }
-
     if let Err(e) = sqlx::query!(
         "UPDATE session_tokens SET access_jti = $1, refresh_jti = $2, access_expires_at = $3, refresh_expires_at = $4, updated_at = NOW() WHERE id = $5",
         new_access_meta.jti,
@@ -385,12 +352,10 @@ pub async fn refresh_session(
         error!("Database error updating session: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-
     if let Err(e) = tx.commit().await {
         error!("Failed to commit transaction: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-
     match sqlx::query!(
         r#"SELECT
             handle, email, email_confirmed,
@@ -430,14 +395,12 @@ pub async fn refresh_session(
         }
     }
 }
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmSignupInput {
     pub did: String,
     pub verification_code: String,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmSignupOutput {
@@ -450,13 +413,11 @@ pub struct ConfirmSignupOutput {
     pub preferred_channel: String,
     pub preferred_channel_verified: bool,
 }
-
 pub async fn confirm_signup(
     State(state): State<AppState>,
     Json(input): Json<ConfirmSignupInput>,
 ) -> Response {
     info!("confirm_signup called for DID: {}", input.did);
-
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.email,
@@ -482,7 +443,6 @@ pub async fn confirm_signup(
             return ApiError::InternalError.into_response();
         }
     };
-
     let stored_code = match &row.email_confirmation_code {
         Some(code) => code,
         None => {
@@ -490,19 +450,16 @@ pub async fn confirm_signup(
             return ApiError::InvalidRequest("No pending verification".into()).into_response();
         }
     };
-
     if stored_code != &input.verification_code {
         warn!("Invalid verification code for user: {}", input.did);
         return ApiError::InvalidRequest("Invalid verification code".into()).into_response();
     }
-
     if let Some(expires_at) = row.email_confirmation_code_expires_at {
         if expires_at < Utc::now() {
             warn!("Verification code expired for user: {}", input.did);
             return ApiError::ExpiredTokenMsg("Verification code has expired".into()).into_response();
         }
     }
-
     let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
         Ok(k) => k,
         Err(e) => {
@@ -510,19 +467,16 @@ pub async fn confirm_signup(
             return ApiError::InternalError.into_response();
         }
     };
-
     let verified_column = match row.channel {
         crate::notifications::NotificationChannel::Email => "email_confirmed",
         crate::notifications::NotificationChannel::Discord => "discord_verified",
         crate::notifications::NotificationChannel::Telegram => "telegram_verified",
         crate::notifications::NotificationChannel::Signal => "signal_verified",
     };
-
     let update_query = format!(
         "UPDATE users SET {} = TRUE, email_confirmation_code = NULL, email_confirmation_code_expires_at = NULL WHERE did = $1",
         verified_column
     );
-
     if let Err(e) = sqlx::query(&update_query)
         .bind(&input.did)
         .execute(&state.db)
@@ -531,7 +485,6 @@ pub async fn confirm_signup(
         error!("Failed to update verification status: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -539,7 +492,6 @@ pub async fn confirm_signup(
             return ApiError::InternalError.into_response();
         }
     };
-
     let refresh_meta = match crate::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -547,7 +499,6 @@ pub async fn confirm_signup(
             return ApiError::InternalError.into_response();
         }
     };
-
     if let Err(e) = sqlx::query!(
         "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
         row.did,
@@ -562,12 +513,10 @@ pub async fn confirm_signup(
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) = crate::notifications::enqueue_welcome(&state.db, row.id, &hostname).await {
         warn!("Failed to enqueue welcome notification: {:?}", e);
     }
-
     let email_confirmed = matches!(row.channel, crate::notifications::NotificationChannel::Email);
     let preferred_channel = match row.channel {
         crate::notifications::NotificationChannel::Email => "email",
@@ -575,7 +524,6 @@ pub async fn confirm_signup(
         crate::notifications::NotificationChannel::Telegram => "telegram",
         crate::notifications::NotificationChannel::Signal => "signal",
     };
-
     Json(ConfirmSignupOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
@@ -587,19 +535,16 @@ pub async fn confirm_signup(
         preferred_channel_verified: true,
     }).into_response()
 }
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResendVerificationInput {
     pub did: String,
 }
-
 pub async fn resend_verification(
     State(state): State<AppState>,
     Json(input): Json<ResendVerificationInput>,
 ) -> Response {
     info!("resend_verification called for DID: {}", input.did);
-
     let row = match sqlx::query!(
         r#"SELECT
             id, handle, email,
@@ -622,19 +567,15 @@ pub async fn resend_verification(
             return ApiError::InternalError.into_response();
         }
     };
-
     let is_verified = row.email_confirmed
         || row.discord_verified
         || row.telegram_verified
         || row.signal_verified;
-
     if is_verified {
         return ApiError::InvalidRequest("Account is already verified".into()).into_response();
     }
-
     let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let code_expires_at = Utc::now() + chrono::Duration::minutes(30);
-
     if let Err(e) = sqlx::query!(
         "UPDATE users SET email_confirmation_code = $1, email_confirmation_code_expires_at = $2 WHERE did = $3",
         verification_code,
@@ -647,7 +588,6 @@ pub async fn resend_verification(
         error!("Failed to update verification code: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-
     let (channel_str, recipient) = match row.channel {
         crate::notifications::NotificationChannel::Email => ("email", row.email.clone().unwrap_or_default()),
         crate::notifications::NotificationChannel::Discord => {
@@ -660,7 +600,6 @@ pub async fn resend_verification(
             ("signal", row.signal_number.unwrap_or_default())
         }
     };
-
     if let Err(e) = crate::notifications::enqueue_signup_verification(
         &state.db,
         row.id,
@@ -670,6 +609,5 @@ pub async fn resend_verification(
     ).await {
         warn!("Failed to enqueue verification notification: {:?}", e);
     }
-
     Json(json!({"success": true})).into_response()
 }

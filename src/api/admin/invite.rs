@@ -8,14 +8,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisableInviteCodesInput {
     pub codes: Option<Vec<String>>,
     pub accounts: Option<Vec<String>>,
 }
-
 pub async fn disable_invite_codes(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -29,7 +27,6 @@ pub async fn disable_invite_codes(
         )
             .into_response();
     }
-
     if let Some(codes) = &input.codes {
         for code in codes {
             let _ = sqlx::query!("UPDATE invite_codes SET disabled = TRUE WHERE code = $1", code)
@@ -37,13 +34,11 @@ pub async fn disable_invite_codes(
                 .await;
         }
     }
-
     if let Some(accounts) = &input.accounts {
         for account in accounts {
             let user = sqlx::query!("SELECT id FROM users WHERE did = $1", account)
                 .fetch_optional(&state.db)
                 .await;
-
             if let Ok(Some(user_row)) = user {
                 let _ = sqlx::query!(
                     "UPDATE invite_codes SET disabled = TRUE WHERE created_by_user = $1",
@@ -54,17 +49,14 @@ pub async fn disable_invite_codes(
             }
         }
     }
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }
-
 #[derive(Deserialize)]
 pub struct GetInviteCodesParams {
     pub sort: Option<String>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeInfo {
@@ -76,20 +68,17 @@ pub struct InviteCodeInfo {
     pub created_at: String,
     pub uses: Vec<InviteCodeUseInfo>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeUseInfo {
     pub used_by: String,
     pub used_at: String,
 }
-
 #[derive(Serialize)]
 pub struct GetInviteCodesOutput {
     pub cursor: Option<String>,
     pub codes: Vec<InviteCodeInfo>,
 }
-
 pub async fn get_invite_codes(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -103,15 +92,12 @@ pub async fn get_invite_codes(
         )
             .into_response();
     }
-
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
     let sort = params.sort.as_deref().unwrap_or("recent");
-
     let order_clause = match sort {
         "usage" => "available_uses DESC",
         _ => "created_at DESC",
     };
-
     let codes_result = if let Some(cursor) = &params.cursor {
         sqlx::query_as::<_, (String, i32, Option<bool>, uuid::Uuid, chrono::DateTime<chrono::Utc>)>(&format!(
             r#"
@@ -141,7 +127,6 @@ pub async fn get_invite_codes(
         .fetch_all(&state.db)
         .await
     };
-
     let codes_rows = match codes_result {
         Ok(rows) => rows,
         Err(e) => {
@@ -153,7 +138,6 @@ pub async fn get_invite_codes(
                 .into_response();
         }
     };
-
     let mut codes = Vec::new();
     for (code, available_uses, disabled, created_by_user, created_at) in &codes_rows {
         let creator_did = sqlx::query_scalar!("SELECT did FROM users WHERE id = $1", created_by_user)
@@ -162,7 +146,6 @@ pub async fn get_invite_codes(
             .ok()
             .flatten()
             .unwrap_or_else(|| "unknown".to_string());
-
         let uses_result = sqlx::query!(
             r#"
             SELECT u.did, icu.used_at
@@ -175,7 +158,6 @@ pub async fn get_invite_codes(
         )
         .fetch_all(&state.db)
         .await;
-
         let uses = match uses_result {
             Ok(use_rows) => use_rows
                 .iter()
@@ -186,7 +168,6 @@ pub async fn get_invite_codes(
                 .collect(),
             Err(_) => Vec::new(),
         };
-
         codes.push(InviteCodeInfo {
             code: code.clone(),
             available: *available_uses,
@@ -197,13 +178,11 @@ pub async fn get_invite_codes(
             uses,
         });
     }
-
     let next_cursor = if codes_rows.len() == limit as usize {
         codes_rows.last().map(|(code, _, _, _, _)| code.clone())
     } else {
         None
     };
-
     (
         StatusCode::OK,
         Json(GetInviteCodesOutput {
@@ -213,12 +192,10 @@ pub async fn get_invite_codes(
     )
         .into_response()
 }
-
 #[derive(Deserialize)]
 pub struct DisableAccountInvitesInput {
     pub account: String,
 }
-
 pub async fn disable_account_invites(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -232,7 +209,6 @@ pub async fn disable_account_invites(
         )
             .into_response();
     }
-
     let account = input.account.trim();
     if account.is_empty() {
         return (
@@ -241,11 +217,9 @@ pub async fn disable_account_invites(
         )
             .into_response();
     }
-
     let result = sqlx::query!("UPDATE users SET invites_disabled = TRUE WHERE did = $1", account)
         .execute(&state.db)
         .await;
-
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {
@@ -267,12 +241,10 @@ pub async fn disable_account_invites(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct EnableAccountInvitesInput {
     pub account: String,
 }
-
 pub async fn enable_account_invites(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -286,7 +258,6 @@ pub async fn enable_account_invites(
         )
             .into_response();
     }
-
     let account = input.account.trim();
     if account.is_empty() {
         return (
@@ -295,11 +266,9 @@ pub async fn enable_account_invites(
         )
             .into_response();
     }
-
     let result = sqlx::query!("UPDATE users SET invites_disabled = FALSE WHERE did = $1", account)
         .execute(&state.db)
         .await;
-
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {

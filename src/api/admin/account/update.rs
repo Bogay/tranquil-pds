@@ -8,13 +8,11 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use tracing::error;
-
 #[derive(Deserialize)]
 pub struct UpdateAccountEmailInput {
     pub account: String,
     pub email: String,
 }
-
 pub async fn update_account_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -28,10 +26,8 @@ pub async fn update_account_email(
         )
             .into_response();
     }
-
     let account = input.account.trim();
     let email = input.email.trim();
-
     if account.is_empty() || email.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -39,11 +35,9 @@ pub async fn update_account_email(
         )
             .into_response();
     }
-
     let result = sqlx::query!("UPDATE users SET email = $1 WHERE did = $2", email, account)
         .execute(&state.db)
         .await;
-
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {
@@ -65,13 +59,11 @@ pub async fn update_account_email(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct UpdateAccountHandleInput {
     pub did: String,
     pub handle: String,
 }
-
 pub async fn update_account_handle(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -85,10 +77,8 @@ pub async fn update_account_handle(
         )
             .into_response();
     }
-
     let did = input.did.trim();
     let handle = input.handle.trim();
-
     if did.is_empty() || handle.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -96,7 +86,6 @@ pub async fn update_account_handle(
         )
             .into_response();
     }
-
     if !handle
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
@@ -107,17 +96,14 @@ pub async fn update_account_handle(
         )
             .into_response();
     }
-
     let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
         .ok()
         .flatten();
-
     let existing = sqlx::query!("SELECT id FROM users WHERE handle = $1 AND did != $2", handle, did)
         .fetch_optional(&state.db)
         .await;
-
     if let Ok(Some(_)) = existing {
         return (
             StatusCode::BAD_REQUEST,
@@ -125,11 +111,9 @@ pub async fn update_account_handle(
         )
             .into_response();
     }
-
     let result = sqlx::query!("UPDATE users SET handle = $1 WHERE did = $2", handle, did)
         .execute(&state.db)
         .await;
-
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {
@@ -155,13 +139,11 @@ pub async fn update_account_handle(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct UpdateAccountPasswordInput {
     pub did: String,
     pub password: String,
 }
-
 pub async fn update_account_password(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -175,10 +157,8 @@ pub async fn update_account_password(
         )
             .into_response();
     }
-
     let did = input.did.trim();
     let password = input.password.trim();
-
     if did.is_empty() || password.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -186,7 +166,6 @@ pub async fn update_account_password(
         )
             .into_response();
     }
-
     let password_hash = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
         Ok(h) => h,
         Err(e) => {
@@ -198,11 +177,9 @@ pub async fn update_account_password(
                 .into_response();
         }
     };
-
     let result = sqlx::query!("UPDATE users SET password_hash = $1 WHERE did = $2", password_hash, did)
         .execute(&state.db)
         .await;
-
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {

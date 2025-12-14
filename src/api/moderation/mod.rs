@@ -9,7 +9,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::error;
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateReportInput {
@@ -17,7 +16,6 @@ pub struct CreateReportInput {
     pub reason: Option<String>,
     pub subject: Value,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateReportOutput {
@@ -28,7 +26,6 @@ pub struct CreateReportOutput {
     pub reported_by: String,
     pub created_at: String,
 }
-
 pub async fn create_report(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -40,12 +37,10 @@ pub async fn create_report(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let did = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     let valid_reason_types = [
         "com.atproto.moderation.defs#reasonSpam",
         "com.atproto.moderation.defs#reasonViolation",
@@ -55,7 +50,6 @@ pub async fn create_report(
         "com.atproto.moderation.defs#reasonOther",
         "com.atproto.moderation.defs#reasonAppeal",
     ];
-
     if !valid_reason_types.contains(&input.reason_type.as_str()) {
         return (
             StatusCode::BAD_REQUEST,
@@ -63,10 +57,8 @@ pub async fn create_report(
         )
             .into_response();
     }
-
     let created_at = chrono::Utc::now();
     let report_id = created_at.timestamp_millis();
-
     let subject_json = json!(input.subject);
     let insert = sqlx::query!(
         "INSERT INTO reports (id, reason_type, reason, subject_json, reported_by_did, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
@@ -79,7 +71,6 @@ pub async fn create_report(
     )
     .execute(&state.db)
     .await;
-
     if let Err(e) = insert {
         error!("Failed to insert report: {:?}", e);
         return (
@@ -88,7 +79,6 @@ pub async fn create_report(
         )
             .into_response();
     }
-
     (
         StatusCode::OK,
         Json(CreateReportOutput {

@@ -7,16 +7,13 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
 const APP_BSKY_NAMESPACE: &str = "app.bsky";
 const MAX_PREFERENCES_COUNT: usize = 100;
 const MAX_PREFERENCE_SIZE: usize = 10_000;
-
 #[derive(Serialize)]
 pub struct GetPreferencesOutput {
     pub preferences: Vec<Value>,
 }
-
 pub async fn get_preferences(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -33,7 +30,6 @@ pub async fn get_preferences(
                 .into_response();
         }
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
         Err(_) => {
@@ -44,7 +40,6 @@ pub async fn get_preferences(
                 .into_response();
         }
     };
-
     let user_id: uuid::Uuid =
         match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
             .fetch_optional(&state.db)
@@ -59,14 +54,12 @@ pub async fn get_preferences(
                     .into_response();
             }
         };
-
     let prefs_result = sqlx::query!(
         "SELECT name, value_json FROM account_preferences WHERE user_id = $1",
         user_id
     )
     .fetch_all(&state.db)
     .await;
-
     let prefs = match prefs_result {
         Ok(rows) => rows,
         Err(_) => {
@@ -77,7 +70,6 @@ pub async fn get_preferences(
                 .into_response();
         }
     };
-
     let preferences: Vec<Value> = prefs
         .into_iter()
         .filter(|row| {
@@ -90,15 +82,12 @@ pub async fn get_preferences(
             serde_json::from_value(row.value_json).ok()
         })
         .collect();
-
     (StatusCode::OK, Json(GetPreferencesOutput { preferences })).into_response()
 }
-
 #[derive(Deserialize)]
 pub struct PutPreferencesInput {
     pub preferences: Vec<Value>,
 }
-
 pub async fn put_preferences(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -116,7 +105,6 @@ pub async fn put_preferences(
                 .into_response();
         }
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
         Err(_) => {
@@ -127,7 +115,6 @@ pub async fn put_preferences(
                 .into_response();
         }
     };
-
     let user_id: uuid::Uuid =
         match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
             .fetch_optional(&state.db)
@@ -142,7 +129,6 @@ pub async fn put_preferences(
                     .into_response();
             }
         };
-
     if input.preferences.len() > MAX_PREFERENCES_COUNT {
         return (
             StatusCode::BAD_REQUEST,
@@ -150,7 +136,6 @@ pub async fn put_preferences(
         )
             .into_response();
     }
-
     for pref in &input.preferences {
         let pref_str = serde_json::to_string(pref).unwrap_or_default();
         if pref_str.len() > MAX_PREFERENCE_SIZE {
@@ -160,7 +145,6 @@ pub async fn put_preferences(
             )
                 .into_response();
         }
-
         let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
             Some(t) => t,
             None => {
@@ -171,7 +155,6 @@ pub async fn put_preferences(
                     .into_response();
             }
         };
-
         if !pref_type.starts_with(APP_BSKY_NAMESPACE) {
             return (
                 StatusCode::BAD_REQUEST,
@@ -179,7 +162,6 @@ pub async fn put_preferences(
             )
                 .into_response();
         }
-
         if pref_type == "app.bsky.actor.defs#declaredAgePref" {
             return (
                 StatusCode::BAD_REQUEST,
@@ -188,7 +170,6 @@ pub async fn put_preferences(
                 .into_response();
         }
     }
-
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(_) => {
@@ -199,7 +180,6 @@ pub async fn put_preferences(
                 .into_response();
         }
     };
-
     let delete_result = sqlx::query!(
         "DELETE FROM account_preferences WHERE user_id = $1 AND (name = $2 OR name LIKE $3)",
         user_id,
@@ -208,7 +188,6 @@ pub async fn put_preferences(
     )
     .execute(&mut *tx)
     .await;
-
     if delete_result.is_err() {
         let _ = tx.rollback().await;
         return (
@@ -217,13 +196,11 @@ pub async fn put_preferences(
         )
             .into_response();
     }
-
     for pref in input.preferences {
         let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
             Some(t) => t,
             None => continue,
         };
-
         let insert_result = sqlx::query!(
             "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)",
             user_id,
@@ -232,7 +209,6 @@ pub async fn put_preferences(
         )
         .execute(&mut *tx)
         .await;
-
         if insert_result.is_err() {
             let _ = tx.rollback().await;
             return (
@@ -242,7 +218,6 @@ pub async fn put_preferences(
                 .into_response();
         }
     }
-
     if let Err(_) = tx.commit().await {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -250,6 +225,5 @@ pub async fn put_preferences(
         )
             .into_response();
     }
-
     StatusCode::OK.into_response()
 }

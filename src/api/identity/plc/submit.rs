@@ -12,12 +12,10 @@ use k256::ecdsa::SigningKey;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::{error, info, warn};
-
 #[derive(Debug, Deserialize)]
 pub struct SubmitPlcOperationInput {
     pub operation: Value,
 }
-
 pub async fn submit_plc_operation(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -29,22 +27,17 @@ pub async fn submit_plc_operation(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &bearer).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     let did = &auth_user.did;
-
     if let Err(e) = validate_plc_operation(&input.operation) {
         return ApiError::InvalidRequest(format!("Invalid operation: {}", e)).into_response();
     }
-
     let op = &input.operation;
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let public_url = format!("https://{}", hostname);
-
     let user = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -58,7 +51,6 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     };
-
     let key_row = match sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
         user.id
@@ -75,7 +67,6 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     };
-
     let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
     {
         Ok(k) => k,
@@ -88,7 +79,6 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     };
-
     let signing_key = match SigningKey::from_slice(&key_bytes) {
         Ok(k) => k,
         Err(e) => {
@@ -100,17 +90,13 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     };
-
     let user_did_key = signing_key_to_did_key(&signing_key);
-
     if let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array()) {
         let server_rotation_key =
             std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
-
         let has_server_key = rotation_keys
             .iter()
             .any(|k| k.as_str() == Some(&server_rotation_key));
-
         if !has_server_key {
             return (
                 StatusCode::BAD_REQUEST,
@@ -122,12 +108,10 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     }
-
     if let Some(services) = op.get("services").and_then(|v| v.as_object()) {
         if let Some(pds) = services.get("atproto_pds").and_then(|v| v.as_object()) {
             let service_type = pds.get("type").and_then(|v| v.as_str());
             let endpoint = pds.get("endpoint").and_then(|v| v.as_str());
-
             if service_type != Some("AtprotoPersonalDataServer") {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -138,7 +122,6 @@ pub async fn submit_plc_operation(
                 )
                     .into_response();
             }
-
             if endpoint != Some(&public_url) {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -151,7 +134,6 @@ pub async fn submit_plc_operation(
             }
         }
     }
-
     if let Some(verification_methods) = op.get("verificationMethods").and_then(|v| v.as_object()) {
         if let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str()) {
             if atproto_key != user_did_key {
@@ -166,11 +148,9 @@ pub async fn submit_plc_operation(
             }
         }
     }
-
     if let Some(also_known_as) = op.get("alsoKnownAs").and_then(|v| v.as_array()) {
         let expected_handle = format!("at://{}", user.handle);
         let first_aka = also_known_as.first().and_then(|v| v.as_str());
-
         if first_aka != Some(&expected_handle) {
             return (
                 StatusCode::BAD_REQUEST,
@@ -182,7 +162,6 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     }
-
     let plc_client = PlcClient::new(None);
     let operation_clone = input.operation.clone();
     let did_clone = did.clone();
@@ -191,7 +170,6 @@ pub async fn submit_plc_operation(
         || async { plc_client.send_operation(&did_clone, &operation_clone).await },
     )
     .await;
-
     match result {
         Ok(()) => {}
         Err(CircuitBreakerError::CircuitOpen(e)) => {
@@ -217,7 +195,6 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     }
-
     match sqlx::query!(
         "INSERT INTO repo_seq (did, event_type) VALUES ($1, 'identity') RETURNING seq",
         did
@@ -237,8 +214,6 @@ pub async fn submit_plc_operation(
             warn!("Failed to sequence identity event: {:?}", e);
         }
     }
-
     info!("Submitted PLC operation for user {}", did);
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }

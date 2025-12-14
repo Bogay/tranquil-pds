@@ -1,7 +1,6 @@
 [Unit]
 Description=BSPDS nginx reverse proxy
 After=bspds-app.service
-
 [Container]
 ContainerName=bspds-nginx
 Image=docker.io/library/nginx:1.28-alpine
@@ -9,10 +8,8 @@ Pod=bspds.pod
 Volume=/srv/bspds/config/nginx.conf:/etc/nginx/nginx.conf:ro,Z
 Volume=/srv/bspds/certs:/etc/nginx/certs:ro,Z
 Volume=/srv/bspds/acme:/var/www/acme:ro,Z
-
 [Service]
 Restart=always
 RestartSec=10
-
 [Install]
 WantedBy=default.target

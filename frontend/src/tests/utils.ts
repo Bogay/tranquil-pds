@@ -1,7 +1,6 @@
 import { render, type RenderResult } from '@testing-library/svelte'
 import { tick } from 'svelte'
 import type { ComponentType } from 'svelte'
-
 export async function renderAndWait<T extends ComponentType>(
   component: T,
   options?: Parameters<typeof render>[1]
@@ -11,7 +10,6 @@ export async function renderAndWait<T extends ComponentType>(
   await new Promise(resolve => setTimeout(resolve, 0))
   return result
 }
-
 export async function waitForElement(
   queryFn: () => HTMLElement | null,
   timeout = 1000
@@ -24,7 +22,6 @@ export async function waitForElement(
   }
   throw new Error('Element not found within timeout')
 }
-
 export async function waitForElementToDisappear(
   queryFn: () => HTMLElement | null,
   timeout = 1000
@@ -37,7 +34,6 @@ export async function waitForElementToDisappear(
   }
   throw new Error('Element still present after timeout')
 }
-
 export async function waitForText(
   container: HTMLElement,
   text: string | RegExp,
@@ -53,10 +49,8 @@ export async function waitForText(
   }
   throw new Error(`Text "${text}" not found within timeout`)
 }
-
 export function mockLocalStorage(initialData: Record<string, string> = {}): void {
   const store: Record<string, string> = { ...initialData }
-
   Object.defineProperty(window, 'localStorage', {
     value: {
       getItem: (key: string) => store[key] || null,
@@ -69,7 +63,6 @@ export function mockLocalStorage(initialData: Record<string, string> = {}): void
     writable: true,
   })
 }
-
 export function setAuthState(session: {
   did: string
   handle: string
@@ -80,7 +73,6 @@ export function setAuthState(session: {
 }): void {
   localStorage.setItem('session', JSON.stringify(session))
 }
-
 export function clearAuthState(): void {
   localStorage.removeItem('session')
 }

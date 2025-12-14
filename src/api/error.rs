@@ -4,14 +4,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
-
 #[derive(Debug, Serialize)]
 struct ErrorBody {
     error: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
 }
-
 #[derive(Debug)]
 pub enum ApiError {
     InternalError,
@@ -48,7 +46,6 @@ pub enum ApiError {
     UpstreamUnavailable(String),
     UpstreamError { status: u16, error: Option<String>, message: Option<String> },
 }
-
 impl ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
@@ -86,7 +83,6 @@ impl ApiError {
             | Self::InvalidSwap => StatusCode::BAD_REQUEST,
         }
     }
-
     fn error_name(&self) -> &'static str {
         match self {
             Self::InternalError | Self::DatabaseError => "InternalError",
@@ -124,7 +120,6 @@ impl ApiError {
             Self::InvalidSwap => "InvalidSwap",
         }
     }
-
     fn message(&self) -> Option<String> {
         match self {
             Self::AuthenticationFailedMsg(msg)
@@ -137,7 +132,6 @@ impl ApiError {
             _ => None,
         }
     }
-
     pub fn from_upstream_response(
         status: u16,
         body: &[u8],
@@ -150,7 +144,6 @@ impl ApiError {
         Self::UpstreamError { status, error: None, message: None }
     }
 }
-
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let body = ErrorBody {
@@ -160,14 +153,12 @@ impl IntoResponse for ApiError {
         (self.status_code(), Json(body)).into_response()
     }
 }
-
 impl From<sqlx::Error> for ApiError {
     fn from(e: sqlx::Error) -> Self {
         tracing::error!("Database error: {:?}", e);
         Self::DatabaseError
     }
 }
-
 impl From<crate::auth::TokenValidationError> for ApiError {
     fn from(e: crate::auth::TokenValidationError) -> Self {
         match e {
@@ -178,7 +169,6 @@ impl From<crate::auth::TokenValidationError> for ApiError {
         }
     }
 }
-
 impl From<crate::util::DbLookupError> for ApiError {
     fn from(e: crate::util::DbLookupError) -> Self {
         match e {

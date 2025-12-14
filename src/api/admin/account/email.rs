@@ -8,7 +8,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendEmailInput {
@@ -18,12 +17,10 @@ pub struct SendEmailInput {
     pub subject: Option<String>,
     pub comment: Option<String>,
 }
-
 #[derive(Serialize)]
 pub struct SendEmailOutput {
     pub sent: bool,
 }
-
 pub async fn send_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -37,10 +34,8 @@ pub async fn send_email(
         )
             .into_response();
     }
-
     let recipient_did = input.recipient_did.trim();
     let content = input.content.trim();
-
     if recipient_did.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -48,7 +43,6 @@ pub async fn send_email(
         )
             .into_response();
     }
-
     if content.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -56,14 +50,12 @@ pub async fn send_email(
         )
             .into_response();
     }
-
     let user = sqlx::query!(
         "SELECT id, email, handle FROM users WHERE did = $1",
         recipient_did
     )
     .fetch_optional(&state.db)
     .await;
-
     let (user_id, email, handle) = match user {
         Ok(Some(row)) => {
             let email = match row.email {
@@ -94,13 +86,11 @@ pub async fn send_email(
                 .into_response();
         }
     };
-
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let subject = input
         .subject
         .clone()
         .unwrap_or_else(|| format!("Message from {}", hostname));
-
     let notification = crate::notifications::NewNotification::email(
         user_id,
         crate::notifications::NotificationType::AdminEmail,
@@ -108,9 +98,7 @@ pub async fn send_email(
         subject,
         content.to_string(),
     );
-
     let result = crate::notifications::enqueue_notification(&state.db, notification).await;
-
     match result {
         Ok(_) => {
             tracing::info!(

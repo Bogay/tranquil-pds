@@ -16,7 +16,6 @@ pub mod storage;
 pub mod sync;
 pub mod util;
 pub mod validation;
-
 use axum::{
     Router,
     http::Method,
@@ -26,7 +25,6 @@ use axum::{
 use state::AppState;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
-
 pub fn app(state: AppState) -> Router {
     let router = Router::new()
         .route("/metrics", get(metrics::metrics_handler))
@@ -180,6 +178,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.admin.getAccountInfos",
             get(api::admin::get_account_infos),
+        )
+        .route(
+            "/xrpc/com.bspds.admin.createProfile",
+            post(api::admin::create_profile),
+        )
+        .route(
+            "/xrpc/com.bspds.admin.createRecord",
+            post(api::admin::create_record_admin),
         )
         .route(
             "/xrpc/com.atproto.server.activateAccount",
@@ -396,10 +402,8 @@ pub fn app(state: AppState) -> Router {
                 .allow_headers(Any),
         )
         .with_state(state);
-
     let frontend_dir = std::env::var("FRONTEND_DIR")
         .unwrap_or_else(|_| "./frontend/dist".to_string());
-
     if std::path::Path::new(&frontend_dir).join("index.html").exists() {
         let index_path = format!("{}/index.html", frontend_dir);
         let serve_dir = ServeDir::new(&frontend_dir)

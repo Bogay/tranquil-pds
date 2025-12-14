@@ -6,10 +6,8 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::json;
-
 use crate::auth::{extract_bearer_token_from_header, validate_bearer_token};
 use crate::state::AppState;
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckSignupQueueOutput {
@@ -19,7 +17,6 @@ pub struct CheckSignupQueueOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_time_ms: Option<i64>,
 }
-
 pub async fn check_signup_queue(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -39,7 +36,6 @@ pub async fn check_signup_queue(
             }
         }
     }
-
     Json(CheckSignupQueueOutput {
         activated: true,
         place_in_queue: None,

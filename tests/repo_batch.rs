@@ -1,16 +1,13 @@
 mod common;
 use common::*;
-
 use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-
 #[tokio::test]
 async fn test_apply_writes_create() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
     let now = Utc::now().to_rfc3339();
-
     let payload = json!({
         "repo": did,
         "writes": [
@@ -34,7 +31,6 @@ async fn test_apply_writes_create() {
             }
         ]
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.applyWrites",
@@ -45,7 +41,6 @@ async fn test_apply_writes_create() {
         .send()
         .await
         .expect("Failed to send request");
-
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert!(body["commit"]["cid"].is_string());
@@ -55,14 +50,12 @@ async fn test_apply_writes_create() {
     assert!(results[0]["uri"].is_string());
     assert!(results[0]["cid"].is_string());
 }
-
 #[tokio::test]
 async fn test_apply_writes_update() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
     let now = Utc::now().to_rfc3339();
     let rkey = format!("batch_update_{}", Utc::now().timestamp_millis());
-
     let create_payload = json!({
         "repo": did,
         "collection": "app.bsky.feed.post",
@@ -84,7 +77,6 @@ async fn test_apply_writes_update() {
         .await
         .expect("Failed to create");
     assert_eq!(res.status(), StatusCode::OK);
-
     let update_payload = json!({
         "repo": did,
         "writes": [
@@ -100,7 +92,6 @@ async fn test_apply_writes_update() {
             }
         ]
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.applyWrites",
@@ -111,21 +102,18 @@ async fn test_apply_writes_update() {
         .send()
         .await
         .expect("Failed to send request");
-
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 1);
     assert!(results[0]["uri"].is_string());
 }
-
 #[tokio::test]
 async fn test_apply_writes_delete() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
     let now = Utc::now().to_rfc3339();
     let rkey = format!("batch_delete_{}", Utc::now().timestamp_millis());
-
     let create_payload = json!({
         "repo": did,
         "collection": "app.bsky.feed.post",
@@ -147,7 +135,6 @@ async fn test_apply_writes_delete() {
         .await
         .expect("Failed to create");
     assert_eq!(res.status(), StatusCode::OK);
-
     let delete_payload = json!({
         "repo": did,
         "writes": [
@@ -158,7 +145,6 @@ async fn test_apply_writes_delete() {
             }
         ]
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.applyWrites",
@@ -169,9 +155,7 @@ async fn test_apply_writes_delete() {
         .send()
         .await
         .expect("Failed to send request");
-
     assert_eq!(res.status(), StatusCode::OK);
-
     let get_res = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.getRecord",
@@ -187,7 +171,6 @@ async fn test_apply_writes_delete() {
         .expect("Failed to verify");
     assert_eq!(get_res.status(), StatusCode::NOT_FOUND);
 }
-
 #[tokio::test]
 async fn test_apply_writes_mixed_operations() {
     let client = client();
@@ -195,7 +178,6 @@ async fn test_apply_writes_mixed_operations() {
     let now = Utc::now().to_rfc3339();
     let rkey_to_delete = format!("mixed_del_{}", Utc::now().timestamp_millis());
     let rkey_to_update = format!("mixed_upd_{}", Utc::now().timestamp_millis());
-
     let setup_payload = json!({
         "repo": did,
         "writes": [
@@ -232,7 +214,6 @@ async fn test_apply_writes_mixed_operations() {
         .await
         .expect("Failed to setup");
     assert_eq!(res.status(), StatusCode::OK);
-
     let mixed_payload = json!({
         "repo": did,
         "writes": [
@@ -262,7 +243,6 @@ async fn test_apply_writes_mixed_operations() {
             }
         ]
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.applyWrites",
@@ -273,17 +253,14 @@ async fn test_apply_writes_mixed_operations() {
         .send()
         .await
         .expect("Failed to send request");
-
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 3);
 }
-
 #[tokio::test]
 async fn test_apply_writes_no_auth() {
     let client = client();
-
     let payload = json!({
         "repo": "did:plc:test",
         "writes": [
@@ -298,7 +275,6 @@ async fn test_apply_writes_no_auth() {
             }
         ]
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.applyWrites",
@@ -308,20 +284,16 @@ async fn test_apply_writes_no_auth() {
         .send()
         .await
         .expect("Failed to send request");
-
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
 #[tokio::test]
 async fn test_apply_writes_empty_writes() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-
     let payload = json!({
         "repo": did,
         "writes": []
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.applyWrites",
@@ -332,6 +304,5 @@ async fn test_apply_writes_empty_writes() {
         .send()
         .await
         .expect("Failed to send request");
-
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }

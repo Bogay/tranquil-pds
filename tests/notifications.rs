@@ -1,11 +1,9 @@
 mod common;
-
 use bspds::notifications::{
     enqueue_notification, enqueue_welcome, NewNotification, NotificationChannel,
     NotificationStatus, NotificationType,
 };
 use sqlx::PgPool;
-
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
     sqlx::postgres::PgPoolOptions::new()
@@ -14,18 +12,14 @@ async fn get_pool() -> PgPool {
         .await
         .expect("Failed to connect to test database")
 }
-
 #[tokio::test]
 async fn test_enqueue_notification() {
     let pool = get_pool().await;
-
     let (_, did) = common::create_account_and_login(&common::client()).await;
-
     let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_one(&pool)
         .await
         .expect("User not found");
-
     let notification = NewNotification::email(
         user_id,
         NotificationType::Welcome,
@@ -33,11 +27,9 @@ async fn test_enqueue_notification() {
         "Test Subject".to_string(),
         "Test body".to_string(),
     );
-
     let notification_id = enqueue_notification(&pool, notification)
         .await
         .expect("Failed to enqueue notification");
-
     let row = sqlx::query!(
         r#"
         SELECT
@@ -53,7 +45,6 @@ async fn test_enqueue_notification() {
     .fetch_one(&pool)
     .await
     .expect("Notification not found");
-
     assert_eq!(row.user_id, user_id);
     assert_eq!(row.recipient, "test@example.com");
     assert_eq!(row.subject.as_deref(), Some("Test Subject"));
@@ -62,22 +53,17 @@ async fn test_enqueue_notification() {
     assert_eq!(row.notification_type, NotificationType::Welcome);
     assert_eq!(row.status, NotificationStatus::Pending);
 }
-
 #[tokio::test]
 async fn test_enqueue_welcome() {
     let pool = get_pool().await;
-
     let (_, did) = common::create_account_and_login(&common::client()).await;
-
     let user_row = sqlx::query!("SELECT id, email, handle FROM users WHERE did = $1", did)
         .fetch_one(&pool)
         .await
         .expect("User not found");
-
     let notification_id = enqueue_welcome(&pool, user_row.id, "example.com")
         .await
         .expect("Failed to enqueue welcome notification");
-
     let row = sqlx::query!(
         r#"
         SELECT
@@ -91,24 +77,19 @@ async fn test_enqueue_welcome() {
     .fetch_one(&pool)
     .await
     .expect("Notification not found");
-
     assert_eq!(Some(row.recipient), user_row.email);
     assert_eq!(row.subject.as_deref(), Some("Welcome to example.com"));
     assert!(row.body.contains(&format!("@{}", user_row.handle)));
     assert_eq!(row.notification_type, NotificationType::Welcome);
 }
-
 #[tokio::test]
 async fn test_notification_queue_status_index() {
     let pool = get_pool().await;
-
     let (_, did) = common::create_account_and_login(&common::client()).await;
-
     let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_one(&pool)
         .await
         .expect("User not found");
-
     let initial_count: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM notification_queue WHERE status = 'pending' AND user_id = $1",
         user_id
@@ -117,7 +98,6 @@ async fn test_notification_queue_status_index() {
     .await
     .expect("Failed to count")
     .unwrap_or(0);
-
     for i in 0..5 {
         let notification = NewNotification::email(
             user_id,
@@ -130,7 +110,6 @@ async fn test_notification_queue_status_index() {
             .await
             .expect("Failed to enqueue");
     }
-
     let final_count: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM notification_queue WHERE status = 'pending' AND user_id = $1",
         user_id
@@ -139,6 +118,5 @@ async fn test_notification_queue_status_index() {
     .await
     .expect("Failed to count")
     .unwrap_or(0);
-
     assert_eq!(final_count - initial_count, 5);
 }

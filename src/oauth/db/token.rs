@@ -1,16 +1,13 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-
 use super::super::{OAuthError, TokenData};
 use super::helpers::{from_json, to_json};
-
 pub async fn create_token(
     pool: &PgPool,
     data: &TokenData,
 ) -> Result<i32, OAuthError> {
     let client_auth_json = to_json(&data.client_auth)?;
     let parameters_json = to_json(&data.parameters)?;
-
     let row = sqlx::query!(
         r#"
         INSERT INTO oauth_token
@@ -35,10 +32,8 @@ pub async fn create_token(
     )
     .fetch_one(pool)
     .await?;
-
     Ok(row.id)
 }
-
 pub async fn get_token_by_id(
     pool: &PgPool,
     token_id: &str,
@@ -54,7 +49,6 @@ pub async fn get_token_by_id(
     )
     .fetch_optional(pool)
     .await?;
-
     match row {
         Some(r) => Ok(Some(TokenData {
             did: r.did,
@@ -74,7 +68,6 @@ pub async fn get_token_by_id(
         None => Ok(None),
     }
 }
-
 pub async fn get_token_by_refresh_token(
     pool: &PgPool,
     refresh_token: &str,
@@ -90,7 +83,6 @@ pub async fn get_token_by_refresh_token(
     )
     .fetch_optional(pool)
     .await?;
-
     match row {
         Some(r) => Ok(Some((
             r.id,
@@ -113,7 +105,6 @@ pub async fn get_token_by_refresh_token(
         None => Ok(None),
     }
 }
-
 pub async fn rotate_token(
     pool: &PgPool,
     old_db_id: i32,
@@ -122,7 +113,6 @@ pub async fn rotate_token(
     new_expires_at: DateTime<Utc>,
 ) -> Result<(), OAuthError> {
     let mut tx = pool.begin().await?;
-
     let old_refresh = sqlx::query_scalar!(
         r#"
         SELECT current_refresh_token FROM oauth_token WHERE id = $1
@@ -131,7 +121,6 @@ pub async fn rotate_token(
     )
     .fetch_one(&mut *tx)
     .await?;
-
     if let Some(old_rt) = old_refresh {
         sqlx::query!(
             r#"
@@ -144,7 +133,6 @@ pub async fn rotate_token(
         .execute(&mut *tx)
         .await?;
     }
-
     sqlx::query!(
         r#"
         UPDATE oauth_token
@@ -158,11 +146,9 @@ pub async fn rotate_token(
     )
     .execute(&mut *tx)
     .await?;
-
     tx.commit().await?;
     Ok(())
 }
-
 pub async fn check_refresh_token_used(
     pool: &PgPool,
     refresh_token: &str,
@@ -175,10 +161,8 @@ pub async fn check_refresh_token_used(
     )
     .fetch_optional(pool)
     .await?;
-
     Ok(row)
 }
-
 pub async fn delete_token(pool: &PgPool, token_id: &str) -> Result<(), OAuthError> {
     sqlx::query!(
         r#"
@@ -188,10 +172,8 @@ pub async fn delete_token(pool: &PgPool, token_id: &str) -> Result<(), OAuthErro
     )
     .execute(pool)
     .await?;
-
     Ok(())
 }
-
 pub async fn delete_token_family(pool: &PgPool, db_id: i32) -> Result<(), OAuthError> {
     sqlx::query!(
         r#"
@@ -201,10 +183,8 @@ pub async fn delete_token_family(pool: &PgPool, db_id: i32) -> Result<(), OAuthE
     )
     .execute(pool)
     .await?;
-
     Ok(())
 }
-
 pub async fn list_tokens_for_user(
     pool: &PgPool,
     did: &str,
@@ -220,7 +200,6 @@ pub async fn list_tokens_for_user(
     )
     .fetch_all(pool)
     .await?;
-
     let mut tokens = Vec::with_capacity(rows.len());
     for r in rows {
         tokens.push(TokenData {
@@ -241,7 +220,6 @@ pub async fn list_tokens_for_user(
     }
     Ok(tokens)
 }
-
 pub async fn count_tokens_for_user(pool: &PgPool, did: &str) -> Result<i64, OAuthError> {
     let count = sqlx::query_scalar!(
         r#"
@@ -251,10 +229,8 @@ pub async fn count_tokens_for_user(pool: &PgPool, did: &str) -> Result<i64, OAut
     )
     .fetch_one(pool)
     .await?;
-
     Ok(count)
 }
-
 pub async fn delete_oldest_tokens_for_user(
     pool: &PgPool,
     did: &str,
@@ -275,12 +251,9 @@ pub async fn delete_oldest_tokens_for_user(
     )
     .execute(pool)
     .await?;
-
     Ok(result.rows_affected())
 }
-
 const MAX_TOKENS_PER_USER: i64 = 100;
-
 pub async fn enforce_token_limit_for_user(pool: &PgPool, did: &str) -> Result<(), OAuthError> {
     let count = count_tokens_for_user(pool, did).await?;
     if count > MAX_TOKENS_PER_USER {

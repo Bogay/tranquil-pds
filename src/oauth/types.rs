@@ -1,49 +1,38 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestId(pub String);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenId(pub String);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceId(pub String);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionId(pub String);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Code(pub String);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RefreshToken(pub String);
-
 impl RequestId {
     pub fn generate() -> Self {
         Self(format!("urn:ietf:params:oauth:request_uri:{}", uuid::Uuid::new_v4()))
     }
 }
-
 impl TokenId {
     pub fn generate() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
 }
-
 impl DeviceId {
     pub fn generate() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
 }
-
 impl SessionId {
     pub fn generate() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
 }
-
 impl Code {
     pub fn generate() -> Self {
         use rand::Rng;
@@ -54,7 +43,6 @@ impl Code {
         ))
     }
 }
-
 impl RefreshToken {
     pub fn generate() -> Self {
         use rand::Rng;
@@ -65,7 +53,6 @@ impl RefreshToken {
         ))
     }
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
 pub enum ClientAuth {
@@ -78,7 +65,6 @@ pub enum ClientAuth {
     #[serde(rename = "private_key_jwt")]
     PrivateKeyJwt { client_assertion: String },
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizationRequestParameters {
     pub response_type: String,
@@ -93,7 +79,6 @@ pub struct AuthorizationRequestParameters {
     #[serde(flatten)]
     pub extra: Option<JsonValue>,
 }
-
 #[derive(Debug, Clone)]
 pub struct RequestData {
     pub client_id: String,
@@ -104,7 +89,6 @@ pub struct RequestData {
     pub device_id: Option<String>,
     pub code: Option<String>,
 }
-
 #[derive(Debug, Clone)]
 pub struct DeviceData {
     pub session_id: String,
@@ -112,7 +96,6 @@ pub struct DeviceData {
     pub ip_address: String,
     pub last_seen_at: DateTime<Utc>,
 }
-
 #[derive(Debug, Clone)]
 pub struct TokenData {
     pub did: String,
@@ -129,13 +112,11 @@ pub struct TokenData {
     pub current_refresh_token: Option<String>,
     pub scope: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizedClientData {
     pub scope: Option<String>,
     pub remember: bool,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthClientMetadata {
     pub client_id: String,
@@ -152,7 +133,6 @@ pub struct OAuthClientMetadata {
     pub jwks_uri: Option<String>,
     pub application_type: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtectedResourceMetadata {
     pub resource: String,
@@ -161,7 +141,6 @@ pub struct ProtectedResourceMetadata {
     pub scopes_supported: Vec<String>,
     pub resource_documentation: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizationServerMetadata {
     pub issuer: String,
@@ -180,13 +159,11 @@ pub struct AuthorizationServerMetadata {
     pub dpop_signing_alg_values_supported: Option<Vec<String>>,
     pub authorization_response_iss_parameter_supported: Option<bool>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParResponse {
     pub request_uri: String,
     pub expires_in: u64,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenResponse {
     pub access_token: String,
@@ -199,7 +176,6 @@ pub struct TokenResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenRequest {
     pub grant_type: String,
@@ -210,7 +186,6 @@ pub struct TokenRequest {
     pub client_id: Option<String>,
     pub client_secret: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DPoPClaims {
     pub jti: String,
@@ -222,7 +197,6 @@ pub struct DPoPClaims {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwkPublicKey {
     pub kty: String,
@@ -234,7 +208,6 @@ pub struct JwkPublicKey {
     pub kid: Option<String>,
     pub alg: Option<String>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Jwks {
     pub keys: Vec<JwkPublicKey>,

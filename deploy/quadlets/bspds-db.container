@@ -1,6 +1,5 @@
 [Unit]
 Description=BSPDS postgres database
-
 [Container]
 ContainerName=bspds-db
 Image=docker.io/library/postgres:18-alpine
@@ -14,10 +13,8 @@ HealthInterval=10s
 HealthTimeout=5s
 HealthRetries=5
 HealthStartPeriod=10s
-
 [Service]
 Restart=always
 RestartSec=10
-
 [Install]
 WantedBy=default.target

@@ -7,48 +7,37 @@ use hmac::{Hmac, Mac};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use sha2::Sha256;
 use uuid;
-
 type HmacSha256 = Hmac<Sha256>;
-
 pub const TOKEN_TYPE_ACCESS: &str = "at+jwt";
 pub const TOKEN_TYPE_REFRESH: &str = "refresh+jwt";
 pub const TOKEN_TYPE_SERVICE: &str = "jwt";
-
 pub const SCOPE_ACCESS: &str = "com.atproto.access";
 pub const SCOPE_REFRESH: &str = "com.atproto.refresh";
 pub const SCOPE_APP_PASS: &str = "com.atproto.appPass";
 pub const SCOPE_APP_PASS_PRIVILEGED: &str = "com.atproto.appPassPrivileged";
-
 pub struct TokenWithMetadata {
     pub token: String,
     pub jti: String,
     pub expires_at: DateTime<Utc>,
 }
-
 pub fn create_access_token(did: &str, key_bytes: &[u8]) -> Result<String> {
     Ok(create_access_token_with_metadata(did, key_bytes)?.token)
 }
-
 pub fn create_refresh_token(did: &str, key_bytes: &[u8]) -> Result<String> {
     Ok(create_refresh_token_with_metadata(did, key_bytes)?.token)
 }
-
 pub fn create_access_token_with_metadata(did: &str, key_bytes: &[u8]) -> Result<TokenWithMetadata> {
     create_signed_token_with_metadata(did, SCOPE_ACCESS, TOKEN_TYPE_ACCESS, key_bytes, Duration::minutes(120))
 }
-
 pub fn create_refresh_token_with_metadata(did: &str, key_bytes: &[u8]) -> Result<TokenWithMetadata> {
     create_signed_token_with_metadata(did, SCOPE_REFRESH, TOKEN_TYPE_REFRESH, key_bytes, Duration::days(90))
 }
-
 pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -> Result<String> {
     let signing_key = SigningKey::from_slice(key_bytes)?;
-
     let expiration = Utc::now()
         .checked_add_signed(Duration::seconds(60))
         .expect("valid timestamp")
         .timestamp();
-
     let claims = Claims {
         iss: did.to_owned(),
         sub: did.to_owned(),
@@ -59,10 +48,8 @@ pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -
         lxm: Some(lxm.to_string()),
         jti: uuid::Uuid::new_v4().to_string(),
     };
-
     sign_claims(claims, &signing_key)
 }
-
 fn create_signed_token_with_metadata(
     did: &str,
     scope: &str,
@@ -71,13 +58,11 @@ fn create_signed_token_with_metadata(
     duration: Duration,
 ) -> Result<TokenWithMetadata> {
     let signing_key = SigningKey::from_slice(key_bytes)?;
-
     let expires_at = Utc::now()
         .checked_add_signed(duration)
         .expect("valid timestamp");
     let expiration = expires_at.timestamp();
     let jti = uuid::Uuid::new_v4().to_string();
-
     let claims = Claims {
         iss: did.to_owned(),
         sub: did.to_owned(),
@@ -91,7 +76,6 @@ fn create_signed_token_with_metadata(
         lxm: None,
         jti: jti.clone(),
     };
-
     let token = sign_claims_with_type(claims, &signing_key, typ)?;
     Ok(TokenWithMetadata {
         token,
@@ -99,52 +83,40 @@ fn create_signed_token_with_metadata(
         expires_at,
     })
 }
-
 fn sign_claims(claims: Claims, key: &SigningKey) -> Result<String> {
     sign_claims_with_type(claims, key, TOKEN_TYPE_SERVICE)
 }
-
 fn sign_claims_with_type(claims: Claims, key: &SigningKey, typ: &str) -> Result<String> {
     let header = Header {
         alg: "ES256K".to_string(),
         typ: typ.to_string(),
     };
-
     let header_json = serde_json::to_string(&header)?;
     let claims_json = serde_json::to_string(&claims)?;
-
     let header_b64 = URL_SAFE_NO_PAD.encode(header_json);
     let claims_b64 = URL_SAFE_NO_PAD.encode(claims_json);
-
     let message = format!("{}.{}", header_b64, claims_b64);
     let signature: Signature = key.sign(message.as_bytes());
     let signature_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
-
     Ok(format!("{}.{}", message, signature_b64))
 }
-
 pub fn create_access_token_hs256(did: &str, secret: &[u8]) -> Result<String> {
     Ok(create_access_token_hs256_with_metadata(did, secret)?.token)
 }
-
 pub fn create_refresh_token_hs256(did: &str, secret: &[u8]) -> Result<String> {
     Ok(create_refresh_token_hs256_with_metadata(did, secret)?.token)
 }
-
 pub fn create_access_token_hs256_with_metadata(did: &str, secret: &[u8]) -> Result<TokenWithMetadata> {
     create_hs256_token_with_metadata(did, SCOPE_ACCESS, TOKEN_TYPE_ACCESS, secret, Duration::minutes(120))
 }
-
 pub fn create_refresh_token_hs256_with_metadata(did: &str, secret: &[u8]) -> Result<TokenWithMetadata> {
     create_hs256_token_with_metadata(did, SCOPE_REFRESH, TOKEN_TYPE_REFRESH, secret, Duration::days(90))
 }
-
 pub fn create_service_token_hs256(did: &str, aud: &str, lxm: &str, secret: &[u8]) -> Result<String> {
     let expiration = Utc::now()
         .checked_add_signed(Duration::seconds(60))
         .expect("valid timestamp")
         .timestamp();
-
     let claims = Claims {
         iss: did.to_owned(),
         sub: did.to_owned(),
@@ -155,10 +127,8 @@ pub fn create_service_token_hs256(did: &str, aud: &str, lxm: &str, secret: &[u8]
         lxm: Some(lxm.to_string()),
         jti: uuid::Uuid::new_v4().to_string(),
     };
-
     sign_claims_hs256(claims, TOKEN_TYPE_SERVICE, secret)
 }
-
 fn create_hs256_token_with_metadata(
     did: &str,
     scope: &str,
@@ -171,7 +141,6 @@ fn create_hs256_token_with_metadata(
         .expect("valid timestamp");
     let expiration = expires_at.timestamp();
     let jti = uuid::Uuid::new_v4().to_string();
-
     let claims = Claims {
         iss: did.to_owned(),
         sub: did.to_owned(),
@@ -185,7 +154,6 @@ fn create_hs256_token_with_metadata(
         lxm: None,
         jti: jti.clone(),
     };
-
     let token = sign_claims_hs256(claims, typ, secret)?;
     Ok(TokenWithMetadata {
         token,
@@ -193,26 +161,20 @@ fn create_hs256_token_with_metadata(
         expires_at,
     })
 }
-
 fn sign_claims_hs256(claims: Claims, typ: &str, secret: &[u8]) -> Result<String> {
     let header = Header {
         alg: "HS256".to_string(),
         typ: typ.to_string(),
     };
-
     let header_json = serde_json::to_string(&header)?;
     let claims_json = serde_json::to_string(&claims)?;
-
     let header_b64 = URL_SAFE_NO_PAD.encode(header_json);
     let claims_b64 = URL_SAFE_NO_PAD.encode(claims_json);
-
     let message = format!("{}.{}", header_b64, claims_b64);
-
     let mut mac = HmacSha256::new_from_slice(secret)
         .map_err(|e| anyhow::anyhow!("Invalid secret length: {}", e))?;
     mac.update(message.as_bytes());
     let signature = mac.finalize().into_bytes();
     let signature_b64 = URL_SAFE_NO_PAD.encode(signature);
-
     Ok(format!("{}.{}", message, signature_b64))
 }

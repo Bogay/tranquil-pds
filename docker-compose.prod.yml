@@ -43,7 +43,6 @@ services:
           memory: 1G
         reservations:
           memory: 256M
-
   db:
     image: postgres:18-alpine
     restart: unless-stopped
@@ -65,7 +64,6 @@ services:
           memory: 512M
         reservations:
           memory: 128M
-
   minio:
     image: minio/minio:RELEASE.2025-10-15T17-29-55Z
     restart: unless-stopped
@@ -87,7 +85,6 @@ services:
           memory: 512M
         reservations:
           memory: 128M
-
   minio-init:
     image: minio/mc:RELEASE.2025-07-16T15-35-03Z
     depends_on:
@@ -103,7 +100,6 @@ services:
     environment:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
       MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
-
   valkey:
     image: valkey/valkey:9-alpine
     restart: unless-stopped
@@ -122,7 +118,6 @@ services:
           memory: 300M
         reservations:
           memory: 64M
-
   nginx:
     image: nginx:1.28-alpine
     restart: unless-stopped
@@ -140,14 +135,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
   certbot:
     image: certbot/certbot:v5.2.2
     volumes:
       - ./certs:/etc/letsencrypt
       - acme_challenge:/var/www/acme
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/acme; sleep 12h & wait $${!}; done'"
-
   prometheus:
     image: prom/prometheus:v3.8.0
     restart: unless-stopped
@@ -164,7 +157,6 @@ services:
       resources:
         limits:
           memory: 256M
-
 volumes:
   postgres_data:
   minio_data:

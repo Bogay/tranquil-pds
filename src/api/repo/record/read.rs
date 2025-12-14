@@ -12,7 +12,6 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::error;
-
 #[derive(Deserialize)]
 pub struct GetRecordInput {
     pub repo: String,
@@ -20,13 +19,11 @@ pub struct GetRecordInput {
     pub rkey: String,
     pub cid: Option<String>,
 }
-
 pub async fn get_record(
     State(state): State<AppState>,
     Query(input): Query<GetRecordInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-
     let user_id_opt = if input.repo.starts_with("did:") {
         sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo)
             .fetch_optional(&state.db)
@@ -44,7 +41,6 @@ pub async fn get_record(
             .await
             .map(|opt| opt.map(|r| r.id))
     };
-
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
         _ => {
@@ -55,7 +51,6 @@ pub async fn get_record(
                 .into_response();
         }
     };
-
     let record_row = sqlx::query!(
         "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
         user_id,
@@ -64,7 +59,6 @@ pub async fn get_record(
     )
     .fetch_optional(&state.db)
     .await;
-
     let record_cid_str: String = match record_row {
         Ok(Some(row)) => row.record_cid,
         _ => {
@@ -75,7 +69,6 @@ pub async fn get_record(
                 .into_response();
         }
     };
-
     if let Some(expected_cid) = &input.cid {
         if &record_cid_str != expected_cid {
             return (
@@ -85,7 +78,6 @@ pub async fn get_record(
                 .into_response();
         }
     }
-
     let cid = match Cid::from_str(&record_cid_str) {
         Ok(c) => c,
         Err(_) => {
@@ -96,7 +88,6 @@ pub async fn get_record(
                 .into_response();
         }
     };
-
     let block = match state.block_store.get(&cid).await {
         Ok(Some(b)) => b,
         _ => {
@@ -107,7 +98,6 @@ pub async fn get_record(
                 .into_response();
         }
     };
-
     let value: serde_json::Value = match serde_ipld_dagcbor::from_slice(&block) {
         Ok(v) => v,
         Err(e) => {
@@ -119,7 +109,6 @@ pub async fn get_record(
                 .into_response();
         }
     };
-
     Json(json!({
         "uri": format!("at://{}/{}/{}", input.repo, input.collection, input.rkey),
         "cid": record_cid_str,
@@ -127,7 +116,6 @@ pub async fn get_record(
     }))
     .into_response()
 }
-
 #[derive(Deserialize)]
 pub struct ListRecordsInput {
     pub repo: String,
@@ -140,19 +128,16 @@ pub struct ListRecordsInput {
     pub rkey_end: Option<String>,
     pub reverse: Option<bool>,
 }
-
 #[derive(Serialize)]
 pub struct ListRecordsOutput {
     pub cursor: Option<String>,
     pub records: Vec<serde_json::Value>,
 }
-
 pub async fn list_records(
     State(state): State<AppState>,
     Query(input): Query<ListRecordsInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-
     let user_id_opt = if input.repo.starts_with("did:") {
         sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo)
             .fetch_optional(&state.db)
@@ -170,7 +155,6 @@ pub async fn list_records(
             .await
             .map(|opt| opt.map(|r| r.id))
     };
-
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
         _ => {
@@ -181,12 +165,10 @@ pub async fn list_records(
                 .into_response();
         }
     };
-
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
     let reverse = input.reverse.unwrap_or(false);
     let limit_i64 = limit as i64;
     let order = if reverse { "ASC" } else { "DESC" };
-
     let rows_res: Result<Vec<(String, String)>, sqlx::Error> = if let Some(cursor) = &input.cursor {
         let comparator = if reverse { ">" } else { "<" };
         let query = format!(
@@ -203,40 +185,32 @@ pub async fn list_records(
     } else {
         let mut conditions = vec!["repo_id = $1", "collection = $2"];
         let mut param_idx = 3;
-
         if input.rkey_start.is_some() {
             conditions.push("rkey > $3");
             param_idx += 1;
         }
-
         if input.rkey_end.is_some() {
             conditions.push(if param_idx == 3 { "rkey < $3" } else { "rkey < $4" });
             param_idx += 1;
         }
-
         let limit_idx = param_idx;
-
         let query = format!(
             "SELECT rkey, record_cid FROM records WHERE {} ORDER BY rkey {} LIMIT ${}",
             conditions.join(" AND "),
             order,
             limit_idx
         );
-
         let mut query_builder = sqlx::query_as::<_, (String, String)>(&query)
             .bind(user_id)
             .bind(&input.collection);
-
         if let Some(start) = &input.rkey_start {
             query_builder = query_builder.bind(start);
         }
         if let Some(end) = &input.rkey_end {
             query_builder = query_builder.bind(end);
         }
-
         query_builder.bind(limit_i64).fetch_all(&state.db).await
     };
-
     let rows = match rows_res {
         Ok(r) => r,
         Err(e) => {
@@ -248,19 +222,15 @@ pub async fn list_records(
                 .into_response();
         }
     };
-
     let last_rkey = rows.last().map(|(rkey, _)| rkey.clone());
-
     let mut cid_to_rkey: HashMap<Cid, (String, String)> = HashMap::new();
     let mut cids: Vec<Cid> = Vec::with_capacity(rows.len());
-
     for (rkey, cid_str) in &rows {
         if let Ok(cid) = Cid::from_str(cid_str) {
             cid_to_rkey.insert(cid, (rkey.clone(), cid_str.clone()));
             cids.push(cid);
         }
     }
-
     let blocks = match state.block_store.get_many(&cids).await {
         Ok(b) => b,
         Err(e) => {
@@ -272,7 +242,6 @@ pub async fn list_records(
                 .into_response();
         }
     };
-
     let mut records = Vec::new();
     for (cid, block_opt) in cids.iter().zip(blocks.into_iter()) {
         if let Some(block) = block_opt {
@@ -287,7 +256,6 @@ pub async fn list_records(
             }
         }
     }
-
     Json(ListRecordsOutput {
         cursor: last_rkey,
         records,

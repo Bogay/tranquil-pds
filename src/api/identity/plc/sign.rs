@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::{error, info, warn};
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignPlcOperationInput {
@@ -26,19 +25,16 @@ pub struct SignPlcOperationInput {
     pub verification_methods: Option<HashMap<String, String>>,
     pub services: Option<HashMap<String, ServiceInput>>,
 }
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServiceInput {
     #[serde(rename = "type")]
     pub service_type: String,
     pub endpoint: String,
 }
-
 #[derive(Debug, Serialize)]
 pub struct SignPlcOperationOutput {
     pub operation: Value,
 }
-
 pub async fn sign_plc_operation(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -50,14 +46,11 @@ pub async fn sign_plc_operation(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &bearer).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     let did = &auth_user.did;
-
     let token = match &input.token {
         Some(t) => t,
         None => {
@@ -66,7 +59,6 @@ pub async fn sign_plc_operation(
             ).into_response();
         }
     };
-
     let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -80,7 +72,6 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     let token_row = match sqlx::query!(
         "SELECT id, expires_at FROM plc_operation_tokens WHERE user_id = $1 AND token = $2",
         user.id,
@@ -109,7 +100,6 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     if Utc::now() > token_row.expires_at {
         let _ = sqlx::query!("DELETE FROM plc_operation_tokens WHERE id = $1", token_row.id)
             .execute(&state.db)
@@ -123,7 +113,6 @@ pub async fn sign_plc_operation(
         )
             .into_response();
     }
-
     let key_row = match sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
         user.id
@@ -140,7 +129,6 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
     {
         Ok(k) => k,
@@ -153,7 +141,6 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     let signing_key = match SigningKey::from_slice(&key_bytes) {
         Ok(k) => k,
         Err(e) => {
@@ -165,7 +152,6 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     let plc_client = PlcClient::new(None);
     let did_clone = did.clone();
     let result: Result<PlcOpOrTombstone, CircuitBreakerError<PlcError>> = with_circuit_breaker(
@@ -173,7 +159,6 @@ pub async fn sign_plc_operation(
         || async { plc_client.get_last_op(&did_clone).await },
     )
     .await;
-
     let last_op = match result {
         Ok(op) => op,
         Err(CircuitBreakerError::CircuitOpen(e)) => {
@@ -209,7 +194,6 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     if last_op.is_tombstone() {
         return (
             StatusCode::BAD_REQUEST,
@@ -220,7 +204,6 @@ pub async fn sign_plc_operation(
         )
             .into_response();
     }
-
     let services = input.services.map(|s| {
         s.into_iter()
             .map(|(k, v)| {
@@ -234,7 +217,6 @@ pub async fn sign_plc_operation(
             })
             .collect()
     });
-
     let unsigned_op = match create_update_op(
         &last_op,
         input.rotation_keys,
@@ -262,7 +244,6 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     let signed_op = match sign_operation(&unsigned_op, &signing_key) {
         Ok(op) => op,
         Err(e) => {
@@ -274,13 +255,10 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-
     let _ = sqlx::query!("DELETE FROM plc_operation_tokens WHERE id = $1", token_row.id)
         .execute(&state.db)
         .await;
-
     info!("Signed PLC operation for user {}", did);
-
     (
         StatusCode::OK,
         Json(SignPlcOperationOutput {

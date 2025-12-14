@@ -11,10 +11,8 @@ use axum::{
 };
 use serde_json::json;
 use tracing::{debug, error, info, warn};
-
 const DEFAULT_MAX_IMPORT_SIZE: usize = 100 * 1024 * 1024;
 const DEFAULT_MAX_BLOCKS: usize = 50000;
-
 pub async fn import_repo(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -23,7 +21,6 @@ pub async fn import_repo(
     let accepting_imports = std::env::var("ACCEPTING_REPO_IMPORTS")
         .map(|v| v != "false" && v != "0")
         .unwrap_or(true);
-
     if !accepting_imports {
         return (
             StatusCode::BAD_REQUEST,
@@ -34,12 +31,10 @@ pub async fn import_repo(
         )
             .into_response();
     }
-
     let max_size: usize = std::env::var("MAX_IMPORT_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_IMPORT_SIZE);
-
     if body.len() > max_size {
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -50,21 +45,17 @@ pub async fn import_repo(
         )
             .into_response();
     }
-
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     let did = &auth_user.did;
-
     let user = match sqlx::query!(
         "SELECT id, deactivated_at, takedown_ref FROM users WHERE did = $1",
         did
@@ -89,7 +80,6 @@ pub async fn import_repo(
                 .into_response();
         }
     };
-
     if user.deactivated_at.is_some() {
         return (
             StatusCode::FORBIDDEN,
@@ -100,7 +90,6 @@ pub async fn import_repo(
         )
             .into_response();
     }
-
     if user.takedown_ref.is_some() {
         return (
             StatusCode::FORBIDDEN,
@@ -111,9 +100,7 @@ pub async fn import_repo(
         )
             .into_response();
     }
-
     let user_id = user.id;
-
     let (root, blocks) = match parse_car(&body).await {
         Ok((r, b)) => (r, b),
         Err(ImportError::InvalidRootCount) => {
@@ -148,14 +135,12 @@ pub async fn import_repo(
                 .into_response();
         }
     };
-
     info!(
         "Importing repo for user {}: {} blocks, root {}",
         did,
         blocks.len(),
         root
     );
-
     let root_block = match blocks.get(&root) {
         Some(b) => b,
         None => {
@@ -169,7 +154,6 @@ pub async fn import_repo(
                 .into_response();
         }
     };
-
     let commit_did = match jacquard_repo::commit::Commit::from_cbor(root_block) {
         Ok(commit) => commit.did().to_string(),
         Err(e) => {
@@ -183,7 +167,6 @@ pub async fn import_repo(
                 .into_response();
         }
     };
-
     if commit_did != *did {
         return (
             StatusCode::FORBIDDEN,
@@ -197,15 +180,12 @@ pub async fn import_repo(
         )
             .into_response();
     }
-
     let skip_verification = std::env::var("SKIP_IMPORT_VERIFICATION")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
-
     if !skip_verification {
         debug!("Verifying CAR file signature and structure for DID {}", did);
         let verifier = CarVerifier::new();
-
         match verifier.verify_car(did, &root, &blocks).await {
             Ok(verified) => {
                 debug!(
@@ -285,12 +265,10 @@ pub async fn import_repo(
     } else {
         warn!("Skipping CAR signature verification for import (SKIP_IMPORT_VERIFICATION=true)");
     }
-
     let max_blocks: usize = std::env::var("MAX_IMPORT_BLOCKS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_BLOCKS);
-
     match apply_import(&state.db, user_id, root, blocks, max_blocks).await {
         Ok(records) => {
             info!(
@@ -298,11 +276,9 @@ pub async fn import_repo(
                 records.len(),
                 did
             );
-
             if let Err(e) = sequence_import_event(&state, did, &root.to_string()).await {
                 warn!("Failed to sequence import event: {:?}", e);
             }
-
             (StatusCode::OK, Json(json!({}))).into_response()
         }
         Err(ImportError::SizeLimitExceeded) => (
@@ -379,36 +355,34 @@ pub async fn import_repo(
         }
     }
 }
-
 async fn sequence_import_event(
     state: &AppState,
     did: &str,
     commit_cid: &str,
 ) -> Result<(), sqlx::Error> {
     let prev_cid: Option<String> = None;
+    let prev_data_cid: Option<String> = None;
     let ops = serde_json::json!([]);
     let blobs: Vec<String> = vec![];
     let blocks_cids: Vec<String> = vec![];
-
     let seq_row = sqlx::query!(
         r#"
-        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids)
-        VALUES ($1, 'commit', $2, $3, $4, $5, $6)
+        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids)
+        VALUES ($1, 'commit', $2, $3, $4, $5, $6, $7)
         RETURNING seq
         "#,
         did,
         commit_cid,
         prev_cid,
+        prev_data_cid,
         ops,
         &blobs,
         &blocks_cids
     )
     .fetch_one(&state.db)
     .await?;
-
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
         .execute(&state.db)
         .await?;
-
     Ok(())
 }

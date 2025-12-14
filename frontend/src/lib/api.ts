@@ -1,15 +1,12 @@
 const API_BASE = '/xrpc'
-
 export class ApiError extends Error {
   public did?: string
-
   constructor(public status: number, public error: string, message: string, did?: string) {
     super(message)
     this.name = 'ApiError'
     this.did = did
   }
 }
-
 async function xrpc<T>(method: string, options?: {
   method?: 'GET' | 'POST'
   params?: Record<string, string>
@@ -17,13 +14,11 @@ async function xrpc<T>(method: string, options?: {
   token?: string
 }): Promise<T> {
   const { method: httpMethod = 'GET', params, body, token } = options ?? {}
-
   let url = `${API_BASE}/${method}`
   if (params) {
     const searchParams = new URLSearchParams(params)
     url += `?${searchParams}`
   }
-
   const headers: Record<string, string> = {}
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
@@ -31,21 +26,17 @@ async function xrpc<T>(method: string, options?: {
   if (body) {
     headers['Content-Type'] = 'application/json'
   }
-
   const res = await fetch(url, {
     method: httpMethod,
     headers,
     body: body ? JSON.stringify(body) : undefined,
   })
-
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown', message: res.statusText }))
     throw new ApiError(res.status, err.error, err.message, err.did)
   }
-
   return res.json()
 }
-
 export interface Session {
   did: string
   handle: string
@@ -56,12 +47,10 @@ export interface Session {
   accessJwt: string
   refreshJwt: string
 }
-
 export interface AppPassword {
   name: string
   createdAt: string
 }
-
 export interface InviteCode {
   code: string
   available: number
@@ -71,9 +60,7 @@ export interface InviteCode {
   createdAt: string
   uses: { usedBy: string; usedAt: string }[]
 }
-
 export type VerificationChannel = 'email' | 'discord' | 'telegram' | 'signal'
-
 export interface CreateAccountParams {
   handle: string
   email: string
@@ -84,14 +71,12 @@ export interface CreateAccountParams {
   telegramUsername?: string
   signalNumber?: string
 }
-
 export interface CreateAccountResult {
   handle: string
   did: string
   verificationRequired: boolean
   verificationChannel: string
 }
-
 export interface ConfirmSignupResult {
   accessJwt: string
   refreshJwt: string
@@ -102,7 +87,6 @@ export interface ConfirmSignupResult {
   preferredChannel?: string
   preferredChannelVerified?: boolean
 }
-
 export const api = {
   async createAccount(params: CreateAccountParams): Promise<CreateAccountResult> {
     return xrpc('com.atproto.server.createAccount', {
@@ -119,50 +103,42 @@ export const api = {
       },
     })
   },
-
   async confirmSignup(did: string, verificationCode: string): Promise<ConfirmSignupResult> {
     return xrpc('com.atproto.server.confirmSignup', {
       method: 'POST',
       body: { did, verificationCode },
     })
   },
-
   async resendVerification(did: string): Promise<{ success: boolean }> {
     return xrpc('com.atproto.server.resendVerification', {
       method: 'POST',
       body: { did },
     })
   },
-
   async createSession(identifier: string, password: string): Promise<Session> {
     return xrpc('com.atproto.server.createSession', {
       method: 'POST',
       body: { identifier, password },
     })
   },
-
   async getSession(token: string): Promise<Session> {
     return xrpc('com.atproto.server.getSession', { token })
   },
-
   async refreshSession(refreshJwt: string): Promise<Session> {
     return xrpc('com.atproto.server.refreshSession', {
       method: 'POST',
       token: refreshJwt,
     })
   },
-
   async deleteSession(token: string): Promise<void> {
     await xrpc('com.atproto.server.deleteSession', {
       method: 'POST',
       token,
     })
   },
-
   async listAppPasswords(token: string): Promise<{ passwords: AppPassword[] }> {
     return xrpc('com.atproto.server.listAppPasswords', { token })
   },
-
   async createAppPassword(token: string, name: string): Promise<{ name: string; password: string; createdAt: string }> {
     return xrpc('com.atproto.server.createAppPassword', {
       method: 'POST',
@@ -170,7 +146,6 @@ export const api = {
       body: { name },
     })
   },
-
   async revokeAppPassword(token: string, name: string): Promise<void> {
     await xrpc('com.atproto.server.revokeAppPassword', {
       method: 'POST',
@@ -178,11 +153,9 @@ export const api = {
       body: { name },
     })
   },
-
   async getAccountInviteCodes(token: string): Promise<{ codes: InviteCode[] }> {
     return xrpc('com.atproto.server.getAccountInviteCodes', { token })
   },
-
   async createInviteCode(token: string, useCount: number = 1): Promise<{ code: string }> {
     return xrpc('com.atproto.server.createInviteCode', {
       method: 'POST',
@@ -190,28 +163,24 @@ export const api = {
       body: { useCount },
     })
   },
-
   async requestPasswordReset(email: string): Promise<void> {
     await xrpc('com.atproto.server.requestPasswordReset', {
       method: 'POST',
       body: { email },
     })
   },
-
   async resetPassword(token: string, password: string): Promise<void> {
     await xrpc('com.atproto.server.resetPassword', {
       method: 'POST',
       body: { token, password },
     })
   },
-
   async requestEmailUpdate(token: string): Promise<{ tokenRequired: boolean }> {
     return xrpc('com.atproto.server.requestEmailUpdate', {
       method: 'POST',
       token,
     })
   },
-
   async updateEmail(token: string, email: string, emailToken?: string): Promise<void> {
     await xrpc('com.atproto.server.updateEmail', {
       method: 'POST',
@@ -219,7 +188,6 @@ export const api = {
       body: { email, token: emailToken },
     })
   },
-
   async updateHandle(token: string, handle: string): Promise<void> {
     await xrpc('com.atproto.identity.updateHandle', {
       method: 'POST',
@@ -227,21 +195,18 @@ export const api = {
       body: { handle },
     })
   },
-
   async requestAccountDelete(token: string): Promise<void> {
     await xrpc('com.atproto.server.requestAccountDelete', {
       method: 'POST',
       token,
     })
   },
-
   async deleteAccount(did: string, password: string, deleteToken: string): Promise<void> {
     await xrpc('com.atproto.server.deleteAccount', {
       method: 'POST',
       body: { did, password, token: deleteToken },
     })
   },
-
   async describeServer(): Promise<{
     availableUserDomains: string[]
     inviteCodeRequired: boolean
@@ -249,7 +214,6 @@ export const api = {
   }> {
     return xrpc('com.atproto.server.describeServer')
   },
-
   async getNotificationPrefs(token: string): Promise<{
     preferredChannel: string
     email: string
@@ -262,7 +226,6 @@ export const api = {
   }> {
     return xrpc('com.bspds.account.getNotificationPrefs', { token })
   },
-
   async updateNotificationPrefs(token: string, prefs: {
     preferredChannel?: string
     discordId?: string
@@ -275,7 +238,6 @@ export const api = {
       body: prefs,
     })
   },
-
   async describeRepo(token: string, repo: string): Promise<{
     handle: string
     did: string
@@ -288,7 +250,6 @@ export const api = {
       params: { repo },
     })
   },
-
   async listRecords(token: string, repo: string, collection: string, options?: {
     limit?: number
     cursor?: string
@@ -303,7 +264,6 @@ export const api = {
     if (options?.reverse) params.reverse = 'true'
     return xrpc('com.atproto.repo.listRecords', { token, params })
   },
-
   async getRecord(token: string, repo: string, collection: string, rkey: string): Promise<{
     uri: string
     cid: string
@@ -314,7 +274,6 @@ export const api = {
       params: { repo, collection, rkey },
     })
   },
-
   async createRecord(token: string, repo: string, collection: string, record: unknown, rkey?: string): Promise<{
     uri: string
     cid: string
@@ -325,7 +284,6 @@ export const api = {
       body: { repo, collection, record, rkey },
     })
   },
-
   async putRecord(token: string, repo: string, collection: string, rkey: string, record: unknown): Promise<{
     uri: string
     cid: string
@@ -336,7 +294,6 @@ export const api = {
       body: { repo, collection, rkey, record },
     })
   },
-
   async deleteRecord(token: string, repo: string, collection: string, rkey: string): Promise<void> {
     await xrpc('com.atproto.repo.deleteRecord', {
       method: 'POST',

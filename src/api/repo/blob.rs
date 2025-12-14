@@ -14,9 +14,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use tracing::error;
-
 const MAX_BLOB_SIZE: usize = 1_000_000;
-
 pub async fn upload_blob(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -29,7 +27,6 @@ pub async fn upload_blob(
         )
             .into_response();
     }
-
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
@@ -42,7 +39,6 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
         Err(_) => {
@@ -54,16 +50,13 @@ pub async fn upload_blob(
         }
     };
     let did = auth_user.did;
-
     let mime_type = headers
         .get("content-type")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("application/octet-stream")
         .to_string();
-
     let size = body.len() as i64;
     let data = body.to_vec();
-
     let mut hasher = Sha256::new();
     hasher.update(&data);
     let hash = hasher.finalize();
@@ -80,13 +73,10 @@ pub async fn upload_blob(
     };
     let cid = Cid::new_v1(0x55, multihash);
     let cid_str = cid.to_string();
-
     let storage_key = format!("blobs/{}", cid_str);
-
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
-
     let user_id = match user_query {
         Ok(Some(row)) => row.id,
         _ => {
@@ -97,7 +87,6 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -109,7 +98,6 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-
     let insert = sqlx::query!(
         "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cid) DO NOTHING RETURNING cid",
         cid_str,
@@ -120,7 +108,6 @@ pub async fn upload_blob(
     )
     .fetch_optional(&mut *tx)
     .await;
-
     let was_inserted = match insert {
         Ok(Some(_)) => true,
         Ok(None) => false,
@@ -133,7 +120,6 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-
     if was_inserted {
         if let Err(e) = state.blob_store.put_bytes(&storage_key, bytes::Bytes::from(data)).await {
             error!("Failed to upload blob to storage: {:?}", e);
@@ -144,7 +130,6 @@ pub async fn upload_blob(
                 .into_response();
         }
     }
-
     if let Err(e) = tx.commit().await {
         error!("Failed to commit blob transaction: {:?}", e);
         if was_inserted {
@@ -158,7 +143,6 @@ pub async fn upload_blob(
         )
             .into_response();
     }
-
     Json(json!({
         "blob": {
             "ref": {
@@ -170,26 +154,22 @@ pub async fn upload_blob(
     }))
     .into_response()
 }
-
 #[derive(Deserialize)]
 pub struct ListMissingBlobsParams {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordBlob {
     pub cid: String,
     pub record_uri: String,
 }
-
 #[derive(Serialize)]
 pub struct ListMissingBlobsOutput {
     pub cursor: Option<String>,
     pub blobs: Vec<RecordBlob>,
 }
-
 fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
     if let Some(obj) = val.as_object() {
         if let Some(type_val) = obj.get("$type") {
@@ -212,7 +192,6 @@ fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
         }
     }
 }
-
 pub async fn list_missing_blobs(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -230,7 +209,6 @@ pub async fn list_missing_blobs(
                 .into_response();
         }
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
         Err(_) => {
@@ -241,13 +219,10 @@ pub async fn list_missing_blobs(
                 .into_response();
         }
     };
-
     let did = auth_user.did;
-
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
-
     let user_id = match user_query {
         Ok(Some(row)) => row.id,
         _ => {
@@ -258,7 +233,6 @@ pub async fn list_missing_blobs(
                 .into_response();
         }
     };
-
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor_str = params.cursor.unwrap_or_default();
     let (cursor_collection, cursor_rkey) = if cursor_str.contains('|') {
@@ -267,7 +241,6 @@ pub async fn list_missing_blobs(
     } else {
         (String::new(), String::new())
     };
-
     let records_query = sqlx::query!(
         "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1 AND (collection, rkey) > ($2, $3) ORDER BY collection, rkey LIMIT $4",
         user_id,
@@ -277,7 +250,6 @@ pub async fn list_missing_blobs(
     )
     .fetch_all(&state.db)
     .await;
-
     let records = match records_query {
         Ok(r) => r,
         Err(e) => {
@@ -289,40 +261,31 @@ pub async fn list_missing_blobs(
                 .into_response();
         }
     };
-
     let mut missing_blobs = Vec::new();
     let mut last_cursor = None;
-
     for row in &records {
         let collection = &row.collection;
         let rkey = &row.rkey;
         let record_cid_str = &row.record_cid;
-
         last_cursor = Some(format!("{}|{}", collection, rkey));
-
         let record_cid = match Cid::from_str(&record_cid_str) {
             Ok(c) => c,
             Err(_) => continue,
         };
-
         let block_bytes = match state.block_store.get(&record_cid).await {
             Ok(Some(b)) => b,
             _ => continue,
         };
-
         let record_val: serde_json::Value = match serde_ipld_dagcbor::from_slice(&block_bytes) {
             Ok(v) => v,
             Err(_) => continue,
         };
-
         let mut blobs = Vec::new();
         find_blobs(&record_val, &mut blobs);
-
         for blob_cid_str in blobs {
             let exists = sqlx::query!("SELECT 1 as one FROM blobs WHERE cid = $1 AND created_by_user = $2", blob_cid_str, user_id)
                 .fetch_optional(&state.db)
                 .await;
-
             match exists {
                 Ok(None) => {
                     missing_blobs.push(RecordBlob {
@@ -337,7 +300,6 @@ pub async fn list_missing_blobs(
             }
         }
     }
-
     // if we fetched fewer records than limit, we are done, so cursor is None.
     // otherwise, cursor is the last one we saw.
     // ...right?
@@ -346,7 +308,6 @@ pub async fn list_missing_blobs(
     } else {
         last_cursor
     };
-
     (
         StatusCode::OK,
         Json(ListMissingBlobsOutput {

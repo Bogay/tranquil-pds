@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{error, info, warn};
-
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
@@ -32,7 +31,6 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "unknown".to_string()
 }
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountInput {
@@ -47,7 +45,6 @@ pub struct CreateAccountInput {
     pub telegram_username: Option<String>,
     pub signal_number: Option<String>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountOutput {
@@ -56,14 +53,12 @@ pub struct CreateAccountOutput {
     pub verification_required: bool,
     pub verification_channel: String,
 }
-
 pub async fn create_account(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(input): Json<CreateAccountInput>,
 ) -> Response {
     info!("create_account called");
-
     let client_ip = extract_client_ip(&headers);
     if !state.check_rate_limit(RateLimitKind::AccountCreation, &client_ip).await {
         warn!(ip = %client_ip, "Account creation rate limit exceeded");
@@ -76,7 +71,6 @@ pub async fn create_account(
         )
             .into_response();
     }
-
     if input.handle.contains('!') || input.handle.contains('@') {
         return (
             StatusCode::BAD_REQUEST,
@@ -86,7 +80,6 @@ pub async fn create_account(
         )
             .into_response();
     }
-
     let email: Option<String> = input.email.as_ref()
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
@@ -99,7 +92,6 @@ pub async fn create_account(
                 .into_response();
         }
     }
-
     let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
     let valid_channels = ["email", "discord", "telegram", "signal"];
     if !valid_channels.contains(&verification_channel) {
@@ -109,7 +101,6 @@ pub async fn create_account(
         )
             .into_response();
     }
-
     let verification_recipient = match verification_channel {
         "email" => match &input.email {
             Some(email) if !email.trim().is_empty() => email.trim().to_string(),
@@ -144,11 +135,15 @@ pub async fn create_account(
             Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
         ).into_response(),
     };
-
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
-    let full_handle = format!("{}.{}", input.handle, hostname);
-
+    let suffix = format!(".{}", hostname);
+    let short_handle = if input.handle.ends_with(&suffix) {
+        input.handle.strip_suffix(&suffix).unwrap_or(&input.handle)
+    } else {
+        &input.handle
+    };
+    let full_handle = format!("{}.{}", short_handle, hostname);
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
             let reserved = sqlx::query!(
@@ -164,7 +159,6 @@ pub async fn create_account(
             )
             .fetch_optional(&state.db)
             .await;
-
             match reserved {
                 Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
                 Ok(None) => {
@@ -190,7 +184,6 @@ pub async fn create_account(
             let secret_key = SecretKey::random(&mut OsRng);
             (secret_key.to_bytes().to_vec(), None)
         };
-
     let signing_key = match SigningKey::from_slice(&secret_key_bytes) {
         Ok(k) => k,
         Err(e) => {
@@ -202,12 +195,10 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let did = if let Some(d) = &input.did {
         if d.trim().is_empty() {
             let rotation_key = std::env::var("PLC_ROTATION_KEY")
                 .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
-
             let genesis_result = match create_genesis_operation(
                 &signing_key,
                 &rotation_key,
@@ -224,7 +215,6 @@ pub async fn create_account(
                         .into_response();
                 }
             };
-
             let plc_client = PlcClient::new(None);
             if let Err(e) = plc_client.send_operation(&genesis_result.did, &genesis_result.signed_operation).await {
                 error!("Failed to submit PLC genesis operation: {:?}", e);
@@ -237,7 +227,6 @@ pub async fn create_account(
                 )
                     .into_response();
             }
-
             info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
             genesis_result.did
         } else if d.starts_with("did:web:") {
@@ -259,7 +248,6 @@ pub async fn create_account(
     } else {
         let rotation_key = std::env::var("PLC_ROTATION_KEY")
             .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
-
         let genesis_result = match create_genesis_operation(
             &signing_key,
             &rotation_key,
@@ -276,7 +264,6 @@ pub async fn create_account(
                     .into_response();
             }
         };
-
         let plc_client = PlcClient::new(None);
         if let Err(e) = plc_client.send_operation(&genesis_result.did, &genesis_result.signed_operation).await {
             error!("Failed to submit PLC genesis operation: {:?}", e);
@@ -289,11 +276,9 @@ pub async fn create_account(
             )
                 .into_response();
         }
-
         info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
         genesis_result.did
     };
-
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -305,11 +290,9 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
-    let exists_query = sqlx::query!("SELECT 1 as one FROM users WHERE handle = $1", input.handle)
+    let exists_query = sqlx::query!("SELECT 1 as one FROM users WHERE handle = $1", short_handle)
         .fetch_optional(&mut *tx)
         .await;
-
     match exists_query {
         Ok(Some(_)) => {
             return (
@@ -328,26 +311,22 @@ pub async fn create_account(
         }
         Ok(None) => {}
     }
-
     if let Some(code) = &input.invite_code {
         let invite_query =
             sqlx::query!("SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE", code)
                 .fetch_optional(&mut *tx)
                 .await;
-
         match invite_query {
             Ok(Some(row)) => {
                 if row.available_uses <= 0 {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidInviteCode", "message": "Invite code exhausted"}))).into_response();
                 }
-
                 let update_invite = sqlx::query!(
                     "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
                     code
                 )
                 .execute(&mut *tx)
                 .await;
-
                 if let Err(e) = update_invite {
                     error!("Error updating invite code: {:?}", e);
                     return (
@@ -374,7 +353,6 @@ pub async fn create_account(
             }
         }
     }
-
     let password_hash = match hash(&input.password, DEFAULT_COST) {
         Ok(h) => h,
         Err(e) => {
@@ -386,10 +364,8 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let code_expires_at = chrono::Utc::now() + chrono::Duration::minutes(30);
-
     let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
         r#"INSERT INTO users (
             handle, email, did, password_hash,
@@ -398,7 +374,7 @@ pub async fn create_account(
             discord_id, telegram_username, signal_number
         ) VALUES ($1, $2, $3, $4, $5, $6, $7::notification_channel, $8, $9, $10) RETURNING id"#,
     )
-        .bind(&input.handle)
+        .bind(short_handle)
         .bind(&email)
         .bind(&did)
         .bind(&password_hash)
@@ -410,7 +386,6 @@ pub async fn create_account(
         .bind(input.signal_number.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()))
         .fetch_one(&mut *tx)
         .await;
-
     let user_id = match user_insert {
         Ok((id,)) => id,
         Err(e) => {
@@ -455,7 +430,6 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(enc) => enc,
         Err(e) => {
@@ -467,7 +441,6 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let key_insert = sqlx::query!(
         "INSERT INTO user_keys (user_id, key_bytes, encryption_version, encrypted_at) VALUES ($1, $2, $3, NOW())",
         user_id,
@@ -476,7 +449,6 @@ pub async fn create_account(
     )
     .execute(&mut *tx)
     .await;
-
     if let Err(e) = key_insert {
         error!("Error inserting user key: {:?}", e);
         return (
@@ -485,7 +457,6 @@ pub async fn create_account(
         )
             .into_response();
     }
-
     if let Some(key_id) = reserved_key_id {
         let mark_used = sqlx::query!(
             "UPDATE reserved_signing_keys SET used_at = NOW() WHERE id = $1",
@@ -493,7 +464,6 @@ pub async fn create_account(
         )
         .execute(&mut *tx)
         .await;
-
         if let Err(e) = mark_used {
             error!("Error marking reserved key as used: {:?}", e);
             return (
@@ -503,7 +473,6 @@ pub async fn create_account(
                 .into_response();
         }
     }
-
     let mst = Mst::new(Arc::new(state.block_store.clone()));
     let mst_root = match mst.persist().await {
         Ok(c) => c,
@@ -516,7 +485,6 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let did_obj = match Did::new(&did) {
         Ok(d) => d,
         Err(_) => {
@@ -527,11 +495,8 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let rev = Tid::now(LimitedU32::MIN);
-
     let unsigned_commit = Commit::new_unsigned(did_obj, mst_root, rev, None);
-
     let signed_commit = match unsigned_commit.sign(&signing_key) {
         Ok(c) => c,
         Err(e) => {
@@ -543,7 +508,6 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let commit_bytes = match signed_commit.to_cbor() {
         Ok(b) => b,
         Err(e) => {
@@ -555,7 +519,6 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let commit_cid = match state.block_store.put(&commit_bytes).await {
         Ok(c) => c,
         Err(e) => {
@@ -567,12 +530,10 @@ pub async fn create_account(
                 .into_response();
         }
     };
-
     let commit_cid_str = commit_cid.to_string();
     let repo_insert = sqlx::query!("INSERT INTO repos (user_id, repo_root_cid) VALUES ($1, $2)", user_id, commit_cid_str)
         .execute(&mut *tx)
         .await;
-
     if let Err(e) = repo_insert {
         error!("Error initializing repo: {:?}", e);
         return (
@@ -581,13 +542,11 @@ pub async fn create_account(
         )
             .into_response();
     }
-
     if let Some(code) = &input.invite_code {
         let use_insert =
             sqlx::query!("INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)", code, user_id)
                 .execute(&mut *tx)
                 .await;
-
         if let Err(e) = use_insert {
             error!("Error recording invite usage: {:?}", e);
             return (
@@ -597,7 +556,6 @@ pub async fn create_account(
                 .into_response();
         }
     }
-
     if let Err(e) = tx.commit().await {
         error!("Error committing transaction: {:?}", e);
         return (
@@ -606,7 +564,25 @@ pub async fn create_account(
         )
             .into_response();
     }
-
+    if let Err(e) = crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle)).await {
+        warn!("Failed to sequence identity event for {}: {}", did, e);
+    }
+    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, &did, true, None).await {
+        warn!("Failed to sequence account event for {}: {}", did, e);
+    }
+    let profile_record = json!({
+        "$type": "app.bsky.actor.profile",
+        "displayName": input.handle
+    });
+    if let Err(e) = crate::api::repo::record::create_record_internal(
+        &state,
+        &did,
+        "app.bsky.actor.profile",
+        "self",
+        &profile_record,
+    ).await {
+        warn!("Failed to create default profile for {}: {}", did, e);
+    }
     if let Err(e) = crate::notifications::enqueue_signup_verification(
         &state.db,
         user_id,
@@ -616,11 +592,10 @@ pub async fn create_account(
     ).await {
         warn!("Failed to enqueue signup verification notification: {:?}", e);
     }
-
     (
         StatusCode::OK,
         Json(CreateAccountOutput {
-            handle: input.handle,
+            handle: short_handle.to_string(),
             did,
             verification_required: true,
             verification_channel: verification_channel.to_string(),

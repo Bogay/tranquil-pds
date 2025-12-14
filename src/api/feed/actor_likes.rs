@@ -13,14 +13,12 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::warn;
-
 #[derive(Deserialize)]
 pub struct GetActorLikesParams {
     pub actor: String,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
-
 fn insert_likes_into_feed(feed: &mut Vec<FeedViewPost>, likes: &[RecordDescript<LikeRecord>]) {
     for like in likes {
         let like_time = &like.indexed_at.to_rfc3339();
@@ -28,7 +26,6 @@ fn insert_likes_into_feed(feed: &mut Vec<FeedViewPost>, likes: &[RecordDescript<
             .iter()
             .position(|fi| &fi.post.indexed_at < like_time)
             .unwrap_or(feed.len());
-
         let placeholder_post = PostView {
             uri: like.record.subject.uri.clone(),
             cid: like.record.subject.cid.clone(),
@@ -48,7 +45,6 @@ fn insert_likes_into_feed(feed: &mut Vec<FeedViewPost>, likes: &[RecordDescript<
             quote_count: 0,
             extra: HashMap::new(),
         };
-
         feed.insert(
             idx,
             FeedViewPost {
@@ -61,14 +57,12 @@ fn insert_likes_into_feed(feed: &mut Vec<FeedViewPost>, likes: &[RecordDescript<
         );
     }
 }
-
 pub async fn get_actor_likes(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Query(params): Query<GetActorLikesParams>,
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
-
     let auth_did = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
             match crate::auth::validate_bearer_token(&state.db, &token).await {
@@ -81,7 +75,6 @@ pub async fn get_actor_likes(
     } else {
         None
     };
-
     let mut query_params = HashMap::new();
     query_params.insert("actor".to_string(), params.actor.clone());
     if let Some(limit) = params.limit {
@@ -90,22 +83,18 @@ pub async fn get_actor_likes(
     if let Some(cursor) = &params.cursor {
         query_params.insert("cursor".to_string(), cursor.clone());
     }
-
     let proxy_result =
         match proxy_to_appview("app.bsky.feed.getActorLikes", &query_params, auth_header).await {
             Ok(r) => r,
             Err(e) => return e,
         };
-
     if !proxy_result.status.is_success() {
         return (proxy_result.status, proxy_result.body).into_response();
     }
-
     let rev = match extract_repo_rev(&proxy_result.headers) {
         Some(r) => r,
         None => return (proxy_result.status, proxy_result.body).into_response(),
     };
-
     let mut feed_output: FeedOutput = match serde_json::from_slice(&proxy_result.body) {
         Ok(f) => f,
         Err(e) => {
@@ -113,12 +102,10 @@ pub async fn get_actor_likes(
             return (proxy_result.status, proxy_result.body).into_response();
         }
     };
-
     let requester_did = match auth_did {
         Some(d) => d,
         None => return (StatusCode::OK, Json(feed_output)).into_response(),
     };
-
     let actor_did = if params.actor.starts_with("did:") {
         params.actor.clone()
     } else {
@@ -141,11 +128,9 @@ pub async fn get_actor_likes(
             }
         }
     };
-
     if actor_did != requester_did {
         return (StatusCode::OK, Json(feed_output)).into_response();
     }
-
     let local_records = match get_records_since_rev(&state, &requester_did, &rev).await {
         Ok(r) => r,
         Err(e) => {
@@ -153,13 +138,10 @@ pub async fn get_actor_likes(
             return (proxy_result.status, proxy_result.body).into_response();
         }
     };
-
     if local_records.likes.is_empty() {
         return (StatusCode::OK, Json(feed_output)).into_response();
     }
-
     insert_likes_into_feed(&mut feed_output.feed, &local_records.likes);
-
     let lag = get_local_lag(&local_records);
     format_munged_response(feed_output, lag)
 }

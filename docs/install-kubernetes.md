@@ -1,11 +1,7 @@
 # BSPDS Production Kubernetes Deployment
-
 > **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
-
 This guide covers deploying BSPDS on a production multi-node Kubernetes cluster with high availability, auto-scaling, and proper secrets management.
-
 ## Architecture Overview
-
 ```
                     ┌─────────────────────────────────────────────────┐
                     │              Kubernetes Cluster                 │
@@ -30,20 +26,15 @@ This guide covers deploying BSPDS on a production multi-node Kubernetes cluster 
                     │ └──────────────────────────────────────┘        │
                     └─────────────────────────────────────────────────┘
 ```
-
 ## Prerequisites
-
 - Kubernetes cluster (1.30+) with at least 3 nodes (1.34 is current stable)
 - `kubectl` configured to access your cluster
 - `helm` 3.x installed
 - Storage class that supports `ReadWriteOnce` (for databases)
 - Ingress controller installed (nginx-ingress or traefik)
 - cert-manager installed for TLS certificates
-
 ### Quick Prerequisites Setup
-
 If you need to install prerequisites:
-
 ```bash
 # Install nginx-ingress (chart v4.14.1 - December 2025)
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
@@ -51,7 +42,6 @@ helm repo update
 helm install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx --create-namespace \
   --version 4.14.1
-
 # Install cert-manager (v1.19.2 - December 2025)
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
@@ -60,20 +50,14 @@ helm install cert-manager jetstack/cert-manager \
   --version v1.19.2 \
   --set installCRDs=true
 ```
-
 ---
-
 ## 1. Create Namespace
-
 ```bash
 kubectl create namespace bspds
 kubectl config set-context --current --namespace=bspds
 ```
-
 ## 2. Create Secrets
-
 Generate secure passwords and secrets:
-
 ```bash
 # Generate secrets
 DB_PASSWORD=$(openssl rand -base64 32)
@@ -81,21 +65,17 @@ MINIO_PASSWORD=$(openssl rand -base64 32)
 JWT_SECRET=$(openssl rand -base64 48)
 DPOP_SECRET=$(openssl rand -base64 48)
 MASTER_KEY=$(openssl rand -base64 48)
-
 # Create Kubernetes secrets
 kubectl create secret generic bspds-db-credentials \
   --from-literal=username=bspds \
   --from-literal=password="$DB_PASSWORD"
-
 kubectl create secret generic bspds-minio-credentials \
   --from-literal=root-user=minioadmin \
   --from-literal=root-password="$MINIO_PASSWORD"
-
 kubectl create secret generic bspds-secrets \
   --from-literal=jwt-secret="$JWT_SECRET" \
   --from-literal=dpop-secret="$DPOP_SECRET" \
   --from-literal=master-key="$MASTER_KEY"
-
 # Save secrets locally (KEEP SECURE!)
 echo "DB_PASSWORD=$DB_PASSWORD" > secrets.txt
 echo "MINIO_PASSWORD=$MINIO_PASSWORD" >> secrets.txt
@@ -104,21 +84,16 @@ echo "DPOP_SECRET=$DPOP_SECRET" >> secrets.txt
 echo "MASTER_KEY=$MASTER_KEY" >> secrets.txt
 chmod 600 secrets.txt
 ```
-
 ## 3. Deploy PostgreSQL
-
 ### Option A: CloudNativePG Operator (Recommended for HA)
-
 ```bash
 # Install CloudNativePG operator (v1.28.0 - December 2025)
 kubectl apply --server-side -f \
   https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.28/releases/cnpg-1.28.0.yaml
-
 # Wait for operator
 kubectl wait --for=condition=available --timeout=120s \
   deployment/cnpg-controller-manager -n cnpg-system
 ```
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: postgresql.cnpg.io/v1
@@ -128,23 +103,19 @@ metadata:
   namespace: bspds
 spec:
   instances: 3
-
   postgresql:
     parameters:
       max_connections: "200"
       shared_buffers: "256MB"
-
   bootstrap:
     initdb:
       database: pds
       owner: bspds
       secret:
         name: bspds-db-credentials
-
   storage:
     size: 20Gi
     storageClass: standard  # adjust for your cluster
-
   resources:
     requests:
       memory: "512Mi"
@@ -152,14 +123,11 @@ spec:
     limits:
       memory: "1Gi"
       cpu: "1000m"
-
   affinity:
     podAntiAffinityType: required
 EOF
 ```
-
 ### Option B: Simple StatefulSet (Single Instance)
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -248,9 +216,7 @@ spec:
       targetPort: 5432
 EOF
 ```
-
 ## 4. Deploy MinIO
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -349,9 +315,7 @@ spec:
       name: console
 EOF
 ```
-
 ### Initialize MinIO Bucket
-
 ```bash
 kubectl run minio-init --rm -it --restart=Never \
   --image=minio/mc:RELEASE.2025-07-16T15-35-03Z \
@@ -362,9 +326,7 @@ kubectl run minio-init --rm -it --restart=Never \
     mc mb --ignore-existing local/pds-blobs
   "
 ```
-
 ## 5. Deploy Valkey
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -446,18 +408,14 @@ spec:
       targetPort: 6379
 EOF
 ```
-
 ## 6. Build and Push BSPDS Image
-
 ```bash
 # Build image
 cd /path/to/bspds
 docker build -t your-registry.com/bspds:latest .
 docker push your-registry.com/bspds:latest
 ```
-
 If using a private registry, create an image pull secret:
-
 ```bash
 kubectl create secret docker-registry regcred \
   --docker-server=your-registry.com \
@@ -465,11 +423,8 @@ kubectl create secret docker-registry regcred \
   --docker-password=your-password \
   --docker-email=your-email
 ```
-
 ## 7. Run Database Migrations
-
 BSPDS runs migrations automatically on startup. However, if you want to run migrations separately (recommended for zero-downtime deployments), you can use a Job:
-
 ```bash
 cat <<'EOF' | kubectl apply -f -
 apiVersion: batch/v1
@@ -496,14 +451,10 @@ spec:
             - name: DATABASE_URL
               value: "postgres://bspds:$(DB_PASSWORD)@bspds-db-rw:5432/pds"
 EOF
-
 kubectl wait --for=condition=complete --timeout=120s job/bspds-migrate
 ```
-
 > **Note**: If your BSPDS image doesn't have a `--migrate-only` flag, you can skip this step. The app will run migrations on first startup. Alternatively, build a separate migration image with `sqlx-cli` installed.
-
 ## 8. Deploy BSPDS Application
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
@@ -631,9 +582,7 @@ spec:
       name: http
 EOF
 ```
-
 ## 9. Configure Horizontal Pod Autoscaler
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: autoscaling/v2
@@ -680,9 +629,7 @@ spec:
       selectPolicy: Max
 EOF
 ```
-
 ## 10. Configure Pod Disruption Budget
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: policy/v1
@@ -697,9 +644,7 @@ spec:
       app: bspds
 EOF
 ```
-
 ## 11. Configure TLS with cert-manager
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: cert-manager.io/v1
@@ -718,9 +663,7 @@ spec:
             class: nginx
 EOF
 ```
-
 ## 12. Configure Ingress
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: networking.k8s.io/v1
@@ -754,9 +697,7 @@ spec:
                   number: 80
 EOF
 ```
-
 ## 13. Configure Network Policies (Optional but Recommended)
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: networking.k8s.io/v1
@@ -817,9 +758,7 @@ spec:
           port: 443
 EOF
 ```
-
 ## 14. Deploy Prometheus Monitoring (Optional)
-
 ```bash
 cat <<EOF | kubectl apply -f -
 apiVersion: monitoring.coreos.com/v1
@@ -839,117 +778,81 @@ spec:
       interval: 30s
 EOF
 ```
-
 ---
-
 ## Verification
-
 ```bash
 # Check all pods are running
 kubectl get pods -n bspds
-
 # Check services
 kubectl get svc -n bspds
-
 # Check ingress
 kubectl get ingress -n bspds
-
 # Check certificate
 kubectl get certificate -n bspds
-
 # Test health endpoint
 curl -s https://pds.example.com/xrpc/_health | jq
-
 # Test DID endpoint
 curl -s https://pds.example.com/.well-known/atproto-did
 ```
-
 ---
-
 ## Maintenance
-
 ### View Logs
-
 ```bash
 # All BSPDS pods
 kubectl logs -l app=bspds -n bspds -f
-
 # Specific pod
 kubectl logs -f deployment/bspds -n bspds
 ```
-
 ### Scale Manually
-
 ```bash
 kubectl scale deployment bspds --replicas=5 -n bspds
 ```
-
 ### Update BSPDS
-
 ```bash
 # Build and push new image
 docker build -t your-registry.com/bspds:v1.2.3 .
 docker push your-registry.com/bspds:v1.2.3
-
 # Update deployment
 kubectl set image deployment/bspds bspds=your-registry.com/bspds:v1.2.3 -n bspds
-
 # Watch rollout
 kubectl rollout status deployment/bspds -n bspds
 ```
-
 ### Backup Database
-
 ```bash
 # For CloudNativePG
 kubectl cnpg backup bspds-db -n bspds
-
 # For StatefulSet
 kubectl exec -it bspds-db-0 -n bspds -- pg_dump -U bspds pds > backup-$(date +%Y%m%d).sql
 ```
-
 ### Run Migrations
-
 If you have a migration Job defined, you can re-run it:
-
 ```bash
 # Delete old job first (if exists)
 kubectl delete job bspds-migrate -n bspds --ignore-not-found
-
 # Re-apply the migration job from step 7
 # Or simply restart the deployment - BSPDS runs migrations on startup
 kubectl rollout restart deployment/bspds -n bspds
 ```
-
 ---
-
 ## Troubleshooting
-
 ### Pod Won't Start
-
 ```bash
 kubectl describe pod -l app=bspds -n bspds
 kubectl logs -l app=bspds -n bspds --previous
 ```
-
 ### Database Connection Issues
-
 ```bash
 # Test connectivity from a debug pod
 kubectl run debug --rm -it --restart=Never --image=postgres:18-alpine -- \
   psql "postgres://bspds:PASSWORD@bspds-db-rw:5432/pds" -c "SELECT 1"
 ```
-
 ### Certificate Issues
-
 ```bash
 kubectl describe certificate bspds-tls -n bspds
 kubectl describe certificaterequest -n bspds
 kubectl logs -l app.kubernetes.io/name=cert-manager -n cert-manager
 ```
-
 ### View Resource Usage
-
 ```bash
 kubectl top pods -n bspds
 kubectl top nodes

@@ -7,13 +7,11 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use tracing::error;
-
+use tracing::{error, warn};
 #[derive(Deserialize)]
 pub struct DeleteAccountInput {
     pub did: String,
 }
-
 pub async fn delete_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -27,7 +25,6 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     let did = input.did.trim();
     if did.is_empty() {
         return (
@@ -36,11 +33,9 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     let user = sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
-
     let (user_id, handle) = match user {
         Ok(Some(row)) => (row.id, row.handle),
         Ok(None) => {
@@ -59,7 +54,6 @@ pub async fn delete_account(
                 .into_response();
         }
     };
-
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -71,7 +65,6 @@ pub async fn delete_account(
                 .into_response();
         }
     };
-
     if let Err(e) = sqlx::query!("DELETE FROM session_tokens WHERE did = $1", did)
         .execute(&mut *tx)
         .await
@@ -83,14 +76,12 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM used_refresh_tokens WHERE session_id IN (SELECT id FROM session_tokens WHERE did = $1)", did)
         .execute(&mut *tx)
         .await
     {
         error!("Failed to delete used refresh tokens for {}: {:?}", did, e);
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM records WHERE repo_id = $1", user_id)
         .execute(&mut *tx)
         .await
@@ -102,7 +93,6 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM repos WHERE user_id = $1", user_id)
         .execute(&mut *tx)
         .await
@@ -114,7 +104,6 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM blobs WHERE created_by_user = $1", user_id)
         .execute(&mut *tx)
         .await
@@ -126,7 +115,6 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM app_passwords WHERE user_id = $1", user_id)
         .execute(&mut *tx)
         .await
@@ -138,21 +126,18 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM invite_code_uses WHERE used_by_user = $1", user_id)
         .execute(&mut *tx)
         .await
     {
         error!("Failed to delete invite code uses for user {}: {:?}", user_id, e);
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM invite_codes WHERE created_by_user = $1", user_id)
         .execute(&mut *tx)
         .await
     {
         error!("Failed to delete invite codes for user {}: {:?}", user_id, e);
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM user_keys WHERE user_id = $1", user_id)
         .execute(&mut *tx)
         .await
@@ -164,7 +149,6 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     if let Err(e) = sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
         .execute(&mut *tx)
         .await
@@ -176,7 +160,6 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
     if let Err(e) = tx.commit().await {
         error!("Failed to commit account deletion transaction: {:?}", e);
         return (
@@ -185,8 +168,9 @@ pub async fn delete_account(
         )
             .into_response();
     }
-
+    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, did, false, Some("deleted")).await {
+        warn!("Failed to sequence account deletion event for {}: {}", did, e);
+    }
     let _ = state.cache.delete(&format!("handle:{}", handle)).await;
-
     (StatusCode::OK, Json(json!({}))).into_response()
 }

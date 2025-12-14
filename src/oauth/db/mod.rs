@@ -5,7 +5,6 @@ mod helpers;
 mod request;
 mod token;
 mod two_factor;
-
 pub use client::{get_authorized_client, upsert_authorized_client};
 pub use device::{
     create_device, delete_device, get_device, get_device_accounts, update_device_last_seen,

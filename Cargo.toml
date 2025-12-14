@@ -2,7 +2,6 @@
 name = "bspds"
 version = "0.1.0"
 edition = "2024"
-
 [dependencies]
 anyhow = "1.0.100"
 async-trait = "0.1.89"
@@ -54,14 +53,11 @@ redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
-
 [features]
 external-infra = []
-
 [dev-dependencies]
 ctor = "0.6.3"
 testcontainers = "0.26.0"
 testcontainers-modules = { version = "0.14.0", features = ["postgres"] }
 wiremock = "0.6.5"
-
 # urlencoding is also in dependencies, but tests use it directly

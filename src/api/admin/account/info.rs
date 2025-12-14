@@ -8,12 +8,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
-
 #[derive(Deserialize)]
 pub struct GetAccountInfoParams {
     pub did: String,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountInfo {
@@ -26,13 +24,11 @@ pub struct AccountInfo {
     pub email_confirmed_at: Option<String>,
     pub deactivated_at: Option<String>,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAccountInfosOutput {
     pub infos: Vec<AccountInfo>,
 }
-
 pub async fn get_account_info(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -46,7 +42,6 @@ pub async fn get_account_info(
         )
             .into_response();
     }
-
     let did = params.did.trim();
     if did.is_empty() {
         return (
@@ -55,7 +50,6 @@ pub async fn get_account_info(
         )
             .into_response();
     }
-
     let result = sqlx::query!(
         r#"
         SELECT did, handle, email, created_at
@@ -66,7 +60,6 @@ pub async fn get_account_info(
     )
     .fetch_optional(&state.db)
     .await;
-
     match result {
         Ok(Some(row)) => {
             (
@@ -99,12 +92,10 @@ pub async fn get_account_info(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct GetAccountInfosParams {
     pub dids: String,
 }
-
 pub async fn get_account_infos(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -118,7 +109,6 @@ pub async fn get_account_infos(
         )
             .into_response();
     }
-
     let dids: Vec<&str> = params.dids.split(',').map(|s| s.trim()).collect();
     if dids.is_empty() {
         return (
@@ -127,14 +117,11 @@ pub async fn get_account_infos(
         )
             .into_response();
     }
-
     let mut infos = Vec::new();
-
     for did in dids {
         if did.is_empty() {
             continue;
         }
-
         let result = sqlx::query!(
             r#"
             SELECT did, handle, email, created_at
@@ -145,7 +132,6 @@ pub async fn get_account_infos(
         )
         .fetch_optional(&state.db)
         .await;
-
         if let Ok(Some(row)) = result {
             infos.push(AccountInfo {
                 did: row.did,
@@ -159,6 +145,5 @@ pub async fn get_account_infos(
             });
         }
     }
-
     (StatusCode::OK, Json(GetAccountInfosOutput { infos })).into_response()
 }

@@ -1,6 +1,5 @@
 [Unit]
 Description=BSPDS minio object storage
-
 [Container]
 ContainerName=bspds-minio
 Image=docker.io/minio/minio:RELEASE.2025-10-15T17-29-55Z
@@ -14,10 +13,8 @@ HealthInterval=30s
 HealthTimeout=10s
 HealthRetries=3
 HealthStartPeriod=10s
-
 [Service]
 Restart=always
 RestartSec=10
-
 [Install]
 WantedBy=default.target

@@ -2,14 +2,11 @@
   import { getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
-
   const auth = getAuthState()
-
   let loading = $state(true)
   let saving = $state(false)
   let error = $state<string | null>(null)
   let success = $state<string | null>(null)
-
   let preferredChannel = $state('email')
   let email = $state('')
   let discordId = $state('')
@@ -18,24 +15,20 @@
   let telegramVerified = $state(false)
   let signalNumber = $state('')
   let signalVerified = $state(false)
-
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
     }
   })
-
   $effect(() => {
     if (auth.session) {
       loadPrefs()
     }
   })
-
   async function loadPrefs() {
     if (!auth.session) return
     loading = true
     error = null
-
     try {
       const prefs = await api.getNotificationPrefs(auth.session.accessJwt)
       preferredChannel = prefs.preferredChannel
@@ -52,15 +45,12 @@
       loading = false
     }
   }
-
   async function handleSave(e: Event) {
     e.preventDefault()
     if (!auth.session) return
-
     saving = true
     error = null
     success = null
-
     try {
       await api.updateNotificationPrefs(auth.session.accessJwt, {
         preferredChannel,
@@ -76,14 +66,12 @@
       saving = false
     }
   }
-
   const channels = [
     { id: 'email', name: 'Email', description: 'Receive notifications via email' },
     { id: 'discord', name: 'Discord', description: 'Receive notifications via Discord DM' },
     { id: 'telegram', name: 'Telegram', description: 'Receive notifications via Telegram' },
     { id: 'signal', name: 'Signal', description: 'Receive notifications via Signal' },
   ]
-
   function canSelectChannel(channelId: string): boolean {
     if (channelId === 'email') return true
     if (channelId === 'discord') return !!discordId
@@ -92,36 +80,30 @@
     return false
   }
 </script>
-
 <div class="page">
   <header>
     <a href="#/dashboard" class="back">&larr; Dashboard</a>
     <h1>Notification Preferences</h1>
   </header>
-
   <p class="description">
     Choose how you want to receive important notifications like password resets,
     security alerts, and account updates.
   </p>
-
   {#if loading}
     <p class="loading">Loading...</p>
   {:else}
     {#if error}
       <div class="message error">{error}</div>
     {/if}
-
     {#if success}
       <div class="message success">{success}</div>
     {/if}
-
     <form onsubmit={handleSave}>
       <section>
         <h2>Preferred Channel</h2>
         <p class="section-description">
           Select your preferred way to receive notifications. You must configure a channel before you can select it.
         </p>
-
         <div class="channel-options">
           {#each channels as channel}
             <label class="channel-option" class:disabled={!canSelectChannel(channel.id)}>
@@ -143,10 +125,8 @@
           {/each}
         </div>
       </section>
-
       <section>
         <h2>Channel Configuration</h2>
-
         <div class="channel-config">
           <div class="config-item">
             <label for="email">Email</label>
@@ -162,7 +142,6 @@
             </div>
             <p class="config-hint">Your email is managed in Account Settings</p>
           </div>
-
           <div class="config-item">
             <label for="discord">Discord User ID</label>
             <div class="config-input">
@@ -183,7 +162,6 @@
             </div>
             <p class="config-hint">Your Discord user ID (not username). Enable Developer Mode in Discord to copy it.</p>
           </div>
-
           <div class="config-item">
             <label for="telegram">Telegram Username</label>
             <div class="config-input">
@@ -204,7 +182,6 @@
             </div>
             <p class="config-hint">Your Telegram username without the @ symbol</p>
           </div>
-
           <div class="config-item">
             <label for="signal">Signal Phone Number</label>
             <div class="config-input">
@@ -227,7 +204,6 @@
           </div>
         </div>
       </section>
-
       <div class="actions">
         <button type="submit" disabled={saving}>
           {saving ? 'Saving...' : 'Save Preferences'}
@@ -236,85 +212,70 @@
     </form>
   {/if}
 </div>
-
 <style>
   .page {
     max-width: 600px;
     margin: 0 auto;
     padding: 2rem;
   }
-
   header {
     margin-bottom: 1rem;
   }
-
   .back {
     color: var(--text-secondary);
     text-decoration: none;
     font-size: 0.875rem;
   }
-
   .back:hover {
     color: var(--accent);
   }
-
   h1 {
     margin: 0.5rem 0 0 0;
   }
-
   .description {
     color: var(--text-secondary);
     margin-bottom: 2rem;
   }
-
   .loading {
     text-align: center;
     color: var(--text-secondary);
     padding: 2rem;
   }
-
   .message {
     padding: 0.75rem;
     border-radius: 4px;
     margin-bottom: 1rem;
   }
-
   .message.error {
     background: var(--error-bg);
     border: 1px solid var(--error-border);
     color: var(--error-text);
   }
-
   .message.success {
     background: var(--success-bg);
     border: 1px solid var(--success-border);
     color: var(--success-text);
   }
-
   section {
     background: var(--bg-secondary);
     padding: 1.5rem;
     border-radius: 8px;
     margin-bottom: 1.5rem;
   }
-
   section h2 {
     margin: 0 0 0.5rem 0;
     font-size: 1.125rem;
   }
-
   .section-description {
     color: var(--text-secondary);
     font-size: 0.875rem;
     margin: 0 0 1rem 0;
   }
-
   .channel-options {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
   }
-
   .channel-option {
     display: flex;
     align-items: flex-start;
@@ -326,64 +287,52 @@
     cursor: pointer;
     transition: border-color 0.15s;
   }
-
   .channel-option:hover:not(.disabled) {
     border-color: var(--accent);
   }
-
   .channel-option.disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
-
   .channel-option input {
     margin-top: 0.25rem;
   }
-
   .channel-info {
     display: flex;
     flex-direction: column;
     gap: 0.125rem;
   }
-
   .channel-name {
     font-weight: 500;
   }
-
   .channel-description {
     font-size: 0.875rem;
     color: var(--text-secondary);
   }
-
   .channel-hint {
     font-size: 0.75rem;
     color: var(--text-muted);
     font-style: italic;
   }
-
   .channel-config {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
   }
-
   .config-item {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
   }
-
   .config-item label {
     font-size: 0.875rem;
     font-weight: 500;
   }
-
   .config-input {
     display: flex;
     align-items: center;
     gap: 0.5rem;
   }
-
   .config-input input {
     flex: 1;
     padding: 0.75rem;
@@ -393,45 +342,37 @@
     background: var(--bg-input);
     color: var(--text-primary);
   }
-
   .config-input input:focus {
     outline: none;
     border-color: var(--accent);
   }
-
   .config-input input.readonly {
     background: var(--bg-input-disabled);
     color: var(--text-secondary);
   }
-
   .status {
     padding: 0.25rem 0.5rem;
     border-radius: 4px;
     font-size: 0.75rem;
     white-space: nowrap;
   }
-
   .status.verified {
     background: var(--success-bg);
     color: var(--success-text);
   }
-
   .status.unverified {
     background: var(--warning-bg);
     color: var(--warning-text);
   }
-
   .config-hint {
     font-size: 0.75rem;
     color: var(--text-secondary);
     margin: 0;
   }
-
   .actions {
     display: flex;
     justify-content: flex-end;
   }
-
   .actions button {
     padding: 0.75rem 2rem;
     background: var(--accent);
@@ -441,11 +382,9 @@
     font-size: 1rem;
     cursor: pointer;
   }
-
   .actions button:hover:not(:disabled) {
     background: var(--accent-hover);
   }
-
   .actions button:disabled {
     opacity: 0.6;
     cursor: not-allowed;

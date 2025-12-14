@@ -1,9 +1,7 @@
 use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-
 pub use crate::common::*;
-
 #[allow(dead_code)]
 pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     let client = client();
@@ -11,7 +9,6 @@ pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     let handle = format!("{}-{}.test", handle_prefix, ts);
     let email = format!("{}-{}@test.com", handle_prefix, ts);
     let password = "e2e-password-123";
-
     let create_account_payload = json!({
         "handle": handle,
         "email": email,
@@ -26,29 +23,23 @@ pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
         .send()
         .await
         .expect("setup_new_user: Failed to send createAccount");
-
     if create_res.status() != reqwest::StatusCode::OK {
         panic!(
             "setup_new_user: Failed to create account: {:?}",
             create_res.text().await
         );
     }
-
     let create_body: Value = create_res
         .json()
         .await
         .expect("setup_new_user: createAccount response was not JSON");
-
     let new_did = create_body["did"]
         .as_str()
         .expect("setup_new_user: Response had no DID")
         .to_string();
-
     let new_jwt = verify_new_account(&client, &new_did).await;
-
     (new_did, new_jwt)
 }
-
 #[allow(dead_code)]
 pub async fn create_post(
     client: &reqwest::Client,
@@ -59,7 +50,6 @@ pub async fn create_post(
     let collection = "app.bsky.feed.post";
     let rkey = format!("e2e_social_{}", Utc::now().timestamp_millis());
     let now = Utc::now().to_rfc3339();
-
     let create_payload = json!({
         "repo": did,
         "collection": collection,
@@ -70,7 +60,6 @@ pub async fn create_post(
             "createdAt": now
         }
     });
-
     let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.putRecord",
@@ -81,7 +70,6 @@ pub async fn create_post(
         .send()
         .await
         .expect("Failed to send create post request");
-
     assert_eq!(
         create_res.status(),
         reqwest::StatusCode::OK,
@@ -95,7 +83,6 @@ pub async fn create_post(
     let cid = create_body["cid"].as_str().unwrap().to_string();
     (uri, cid)
 }
-
 #[allow(dead_code)]
 pub async fn create_follow(
     client: &reqwest::Client,
@@ -106,7 +93,6 @@ pub async fn create_follow(
     let collection = "app.bsky.graph.follow";
     let rkey = format!("e2e_follow_{}", Utc::now().timestamp_millis());
     let now = Utc::now().to_rfc3339();
-
     let create_payload = json!({
         "repo": follower_did,
         "collection": collection,
@@ -117,7 +103,6 @@ pub async fn create_follow(
             "createdAt": now
         }
     });
-
     let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.putRecord",
@@ -128,7 +113,6 @@ pub async fn create_follow(
         .send()
         .await
         .expect("Failed to send create follow request");
-
     assert_eq!(
         create_res.status(),
         reqwest::StatusCode::OK,
@@ -142,7 +126,6 @@ pub async fn create_follow(
     let cid = create_body["cid"].as_str().unwrap().to_string();
     (uri, cid)
 }
-
 #[allow(dead_code)]
 pub async fn create_like(
     client: &reqwest::Client,
@@ -154,7 +137,6 @@ pub async fn create_like(
     let collection = "app.bsky.feed.like";
     let rkey = format!("e2e_like_{}", Utc::now().timestamp_millis());
     let now = Utc::now().to_rfc3339();
-
     let payload = json!({
         "repo": liker_did,
         "collection": collection,
@@ -168,7 +150,6 @@ pub async fn create_like(
             "createdAt": now
         }
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.putRecord",
@@ -179,7 +160,6 @@ pub async fn create_like(
         .send()
         .await
         .expect("Failed to create like");
-
     assert_eq!(res.status(), StatusCode::OK, "Failed to create like");
     let body: Value = res.json().await.expect("Like response not JSON");
     (
@@ -187,7 +167,6 @@ pub async fn create_like(
         body["cid"].as_str().unwrap().to_string(),
     )
 }
-
 #[allow(dead_code)]
 pub async fn create_repost(
     client: &reqwest::Client,
@@ -199,7 +178,6 @@ pub async fn create_repost(
     let collection = "app.bsky.feed.repost";
     let rkey = format!("e2e_repost_{}", Utc::now().timestamp_millis());
     let now = Utc::now().to_rfc3339();
-
     let payload = json!({
         "repo": reposter_did,
         "collection": collection,
@@ -213,7 +191,6 @@ pub async fn create_repost(
             "createdAt": now
         }
     });
-
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.putRecord",
@@ -224,7 +201,6 @@ pub async fn create_repost(
         .send()
         .await
         .expect("Failed to create repost");
-
     assert_eq!(res.status(), StatusCode::OK, "Failed to create repost");
     let body: Value = res.json().await.expect("Repost response not JSON");
     (

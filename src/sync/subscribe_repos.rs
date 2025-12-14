@@ -10,15 +10,12 @@ use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info, warn};
-
 const BACKFILL_BATCH_SIZE: i64 = 1000;
 static SUBSCRIBER_COUNT: AtomicUsize = AtomicUsize::new(0);
-
 #[derive(Deserialize)]
 pub struct SubscribeReposParams {
     pub cursor: Option<i64>,
 }
-
 #[axum::debug_handler]
 pub async fn subscribe_repos(
     ws: WebSocketUpgrade,
@@ -27,7 +24,6 @@ pub async fn subscribe_repos(
 ) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state, params))
 }
-
 async fn send_event(
     socket: &mut WebSocket,
     state: &AppState,
@@ -37,23 +33,18 @@ async fn send_event(
     socket.send(Message::Binary(bytes.into())).await?;
     Ok(())
 }
-
 pub fn get_subscriber_count() -> usize {
     SUBSCRIBER_COUNT.load(Ordering::SeqCst)
 }
-
 async fn handle_socket(mut socket: WebSocket, state: AppState, params: SubscribeReposParams) {
     let count = SUBSCRIBER_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
     crate::metrics::set_firehose_subscribers(count);
     info!(cursor = ?params.cursor, subscribers = count, "New firehose subscriber");
-
     let _ = handle_socket_inner(&mut socket, &state, params).await;
-
     let count = SUBSCRIBER_COUNT.fetch_sub(1, Ordering::SeqCst) - 1;
     crate::metrics::set_firehose_subscribers(count);
     info!(subscribers = count, "Firehose subscriber disconnected");
 }
-
 async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: SubscribeReposParams) -> Result<(), ()> {
     if let Some(cursor) = params.cursor {
         let mut current_cursor = cursor;
@@ -61,7 +52,7 @@ async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: S
             let events = sqlx::query_as!(
                 SequencedEvent,
                 r#"
-                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids
+                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status
                 FROM repo_seq
                 WHERE seq > $1
                 ORDER BY seq ASC
@@ -72,15 +63,12 @@ async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: S
             )
             .fetch_all(&state.db)
             .await;
-
             match events {
                 Ok(events) => {
                     if events.is_empty() {
                         break;
                     }
-
                     let events_count = events.len();
-
                     let prefetched = match prefetch_blocks_for_events(state, &events).await {
                         Ok(blocks) => blocks,
                         Err(e) => {
@@ -89,7 +77,6 @@ async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: S
                             return Err(());
                         }
                     };
-
                     for event in events {
                         current_cursor = event.seq;
                         let bytes = match format_event_with_prefetched_blocks(event, &prefetched).await {
@@ -117,13 +104,11 @@ async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: S
             }
         }
     }
-
     let mut rx = state.firehose_tx.subscribe();
     let max_lag_before_disconnect: u64 = std::env::var("FIREHOSE_MAX_LAG")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(5000);
-
     loop {
         tokio::select! {
             result = rx.recv() => {

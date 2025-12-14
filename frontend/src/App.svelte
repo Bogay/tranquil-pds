@@ -9,13 +9,10 @@
   import Settings from './routes/Settings.svelte'
   import Notifications from './routes/Notifications.svelte'
   import RepoExplorer from './routes/RepoExplorer.svelte'
-
   const auth = getAuthState()
-
   $effect(() => {
     initAuth()
   })
-
   function getComponent(path: string) {
     switch (path) {
       case '/login':
@@ -38,11 +35,9 @@
         return auth.session ? Dashboard : Login
     }
   }
-
   let currentPath = $derived(getCurrentPath())
   let CurrentComponent = $derived(getComponent(currentPath))
 </script>
-
 <main>
   {#if auth.loading}
     <div class="loading">
@@ -52,7 +47,6 @@
     <CurrentComponent />
   {/if}
 </main>
-
 <style>
   :global(:root) {
     --bg-primary: #fafafa;
@@ -76,7 +70,6 @@
     --warning-bg: #ffd;
     --warning-text: #660;
   }
-
   @media (prefers-color-scheme: dark) {
     :global(:root) {
       --bg-primary: #1a1a1a;
@@ -101,7 +94,6 @@
       --warning-text: #c6c67b;
     }
   }
-
   :global(body) {
     margin: 0;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -109,16 +101,13 @@
     color: var(--text-primary);
     background: var(--bg-primary);
   }
-
   :global(*) {
     box-sizing: border-box;
   }
-
   main {
     min-height: 100vh;
     background: var(--bg-primary);
   }
-
   .loading {
     display: flex;
     align-items: center;

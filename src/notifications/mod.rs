@@ -1,7 +1,6 @@
 mod sender;
 mod service;
 mod types;
-
 pub use sender::{
     DiscordSender, EmailSender, NotificationSender, SendError, SignalSender, TelegramSender,
     is_valid_phone_number, sanitize_header_value,

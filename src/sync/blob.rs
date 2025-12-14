@@ -10,20 +10,17 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
-
 #[derive(Deserialize)]
 pub struct GetBlobParams {
     pub did: String,
     pub cid: String,
 }
-
 pub async fn get_blob(
     State(state): State<AppState>,
     Query(params): Query<GetBlobParams>,
 ) -> Response {
     let did = params.did.trim();
     let cid = params.cid.trim();
-
     if did.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -31,7 +28,6 @@ pub async fn get_blob(
         )
             .into_response();
     }
-
     if cid.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -39,11 +35,9 @@ pub async fn get_blob(
         )
             .into_response();
     }
-
     let user_exists = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
-
     match user_exists {
         Ok(None) => {
             return (
@@ -62,16 +56,13 @@ pub async fn get_blob(
         }
         Ok(Some(_)) => {}
     }
-
     let blob_result = sqlx::query!("SELECT storage_key, mime_type FROM blobs WHERE cid = $1", cid)
         .fetch_optional(&state.db)
         .await;
-
     match blob_result {
         Ok(Some(row)) => {
             let storage_key = &row.storage_key;
             let mime_type = &row.mime_type;
-
             match state.blob_store.get(&storage_key).await {
                 Ok(data) => Response::builder()
                     .status(StatusCode::OK)
@@ -103,7 +94,6 @@ pub async fn get_blob(
         }
     }
 }
-
 #[derive(Deserialize)]
 pub struct ListBlobsParams {
     pub did: String,
@@ -111,19 +101,16 @@ pub struct ListBlobsParams {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
-
 #[derive(Serialize)]
 pub struct ListBlobsOutput {
     pub cursor: Option<String>,
     pub cids: Vec<String>,
 }
-
 pub async fn list_blobs(
     State(state): State<AppState>,
     Query(params): Query<ListBlobsParams>,
 ) -> Response {
     let did = params.did.trim();
-
     if did.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -131,14 +118,11 @@ pub async fn list_blobs(
         )
             .into_response();
     }
-
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor_cid = params.cursor.as_deref().unwrap_or("");
-
     let user_result = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
-
     let user_id = match user_result {
         Ok(Some(row)) => row.id,
         Ok(None) => {
@@ -157,7 +141,6 @@ pub async fn list_blobs(
                 .into_response();
         }
     };
-
     let cids_result: Result<Vec<String>, sqlx::Error> = if let Some(since) = &params.since {
         let since_time = chrono::DateTime::parse_from_rfc3339(since)
             .map(|dt| dt.with_timezone(&chrono::Utc))
@@ -193,7 +176,6 @@ pub async fn list_blobs(
         .await
         .map(|rows| rows.into_iter().map(|r| r.cid).collect())
     };
-
     match cids_result {
         Ok(cids) => {
             let has_more = cids.len() as i64 > limit;
@@ -201,13 +183,11 @@ pub async fn list_blobs(
                 .into_iter()
                 .take(limit as usize)
                 .collect();
-
             let next_cursor = if has_more {
                 cids.last().cloned()
             } else {
                 None
             };
-
             (
                 StatusCode::OK,
                 Json(ListBlobsOutput {

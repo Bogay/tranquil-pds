@@ -2,7 +2,6 @@
   import { register, confirmSignup, resendVerification, getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError, type VerificationChannel } from '../lib/api'
-
   let handle = $state('')
   let email = $state('')
   let password = $state('')
@@ -14,34 +13,28 @@
   let signalNumber = $state('')
   let submitting = $state(false)
   let error = $state<string | null>(null)
-
   let pendingVerification = $state<{ did: string; handle: string; channel: string } | null>(null)
   let verificationCode = $state('')
   let resendingCode = $state(false)
   let resendMessage = $state<string | null>(null)
-
   let serverInfo = $state<{
     availableUserDomains: string[]
     inviteCodeRequired: boolean
   } | null>(null)
   let loadingServerInfo = $state(true)
   let serverInfoLoaded = false
-
   const auth = getAuthState()
-
   $effect(() => {
     if (auth.session) {
       navigate('/dashboard')
     }
   })
-
   $effect(() => {
     if (!serverInfoLoaded) {
       serverInfoLoaded = true
       loadServerInfo()
     }
   })
-
   async function loadServerInfo() {
     try {
       serverInfo = await api.describeServer()
@@ -51,7 +44,6 @@
       loadingServerInfo = false
     }
   }
-
   function validateForm(): string | null {
     if (!handle.trim()) return 'Handle is required'
     if (!password) return 'Password is required'
@@ -76,22 +68,18 @@
     }
     return null
   }
-
   async function handleSubmit(e: Event) {
     e.preventDefault()
     console.log('[Register] handleSubmit called')
-
     const validationError = validateForm()
     if (validationError) {
       console.log('[Register] validation error:', validationError)
       error = validationError
       return
     }
-
     submitting = true
     error = null
     console.log('[Register] starting registration...')
-
     try {
       const result = await register({
         handle: handle.trim(),
@@ -104,7 +92,6 @@
         signalNumber: signalNumber.trim() || undefined,
       })
       console.log('[Register] registration result:', result)
-
       if (result.verificationRequired) {
         console.log('[Register] setting pendingVerification')
         pendingVerification = {
@@ -131,15 +118,11 @@
       console.log('[Register] finished, submitting=false')
     }
   }
-
   async function handleVerification(e: Event) {
     e.preventDefault()
-
     if (!pendingVerification || !verificationCode.trim()) return
-
     submitting = true
     error = null
-
     try {
       await confirmSignup(pendingVerification.did, verificationCode.trim())
       navigate('/dashboard')
@@ -149,14 +132,11 @@
       submitting = false
     }
   }
-
   async function handleResendCode() {
     if (!pendingVerification || resendingCode) return
-
     resendingCode = true
     resendMessage = null
     error = null
-
     try {
       await resendVerification(pendingVerification.did)
       resendMessage = 'Verification code resent!'
@@ -166,7 +146,6 @@
       resendingCode = false
     }
   }
-
   let fullHandle = $derived(() => {
     if (!handle.trim()) return ''
     if (handle.includes('.')) return handle.trim()
@@ -174,7 +153,6 @@
     if (domain) return `${handle.trim()}.${domain}`
     return handle.trim()
   })
-
   function channelLabel(ch: string): string {
     switch (ch) {
       case 'email': return 'Email'
@@ -185,25 +163,20 @@
     }
   }
 </script>
-
 <div class="register-container">
   {#if error}
     <div class="error">{error}</div>
   {/if}
-
   {#if pendingVerification}
     <h1>Verify Your Account</h1>
     <p class="subtitle">
       We've sent a verification code to your {channelLabel(pendingVerification.channel)}.
       Enter it below to complete registration.
     </p>
-
     {#if resendMessage}
       <div class="success">{resendMessage}</div>
     {/if}
-
     <form onsubmit={(e) => { e.preventDefault(); handleVerification(e); }}>
-
       <div class="field">
         <label for="verification-code">Verification Code</label>
         <input
@@ -218,11 +191,9 @@
           autocomplete="one-time-code"
         />
       </div>
-
       <button type="submit" disabled={submitting || !verificationCode.trim()}>
         {submitting ? 'Verifying...' : 'Verify Account'}
       </button>
-
       <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
         {resendingCode ? 'Resending...' : 'Resend Code'}
       </button>
@@ -230,7 +201,6 @@
   {:else}
     <h1>Create Account</h1>
     <p class="subtitle">Create a new account on this PDS</p>
-
     {#if loadingServerInfo}
       <p class="loading">Loading...</p>
     {:else}
@@ -249,7 +219,6 @@
             <p class="hint">Your full handle will be: @{fullHandle()}</p>
           {/if}
         </div>
-
         <div class="field">
           <label for="password">Password</label>
           <input
@@ -262,7 +231,6 @@
             minlength="8"
           />
         </div>
-
         <div class="field">
           <label for="confirm-password">Confirm Password</label>
           <input
@@ -274,11 +242,9 @@
             required
           />
         </div>
-
         <fieldset class="verification-section">
           <legend>Contact Method</legend>
           <p class="section-hint">Choose how you'd like to verify your account and receive notifications. You only need one.</p>
-
           <div class="field">
             <label for="verification-channel">Verification Method</label>
             <select
@@ -292,7 +258,6 @@
               <option value="signal">Signal</option>
             </select>
           </div>
-
           {#if verificationChannel === 'email'}
             <div class="field">
               <label for="email">Email Address</label>
@@ -345,7 +310,6 @@
             </div>
           {/if}
         </fieldset>
-
         {#if serverInfo?.inviteCodeRequired}
           <div class="field">
             <label for="invite-code">Invite Code <span class="required">*</span></label>
@@ -370,70 +334,57 @@
             />
           </div>
         {/if}
-
         <button type="submit" disabled={submitting}>
           {submitting ? 'Creating account...' : 'Create Account'}
         </button>
       </form>
-
       <p class="login-link">
         Already have an account? <a href="#/login">Sign in</a>
       </p>
     {/if}
   {/if}
 </div>
-
 <style>
   .register-container {
     max-width: 400px;
     margin: 4rem auto;
     padding: 2rem;
   }
-
   h1 {
     margin: 0 0 0.5rem 0;
   }
-
   .subtitle {
     color: var(--text-secondary);
     margin: 0 0 2rem 0;
   }
-
   .loading {
     text-align: center;
     color: var(--text-secondary);
   }
-
   form {
     display: flex;
     flex-direction: column;
     gap: 1rem;
   }
-
   .field {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
   }
-
   .field.optional {
     opacity: 0.8;
   }
-
   label {
     font-size: 0.875rem;
     font-weight: 500;
   }
-
   .required {
     color: var(--error-text);
   }
-
   .optional-label {
     color: var(--text-secondary);
     font-weight: normal;
   }
-
   input, select {
     padding: 0.75rem;
     border: 1px solid var(--border-color-light);
@@ -442,37 +393,31 @@
     background: var(--bg-input);
     color: var(--text-primary);
   }
-
   input:focus, select:focus {
     outline: none;
     border-color: var(--accent);
   }
-
   .hint {
     font-size: 0.75rem;
     color: var(--text-secondary);
     margin: 0.25rem 0 0 0;
   }
-
   .verification-section {
     border: 1px solid var(--border-color-light);
     border-radius: 6px;
     padding: 1rem;
     margin: 0.5rem 0;
   }
-
   .verification-section legend {
     font-weight: 600;
     padding: 0 0.5rem;
     color: var(--text-primary);
   }
-
   .section-hint {
     font-size: 0.8rem;
     color: var(--text-secondary);
     margin: 0 0 1rem 0;
   }
-
   button {
     padding: 0.75rem;
     background: var(--accent);
@@ -483,27 +428,22 @@
     cursor: pointer;
     margin-top: 0.5rem;
   }
-
   button:hover:not(:disabled) {
     background: var(--accent-hover);
   }
-
   button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
-
   button.secondary {
     background: transparent;
     color: var(--accent);
     border: 1px solid var(--accent);
   }
-
   button.secondary:hover:not(:disabled) {
     background: var(--accent);
     color: white;
   }
-
   .error {
     padding: 0.75rem;
     background: var(--error-bg);
@@ -511,7 +451,6 @@
     border-radius: 4px;
     color: var(--error-text);
   }
-
   .success {
     padding: 0.75rem;
     background: var(--success-bg);
@@ -519,13 +458,11 @@
     border-radius: 4px;
     color: var(--success-text);
   }
-
   .login-link {
     text-align: center;
     margin-top: 1.5rem;
     color: var(--text-secondary);
   }
-
   .login-link a {
     color: var(--accent);
   }

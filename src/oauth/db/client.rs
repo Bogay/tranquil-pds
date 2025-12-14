@@ -1,8 +1,6 @@
 use sqlx::PgPool;
-
 use super::super::{AuthorizedClientData, OAuthError};
 use super::helpers::{from_json, to_json};
-
 pub async fn upsert_authorized_client(
     pool: &PgPool,
     did: &str,
@@ -10,7 +8,6 @@ pub async fn upsert_authorized_client(
     data: &AuthorizedClientData,
 ) -> Result<(), OAuthError> {
     let data_json = to_json(data)?;
-
     sqlx::query!(
         r#"
         INSERT INTO oauth_authorized_client (did, client_id, created_at, updated_at, data)
@@ -23,10 +20,8 @@ pub async fn upsert_authorized_client(
     )
     .execute(pool)
     .await?;
-
     Ok(())
 }
-
 pub async fn get_authorized_client(
     pool: &PgPool,
     did: &str,
@@ -42,7 +37,6 @@ pub async fn get_authorized_client(
     )
     .fetch_optional(pool)
     .await?;
-
     match row {
         Some(v) => Ok(Some(from_json(v)?)),
         None => Ok(None),

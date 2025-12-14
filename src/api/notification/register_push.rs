@@ -10,7 +10,6 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info};
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterPushInput {
@@ -19,9 +18,7 @@ pub struct RegisterPushInput {
     pub platform: String,
     pub app_id: String,
 }
-
 const VALID_PLATFORMS: &[&str] = &["ios", "android", "web"];
-
 pub async fn register_push(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -33,20 +30,16 @@ pub async fn register_push(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-
     let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
-
     if let Err(e) = validate_did(&input.service_did) {
         return ApiError::InvalidRequest(format!("Invalid serviceDid: {}", e)).into_response();
     }
-
     if input.token.is_empty() || input.token.len() > 4096 {
         return ApiError::InvalidRequest("Invalid push token".to_string()).into_response();
     }
-
     if !VALID_PLATFORMS.contains(&input.platform.as_str()) {
         return ApiError::InvalidRequest(format!(
             "Invalid platform. Must be one of: {}",
@@ -54,11 +47,9 @@ pub async fn register_push(
         ))
         .into_response();
     }
-
     if input.app_id.is_empty() || input.app_id.len() > 256 {
         return ApiError::InvalidRequest("Invalid appId".to_string()).into_response();
     }
-
     let appview_url = match std::env::var("APPVIEW_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -66,13 +57,11 @@ pub async fn register_push(
                 .into_response();
         }
     };
-
     if let Err(e) = is_ssrf_safe(&appview_url) {
         error!("SSRF check failed for appview URL: {}", e);
         return ApiError::UpstreamUnavailable(format!("Invalid upstream URL: {}", e))
             .into_response();
     }
-
     let key_row = match sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys k JOIN users u ON k.user_id = u.id WHERE u.did = $1",
         auth_user.did
@@ -90,7 +79,6 @@ pub async fn register_push(
             return ApiError::DatabaseError.into_response();
         }
     };
-
     let decrypted_key =
         match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version) {
             Ok(k) => k,
@@ -99,7 +87,6 @@ pub async fn register_push(
                 return ApiError::InternalError.into_response();
             }
         };
-
     let service_token = match crate::auth::create_service_token(
         &auth_user.did,
         &input.service_did,
@@ -112,7 +99,6 @@ pub async fn register_push(
             return ApiError::InternalError.into_response();
         }
     };
-
     let target_url = format!("{}/xrpc/app.bsky.notification.registerPush", appview_url);
     info!(
         target = %target_url,
@@ -120,7 +106,6 @@ pub async fn register_push(
         platform = %input.platform,
         "Proxying registerPush request"
     );
-
     let client = proxy_client();
     let request_body = json!({
         "serviceDid": input.service_did,
@@ -128,7 +113,6 @@ pub async fn register_push(
         "platform": input.platform,
         "appId": input.app_id
     });
-
     match client
         .post(&target_url)
         .header("Authorization", format!("Bearer {}", service_token))

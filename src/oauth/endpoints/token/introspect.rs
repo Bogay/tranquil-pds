@@ -3,19 +3,15 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-
 use crate::state::{AppState, RateLimitKind};
 use crate::oauth::{OAuthError, db};
-
 use super::helpers::extract_token_claims;
-
 #[derive(Debug, Deserialize)]
 pub struct RevokeRequest {
     pub token: Option<String>,
     #[serde(default)]
     pub token_type_hint: Option<String>,
 }
-
 pub async fn revoke_token(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -26,7 +22,6 @@ pub async fn revoke_token(
         tracing::warn!(ip = %client_ip, "OAuth revoke rate limit exceeded");
         return Err(OAuthError::RateLimited);
     }
-
     if let Some(token) = &request.token {
         if let Some((db_id, _)) = db::get_token_by_refresh_token(&state.db, token).await? {
             db::delete_token_family(&state.db, db_id).await?;
@@ -34,17 +29,14 @@ pub async fn revoke_token(
             db::delete_token(&state.db, token).await?;
         }
     }
-
     Ok(StatusCode::OK)
 }
-
 #[derive(Debug, Deserialize)]
 pub struct IntrospectRequest {
     pub token: String,
     #[serde(default)]
     pub token_type_hint: Option<String>,
 }
-
 #[derive(Debug, Serialize)]
 pub struct IntrospectResponse {
     pub active: bool,
@@ -71,7 +63,6 @@ pub struct IntrospectResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jti: Option<String>,
 }
-
 pub async fn introspect_token(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -82,7 +73,6 @@ pub async fn introspect_token(
         tracing::warn!(ip = %client_ip, "OAuth introspect rate limit exceeded");
         return Err(OAuthError::RateLimited);
     }
-
     let inactive_response = IntrospectResponse {
         active: false,
         scope: None,
@@ -97,24 +87,19 @@ pub async fn introspect_token(
         iss: None,
         jti: None,
     };
-
     let token_info = match extract_token_claims(&request.token) {
         Ok(info) => info,
         Err(_) => return Ok(Json(inactive_response)),
     };
-
     let token_data = match db::get_token_by_id(&state.db, &token_info.jti).await {
         Ok(Some(data)) => data,
         _ => return Ok(Json(inactive_response)),
     };
-
     if token_data.expires_at < Utc::now() {
         return Ok(Json(inactive_response));
     }
-
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let issuer = format!("https://{}", pds_hostname);
-
     Ok(Json(IntrospectResponse {
         active: true,
         scope: token_data.scope,

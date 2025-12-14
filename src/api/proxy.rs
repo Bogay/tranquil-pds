@@ -8,7 +8,6 @@ use axum::{
 use crate::api::proxy_client::proxy_client;
 use std::collections::HashMap;
 use tracing::{error, info};
-
 pub async fn proxy_handler(
     State(state): State<AppState>,
     Path(method): Path<String>,
@@ -21,7 +20,6 @@ pub async fn proxy_handler(
         .get("atproto-proxy")
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
-
     let appview_url = match &proxy_header {
         Some(url) => url.clone(),
         None => match std::env::var("APPVIEW_URL") {
@@ -31,17 +29,11 @@ pub async fn proxy_handler(
             }
         },
     };
-
     let target_url = format!("{}/xrpc/{}", appview_url, method);
-
     info!("Proxying {} request to {}", method_verb, target_url);
-
     let client = proxy_client();
-
     let mut request_builder = client.request(method_verb, &target_url).query(&params);
-
     let mut auth_header_val = headers.get("Authorization").map(|h| h.clone());
-
     if let Some(aud) = &proxy_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(
             headers.get("Authorization").and_then(|h| h.to_str().ok())
@@ -61,19 +53,15 @@ pub async fn proxy_handler(
             }
         }
     }
-
     if let Some(val) = auth_header_val {
         request_builder = request_builder.header("Authorization", val);
     }
-
     for (key, value) in headers.iter() {
         if key != "host" && key != "content-length" && key != "authorization" {
             request_builder = request_builder.header(key, value);
         }
     }
-
     request_builder = request_builder.body(body);
-
     match request_builder.send().await {
         Ok(resp) => {
             let status = resp.status();
@@ -86,13 +74,10 @@ pub async fn proxy_handler(
                         .into_response();
                 }
             };
-
             let mut response_builder = Response::builder().status(status);
-
             for (key, value) in headers.iter() {
                 response_builder = response_builder.header(key, value);
             }
-
             match response_builder.body(axum::body::Body::from(body)) {
                 Ok(r) => r,
                 Err(e) => {
