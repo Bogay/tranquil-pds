@@ -94,6 +94,34 @@ pub fn extract_bearer_token_from_header(auth_header: Option<&str>) -> Option<Str
     Some(token.to_string())
 }
 
+pub struct ExtractedToken {
+    pub token: String,
+    pub is_dpop: bool,
+}
+
+pub fn extract_auth_token_from_header(auth_header: Option<&str>) -> Option<ExtractedToken> {
+    let header = auth_header?;
+    let header = header.trim();
+
+    if header.len() >= 7 && header[..7].eq_ignore_ascii_case("bearer ") {
+        let token = header[7..].trim();
+        if token.is_empty() {
+            return None;
+        }
+        return Some(ExtractedToken { token: token.to_string(), is_dpop: false });
+    }
+
+    if header.len() >= 5 && header[..5].eq_ignore_ascii_case("dpop ") {
+        let token = header[5..].trim();
+        if token.is_empty() {
+            return None;
+        }
+        return Some(ExtractedToken { token: token.to_string(), is_dpop: true });
+    }
+
+    None
+}
+
 impl FromRequestParts<AppState> for BearerAuth {
     type Rejection = AuthError;
 

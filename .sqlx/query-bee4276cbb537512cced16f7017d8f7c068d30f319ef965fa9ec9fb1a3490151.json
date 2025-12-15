@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref,\n                      k.key_bytes as \"key_bytes?\", k.encryption_version as \"encryption_version?\"\n               FROM oauth_token t\n               JOIN users u ON t.did = u.did\n               LEFT JOIN user_keys k ON u.id = k.user_id\n               WHERE t.token_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "takedown_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "key_bytes?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "encryption_version?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "bee4276cbb537512cced16f7017d8f7c068d30f319ef965fa9ec9fb1a3490151"
+}

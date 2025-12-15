@@ -73,7 +73,8 @@ fn munge_profile_with_local(profile: &mut ProfileViewDetailed, local_record: &Va
 async fn proxy_to_appview(
     method: &str,
     params: &HashMap<String, String>,
-    auth_header: Option<&str>,
+    auth_did: &str,
+    auth_key_bytes: Option<&[u8]>,
 ) -> Result<(StatusCode, Value), Response> {
     let appview_url = match std::env::var("APPVIEW_URL") {
         Ok(url) => url,
@@ -87,8 +88,17 @@ async fn proxy_to_appview(
     info!("Proxying GET request to {}", target_url);
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(params);
-    if let Some(auth) = auth_header {
-        request_builder = request_builder.header("Authorization", auth);
+    if let Some(key_bytes) = auth_key_bytes {
+        let appview_did = std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
+        match crate::auth::create_service_token(auth_did, &appview_did, method, key_bytes) {
+            Ok(service_token) => {
+                request_builder = request_builder.header("Authorization", format!("Bearer {}", service_token));
+            }
+            Err(e) => {
+                error!("Failed to create service token: {:?}", e);
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError"}))).into_response());
+            }
+        }
     }
     match request_builder.send().await {
         Ok(resp) => {
@@ -118,21 +128,20 @@ pub async fn get_profile(
     Query(params): Query<GetProfileParams>,
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
-    let auth_did = if let Some(h) = auth_header {
+    let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            match crate::auth::validate_bearer_token(&state.db, &token).await {
-                Ok(user) => Some(user.did),
-                Err(_) => None,
-            }
+            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
         } else {
             None
         }
     } else {
         None
     };
+    let auth_did = auth_user.as_ref().map(|u| u.did.clone());
+    let auth_key_bytes = auth_user.as_ref().and_then(|u| u.key_bytes.clone());
     let mut query_params = HashMap::new();
     query_params.insert("actor".to_string(), params.actor.clone());
-    let (status, body) = match proxy_to_appview("app.bsky.actor.getProfile", &query_params, auth_header).await {
+    let (status, body) = match proxy_to_appview("app.bsky.actor.getProfile", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
         Ok(r) => r,
         Err(e) => return e,
     };
@@ -161,21 +170,20 @@ pub async fn get_profiles(
     Query(params): Query<GetProfilesParams>,
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
-    let auth_did = if let Some(h) = auth_header {
+    let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            match crate::auth::validate_bearer_token(&state.db, &token).await {
-                Ok(user) => Some(user.did),
-                Err(_) => None,
-            }
+            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
         } else {
             None
         }
     } else {
         None
     };
+    let auth_did = auth_user.as_ref().map(|u| u.did.clone());
+    let auth_key_bytes = auth_user.as_ref().and_then(|u| u.key_bytes.clone());
     let mut query_params = HashMap::new();
     query_params.insert("actors".to_string(), params.actors.clone());
-    let (status, body) = match proxy_to_appview("app.bsky.actor.getProfiles", &query_params, auth_header).await {
+    let (status, body) = match proxy_to_appview("app.bsky.actor.getProfiles", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
         Ok(r) => r,
         Err(e) => return e,
     };

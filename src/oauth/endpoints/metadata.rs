@@ -31,6 +31,8 @@ pub struct AuthorizationServerMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_endpoint_auth_methods_supported: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_endpoint_auth_signing_alg_values_supported: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code_challenge_methods_supported: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pushed_authorization_request_endpoint: Option<String>,
@@ -44,6 +46,8 @@ pub struct AuthorizationServerMetadata {
     pub revocation_endpoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub introspection_endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id_metadata_document_supported: Option<bool>,
 }
 
 pub async fn oauth_protected_resource(
@@ -86,6 +90,12 @@ pub async fn oauth_authorization_server(
             "none".to_string(),
             "private_key_jwt".to_string(),
         ]),
+        token_endpoint_auth_signing_alg_values_supported: Some(vec![
+            "ES256".to_string(),
+            "ES384".to_string(),
+            "ES512".to_string(),
+            "EdDSA".to_string(),
+        ]),
         code_challenge_methods_supported: Some(vec!["S256".to_string()]),
         pushed_authorization_request_endpoint: Some(format!("{}/oauth/par", issuer)),
         require_pushed_authorization_requests: Some(true),
@@ -98,6 +108,7 @@ pub async fn oauth_authorization_server(
         authorization_response_iss_parameter_supported: Some(true),
         revocation_endpoint: Some(format!("{}/oauth/revoke", issuer)),
         introspection_endpoint: Some(format!("{}/oauth/introspect", issuer)),
+        client_id_metadata_document_supported: Some(true),
     })
 }
 

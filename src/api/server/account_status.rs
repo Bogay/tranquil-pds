@@ -31,13 +31,24 @@ pub async fn check_account_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let http_uri = format!("https://{}/xrpc/com.atproto.server.checkAccountStatus",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let did = match crate::auth::validate_token_with_dpop(
+        &state.db,
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        "GET",
+        &http_uri,
+        true,
+    ).await {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -101,13 +112,24 @@ pub async fn activate_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let http_uri = format!("https://{}/xrpc/com.atproto.server.activateAccount",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let did = match crate::auth::validate_token_with_dpop(
+        &state.db,
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        "POST",
+        &http_uri,
+        true,
+    ).await {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -148,13 +170,24 @@ pub async fn deactivate_account(
     headers: axum::http::HeaderMap,
     Json(_input): Json<DeactivateAccountInput>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let did = match crate::auth::validate_bearer_token(&state.db, &token).await {
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let http_uri = format!("https://{}/xrpc/com.atproto.server.deactivateAccount",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let did = match crate::auth::validate_token_with_dpop(
+        &state.db,
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        "POST",
+        &http_uri,
+        false,
+    ).await {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -188,13 +221,24 @@ pub async fn request_account_delete(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok())
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let http_uri = format!("https://{}/xrpc/com.atproto.server.requestAccountDelete",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let did = match crate::auth::validate_token_with_dpop(
+        &state.db,
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        "POST",
+        &http_uri,
+        true,
+    ).await {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };

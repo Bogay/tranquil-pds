@@ -7,7 +7,21 @@ use axum::{
 };
 use crate::api::proxy_client::proxy_client;
 use std::collections::HashMap;
-use tracing::{error, info};
+use tracing::error;
+
+fn resolve_service_did(did_with_fragment: &str) -> Option<(String, String)> {
+    if did_with_fragment.starts_with("did:web:") {
+        let without_prefix = &did_with_fragment[8..];
+        let host = without_prefix.split('#').next()?;
+        let url = format!("https://{}", host);
+        let did_without_fragment = format!("did:web:{}", host);
+        Some((url, did_without_fragment))
+    } else if did_with_fragment.starts_with("did:plc:") {
+        None
+    } else {
+        None
+    }
+}
 
 pub async fn proxy_handler(
     State(state): State<AppState>,
@@ -21,21 +35,33 @@ pub async fn proxy_handler(
         .get("atproto-proxy")
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string());
-    let appview_url = match &proxy_header {
-        Some(url) => url.clone(),
-        None => match std::env::var("APPVIEW_URL") {
-            Ok(url) => url,
-            Err(_) => {
-                return (StatusCode::BAD_GATEWAY, "No upstream AppView configured").into_response();
-            }
-        },
+    let (appview_url, service_aud) = match &proxy_header {
+        Some(did_str) => {
+            let (url, did_without_fragment) = match resolve_service_did(did_str) {
+                Some(resolved) => resolved,
+                None => {
+                    error!(did = %did_str, "Could not resolve service DID");
+                    return (StatusCode::BAD_GATEWAY, "Could not resolve service DID").into_response();
+                }
+            };
+            (url, Some(did_without_fragment))
+        }
+        None => {
+            let url = match std::env::var("APPVIEW_URL") {
+                Ok(url) => url,
+                Err(_) => {
+                    return (StatusCode::BAD_GATEWAY, "No upstream AppView configured").into_response();
+                }
+            };
+            let aud = std::env::var("APPVIEW_DID").ok();
+            (url, aud)
+        }
     };
     let target_url = format!("{}/xrpc/{}", appview_url, method);
-    info!("Proxying {} request to {}", method_verb, target_url);
     let client = proxy_client();
     let mut request_builder = client.request(method_verb, &target_url).query(&params);
     let mut auth_header_val = headers.get("Authorization").map(|h| h.clone());
-    if let Some(aud) = &proxy_header {
+    if let Some(aud) = &service_aud {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(
             headers.get("Authorization").and_then(|h| h.to_str().ok())
         ) {

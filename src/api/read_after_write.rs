@@ -229,10 +229,21 @@ pub struct ProxyResponse {
     pub body: bytes::Bytes,
 }
 
+impl ProxyResponse {
+    pub fn into_response(self) -> Response {
+        let mut response = Response::builder().status(self.status);
+        for (key, value) in self.headers.iter() {
+            response = response.header(key, value);
+        }
+        response.body(axum::body::Body::from(self.body)).unwrap()
+    }
+}
+
 pub async fn proxy_to_appview(
     method: &str,
     params: &HashMap<String, String>,
-    auth_header: Option<&str>,
+    auth_did: &str,
+    auth_key_bytes: Option<&[u8]>,
 ) -> Result<ProxyResponse, Response> {
     let appview_url = std::env::var("APPVIEW_URL").map_err(|_| {
         ApiError::UpstreamUnavailable("No upstream AppView configured".to_string()).into_response()
@@ -246,8 +257,17 @@ pub async fn proxy_to_appview(
     info!(target = %target_url, "Proxying request to appview");
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(params);
-    if let Some(auth) = auth_header {
-        request_builder = request_builder.header("Authorization", auth);
+    if let Some(key_bytes) = auth_key_bytes {
+        let appview_did = std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
+        match crate::auth::create_service_token(auth_did, &appview_did, method, key_bytes) {
+            Ok(service_token) => {
+                request_builder = request_builder.header("Authorization", format!("Bearer {}", service_token));
+            }
+            Err(e) => {
+                error!(error = ?e, "Failed to create service token");
+                return Err(ApiError::InternalError.into_response());
+            }
+        }
     }
     match request_builder.send().await {
         Ok(resp) => {

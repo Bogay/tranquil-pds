@@ -10,7 +10,7 @@ pub mod extractor;
 pub mod token;
 pub mod verify;
 
-pub use extractor::{BearerAuth, BearerAuthAllowDeactivated, AuthError, extract_bearer_token_from_header};
+pub use extractor::{BearerAuth, BearerAuthAllowDeactivated, AuthError, extract_bearer_token_from_header, extract_auth_token_from_header, ExtractedToken};
 pub use token::{
     create_access_token, create_refresh_token, create_service_token,
     create_access_token_with_metadata, create_refresh_token_with_metadata,
@@ -195,9 +195,11 @@ async fn validate_bearer_token_with_options_internal(
 
     if let Ok(oauth_info) = crate::oauth::verify::extract_oauth_token_info(token) {
         if let Some(oauth_token) = sqlx::query!(
-            r#"SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref
+            r#"SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref,
+                      k.key_bytes as "key_bytes?", k.encryption_version as "encryption_version?"
                FROM oauth_token t
                JOIN users u ON t.did = u.did
+               LEFT JOIN user_keys k ON u.id = k.user_id
                WHERE t.token_id = $1"#,
             oauth_info.token_id
         )
@@ -216,9 +218,14 @@ async fn validate_bearer_token_with_options_internal(
 
             let now = chrono::Utc::now();
             if oauth_token.expires_at > now {
+                let key_bytes = if let (Some(kb), Some(ev)) = (&oauth_token.key_bytes, oauth_token.encryption_version) {
+                    crate::config::decrypt_key(kb, Some(ev)).ok()
+                } else {
+                    None
+                };
                 return Ok(AuthenticatedUser {
                     did: oauth_token.did,
-                    key_bytes: None,
+                    key_bytes,
                     is_oauth: true,
                 });
             }
@@ -231,6 +238,69 @@ async fn validate_bearer_token_with_options_internal(
 pub async fn invalidate_auth_cache(cache: &Arc<dyn Cache>, did: &str) {
     let key_cache_key = format!("auth:key:{}", did);
     let _ = cache.delete(&key_cache_key).await;
+}
+
+pub async fn validate_token_with_dpop(
+    db: &PgPool,
+    token: &str,
+    is_dpop_token: bool,
+    dpop_proof: Option<&str>,
+    http_method: &str,
+    http_uri: &str,
+    allow_deactivated: bool,
+) -> Result<AuthenticatedUser, TokenValidationError> {
+    if !is_dpop_token {
+        if allow_deactivated {
+            return validate_bearer_token_allow_deactivated(db, token).await;
+        } else {
+            return validate_bearer_token(db, token).await;
+        }
+    }
+    match crate::oauth::verify::verify_oauth_access_token(db, token, dpop_proof, http_method, http_uri).await {
+        Ok(result) => {
+            if !allow_deactivated {
+                let deactivated = sqlx::query_scalar!(
+                    "SELECT deactivated_at FROM users WHERE did = $1",
+                    result.did
+                )
+                .fetch_optional(db)
+                .await
+                .ok()
+                .flatten()
+                .flatten();
+                if deactivated.is_some() {
+                    return Err(TokenValidationError::AccountDeactivated);
+                }
+            }
+            let takedown = sqlx::query_scalar!(
+                "SELECT takedown_ref FROM users WHERE did = $1",
+                result.did
+            )
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+            if takedown.is_some() {
+                return Err(TokenValidationError::AccountTakedown);
+            }
+            let key_bytes = sqlx::query!(
+                "SELECT k.key_bytes, k.encryption_version FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1",
+                result.did
+            )
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| crate::config::decrypt_key(&row.key_bytes, row.encryption_version).ok());
+            Ok(AuthenticatedUser {
+                did: result.did,
+                key_bytes,
+                is_oauth: true,
+            })
+        }
+        Err(_) => Err(TokenValidationError::AuthenticationFailed),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

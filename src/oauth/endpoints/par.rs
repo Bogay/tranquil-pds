@@ -50,7 +50,7 @@ pub async fn pushed_authorization_request(
     State(state): State<AppState>,
     headers: HeaderMap,
     Form(request): Form<ParRequest>,
-) -> Result<Json<ParResponse>, OAuthError> {
+) -> Result<(axum::http::StatusCode, Json<ParResponse>), OAuthError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
     if !state.check_rate_limit(RateLimitKind::OAuthPar, &client_ip).await {
         tracing::warn!(ip = %client_ip, "OAuth PAR rate limit exceeded");
@@ -63,9 +63,7 @@ pub async fn pushed_authorization_request(
     }
     let code_challenge = request.code_challenge.as_ref()
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| OAuthError::InvalidRequest(
-            "code_challenge is required".to_string(),
-        ))?;
+        .ok_or_else(|| OAuthError::InvalidRequest("code_challenge is required".to_string()))?;
     let code_challenge_method = request.code_challenge_method.as_deref().unwrap_or("");
     if code_challenge_method != "S256" {
         return Err(OAuthError::InvalidRequest(
@@ -76,11 +74,6 @@ pub async fn pushed_authorization_request(
     let client_metadata = client_cache.get(&request.client_id).await?;
     client_cache.validate_redirect_uri(&client_metadata, &request.redirect_uri)?;
     let client_auth = determine_client_auth(&request)?;
-    if client_metadata.requires_dpop() && request.dpop_jkt.is_none() {
-        return Err(OAuthError::InvalidRequest(
-            "dpop_jkt is required for this client".to_string(),
-        ));
-    }
     let validated_scope = validate_scope(&request.scope, &client_metadata)?;
     let request_id = RequestId::generate();
     let expires_at = Utc::now() + Duration::seconds(PAR_EXPIRY_SECONDS);
@@ -114,10 +107,13 @@ pub async fn pushed_authorization_request(
             }
         }
     });
-    Ok(Json(ParResponse {
-        request_uri: request_id.0,
-        expires_in: PAR_EXPIRY_SECONDS as u64,
-    }))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(ParResponse {
+            request_uri: request_id.0,
+            expires_in: PAR_EXPIRY_SECONDS as u64,
+        }),
+    ))
 }
 
 fn determine_client_auth(request: &ParRequest) -> Result<ClientAuth, OAuthError> {

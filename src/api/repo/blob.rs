@@ -147,6 +147,7 @@ pub async fn upload_blob(
     }
     Json(json!({
         "blob": {
+            "$type": "blob",
             "ref": {
                 "$link": cid_str
             },

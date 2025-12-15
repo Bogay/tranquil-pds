@@ -30,13 +30,13 @@ pub async fn get_feed(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    if let Err(e) = crate::auth::validate_bearer_token(&state.db, &token).await {
-        return ApiError::from(e).into_response();
+    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+        Ok(user) => user,
+        Err(e) => return ApiError::from(e).into_response(),
     };
     if let Err(e) = validate_at_uri(&params.feed) {
         return ApiError::InvalidRequest(format!("Invalid feed URI: {}", e)).into_response();
     }
-    let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let appview_url = match std::env::var("APPVIEW_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -60,8 +60,17 @@ pub async fn get_feed(
     info!(target = %target_url, feed = %params.feed, "Proxying getFeed request");
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(&query_params);
-    if let Some(auth) = auth_header {
-        request_builder = request_builder.header("Authorization", auth);
+    if let Some(key_bytes) = auth_user.key_bytes.as_ref() {
+        let appview_did = std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
+        match crate::auth::create_service_token(&auth_user.did, &appview_did, "app.bsky.feed.getFeed", key_bytes) {
+            Ok(service_token) => {
+                request_builder = request_builder.header("Authorization", format!("Bearer {}", service_token));
+            }
+            Err(e) => {
+                error!(error = ?e, "Failed to create service token for getFeed");
+                return ApiError::InternalError.into_response();
+            }
+        }
     }
     match request_builder.send().await {
         Ok(resp) => {

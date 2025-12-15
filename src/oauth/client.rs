@@ -86,7 +86,52 @@ impl ClientMetadataCache {
         }
     }
 
+    fn is_loopback_client(client_id: &str) -> bool {
+        if let Ok(url) = reqwest::Url::parse(client_id) {
+            url.scheme() == "http"
+                && url.host_str() == Some("localhost")
+                && url.port().is_none()
+        } else {
+            false
+        }
+    }
+
+    fn build_loopback_metadata(client_id: &str) -> Result<ClientMetadata, OAuthError> {
+        let url = reqwest::Url::parse(client_id).map_err(|_| {
+            OAuthError::InvalidClient("Invalid loopback client_id URL".to_string())
+        })?;
+        let mut redirect_uris = Vec::new();
+        for (key, value) in url.query_pairs() {
+            if key == "redirect_uri" {
+                redirect_uris.push(value.to_string());
+            }
+        }
+        if redirect_uris.is_empty() {
+            redirect_uris.push("http://127.0.0.1/callback".to_string());
+            redirect_uris.push("http://localhost/callback".to_string());
+        }
+        let scope = Some("atproto transition:generic transition:chat.bsky".to_string());
+        Ok(ClientMetadata {
+            client_id: client_id.to_string(),
+            client_name: Some("Loopback Client".to_string()),
+            client_uri: None,
+            logo_uri: None,
+            redirect_uris,
+            grant_types: vec!["authorization_code".to_string(), "refresh_token".to_string()],
+            response_types: vec!["code".to_string()],
+            scope,
+            token_endpoint_auth_method: Some("none".to_string()),
+            dpop_bound_access_tokens: Some(false),
+            jwks: None,
+            jwks_uri: None,
+            application_type: Some("native".to_string()),
+        })
+    }
+
     pub async fn get(&self, client_id: &str) -> Result<ClientMetadata, OAuthError> {
+        if Self::is_loopback_client(client_id) {
+            return Self::build_loopback_metadata(client_id);
+        }
         {
             let cache = self.cache.read().await;
             if let Some(cached) = cache.get(client_id) {
@@ -250,12 +295,34 @@ impl ClientMetadataCache {
         metadata: &ClientMetadata,
         redirect_uri: &str,
     ) -> Result<(), OAuthError> {
-        if !metadata.redirect_uris.contains(&redirect_uri.to_string()) {
-            return Err(OAuthError::InvalidRequest(
-                "redirect_uri not registered for client".to_string(),
-            ));
+        if metadata.redirect_uris.contains(&redirect_uri.to_string()) {
+            return Ok(());
         }
-        Ok(())
+        if Self::is_loopback_client(&metadata.client_id) {
+            if let Ok(req_url) = reqwest::Url::parse(redirect_uri) {
+                let req_host = req_url.host_str().unwrap_or("");
+                let is_loopback_redirect = req_url.scheme() == "http"
+                    && (req_host == "localhost" || req_host == "127.0.0.1" || req_host == "[::1]");
+                if is_loopback_redirect {
+                    for registered in &metadata.redirect_uris {
+                        if let Ok(reg_url) = reqwest::Url::parse(registered) {
+                            let reg_host = reg_url.host_str().unwrap_or("");
+                            let hosts_match = (req_host == "localhost" && reg_host == "localhost")
+                                || (req_host == "127.0.0.1" && reg_host == "127.0.0.1")
+                                || (req_host == "[::1]" && reg_host == "[::1]")
+                                || (req_host == "localhost" && reg_host == "127.0.0.1")
+                                || (req_host == "127.0.0.1" && reg_host == "localhost");
+                            if hosts_match && req_url.path() == reg_url.path() {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(OAuthError::InvalidRequest(
+            "redirect_uri not registered for client".to_string(),
+        ))
     }
 
     fn validate_redirect_uri_format(&self, uri: &str) -> Result<(), OAuthError> {
@@ -344,13 +411,14 @@ async fn verify_private_key_jwt_async(
     metadata: &ClientMetadata,
     client_assertion: &str,
 ) -> Result<(), OAuthError> {
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use base64::{Engine as _, engine::general_purpose::{URL_SAFE_NO_PAD, STANDARD}};
     let parts: Vec<&str> = client_assertion.split('.').collect();
     if parts.len() != 3 {
         return Err(OAuthError::InvalidClient("Invalid client_assertion format".to_string()));
     }
     let header_bytes = URL_SAFE_NO_PAD
         .decode(parts[0])
+        .or_else(|_| STANDARD.decode(parts[0]))
         .map_err(|_| OAuthError::InvalidClient("Invalid assertion header encoding".to_string()))?;
     let header: serde_json::Value = serde_json::from_slice(&header_bytes)
         .map_err(|_| OAuthError::InvalidClient("Invalid assertion header JSON".to_string()))?;
@@ -366,7 +434,11 @@ async fn verify_private_key_jwt_async(
     let kid = header.get("kid").and_then(|k| k.as_str());
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(parts[1])
-        .map_err(|_| OAuthError::InvalidClient("Invalid assertion payload encoding".to_string()))?;
+        .or_else(|_| STANDARD.decode(parts[1]))
+        .map_err(|e| {
+            tracing::warn!(error = %e, payload_part = parts[1], "Invalid assertion payload encoding");
+            OAuthError::InvalidClient("Invalid assertion payload encoding".to_string())
+        })?;
     let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
         .map_err(|_| OAuthError::InvalidClient("Invalid assertion payload JSON".to_string()))?;
     let iss = payload.get("iss").and_then(|i| i.as_str()).ok_or_else(|| {
@@ -385,14 +457,24 @@ async fn verify_private_key_jwt_async(
             "client_assertion sub does not match client_id".to_string(),
         ));
     }
-    let exp = payload.get("exp").and_then(|e| e.as_i64()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing exp in client_assertion".to_string())
-    })?;
     let now = chrono::Utc::now().timestamp();
-    if exp < now {
-        return Err(OAuthError::InvalidClient("client_assertion has expired".to_string()));
-    }
+    let exp = payload.get("exp").and_then(|e| e.as_i64());
     let iat = payload.get("iat").and_then(|i| i.as_i64());
+    if let Some(exp) = exp {
+        if exp < now {
+            return Err(OAuthError::InvalidClient("client_assertion has expired".to_string()));
+        }
+    } else if let Some(iat) = iat {
+        let max_age_secs = 300;
+        if now - iat > max_age_secs {
+            tracing::warn!(iat = iat, now = now, "client_assertion too old (no exp, using iat)");
+            return Err(OAuthError::InvalidClient("client_assertion is too old".to_string()));
+        }
+    } else {
+        return Err(OAuthError::InvalidClient(
+            "client_assertion must have exp or iat claim".to_string(),
+        ));
+    }
     if let Some(iat) = iat {
         if iat > now + 60 {
             return Err(OAuthError::InvalidClient(

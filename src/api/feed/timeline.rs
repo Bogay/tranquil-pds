@@ -52,7 +52,7 @@ pub async fn get_timeline(
     };
     match std::env::var("APPVIEW_URL") {
         Ok(url) if !url.starts_with("http://127.0.0.1") => {
-            return get_timeline_with_appview(&state, &headers, &params, &auth_user.did).await;
+            return get_timeline_with_appview(&state, &params, &auth_user.did, auth_user.key_bytes.as_deref()).await;
         }
         _ => {}
     }
@@ -61,11 +61,10 @@ pub async fn get_timeline(
 
 async fn get_timeline_with_appview(
     state: &AppState,
-    headers: &axum::http::HeaderMap,
     params: &GetTimelineParams,
     auth_did: &str,
+    auth_key_bytes: Option<&[u8]>,
 ) -> Response {
-    let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let mut query_params = HashMap::new();
     if let Some(algo) = &params.algorithm {
         query_params.insert("algorithm".to_string(), algo.clone());
@@ -77,34 +76,34 @@ async fn get_timeline_with_appview(
         query_params.insert("cursor".to_string(), cursor.clone());
     }
     let proxy_result =
-        match proxy_to_appview("app.bsky.feed.getTimeline", &query_params, auth_header).await {
+        match proxy_to_appview("app.bsky.feed.getTimeline", &query_params, auth_did, auth_key_bytes).await {
             Ok(r) => r,
             Err(e) => return e,
         };
     if !proxy_result.status.is_success() {
-        return (proxy_result.status, proxy_result.body).into_response();
+        return proxy_result.into_response();
     }
     let rev = extract_repo_rev(&proxy_result.headers);
     if rev.is_none() {
-        return (proxy_result.status, proxy_result.body).into_response();
+        return proxy_result.into_response();
     }
     let rev = rev.unwrap();
     let mut feed_output: FeedOutput = match serde_json::from_slice(&proxy_result.body) {
         Ok(f) => f,
         Err(e) => {
             warn!("Failed to parse timeline response: {:?}", e);
-            return (proxy_result.status, proxy_result.body).into_response();
+            return proxy_result.into_response();
         }
     };
     let local_records = match get_records_since_rev(state, auth_did, &rev).await {
         Ok(r) => r,
         Err(e) => {
             warn!("Failed to get local records: {}", e);
-            return (proxy_result.status, proxy_result.body).into_response();
+            return proxy_result.into_response();
         }
     };
     if local_records.count == 0 {
-        return (proxy_result.status, proxy_result.body).into_response();
+        return proxy_result.into_response();
     }
     let handle = match sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", auth_did)
         .fetch_optional(&state.db)

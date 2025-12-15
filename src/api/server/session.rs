@@ -29,6 +29,15 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     "unknown".to_string()
 }
 
+fn normalize_handle(identifier: &str, pds_hostname: &str) -> String {
+    let suffix = format!(".{}", pds_hostname);
+    if identifier.ends_with(&suffix) {
+        identifier[..identifier.len() - suffix.len()].to_string()
+    } else {
+        identifier.to_string()
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreateSessionInput {
     pub identifier: String,
@@ -62,6 +71,8 @@ pub async fn create_session(
         )
             .into_response();
     }
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let normalized_identifier = normalize_handle(&input.identifier, &pds_hostname);
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.password_hash,
@@ -70,7 +81,7 @@ pub async fn create_session(
         FROM users u
         JOIN user_keys k ON u.id = k.user_id
         WHERE u.handle = $1 OR u.email = $1"#,
-        input.identifier
+        normalized_identifier
     )
     .fetch_optional(&state.db)
     .await
@@ -152,10 +163,11 @@ pub async fn create_session(
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError.into_response();
     }
+    let full_handle = format!("{}.{}", row.handle, pds_hostname);
     Json(CreateSessionOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
-        handle: row.handle,
+        handle: full_handle,
         did: row.did,
     }).into_response()
 }
@@ -182,13 +194,16 @@ pub async fn get_session(
                 crate::notifications::NotificationChannel::Telegram => ("telegram", row.telegram_verified),
                 crate::notifications::NotificationChannel::Signal => ("signal", row.signal_verified),
             };
+            let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+            let full_handle = format!("{}.{}", row.handle, pds_hostname);
             Json(json!({
-                "handle": row.handle,
+                "handle": full_handle,
                 "did": auth_user.did,
                 "email": row.email,
                 "emailConfirmed": row.email_confirmed,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
+                "active": true,
                 "didDoc": {}
             })).into_response()
         }
@@ -381,15 +396,18 @@ pub async fn refresh_session(
                 crate::notifications::NotificationChannel::Telegram => ("telegram", u.telegram_verified),
                 crate::notifications::NotificationChannel::Signal => ("signal", u.signal_verified),
             };
+            let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+            let full_handle = format!("{}.{}", u.handle, pds_hostname);
             Json(json!({
                 "accessJwt": new_access_meta.token,
                 "refreshJwt": new_refresh_meta.token,
-                "handle": u.handle,
+                "handle": full_handle,
                 "did": session_row.did,
                 "email": u.email,
                 "emailConfirmed": u.email_confirmed,
                 "preferredChannel": preferred_channel,
-                "preferredChannelVerified": preferred_channel_verified
+                "preferredChannelVerified": preferred_channel_verified,
+                "active": true
             })).into_response()
         }
         Ok(None) => {

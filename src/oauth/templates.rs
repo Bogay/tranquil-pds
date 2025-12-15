@@ -394,8 +394,8 @@ pub fn login_page(
                     <label for="remember_device">Remember this device</label>
                 </div>
                 <div class="buttons">
-                    <button type="submit" formaction="/oauth/authorize/deny" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Sign in</button>
+                    <button type="submit" formaction="/oauth/authorize/deny" class="btn btn-secondary">Cancel</button>
                 </div>
             </form>
             <div class="footer">

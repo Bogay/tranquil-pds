@@ -126,18 +126,17 @@ pub async fn get_post_thread(
     Query(params): Query<GetPostThreadParams>,
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
-    let auth_did = if let Some(h) = auth_header {
+    let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            match crate::auth::validate_bearer_token(&state.db, &token).await {
-                Ok(user) => Some(user.did),
-                Err(_) => None,
-            }
+            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
         } else {
             None
         }
     } else {
         None
     };
+    let auth_did = auth_user.as_ref().map(|u| u.did.clone());
+    let auth_key_bytes = auth_user.as_ref().and_then(|u| u.key_bytes.clone());
     let mut query_params = HashMap::new();
     query_params.insert("uri".to_string(), params.uri.clone());
     if let Some(depth) = params.depth {
@@ -147,7 +146,7 @@ pub async fn get_post_thread(
         query_params.insert("parentHeight".to_string(), parent_height.to_string());
     }
     let proxy_result =
-        match proxy_to_appview("app.bsky.feed.getPostThread", &query_params, auth_header).await {
+        match proxy_to_appview("app.bsky.feed.getPostThread", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
             Ok(r) => r,
             Err(e) => return e,
         };
@@ -155,17 +154,17 @@ pub async fn get_post_thread(
         return handle_not_found(&state, &params.uri, auth_did, &proxy_result.headers).await;
     }
     if !proxy_result.status.is_success() {
-        return (proxy_result.status, proxy_result.body).into_response();
+        return proxy_result.into_response();
     }
     let rev = match extract_repo_rev(&proxy_result.headers) {
         Some(r) => r,
-        None => return (proxy_result.status, proxy_result.body).into_response(),
+        None => return proxy_result.into_response(),
     };
     let mut thread_output: PostThreadOutput = match serde_json::from_slice(&proxy_result.body) {
         Ok(t) => t,
         Err(e) => {
             warn!("Failed to parse post thread response: {:?}", e);
-            return (proxy_result.status, proxy_result.body).into_response();
+            return proxy_result.into_response();
         }
     };
     let requester_did = match auth_did {
@@ -176,7 +175,7 @@ pub async fn get_post_thread(
         Ok(r) => r,
         Err(e) => {
             warn!("Failed to get local records: {}", e);
-            return (proxy_result.status, proxy_result.body).into_response();
+            return proxy_result.into_response();
         }
     };
     if local_records.posts.is_empty() {

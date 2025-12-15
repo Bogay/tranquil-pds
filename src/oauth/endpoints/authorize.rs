@@ -1,7 +1,7 @@
 use axum::{
     Form, Json,
     extract::{Query, State},
-    http::{HeaderMap, header::SET_COOKIE},
+    http::{HeaderMap, StatusCode, header::{SET_COOKIE, LOCATION}},
     response::{IntoResponse, Redirect, Response, Html},
 };
 use chrono::Utc;
@@ -13,6 +13,10 @@ use crate::oauth::{Code, DeviceAccount, DeviceData, DeviceId, OAuthError, Sessio
 use crate::notifications::{NotificationChannel, channel_display_name, enqueue_2fa_code};
 
 const DEVICE_COOKIE_NAME: &str = "oauth_device_id";
+
+fn redirect_see_other(uri: &str) -> Response {
+    (StatusCode::SEE_OTHER, [(LOCATION, uri.to_string())]).into_response()
+}
 
 fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
     headers
@@ -346,6 +350,20 @@ pub async fn authorize_post(
             Some(&form.username),
         )).into_response()
     };
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let normalized_username = form.username.trim();
+    let normalized_username = normalized_username.strip_prefix('@').unwrap_or(normalized_username);
+    let normalized_username = if let Some(bare_handle) = normalized_username.strip_suffix(&format!(".{}", pds_hostname)) {
+        bare_handle.to_string()
+    } else {
+        normalized_username.to_string()
+    };
+    tracing::debug!(
+        original_username = %form.username,
+        normalized_username = %normalized_username,
+        pds_hostname = %pds_hostname,
+        "Normalized username for lookup"
+    );
     let user = match sqlx::query!(
         r#"
         SELECT id, did, email, password_hash, two_factor_enabled,
@@ -354,7 +372,7 @@ pub async fn authorize_post(
         FROM users
         WHERE handle = $1 OR email = $1
         "#,
-        form.username
+        normalized_username
     )
     .fetch_optional(&state.db)
     .await
@@ -447,11 +465,10 @@ pub async fn authorize_post(
         &code.0,
         request_data.parameters.state.as_deref(),
     );
-    let redirect = Redirect::temporary(&redirect_url);
     if let Some(cookie) = new_cookie {
-        ([(SET_COOKIE, cookie)], redirect).into_response()
+        (StatusCode::SEE_OTHER, [(SET_COOKIE, cookie), (LOCATION, redirect_url)]).into_response()
     } else {
-        redirect.into_response()
+        redirect_see_other(&redirect_url)
     }
 }
 
@@ -586,7 +603,7 @@ pub async fn authorize_select(
         &code.0,
         request_data.parameters.state.as_deref(),
     );
-    Redirect::temporary(&redirect_url).into_response()
+    redirect_see_other(&redirect_url)
 }
 
 fn build_success_redirect(redirect_uri: &str, code: &str, state: Option<&str>) -> String {
@@ -625,7 +642,7 @@ pub async fn authorize_deny(
     if let Some(state) = &request_data.parameters.state {
         redirect_url.push_str(&format!("&state={}", url_encode(state)));
     }
-    Ok(Redirect::temporary(&redirect_url).into_response())
+    Ok(redirect_see_other(&redirect_url))
 }
 
 #[derive(Debug, Deserialize)]
@@ -812,5 +829,5 @@ pub async fn authorize_2fa_post(
         &code.0,
         request_data.parameters.state.as_deref(),
     );
-    Redirect::temporary(&redirect_url).into_response()
+    redirect_see_other(&redirect_url)
 }

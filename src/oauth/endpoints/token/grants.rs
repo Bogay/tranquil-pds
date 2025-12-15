@@ -42,10 +42,23 @@ pub async fn handle_authorization_code_grant(
         .did
         .ok_or_else(|| OAuthError::InvalidGrant("Authorization not completed".to_string()))?;
     let client_metadata_cache = ClientMetadataCache::new(3600);
-    let client_metadata = client_metadata_cache
-        .get(&auth_request.client_id)
-        .await?;
-    let client_auth = auth_request.client_auth.clone().unwrap_or(ClientAuth::None);
+    let client_metadata = client_metadata_cache.get(&auth_request.client_id).await?;
+    let client_auth = if let (Some(assertion), Some(assertion_type)) = (&request.client_assertion, &request.client_assertion_type) {
+        if assertion_type != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
+            return Err(OAuthError::InvalidClient(
+                "Unsupported client_assertion_type".to_string(),
+            ));
+        }
+        ClientAuth::PrivateKeyJwt {
+            client_assertion: assertion.clone(),
+        }
+    } else if let Some(secret) = &request.client_secret {
+        ClientAuth::SecretPost {
+            client_secret: secret.clone(),
+        }
+    } else {
+        ClientAuth::None
+    };
     verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
     verify_pkce(&auth_request.parameters.code_challenge, &code_verifier)?;
     if let Some(redirect_uri) = &request.redirect_uri {
