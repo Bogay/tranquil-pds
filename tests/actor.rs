@@ -1,6 +1,7 @@
 mod common;
 use common::{base_url, client, create_account_and_login};
 use serde_json::{json, Value};
+
 #[tokio::test]
 async fn test_get_preferences_empty() {
     let client = client();
@@ -17,6 +18,7 @@ async fn test_get_preferences_empty() {
     assert!(body.get("preferences").is_some());
     assert!(body["preferences"].as_array().unwrap().is_empty());
 }
+
 #[tokio::test]
 async fn test_get_preferences_no_auth() {
     let client = client();
@@ -28,6 +30,7 @@ async fn test_get_preferences_no_auth() {
         .unwrap();
     assert_eq!(resp.status(), 401);
 }
+
 #[tokio::test]
 async fn test_put_preferences_success() {
     let client = client();
@@ -70,6 +73,7 @@ async fn test_put_preferences_success() {
     assert!(adult_pref.is_some());
     assert_eq!(adult_pref.unwrap()["enabled"], true);
 }
+
 #[tokio::test]
 async fn test_put_preferences_no_auth() {
     let client = client();
@@ -85,6 +89,7 @@ async fn test_put_preferences_no_auth() {
         .unwrap();
     assert_eq!(resp.status(), 401);
 }
+
 #[tokio::test]
 async fn test_put_preferences_missing_type() {
     let client = client();
@@ -108,6 +113,7 @@ async fn test_put_preferences_missing_type() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_put_preferences_invalid_namespace() {
     let client = client();
@@ -132,6 +138,7 @@ async fn test_put_preferences_invalid_namespace() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_put_preferences_read_only_rejected() {
     let client = client();
@@ -156,6 +163,7 @@ async fn test_put_preferences_read_only_rejected() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_put_preferences_replaces_all() {
     let client = client();
@@ -208,6 +216,7 @@ async fn test_put_preferences_replaces_all() {
     assert_eq!(prefs_arr.len(), 1);
     assert_eq!(prefs_arr[0]["$type"], "app.bsky.actor.defs#threadViewPref");
 }
+
 #[tokio::test]
 async fn test_put_preferences_saved_feeds() {
     let client = client();
@@ -249,6 +258,7 @@ async fn test_put_preferences_saved_feeds() {
     assert_eq!(saved_feeds["$type"], "app.bsky.actor.defs#savedFeedsPrefV2");
     assert!(saved_feeds["items"].as_array().unwrap().len() == 1);
 }
+
 #[tokio::test]
 async fn test_put_preferences_muted_words() {
     let client = client();
@@ -286,6 +296,7 @@ async fn test_put_preferences_muted_words() {
     let prefs_arr = body["preferences"].as_array().unwrap();
     assert_eq!(prefs_arr[0]["$type"], "app.bsky.actor.defs#mutedWordsPref");
 }
+
 #[tokio::test]
 async fn test_preferences_isolation_between_users() {
     let client = client();

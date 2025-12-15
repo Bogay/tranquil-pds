@@ -3,6 +3,7 @@ pub const MAX_LOCAL_PART_LENGTH: usize = 64;
 pub const MAX_DOMAIN_LENGTH: usize = 253;
 pub const MAX_DOMAIN_LABEL_LENGTH: usize = 63;
 const EMAIL_LOCAL_SPECIAL_CHARS: &str = ".!#$%&'*+/=?^_`{|}~-";
+
 pub fn is_valid_email(email: &str) -> bool {
     let email = email.trim();
     if email.is_empty() || email.len() > MAX_EMAIL_LENGTH {
@@ -49,6 +50,7 @@ pub fn is_valid_email(email: &str) -> bool {
     }
     true
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

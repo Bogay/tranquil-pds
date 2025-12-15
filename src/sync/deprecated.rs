@@ -14,15 +14,19 @@ use serde_json::json;
 use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
+
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
+
 #[derive(Deserialize)]
 pub struct GetHeadParams {
     pub did: String,
 }
+
 #[derive(Serialize)]
 pub struct GetHeadOutput {
     pub root: String,
 }
+
 pub async fn get_head(
     State(state): State<AppState>,
     Query(params): Query<GetHeadParams>,
@@ -63,10 +67,12 @@ pub async fn get_head(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct GetCheckoutParams {
     pub did: String,
 }
+
 pub async fn get_checkout(
     State(state): State<AppState>,
     Query(params): Query<GetCheckoutParams>,
@@ -168,6 +174,7 @@ pub async fn get_checkout(
     )
         .into_response()
 }
+
 fn extract_links_ipld(value: &Ipld, stack: &mut Vec<Cid>) {
     match value {
         Ipld::Link(cid) => {

@@ -10,14 +10,17 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
+
 fn generate_confirmation_code() -> String {
     crate::util::generate_token_code()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestEmailUpdateInput {
     pub email: String,
 }
+
 pub async fn request_email_update(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -119,12 +122,14 @@ pub async fn request_email_update(
     info!("Email update requested for user {}", user_id);
     (StatusCode::OK, Json(json!({ "tokenRequired": true }))).into_response()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmEmailInput {
     pub email: String,
     pub token: String,
 }
+
 pub async fn confirm_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -236,6 +241,7 @@ pub async fn confirm_email(
     info!("Email updated for user {}", user_id);
     (StatusCode::OK, Json(json!({}))).into_response()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateEmailInput {
@@ -244,6 +250,7 @@ pub struct UpdateEmailInput {
     pub email_auth_factor: Option<bool>,
     pub token: Option<String>,
 }
+
 pub async fn update_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

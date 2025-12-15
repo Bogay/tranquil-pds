@@ -4,6 +4,7 @@ use common::*;
 use helpers::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_moderation_report_lifecycle() {
     let client = client();

@@ -5,6 +5,7 @@ mod tests {
     use cid::Cid;
     use sha2::{Digest, Sha256};
     use std::collections::HashMap;
+
     fn make_cid(data: &[u8]) -> Cid {
         let mut hasher = Sha256::new();
         hasher.update(data);
@@ -12,10 +13,12 @@ mod tests {
         let multihash = multihash::Multihash::wrap(0x12, &hash).unwrap();
         Cid::new_v1(0x71, multihash)
     }
+
     #[test]
     fn test_verifier_creation() {
         let _verifier = CarVerifier::new();
     }
+
     #[test]
     fn test_verify_error_display() {
         let err = VerifyError::DidMismatch {
@@ -31,6 +34,7 @@ mod tests {
         let err = VerifyError::MstValidationFailed("test error".to_string());
         assert!(err.to_string().contains("test error"));
     }
+
     #[test]
     fn test_mst_validation_missing_root_block() {
         let verifier = CarVerifier::new();
@@ -41,6 +45,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(err, VerifyError::BlockNotFound(_)));
     }
+
     #[test]
     fn test_mst_validation_invalid_cbor() {
         let verifier = CarVerifier::new();
@@ -53,6 +58,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(err, VerifyError::InvalidCbor(_)));
     }
+
     #[test]
     fn test_mst_validation_empty_node() {
         let verifier = CarVerifier::new();
@@ -65,9 +71,11 @@ mod tests {
         let result = verifier.verify_mst_structure(&cid, &blocks);
         assert!(result.is_ok());
     }
+
     #[test]
     fn test_mst_validation_missing_left_pointer() {
         use ipld_core::ipld::Ipld;
+
         let verifier = CarVerifier::new();
         let missing_left_cid = make_cid(b"missing left");
         let node = Ipld::Map(std::collections::BTreeMap::from([
@@ -84,9 +92,11 @@ mod tests {
         assert!(matches!(err, VerifyError::BlockNotFound(_)));
         assert!(err.to_string().contains("left pointer"));
     }
+
     #[test]
     fn test_mst_validation_missing_subtree() {
         use ipld_core::ipld::Ipld;
+
         let verifier = CarVerifier::new();
         let missing_subtree_cid = make_cid(b"missing subtree");
         let record_cid = make_cid(b"record");
@@ -109,9 +119,11 @@ mod tests {
         assert!(matches!(err, VerifyError::BlockNotFound(_)));
         assert!(err.to_string().contains("subtree"));
     }
+
     #[test]
     fn test_mst_validation_unsorted_keys() {
         use ipld_core::ipld::Ipld;
+
         let verifier = CarVerifier::new();
         let record_cid = make_cid(b"record");
         let entry1 = Ipld::Map(std::collections::BTreeMap::from([
@@ -137,9 +149,11 @@ mod tests {
         assert!(matches!(err, VerifyError::MstValidationFailed(_)));
         assert!(err.to_string().contains("sorted"));
     }
+
     #[test]
     fn test_mst_validation_sorted_keys_ok() {
         use ipld_core::ipld::Ipld;
+
         let verifier = CarVerifier::new();
         let record_cid = make_cid(b"record");
         let entry1 = Ipld::Map(std::collections::BTreeMap::from([
@@ -167,9 +181,11 @@ mod tests {
         let result = verifier.verify_mst_structure(&cid, &blocks);
         assert!(result.is_ok());
     }
+
     #[test]
     fn test_mst_validation_with_valid_left_pointer() {
         use ipld_core::ipld::Ipld;
+
         let verifier = CarVerifier::new();
         let left_node = Ipld::Map(std::collections::BTreeMap::from([
             ("e".to_string(), Ipld::List(vec![])),
@@ -188,6 +204,7 @@ mod tests {
         let result = verifier.verify_mst_structure(&root_cid, &blocks);
         assert!(result.is_ok());
     }
+
     #[test]
     fn test_mst_validation_cycle_detection() {
         let verifier = CarVerifier::new();
@@ -200,6 +217,7 @@ mod tests {
         let result = verifier.verify_mst_structure(&cid, &blocks);
         assert!(result.is_ok());
     }
+
     #[tokio::test]
     async fn test_unsupported_did_method() {
         let verifier = CarVerifier::new();
@@ -209,9 +227,11 @@ mod tests {
         assert!(matches!(err, VerifyError::DidResolutionFailed(_)));
         assert!(err.to_string().contains("Unsupported"));
     }
+
     #[test]
     fn test_mst_validation_with_prefix_compression() {
         use ipld_core::ipld::Ipld;
+
         let verifier = CarVerifier::new();
         let record_cid = make_cid(b"record");
         let entry1 = Ipld::Map(std::collections::BTreeMap::from([
@@ -239,9 +259,11 @@ mod tests {
         let result = verifier.verify_mst_structure(&cid, &blocks);
         assert!(result.is_ok(), "Prefix-compressed keys should be validated correctly");
     }
+
     #[test]
     fn test_mst_validation_prefix_compression_unsorted() {
         use ipld_core::ipld::Ipld;
+
         let verifier = CarVerifier::new();
         let record_cid = make_cid(b"record");
         let entry1 = Ipld::Map(std::collections::BTreeMap::from([

@@ -10,16 +10,19 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use uuid::Uuid;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateInviteCodeInput {
     pub use_count: i32,
     pub for_account: Option<String>,
 }
+
 #[derive(Serialize)]
 pub struct CreateInviteCodeOutput {
     pub code: String,
 }
+
 pub async fn create_invite_code(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
@@ -81,6 +84,7 @@ pub async fn create_invite_code(
         }
     }
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateInviteCodesInput {
@@ -88,15 +92,18 @@ pub struct CreateInviteCodesInput {
     pub use_count: i32,
     pub for_accounts: Option<Vec<String>>,
 }
+
 #[derive(Serialize)]
 pub struct CreateInviteCodesOutput {
     pub codes: Vec<AccountCodes>,
 }
+
 #[derive(Serialize)]
 pub struct AccountCodes {
     pub account: String,
     pub codes: Vec<String>,
 }
+
 pub async fn create_invite_codes(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
@@ -172,12 +179,14 @@ pub async fn create_invite_codes(
     }
     Json(CreateInviteCodesOutput { codes: result_codes }).into_response()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAccountInviteCodesParams {
     pub include_used: Option<bool>,
     pub create_available: Option<bool>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCode {
@@ -189,16 +198,19 @@ pub struct InviteCode {
     pub created_at: String,
     pub uses: Vec<InviteCodeUse>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeUse {
     pub used_by: String,
     pub used_at: String,
 }
+
 #[derive(Serialize)]
 pub struct GetAccountInviteCodesOutput {
     pub codes: Vec<InviteCode>,
 }
+
 pub async fn get_account_invite_codes(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,

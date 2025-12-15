@@ -8,12 +8,14 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use wiremock::matchers::{method, path};
+
 fn no_redirect_client() -> reqwest::Client {
     reqwest::Client::builder()
         .redirect(redirect::Policy::none())
         .build()
         .unwrap()
 }
+
 fn generate_pkce() -> (String, String) {
     let verifier_bytes: [u8; 32] = rand::random();
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
@@ -23,6 +25,7 @@ fn generate_pkce() -> (String, String) {
     let code_challenge = URL_SAFE_NO_PAD.encode(&hash);
     (code_verifier, code_challenge)
 }
+
 async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
     let mock_server = MockServer::start().await;
     let client_id = mock_server.uri();

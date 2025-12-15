@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+
 pub fn validate_record(record: &serde_json::Value, collection: &str) -> Result<(), Response> {
     let validator = RecordValidator::new();
     match validator.validate(record, collection) {

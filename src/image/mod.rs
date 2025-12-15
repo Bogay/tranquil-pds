@@ -1,7 +1,9 @@
 use image::{DynamicImage, ImageFormat, ImageReader, imageops::FilterType};
 use std::io::Cursor;
+
 pub const THUMB_SIZE_FEED: u32 = 200;
 pub const THUMB_SIZE_FULL: u32 = 1000;
+
 #[derive(Debug, Clone)]
 pub struct ProcessedImage {
     pub data: Vec<u8>,
@@ -9,12 +11,14 @@ pub struct ProcessedImage {
     pub width: u32,
     pub height: u32,
 }
+
 #[derive(Debug, Clone)]
 pub struct ImageProcessingResult {
     pub original: ProcessedImage,
     pub thumbnail_feed: Option<ProcessedImage>,
     pub thumbnail_full: Option<ProcessedImage>,
 }
+
 #[derive(Debug, thiserror::Error)]
 pub enum ImageError {
     #[error("Failed to decode image: {0}")]
@@ -32,13 +36,16 @@ pub enum ImageError {
     #[error("File too large: {size} bytes exceeds maximum {max_size} bytes")]
     FileTooLarge { size: usize, max_size: usize },
 }
-pub const DEFAULT_MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10MB
+
+pub const DEFAULT_MAX_FILE_SIZE: usize = 10 * 1024 * 1024;
+
 pub struct ImageProcessor {
     max_dimension: u32,
     max_file_size: usize,
     output_format: OutputFormat,
     generate_thumbnails: bool,
 }
+
 #[derive(Debug, Clone, Copy)]
 pub enum OutputFormat {
     WebP,
@@ -46,6 +53,7 @@ pub enum OutputFormat {
     Png,
     Original,
 }
+
 impl Default for ImageProcessor {
     fn default() -> Self {
         Self {
@@ -56,26 +64,32 @@ impl Default for ImageProcessor {
         }
     }
 }
+
 impl ImageProcessor {
     pub fn new() -> Self {
         Self::default()
     }
+
     pub fn with_max_dimension(mut self, max: u32) -> Self {
         self.max_dimension = max;
         self
     }
+
     pub fn with_max_file_size(mut self, max: usize) -> Self {
         self.max_file_size = max;
         self
     }
+
     pub fn with_output_format(mut self, format: OutputFormat) -> Self {
         self.output_format = format;
         self
     }
+
     pub fn with_thumbnails(mut self, generate: bool) -> Self {
         self.generate_thumbnails = generate;
         self
     }
+
     pub fn process(&self, data: &[u8], mime_type: &str) -> Result<ImageProcessingResult, ImageError> {
         if data.len() > self.max_file_size {
             return Err(ImageError::FileTooLarge {
@@ -109,6 +123,7 @@ impl ImageProcessor {
             thumbnail_full,
         })
     }
+
     fn detect_format(&self, mime_type: &str, data: &[u8]) -> Result<ImageFormat, ImageError> {
         match mime_type.to_lowercase().as_str() {
             "image/jpeg" | "image/jpg" => Ok(ImageFormat::Jpeg),
@@ -124,6 +139,7 @@ impl ImageProcessor {
             }
         }
     }
+
     fn decode_image(&self, data: &[u8], format: ImageFormat) -> Result<DynamicImage, ImageError> {
         let cursor = Cursor::new(data);
         let reader = ImageReader::with_format(cursor, format);
@@ -131,6 +147,7 @@ impl ImageProcessor {
             .decode()
             .map_err(|e| ImageError::DecodeError(e.to_string()))
     }
+
     fn encode_image(&self, img: &DynamicImage) -> Result<ProcessedImage, ImageError> {
         let (data, mime_type) = match self.output_format {
             OutputFormat::WebP => {
@@ -165,6 +182,7 @@ impl ImageProcessor {
             height: img.height(),
         })
     }
+
     fn generate_thumbnail(&self, img: &DynamicImage, max_size: u32) -> Result<ProcessedImage, ImageError> {
         let (orig_width, orig_height) = (img.width(), img.height());
         let (new_width, new_height) = if orig_width > orig_height {
@@ -177,12 +195,14 @@ impl ImageProcessor {
         let thumb = img.resize(new_width, new_height, FilterType::Lanczos3);
         self.encode_image(&thumb)
     }
+
     pub fn is_supported_mime_type(mime_type: &str) -> bool {
         matches!(
             mime_type.to_lowercase().as_str(),
             "image/jpeg" | "image/jpg" | "image/png" | "image/gif" | "image/webp"
         )
     }
+
     pub fn strip_exif(data: &[u8]) -> Result<Vec<u8>, ImageError> {
         let format = image::guess_format(data)
             .map_err(|e| ImageError::DecodeError(e.to_string()))?;
@@ -196,15 +216,18 @@ impl ImageProcessor {
         Ok(buf)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn create_test_image(width: u32, height: u32) -> Vec<u8> {
         let img = DynamicImage::new_rgb8(width, height);
         let mut buf = Vec::new();
         img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png).unwrap();
         buf
     }
+
     #[test]
     fn test_process_small_image() {
         let processor = ImageProcessor::new();
@@ -213,6 +236,7 @@ mod tests {
         assert!(result.thumbnail_feed.is_none());
         assert!(result.thumbnail_full.is_none());
     }
+
     #[test]
     fn test_process_large_image_generates_thumbnails() {
         let processor = ImageProcessor::new();
@@ -227,6 +251,7 @@ mod tests {
         assert!(full_thumb.width <= THUMB_SIZE_FULL);
         assert!(full_thumb.height <= THUMB_SIZE_FULL);
     }
+
     #[test]
     fn test_webp_conversion() {
         let processor = ImageProcessor::new().with_output_format(OutputFormat::WebP);
@@ -234,6 +259,7 @@ mod tests {
         let result = processor.process(&data, "image/png").unwrap();
         assert_eq!(result.original.mime_type, "image/webp");
     }
+
     #[test]
     fn test_reject_too_large() {
         let processor = ImageProcessor::new().with_max_dimension(1000);
@@ -241,6 +267,7 @@ mod tests {
         let result = processor.process(&data, "image/png");
         assert!(matches!(result, Err(ImageError::TooLarge { .. })));
     }
+
     #[test]
     fn test_is_supported_mime_type() {
         assert!(ImageProcessor::is_supported_mime_type("image/jpeg"));

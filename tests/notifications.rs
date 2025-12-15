@@ -4,6 +4,7 @@ use bspds::notifications::{
     NotificationStatus, NotificationType,
 };
 use sqlx::PgPool;
+
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
     sqlx::postgres::PgPoolOptions::new()
@@ -12,6 +13,7 @@ async fn get_pool() -> PgPool {
         .await
         .expect("Failed to connect to test database")
 }
+
 #[tokio::test]
 async fn test_enqueue_notification() {
     let pool = get_pool().await;
@@ -53,6 +55,7 @@ async fn test_enqueue_notification() {
     assert_eq!(row.notification_type, NotificationType::Welcome);
     assert_eq!(row.status, NotificationStatus::Pending);
 }
+
 #[tokio::test]
 async fn test_enqueue_welcome() {
     let pool = get_pool().await;
@@ -82,6 +85,7 @@ async fn test_enqueue_welcome() {
     assert!(row.body.contains(&format!("@{}", user_row.handle)));
     assert_eq!(row.notification_type, NotificationType::Welcome);
 }
+
 #[tokio::test]
 async fn test_notification_queue_status_index() {
     let pool = get_pool().await;

@@ -11,12 +11,14 @@ use axum::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use tracing::{error, info};
+
 #[derive(Deserialize)]
 pub struct GetFeedParams {
     pub feed: String,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
+
 pub async fn get_feed(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

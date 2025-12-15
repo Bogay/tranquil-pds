@@ -2,6 +2,7 @@ mod common;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use sqlx::PgPool;
+
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
     sqlx::postgres::PgPoolOptions::new()
@@ -10,6 +11,7 @@ async fn get_pool() -> PgPool {
         .await
         .expect("Failed to connect to test database")
 }
+
 async fn create_verified_account(client: &reqwest::Client, base_url: &str, handle: &str, email: &str) -> String {
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
@@ -26,6 +28,7 @@ async fn create_verified_account(client: &reqwest::Client, base_url: &str, handl
     let did = body["did"].as_str().expect("No did");
     common::verify_new_account(client, did).await
 }
+
 #[tokio::test]
 async fn test_email_update_flow_success() {
     let client = common::client();
@@ -77,6 +80,7 @@ async fn test_email_update_flow_success() {
     assert!(user.email_pending_verification.is_none());
     assert!(user.email_confirmation_code.is_none());
 }
+
 #[tokio::test]
 async fn test_request_email_update_taken_email() {
     let client = common::client();
@@ -98,6 +102,7 @@ async fn test_request_email_update_taken_email() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "EmailTaken");
 }
+
 #[tokio::test]
 async fn test_confirm_email_invalid_token() {
     let client = common::client();
@@ -128,6 +133,7 @@ async fn test_confirm_email_invalid_token() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidToken");
 }
+
 #[tokio::test]
 async fn test_confirm_email_wrong_email() {
     let client = common::client();
@@ -164,6 +170,7 @@ async fn test_confirm_email_wrong_email() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["message"], "Email does not match pending update");
 }
+
 #[tokio::test]
 async fn test_update_email_success_no_token_required() {
     let client = common::client();
@@ -187,6 +194,7 @@ async fn test_update_email_success_no_token_required() {
         .expect("User not found");
     assert_eq!(user.email, Some(new_email));
 }
+
 #[tokio::test]
 async fn test_update_email_same_email_noop() {
     let client = common::client();
@@ -203,6 +211,7 @@ async fn test_update_email_same_email_noop() {
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK, "Updating to same email should succeed as no-op");
 }
+
 #[tokio::test]
 async fn test_update_email_requires_token_after_pending() {
     let client = common::client();
@@ -230,6 +239,7 @@ async fn test_update_email_requires_token_after_pending() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "TokenRequired");
 }
+
 #[tokio::test]
 async fn test_update_email_with_valid_token() {
     let client = common::client();
@@ -273,6 +283,7 @@ async fn test_update_email_with_valid_token() {
     assert_eq!(user.email, Some(new_email));
     assert!(user.email_pending_verification.is_none());
 }
+
 #[tokio::test]
 async fn test_update_email_invalid_token() {
     let client = common::client();
@@ -303,6 +314,7 @@ async fn test_update_email_invalid_token() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidToken");
 }
+
 #[tokio::test]
 async fn test_update_email_already_taken() {
     let client = common::client();
@@ -324,6 +336,7 @@ async fn test_update_email_already_taken() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert!(body["message"].as_str().unwrap().contains("already in use") || body["error"] == "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_update_email_no_auth() {
     let client = common::client();
@@ -338,6 +351,7 @@ async fn test_update_email_no_auth() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "AuthenticationRequired");
 }
+
 #[tokio::test]
 async fn test_update_email_invalid_format() {
     let client = common::client();

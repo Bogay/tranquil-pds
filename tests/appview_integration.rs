@@ -1,7 +1,9 @@
 mod common;
+
 use common::{base_url, client, create_account_and_login};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
+
 #[tokio::test]
 async fn test_get_author_feed_returns_appview_data() {
     let client = client();
@@ -27,6 +29,7 @@ async fn test_get_author_feed_returns_appview_data() {
         "Post text should match appview response"
     );
 }
+
 #[tokio::test]
 async fn test_get_actor_likes_returns_appview_data() {
     let client = client();
@@ -52,6 +55,7 @@ async fn test_get_actor_likes_returns_appview_data() {
         "Post text should match appview response"
     );
 }
+
 #[tokio::test]
 async fn test_get_post_thread_returns_appview_data() {
     let client = client();
@@ -80,6 +84,7 @@ async fn test_get_post_thread_returns_appview_data() {
         "Post text should match appview response"
     );
 }
+
 #[tokio::test]
 async fn test_get_feed_returns_appview_data() {
     let client = client();
@@ -105,6 +110,7 @@ async fn test_get_feed_returns_appview_data() {
         "Post text should match appview response"
     );
 }
+
 #[tokio::test]
 async fn test_register_push_proxies_to_appview() {
     let client = client();

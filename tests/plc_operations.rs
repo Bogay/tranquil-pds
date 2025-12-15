@@ -3,6 +3,7 @@ use common::*;
 use reqwest::StatusCode;
 use serde_json::json;
 use sqlx::PgPool;
+
 #[tokio::test]
 async fn test_request_plc_operation_signature_requires_auth() {
     let client = client();
@@ -16,6 +17,7 @@ async fn test_request_plc_operation_signature_requires_auth() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_request_plc_operation_signature_success() {
     let client = client();
@@ -31,6 +33,7 @@ async fn test_request_plc_operation_signature_success() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_sign_plc_operation_requires_auth() {
     let client = client();
@@ -45,6 +48,7 @@ async fn test_sign_plc_operation_requires_auth() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_sign_plc_operation_requires_token() {
     let client = client();
@@ -63,6 +67,7 @@ async fn test_sign_plc_operation_requires_token() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_sign_plc_operation_invalid_token() {
     let client = client();
@@ -83,6 +88,7 @@ async fn test_sign_plc_operation_invalid_token() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["error"] == "InvalidToken" || body["error"] == "ExpiredToken");
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_requires_auth() {
     let client = client();
@@ -99,6 +105,7 @@ async fn test_submit_plc_operation_requires_auth() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_invalid_operation() {
     let client = client();
@@ -121,6 +128,7 @@ async fn test_submit_plc_operation_invalid_operation() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_missing_sig() {
     let client = client();
@@ -148,6 +156,7 @@ async fn test_submit_plc_operation_missing_sig() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_wrong_service_endpoint() {
     let client = client();
@@ -179,6 +188,7 @@ async fn test_submit_plc_operation_wrong_service_endpoint() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_request_plc_operation_creates_token_in_db() {
     let client = client();
@@ -213,6 +223,7 @@ async fn test_request_plc_operation_creates_token_in_db() {
     assert!(row.token.contains('-'), "Token should contain hyphen");
     assert!(row.expires_at > chrono::Utc::now(), "Token should not be expired");
 }
+
 #[tokio::test]
 async fn test_request_plc_operation_replaces_existing_token() {
     let client = client();
@@ -278,6 +289,7 @@ async fn test_request_plc_operation_replaces_existing_token() {
     .expect("Count query failed");
     assert_eq!(count, 1, "Should only have one token per user");
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_wrong_verification_method() {
     let client = client();
@@ -321,6 +333,7 @@ async fn test_submit_plc_operation_wrong_verification_method() {
         body
     );
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_wrong_handle() {
     let client = client();
@@ -357,6 +370,7 @@ async fn test_submit_plc_operation_wrong_handle() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_wrong_service_type() {
     let client = client();
@@ -393,6 +407,7 @@ async fn test_submit_plc_operation_wrong_service_type() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_plc_token_expiry_format() {
     let client = client();

@@ -4,6 +4,7 @@ use common::*;
 use helpers::*;
 use reqwest::StatusCode;
 use serde_json::Value;
+
 #[tokio::test]
 async fn test_get_head_success() {
     let client = client();
@@ -23,6 +24,7 @@ async fn test_get_head_success() {
     let root = body["root"].as_str().unwrap();
     assert!(root.starts_with("bafy"), "Root CID should be a CID");
 }
+
 #[tokio::test]
 async fn test_get_head_not_found() {
     let client = client();
@@ -40,6 +42,7 @@ async fn test_get_head_not_found() {
     assert_eq!(body["error"], "HeadNotFound");
     assert!(body["message"].as_str().unwrap().contains("Could not find root"));
 }
+
 #[tokio::test]
 async fn test_get_head_missing_param() {
     let client = client();
@@ -53,6 +56,7 @@ async fn test_get_head_missing_param() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_get_head_empty_did() {
     let client = client();
@@ -69,6 +73,7 @@ async fn test_get_head_empty_did() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_get_head_whitespace_did() {
     let client = client();
@@ -83,6 +88,7 @@ async fn test_get_head_whitespace_did() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_get_head_changes_after_record_create() {
     let client = client();
@@ -112,6 +118,7 @@ async fn test_get_head_changes_after_record_create() {
     let head2 = body2["root"].as_str().unwrap().to_string();
     assert_ne!(head1, head2, "Head CID should change after record creation");
 }
+
 #[tokio::test]
 async fn test_get_checkout_success() {
     let client = client();
@@ -137,6 +144,7 @@ async fn test_get_checkout_success() {
     assert!(!body.is_empty(), "CAR file should not be empty");
     assert!(body.len() > 50, "CAR file should contain actual data");
 }
+
 #[tokio::test]
 async fn test_get_checkout_not_found() {
     let client = client();
@@ -153,6 +161,7 @@ async fn test_get_checkout_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
+
 #[tokio::test]
 async fn test_get_checkout_missing_param() {
     let client = client();
@@ -166,6 +175,7 @@ async fn test_get_checkout_missing_param() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_get_checkout_empty_did() {
     let client = client();
@@ -180,6 +190,7 @@ async fn test_get_checkout_empty_did() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_get_checkout_empty_repo() {
     let client = client();
@@ -197,6 +208,7 @@ async fn test_get_checkout_empty_repo() {
     let body = res.bytes().await.expect("Failed to get body");
     assert!(!body.is_empty(), "Even empty repo should return CAR header");
 }
+
 #[tokio::test]
 async fn test_get_checkout_includes_multiple_records() {
     let client = client();
@@ -218,6 +230,7 @@ async fn test_get_checkout_includes_multiple_records() {
     let body = res.bytes().await.expect("Failed to get body");
     assert!(body.len() > 500, "CAR file with 5 records should be larger");
 }
+
 #[tokio::test]
 async fn test_get_head_matches_latest_commit() {
     let client = client();
@@ -246,6 +259,7 @@ async fn test_get_head_matches_latest_commit() {
     let latest_cid = latest_body["cid"].as_str().unwrap();
     assert_eq!(head_root, latest_cid, "getHead root should match getLatestCommit cid");
 }
+
 #[tokio::test]
 async fn test_get_checkout_car_header_valid() {
     let client = client();

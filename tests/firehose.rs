@@ -8,11 +8,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::Cursor;
 use tokio_tungstenite::{connect_async, tungstenite};
+
 #[derive(Debug, Deserialize)]
 struct FrameHeader {
     op: i64,
     t: String,
 }
+
 #[derive(Debug, Deserialize)]
 struct CommitFrame {
     seq: i64,
@@ -29,12 +31,14 @@ struct CommitFrame {
     blobs: Vec<Cid>,
     time: String,
 }
+
 #[derive(Debug, Deserialize)]
 struct RepoOp {
     action: String,
     path: String,
     cid: Option<Cid>,
 }
+
 fn find_cbor_map_end(bytes: &[u8]) -> Result<usize, String> {
     let mut pos = 0;
     fn read_uint(bytes: &[u8], pos: &mut usize, additional: u8) -> Result<u64, String> {
@@ -104,6 +108,7 @@ fn find_cbor_map_end(bytes: &[u8]) -> Result<usize, String> {
     skip_value(bytes, &mut pos)?;
     Ok(pos)
 }
+
 fn parse_frame(bytes: &[u8]) -> Result<(FrameHeader, CommitFrame), String> {
     let header_len = find_cbor_map_end(bytes)?;
     let header: FrameHeader = serde_ipld_dagcbor::from_slice(&bytes[..header_len])
@@ -113,6 +118,7 @@ fn parse_frame(bytes: &[u8]) -> Result<(FrameHeader, CommitFrame), String> {
         .map_err(|e| format!("Failed to parse commit frame: {:?}", e))?;
     Ok((header, frame))
 }
+
 #[tokio::test]
 async fn test_firehose_subscription() {
     let client = client();

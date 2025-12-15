@@ -1,7 +1,9 @@
 use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 pub use crate::common::*;
+
 #[allow(dead_code)]
 pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     let client = client();
@@ -40,6 +42,7 @@ pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     let new_jwt = verify_new_account(&client, &new_did).await;
     (new_did, new_jwt)
 }
+
 #[allow(dead_code)]
 pub async fn create_post(
     client: &reqwest::Client,
@@ -83,6 +86,7 @@ pub async fn create_post(
     let cid = create_body["cid"].as_str().unwrap().to_string();
     (uri, cid)
 }
+
 #[allow(dead_code)]
 pub async fn create_follow(
     client: &reqwest::Client,
@@ -126,6 +130,7 @@ pub async fn create_follow(
     let cid = create_body["cid"].as_str().unwrap().to_string();
     (uri, cid)
 }
+
 #[allow(dead_code)]
 pub async fn create_like(
     client: &reqwest::Client,
@@ -167,6 +172,7 @@ pub async fn create_like(
         body["cid"].as_str().unwrap().to_string(),
     )
 }
+
 #[allow(dead_code)]
 pub async fn create_repost(
     client: &reqwest::Client,

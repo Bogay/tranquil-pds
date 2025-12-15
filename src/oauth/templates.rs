@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+
 fn base_styles() -> &'static str {
     r#"
         :root {
@@ -340,6 +341,7 @@ fn base_styles() -> &'static str {
         }
     "#
 }
+
 pub fn login_page(
     client_id: &str,
     client_name: Option<&str>,
@@ -411,12 +413,14 @@ pub fn login_page(
         login_hint_value = html_escape(login_hint_value),
     )
 }
+
 pub struct DeviceAccount {
     pub did: String,
     pub handle: String,
     pub email: Option<String>,
     pub last_used_at: DateTime<Utc>,
 }
+
 pub fn account_selector_page(
     client_id: &str,
     client_name: Option<&str>,
@@ -482,6 +486,7 @@ pub fn account_selector_page(
         request_uri_encoded = urlencoding::encode(request_uri),
     )
 }
+
 pub fn two_factor_page(
     request_uri: &str,
     channel: &str,
@@ -539,6 +544,7 @@ pub fn two_factor_page(
         error_html = error_html,
     )
 }
+
 pub fn error_page(error: &str, error_description: Option<&str>) -> String {
     let description = error_description.unwrap_or("An error occurred during the authorization process.");
     format!(
@@ -570,6 +576,7 @@ pub fn error_page(error: &str, error_description: Option<&str>) -> String {
         description = html_escape(description),
     )
 }
+
 pub fn success_page(client_name: Option<&str>) -> String {
     let client_display = client_name.unwrap_or("The application");
     format!(
@@ -597,6 +604,7 @@ pub fn success_page(client_name: Option<&str>) -> String {
         client_display = html_escape(client_display),
     )
 }
+
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -604,6 +612,7 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
 }
+
 fn get_initials(handle: &str) -> String {
     let clean = handle.trim_start_matches('@');
     if clean.is_empty() {
@@ -611,6 +620,7 @@ fn get_initials(handle: &str) -> String {
     }
     clean.chars().next().unwrap_or('?').to_uppercase().to_string()
 }
+
 pub fn mask_email(email: &str) -> String {
     if let Some(at_pos) = email.find('@') {
         let local = &email[..at_pos];

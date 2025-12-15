@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 use super::super::{AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData};
 use super::helpers::{from_json, to_json};
+
 pub async fn create_authorization_request(
     pool: &PgPool,
     request_id: &str,
@@ -30,6 +31,7 @@ pub async fn create_authorization_request(
     .await?;
     Ok(())
 }
+
 pub async fn get_authorization_request(
     pool: &PgPool,
     request_id: &str,
@@ -64,6 +66,7 @@ pub async fn get_authorization_request(
         None => Ok(None),
     }
 }
+
 pub async fn update_authorization_request(
     pool: &PgPool,
     request_id: &str,
@@ -86,6 +89,7 @@ pub async fn update_authorization_request(
     .await?;
     Ok(())
 }
+
 pub async fn consume_authorization_request_by_code(
     pool: &PgPool,
     code: &str,
@@ -120,6 +124,7 @@ pub async fn consume_authorization_request_by_code(
         None => Ok(None),
     }
 }
+
 pub async fn delete_authorization_request(
     pool: &PgPool,
     request_id: &str,
@@ -134,6 +139,7 @@ pub async fn delete_authorization_request(
     .await?;
     Ok(())
 }
+
 pub async fn delete_expired_authorization_requests(pool: &PgPool) -> Result<u64, OAuthError> {
     let result = sqlx::query!(
         r#"

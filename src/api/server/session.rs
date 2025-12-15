@@ -12,6 +12,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
+
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
@@ -27,11 +28,13 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "unknown".to_string()
 }
+
 #[derive(Deserialize)]
 pub struct CreateSessionInput {
     pub identifier: String,
     pub password: String,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionOutput {
@@ -40,6 +43,7 @@ pub struct CreateSessionOutput {
     pub handle: String,
     pub did: String,
 }
+
 pub async fn create_session(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -155,6 +159,7 @@ pub async fn create_session(
         did: row.did,
     }).into_response()
 }
+
 pub async fn get_session(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
@@ -194,6 +199,7 @@ pub async fn get_session(
         }
     }
 }
+
 pub async fn delete_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -227,6 +233,7 @@ pub async fn delete_session(
         }
     }
 }
+
 pub async fn refresh_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -395,12 +402,14 @@ pub async fn refresh_session(
         }
     }
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmSignupInput {
     pub did: String,
     pub verification_code: String,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmSignupOutput {
@@ -413,6 +422,7 @@ pub struct ConfirmSignupOutput {
     pub preferred_channel: String,
     pub preferred_channel_verified: bool,
 }
+
 pub async fn confirm_signup(
     State(state): State<AppState>,
     Json(input): Json<ConfirmSignupInput>,
@@ -535,11 +545,13 @@ pub async fn confirm_signup(
         preferred_channel_verified: true,
     }).into_response()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResendVerificationInput {
     pub did: String,
 }
+
 pub async fn resend_verification(
     State(state): State<AppState>,
     Json(input): Json<ResendVerificationInput>,

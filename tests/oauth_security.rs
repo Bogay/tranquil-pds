@@ -12,12 +12,14 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use wiremock::matchers::{method, path};
+
 fn no_redirect_client() -> reqwest::Client {
     reqwest::Client::builder()
         .redirect(redirect::Policy::none())
         .build()
         .unwrap()
 }
+
 fn generate_pkce() -> (String, String) {
     let verifier_bytes: [u8; 32] = rand::random();
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
@@ -27,6 +29,7 @@ fn generate_pkce() -> (String, String) {
     let code_challenge = URL_SAFE_NO_PAD.encode(&hash);
     (code_verifier, code_challenge)
 }
+
 async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
     let mock_server = MockServer::start().await;
     let client_id = mock_server.uri();
@@ -46,6 +49,7 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
         .await;
     mock_server
 }
+
 async fn get_oauth_tokens(
     http_client: &reqwest::Client,
     url: &str,
@@ -117,6 +121,7 @@ async fn get_oauth_tokens(
     let refresh_token = token_body["refresh_token"].as_str().unwrap().to_string();
     (access_token, refresh_token, client_id)
 }
+
 #[tokio::test]
 async fn test_security_forged_token_signature_rejected() {
     let url = base_url().await;
@@ -134,6 +139,7 @@ async fn test_security_forged_token_signature_rejected() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Forged signature should be rejected");
 }
+
 #[tokio::test]
 async fn test_security_modified_payload_rejected() {
     let url = base_url().await;
@@ -153,6 +159,7 @@ async fn test_security_modified_payload_rejected() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Modified payload should be rejected");
 }
+
 #[tokio::test]
 async fn test_security_algorithm_none_attack_rejected() {
     let url = base_url().await;
@@ -181,6 +188,7 @@ async fn test_security_algorithm_none_attack_rejected() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Algorithm 'none' attack should be rejected");
 }
+
 #[tokio::test]
 async fn test_security_algorithm_substitution_attack_rejected() {
     let url = base_url().await;
@@ -209,6 +217,7 @@ async fn test_security_algorithm_substitution_attack_rejected() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Algorithm substitution attack should be rejected");
 }
+
 #[tokio::test]
 async fn test_security_expired_token_rejected() {
     let url = base_url().await;
@@ -237,6 +246,7 @@ async fn test_security_expired_token_rejected() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Expired token should be rejected");
 }
+
 #[tokio::test]
 async fn test_security_pkce_plain_method_rejected() {
     let url = base_url().await;
@@ -264,6 +274,7 @@ async fn test_security_pkce_plain_method_rejected() {
         "Error should mention S256 requirement"
     );
 }
+
 #[tokio::test]
 async fn test_security_pkce_missing_challenge_rejected() {
     let url = base_url().await;
@@ -283,6 +294,7 @@ async fn test_security_pkce_missing_challenge_rejected() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Missing PKCE challenge should be rejected");
 }
+
 #[tokio::test]
 async fn test_security_pkce_wrong_verifier_rejected() {
     let url = base_url().await;
@@ -352,6 +364,7 @@ async fn test_security_pkce_wrong_verifier_rejected() {
     let body: Value = token_res.json().await.unwrap();
     assert_eq!(body["error"], "invalid_grant");
 }
+
 #[tokio::test]
 async fn test_security_authorization_code_replay_attack() {
     let url = base_url().await;
@@ -434,6 +447,7 @@ async fn test_security_authorization_code_replay_attack() {
     let body: Value = replay_res.json().await.unwrap();
     assert_eq!(body["error"], "invalid_grant");
 }
+
 #[tokio::test]
 async fn test_security_refresh_token_replay_attack() {
     let url = base_url().await;
@@ -550,6 +564,7 @@ async fn test_security_refresh_token_replay_attack() {
         "Token family should be revoked after replay detection"
     );
 }
+
 #[tokio::test]
 async fn test_security_redirect_uri_manipulation() {
     let url = base_url().await;
@@ -573,6 +588,7 @@ async fn test_security_redirect_uri_manipulation() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Unregistered redirect_uri should be rejected");
 }
+
 #[tokio::test]
 async fn test_security_deactivated_account_blocked() {
     let url = base_url().await;
@@ -639,6 +655,7 @@ async fn test_security_deactivated_account_blocked() {
     let body: Value = auth_res.json().await.unwrap();
     assert_eq!(body["error"], "access_denied");
 }
+
 #[tokio::test]
 async fn test_security_url_injection_in_state_parameter() {
     let url = base_url().await;
@@ -710,6 +727,7 @@ async fn test_security_url_injection_in_state_parameter() {
         location
     );
 }
+
 #[tokio::test]
 async fn test_security_cross_client_token_theft() {
     let url = base_url().await;
@@ -789,6 +807,7 @@ async fn test_security_cross_client_token_theft() {
         "Error should mention client_id mismatch"
     );
 }
+
 #[test]
 fn test_security_dpop_nonce_tamper_detection() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -803,6 +822,7 @@ fn test_security_dpop_nonce_tamper_detection() {
     let result = verifier.validate_nonce(&tampered_nonce);
     assert!(result.is_err(), "Tampered nonce should be rejected");
 }
+
 #[test]
 fn test_security_dpop_nonce_cross_server_rejected() {
     let secret1 = b"server-1-secret-32-bytes-long!!!";
@@ -813,6 +833,7 @@ fn test_security_dpop_nonce_cross_server_rejected() {
     let result = verifier2.validate_nonce(&nonce_from_server1);
     assert!(result.is_err(), "Nonce from different server should be rejected");
 }
+
 #[test]
 fn test_security_dpop_proof_signature_tampering() {
     use p256::ecdsa::{SigningKey, Signature, signature::Signer};
@@ -851,6 +872,7 @@ fn test_security_dpop_proof_signature_tampering() {
     let result = verifier.verify_proof(&tampered_proof, "POST", "https://example.com/token", None);
     assert!(result.is_err(), "Tampered DPoP signature should be rejected");
 }
+
 #[test]
 fn test_security_dpop_proof_key_substitution() {
     use p256::ecdsa::{SigningKey, Signature, signature::Signer};
@@ -888,6 +910,7 @@ fn test_security_dpop_proof_key_substitution() {
     let result = verifier.verify_proof(&mismatched_proof, "POST", "https://example.com/token", None);
     assert!(result.is_err(), "DPoP proof with mismatched key should be rejected");
 }
+
 #[test]
 fn test_security_jwk_thumbprint_consistency() {
     let jwk = DPoPJwk {
@@ -905,6 +928,7 @@ fn test_security_jwk_thumbprint_consistency() {
         assert_eq!(first, result, "Thumbprint should be deterministic, but iteration {} differs", i);
     }
 }
+
 #[test]
 fn test_security_dpop_iat_clock_skew_limits() {
     use p256::ecdsa::{SigningKey, Signature, signature::Signer};
@@ -956,6 +980,7 @@ fn test_security_dpop_iat_clock_skew_limits() {
         }
     }
 }
+
 #[test]
 fn test_security_dpop_method_case_insensitivity() {
     use p256::ecdsa::{SigningKey, Signature, signature::Signer};
@@ -992,6 +1017,7 @@ fn test_security_dpop_method_case_insensitivity() {
     let result = verifier.verify_proof(&proof, "POST", "https://example.com/token", None);
     assert!(result.is_ok(), "HTTP method comparison should be case-insensitive");
 }
+
 #[tokio::test]
 async fn test_security_invalid_grant_type_rejected() {
     let url = base_url().await;
@@ -1024,6 +1050,7 @@ async fn test_security_invalid_grant_type_rejected() {
         );
     }
 }
+
 #[tokio::test]
 async fn test_security_token_with_wrong_typ_rejected() {
     let url = base_url().await;
@@ -1066,6 +1093,7 @@ async fn test_security_token_with_wrong_typ_rejected() {
         );
     }
 }
+
 #[tokio::test]
 async fn test_security_missing_required_claims_rejected() {
     let url = base_url().await;
@@ -1098,6 +1126,7 @@ async fn test_security_missing_required_claims_rejected() {
         );
     }
 }
+
 #[tokio::test]
 async fn test_security_malformed_tokens_rejected() {
     let url = base_url().await;
@@ -1130,6 +1159,7 @@ async fn test_security_malformed_tokens_rejected() {
         );
     }
 }
+
 #[tokio::test]
 async fn test_security_authorization_header_formats() {
     let url = base_url().await;
@@ -1175,6 +1205,7 @@ async fn test_security_authorization_header_formats() {
         );
     }
 }
+
 #[tokio::test]
 async fn test_security_no_authorization_header() {
     let url = base_url().await;
@@ -1186,6 +1217,7 @@ async fn test_security_no_authorization_header() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Missing auth header should return 401");
 }
+
 #[tokio::test]
 async fn test_security_empty_authorization_header() {
     let url = base_url().await;
@@ -1198,6 +1230,7 @@ async fn test_security_empty_authorization_header() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Empty auth header should return 401");
 }
+
 #[tokio::test]
 async fn test_security_revoked_token_rejected() {
     let url = base_url().await;
@@ -1219,6 +1252,7 @@ async fn test_security_revoked_token_rejected() {
     let introspect_body: Value = introspect_res.json().await.unwrap();
     assert_eq!(introspect_body["active"], false, "Revoked token should be inactive");
 }
+
 #[tokio::test]
 #[ignore = "rate limiting is disabled in test environment"]
 async fn test_security_oauth_authorize_rate_limiting() {
@@ -1274,6 +1308,7 @@ async fn test_security_oauth_authorize_rate_limiting() {
         rate_limited_count
     );
 }
+
 fn create_dpop_proof(
     method: &str,
     uri: &str,
@@ -1317,6 +1352,7 @@ fn create_dpop_proof(
     let signature_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
     format!("{}.{}", signing_input, signature_b64)
 }
+
 #[test]
 fn test_dpop_nonce_generation() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1326,6 +1362,7 @@ fn test_dpop_nonce_generation() {
     assert!(!nonce1.is_empty());
     assert!(!nonce2.is_empty());
 }
+
 #[test]
 fn test_dpop_nonce_validation_success() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1334,6 +1371,7 @@ fn test_dpop_nonce_validation_success() {
     let result = verifier.validate_nonce(&nonce);
     assert!(result.is_ok(), "Valid nonce should pass: {:?}", result);
 }
+
 #[test]
 fn test_dpop_nonce_wrong_secret() {
     let secret1 = b"test-dpop-secret-32-bytes-long!!";
@@ -1344,6 +1382,7 @@ fn test_dpop_nonce_wrong_secret() {
     let result = verifier2.validate_nonce(&nonce);
     assert!(result.is_err(), "Nonce from different secret should fail");
 }
+
 #[test]
 fn test_dpop_nonce_invalid_format() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1352,6 +1391,7 @@ fn test_dpop_nonce_invalid_format() {
     assert!(verifier.validate_nonce("").is_err());
     assert!(verifier.validate_nonce("!!!not-base64!!!").is_err());
 }
+
 #[test]
 fn test_jwk_thumbprint_ec_p256() {
     let jwk = DPoPJwk {
@@ -1366,6 +1406,7 @@ fn test_jwk_thumbprint_ec_p256() {
     assert!(!tp.is_empty());
     assert!(tp.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
 }
+
 #[test]
 fn test_jwk_thumbprint_ec_secp256k1() {
     let jwk = DPoPJwk {
@@ -1377,6 +1418,7 @@ fn test_jwk_thumbprint_ec_secp256k1() {
     let thumbprint = compute_jwk_thumbprint(&jwk);
     assert!(thumbprint.is_ok());
 }
+
 #[test]
 fn test_jwk_thumbprint_okp_ed25519() {
     let jwk = DPoPJwk {
@@ -1388,6 +1430,7 @@ fn test_jwk_thumbprint_okp_ed25519() {
     let thumbprint = compute_jwk_thumbprint(&jwk);
     assert!(thumbprint.is_ok());
 }
+
 #[test]
 fn test_jwk_thumbprint_missing_crv() {
     let jwk = DPoPJwk {
@@ -1399,6 +1442,7 @@ fn test_jwk_thumbprint_missing_crv() {
     let thumbprint = compute_jwk_thumbprint(&jwk);
     assert!(thumbprint.is_err());
 }
+
 #[test]
 fn test_jwk_thumbprint_missing_x() {
     let jwk = DPoPJwk {
@@ -1410,6 +1454,7 @@ fn test_jwk_thumbprint_missing_x() {
     let thumbprint = compute_jwk_thumbprint(&jwk);
     assert!(thumbprint.is_err());
 }
+
 #[test]
 fn test_jwk_thumbprint_missing_y_for_ec() {
     let jwk = DPoPJwk {
@@ -1421,6 +1466,7 @@ fn test_jwk_thumbprint_missing_y_for_ec() {
     let thumbprint = compute_jwk_thumbprint(&jwk);
     assert!(thumbprint.is_err());
 }
+
 #[test]
 fn test_jwk_thumbprint_unsupported_key_type() {
     let jwk = DPoPJwk {
@@ -1432,6 +1478,7 @@ fn test_jwk_thumbprint_unsupported_key_type() {
     let thumbprint = compute_jwk_thumbprint(&jwk);
     assert!(thumbprint.is_err());
 }
+
 #[test]
 fn test_jwk_thumbprint_deterministic() {
     let jwk = DPoPJwk {
@@ -1444,6 +1491,7 @@ fn test_jwk_thumbprint_deterministic() {
     let tp2 = compute_jwk_thumbprint(&jwk).unwrap();
     assert_eq!(tp1, tp2, "Thumbprint should be deterministic");
 }
+
 #[test]
 fn test_dpop_proof_invalid_format() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1453,6 +1501,7 @@ fn test_dpop_proof_invalid_format() {
     let result = verifier.verify_proof("invalid", "POST", "https://example.com", None);
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_invalid_typ() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1479,6 +1528,7 @@ fn test_dpop_proof_invalid_typ() {
     let result = verifier.verify_proof(&proof, "POST", "https://example.com", None);
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_method_mismatch() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1487,6 +1537,7 @@ fn test_dpop_proof_method_mismatch() {
     let result = verifier.verify_proof(&proof, "GET", "https://example.com/token", None);
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_uri_mismatch() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1495,6 +1546,7 @@ fn test_dpop_proof_uri_mismatch() {
     let result = verifier.verify_proof(&proof, "POST", "https://other.com/token", None);
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_iat_too_old() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1503,6 +1555,7 @@ fn test_dpop_proof_iat_too_old() {
     let result = verifier.verify_proof(&proof, "POST", "https://example.com/token", None);
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_iat_future() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1511,6 +1564,7 @@ fn test_dpop_proof_iat_future() {
     let result = verifier.verify_proof(&proof, "POST", "https://example.com/token", None);
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_ath_mismatch() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1530,6 +1584,7 @@ fn test_dpop_proof_ath_mismatch() {
     );
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_missing_ath_when_required() {
     let secret = b"test-dpop-secret-32-bytes-long!!";
@@ -1543,6 +1598,7 @@ fn test_dpop_proof_missing_ath_when_required() {
     );
     assert!(result.is_err());
 }
+
 #[test]
 fn test_dpop_proof_uri_ignores_query_params() {
     let secret = b"test-dpop-secret-32-bytes-long!!";

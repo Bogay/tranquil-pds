@@ -2,6 +2,7 @@ mod common;
 use common::{base_url, client};
 use reqwest::StatusCode;
 use serde_json::json;
+
 #[tokio::test]
 #[ignore = "rate limiting is disabled in test environment"]
 async fn test_login_rate_limiting() {
@@ -39,6 +40,7 @@ async fn test_login_rate_limiting() {
         rate_limited_count
     );
 }
+
 #[tokio::test]
 #[ignore = "rate limiting is disabled in test environment"]
 async fn test_password_reset_rate_limiting() {
@@ -78,6 +80,7 @@ async fn test_password_reset_rate_limiting() {
         success_count
     );
 }
+
 #[tokio::test]
 #[ignore = "rate limiting is disabled in test environment"]
 async fn test_account_creation_rate_limiting() {
@@ -117,6 +120,7 @@ async fn test_account_creation_rate_limiting() {
         rate_limited_count
     );
 }
+
 #[tokio::test]
 async fn test_valkey_connection() {
     if std::env::var("VALKEY_URL").is_err() {
@@ -154,6 +158,7 @@ async fn test_valkey_connection() {
         .await
         .expect("DEL failed");
 }
+
 #[tokio::test]
 async fn test_distributed_rate_limiter_directly() {
     if std::env::var("VALKEY_URL").is_err() {

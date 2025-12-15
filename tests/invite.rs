@@ -2,6 +2,7 @@ mod common;
 use common::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_create_invite_code_success() {
     let client = client();
@@ -26,6 +27,7 @@ async fn test_create_invite_code_success() {
     assert!(!code.is_empty());
     assert!(code.contains('-'), "Code should be a UUID format");
 }
+
 #[tokio::test]
 async fn test_create_invite_code_no_auth() {
     let client = client();
@@ -45,6 +47,7 @@ async fn test_create_invite_code_no_auth() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "AuthenticationRequired");
 }
+
 #[tokio::test]
 async fn test_create_invite_code_invalid_use_count() {
     let client = client();
@@ -66,6 +69,7 @@ async fn test_create_invite_code_invalid_use_count() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_create_invite_code_for_another_account() {
     let client = client();
@@ -89,6 +93,7 @@ async fn test_create_invite_code_for_another_account() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert!(body["code"].is_string());
 }
+
 #[tokio::test]
 async fn test_create_invite_codes_success() {
     let client = client();
@@ -114,6 +119,7 @@ async fn test_create_invite_codes_success() {
     assert_eq!(codes.len(), 1);
     assert_eq!(codes[0]["codes"].as_array().unwrap().len(), 3);
 }
+
 #[tokio::test]
 async fn test_create_invite_codes_for_multiple_accounts() {
     let client = client();
@@ -143,6 +149,7 @@ async fn test_create_invite_codes_for_multiple_accounts() {
         assert_eq!(code_obj["codes"].as_array().unwrap().len(), 2);
     }
 }
+
 #[tokio::test]
 async fn test_create_invite_codes_no_auth() {
     let client = client();
@@ -160,6 +167,7 @@ async fn test_create_invite_codes_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_get_account_invite_codes_success() {
     let client = client();
@@ -198,6 +206,7 @@ async fn test_get_account_invite_codes_success() {
     assert!(code["createdAt"].is_string());
     assert!(code["uses"].is_array());
 }
+
 #[tokio::test]
 async fn test_get_account_invite_codes_no_auth() {
     let client = client();
@@ -211,6 +220,7 @@ async fn test_get_account_invite_codes_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_get_account_invite_codes_include_used_filter() {
     let client = client();

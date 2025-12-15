@@ -7,9 +7,11 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
 const APP_BSKY_NAMESPACE: &str = "app.bsky";
 const MAX_PREFERENCES_COUNT: usize = 100;
 const MAX_PREFERENCE_SIZE: usize = 10_000;
+
 #[derive(Serialize)]
 pub struct GetPreferencesOutput {
     pub preferences: Vec<Value>,
@@ -84,6 +86,7 @@ pub async fn get_preferences(
         .collect();
     (StatusCode::OK, Json(GetPreferencesOutput { preferences })).into_response()
 }
+
 #[derive(Deserialize)]
 pub struct PutPreferencesInput {
     pub preferences: Vec<Value>,

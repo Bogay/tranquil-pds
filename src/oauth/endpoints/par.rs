@@ -11,8 +11,10 @@ use crate::oauth::{
     client::ClientMetadataCache,
     db,
 };
+
 const PAR_EXPIRY_SECONDS: i64 = 600;
 const SUPPORTED_SCOPES: &[&str] = &["atproto", "transition:generic", "transition:chat.bsky"];
+
 #[derive(Debug, Deserialize)]
 pub struct ParRequest {
     pub response_type: String,
@@ -37,11 +39,13 @@ pub struct ParRequest {
     #[serde(default)]
     pub client_assertion_type: Option<String>,
 }
+
 #[derive(Debug, Serialize)]
 pub struct ParResponse {
     pub request_uri: String,
     pub expires_in: u64,
 }
+
 pub async fn pushed_authorization_request(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -115,6 +119,7 @@ pub async fn pushed_authorization_request(
         expires_in: PAR_EXPIRY_SECONDS as u64,
     }))
 }
+
 fn determine_client_auth(request: &ParRequest) -> Result<ClientAuth, OAuthError> {
     if let (Some(assertion), Some(assertion_type)) =
         (&request.client_assertion, &request.client_assertion_type)
@@ -135,6 +140,7 @@ fn determine_client_auth(request: &ParRequest) -> Result<ClientAuth, OAuthError>
     }
     Ok(ClientAuth::None)
 }
+
 fn validate_scope(
     requested_scope: &Option<String>,
     client_metadata: &crate::oauth::client::ClientMetadata,

@@ -14,12 +14,15 @@ use serde_json::json;
 use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
+
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
+
 #[derive(Deserialize)]
 pub struct GetBlocksQuery {
     pub did: String,
     pub cids: String,
 }
+
 pub async fn get_blocks(
     State(state): State<AppState>,
     Query(query): Query<GetBlocksQuery>,
@@ -81,11 +84,13 @@ pub async fn get_blocks(
     )
         .into_response()
 }
+
 #[derive(Deserialize)]
 pub struct GetRepoQuery {
     pub did: String,
     pub since: Option<String>,
 }
+
 pub async fn get_repo(
     State(state): State<AppState>,
     Query(query): Query<GetRepoQuery>,
@@ -177,6 +182,7 @@ pub async fn get_repo(
     )
         .into_response()
 }
+
 fn extract_links_ipld(value: &Ipld, stack: &mut Vec<Cid>) {
     match value {
         Ipld::Link(cid) => {
@@ -195,12 +201,14 @@ fn extract_links_ipld(value: &Ipld, stack: &mut Vec<Cid>) {
         _ => {}
     }
 }
+
 #[derive(Deserialize)]
 pub struct GetRecordQuery {
     pub did: String,
     pub collection: String,
     pub rkey: String,
 }
+
 pub async fn get_record(
     State(state): State<AppState>,
     Query(query): Query<GetRecordQuery>,
@@ -209,6 +217,7 @@ pub async fn get_record(
     use jacquard_repo::mst::Mst;
     use std::collections::BTreeMap;
     use std::sync::Arc;
+
     let repo_row = sqlx::query!(
         r#"
         SELECT r.repo_root_cid

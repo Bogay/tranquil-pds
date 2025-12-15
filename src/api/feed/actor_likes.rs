@@ -13,12 +13,14 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::warn;
+
 #[derive(Deserialize)]
 pub struct GetActorLikesParams {
     pub actor: String,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
+
 fn insert_likes_into_feed(feed: &mut Vec<FeedViewPost>, likes: &[RecordDescript<LikeRecord>]) {
     for like in likes {
         let like_time = &like.indexed_at.to_rfc3339();
@@ -57,6 +59,7 @@ fn insert_likes_into_feed(feed: &mut Vec<FeedViewPost>, likes: &[RecordDescript<
         );
     }
 }
+
 pub async fn get_actor_likes(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

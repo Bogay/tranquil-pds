@@ -3,6 +3,7 @@ mod email;
 mod info;
 mod profile;
 mod update;
+
 pub use delete::{delete_account, DeleteAccountInput};
 pub use email::{send_email, SendEmailInput, SendEmailOutput};
 pub use info::{

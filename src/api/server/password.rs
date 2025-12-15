@@ -10,6 +10,7 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
+
 fn generate_reset_code() -> String {
     crate::util::generate_token_code()
 }
@@ -28,10 +29,12 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "unknown".to_string()
 }
+
 #[derive(Deserialize)]
 pub struct RequestPasswordResetInput {
     pub email: String,
 }
+
 pub async fn request_password_reset(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -102,11 +105,13 @@ pub async fn request_password_reset(
     info!("Password reset requested for user {}", user_id);
     (StatusCode::OK, Json(json!({}))).into_response()
 }
+
 #[derive(Deserialize)]
 pub struct ResetPasswordInput {
     pub token: String,
     pub password: String,
 }
+
 pub async fn reset_password(
     State(state): State<AppState>,
     headers: HeaderMap,

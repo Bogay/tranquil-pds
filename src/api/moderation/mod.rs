@@ -9,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::error;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateReportInput {
@@ -16,6 +17,7 @@ pub struct CreateReportInput {
     pub reason: Option<String>,
     pub subject: Value,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateReportOutput {
@@ -26,6 +28,7 @@ pub struct CreateReportOutput {
     pub reported_by: String,
     pub created_at: String,
 }
+
 pub async fn create_report(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

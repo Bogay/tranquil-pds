@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::{error, info, warn};
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignPlcOperationInput {
@@ -25,16 +26,19 @@ pub struct SignPlcOperationInput {
     pub verification_methods: Option<HashMap<String, String>>,
     pub services: Option<HashMap<String, ServiceInput>>,
 }
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServiceInput {
     #[serde(rename = "type")]
     pub service_type: String,
     pub endpoint: String,
 }
+
 #[derive(Debug, Serialize)]
 pub struct SignPlcOperationOutput {
     pub operation: Value,
 }
+
 pub async fn sign_plc_operation(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

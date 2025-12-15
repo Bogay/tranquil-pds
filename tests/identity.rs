@@ -4,6 +4,7 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
 #[tokio::test]
 async fn test_resolve_handle_success() {
     let client = client();
@@ -39,6 +40,7 @@ async fn test_resolve_handle_success() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["did"], did);
 }
+
 #[tokio::test]
 async fn test_resolve_handle_not_found() {
     let client = client();
@@ -56,6 +58,7 @@ async fn test_resolve_handle_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "HandleNotFound");
 }
+
 #[tokio::test]
 async fn test_resolve_handle_missing_param() {
     let client = client();
@@ -69,6 +72,7 @@ async fn test_resolve_handle_missing_param() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_well_known_did() {
     let client = client();
@@ -82,6 +86,7 @@ async fn test_well_known_did() {
     assert!(body["id"].as_str().unwrap().starts_with("did:web:"));
     assert_eq!(body["service"][0]["type"], "AtprotoPersonalDataServer");
 }
+
 #[tokio::test]
 async fn test_create_did_web_account_and_resolve() {
     let client = client();
@@ -145,6 +150,7 @@ async fn test_create_did_web_account_and_resolve() {
     assert_eq!(doc["verificationMethod"][0]["controller"], did);
     assert!(doc["verificationMethod"][0]["publicKeyJwk"].is_object());
 }
+
 #[tokio::test]
 async fn test_create_account_duplicate_handle() {
     let client = client();
@@ -178,6 +184,7 @@ async fn test_create_account_duplicate_handle() {
     let body: Value = res.json().await.expect("Response was not JSON");
     assert_eq!(body["error"], "HandleTaken");
 }
+
 #[tokio::test]
 async fn test_did_web_lifecycle() {
     let client = client();
@@ -267,6 +274,7 @@ async fn test_did_web_lifecycle() {
     assert_eq!(record_body["value"]["displayName"], "DID Web User");
     */
 }
+
 #[tokio::test]
 async fn test_get_recommended_did_credentials_success() {
     let client = client();
@@ -296,6 +304,7 @@ async fn test_get_recommended_did_credentials_success() {
     assert_eq!(body["services"]["atprotoPds"]["type"], "AtprotoPersonalDataServer");
     assert!(body["services"]["atprotoPds"]["endpoint"].is_string());
 }
+
 #[tokio::test]
 async fn test_get_recommended_did_credentials_no_auth() {
     let client = client();

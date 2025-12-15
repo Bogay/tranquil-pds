@@ -5,6 +5,7 @@ use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sqlx::PgPool;
+
 async fn get_pool() -> PgPool {
     let conn_str = get_db_connection_string().await;
     sqlx::postgres::PgPoolOptions::new()
@@ -13,6 +14,7 @@ async fn get_pool() -> PgPool {
         .await
         .expect("Failed to connect to test database")
 }
+
 async fn create_verified_account(client: &reqwest::Client, base_url: &str, handle: &str, email: &str, password: &str) -> (String, String) {
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
@@ -30,6 +32,7 @@ async fn create_verified_account(client: &reqwest::Client, base_url: &str, handl
     let jwt = verify_new_account(client, &did).await;
     (did, jwt)
 }
+
 #[tokio::test]
 async fn test_delete_account_full_flow() {
     let client = client();
@@ -86,6 +89,7 @@ async fn test_delete_account_full_flow() {
         .expect("Failed to check session");
     assert_eq!(session_res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_delete_account_wrong_password() {
     let client = client();
@@ -129,6 +133,7 @@ async fn test_delete_account_wrong_password() {
     let body: Value = delete_res.json().await.unwrap();
     assert_eq!(body["error"], "AuthenticationFailed");
 }
+
 #[tokio::test]
 async fn test_delete_account_invalid_token() {
     let client = client();
@@ -171,6 +176,7 @@ async fn test_delete_account_invalid_token() {
     let body: Value = delete_res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidToken");
 }
+
 #[tokio::test]
 async fn test_delete_account_expired_token() {
     let client = client();
@@ -221,6 +227,7 @@ async fn test_delete_account_expired_token() {
     let body: Value = delete_res.json().await.unwrap();
     assert_eq!(body["error"], "ExpiredToken");
 }
+
 #[tokio::test]
 async fn test_delete_account_token_mismatch() {
     let client = client();
@@ -268,6 +275,7 @@ async fn test_delete_account_token_mismatch() {
     let body: Value = delete_res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidToken");
 }
+
 #[tokio::test]
 async fn test_delete_account_with_app_password() {
     let client = client();
@@ -327,6 +335,7 @@ async fn test_delete_account_with_app_password() {
         .expect("Failed to query user");
     assert!(user_row.is_none(), "User should be deleted from database");
 }
+
 #[tokio::test]
 async fn test_delete_account_missing_fields() {
     let client = client();
@@ -371,6 +380,7 @@ async fn test_delete_account_missing_fields() {
         .expect("Failed to send request");
     assert_eq!(res3.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
+
 #[tokio::test]
 async fn test_delete_account_nonexistent_user() {
     let client = client();

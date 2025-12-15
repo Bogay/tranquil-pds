@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckAccountStatusOutput {
@@ -25,6 +26,7 @@ pub struct CheckAccountStatusOutput {
     pub expected_blobs: i64,
     pub imported_blobs: i64,
 }
+
 pub async fn check_account_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -94,6 +96,7 @@ pub async fn check_account_status(
     )
         .into_response()
 }
+
 pub async fn activate_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -133,11 +136,13 @@ pub async fn activate_account(
         }
     }
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeactivateAccountInput {
     pub delete_after: Option<String>,
 }
+
 pub async fn deactivate_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -178,6 +183,7 @@ pub async fn deactivate_account(
         }
     }
 }
+
 pub async fn request_account_delete(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -232,12 +238,14 @@ pub async fn request_account_delete(
     info!("Account deletion requested for user {}", did);
     (StatusCode::OK, Json(json!({}))).into_response()
 }
+
 #[derive(Deserialize)]
 pub struct DeleteAccountInput {
     pub did: String,
     pub password: String,
     pub token: String,
 }
+
 pub async fn delete_account(
     State(state): State<AppState>,
     Json(input): Json<DeleteAccountInput>,

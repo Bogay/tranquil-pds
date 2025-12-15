@@ -14,9 +14,11 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static APP_PORT: OnceLock<u16> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
+
 #[cfg(not(feature = "external-infra"))]
 use testcontainers::core::ContainerPort;
 #[cfg(not(feature = "external-infra"))]
@@ -27,6 +29,7 @@ use testcontainers_modules::postgres::Postgres;
 static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
 #[cfg(not(feature = "external-infra"))]
 static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
+
 #[allow(dead_code)]
 pub const AUTH_TOKEN: &str = "test-token";
 #[allow(dead_code)]
@@ -35,6 +38,7 @@ pub const BAD_AUTH_TOKEN: &str = "bad-token";
 pub const AUTH_DID: &str = "did:plc:fake";
 #[allow(dead_code)]
 pub const TARGET_DID: &str = "did:plc:target";
+
 fn has_external_infra() -> bool {
     std::env::var("BSPDS_TEST_INFRA_READY").is_ok()
         || (std::env::var("DATABASE_URL").is_ok() && std::env::var("S3_ENDPOINT").is_ok())
@@ -54,14 +58,17 @@ fn cleanup() {
         .args(&["container", "prune", "-f", "--filter", "label=bspds_test=true"])
         .output();
 }
+
 #[allow(dead_code)]
 pub fn client() -> Client {
     Client::new()
 }
+
 #[allow(dead_code)]
 pub fn app_port() -> u16 {
     *APP_PORT.get().expect("APP_PORT not initialized")
 }
+
 pub async fn base_url() -> &'static str {
     SERVER_URL.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -94,6 +101,7 @@ pub async fn base_url() -> &'static str {
         rx.recv().expect("Failed to start test server")
     })
 }
+
 async fn setup_with_external_infra() -> String {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set when using external infra");
@@ -114,6 +122,7 @@ async fn setup_with_external_infra() -> String {
     MOCK_APPVIEW.set(mock_server).ok();
     spawn_app(database_url).await
 }
+
 #[cfg(not(feature = "external-infra"))]
 async fn setup_with_testcontainers() -> String {
     let s3_container = GenericImage::new("minio/minio", "latest")
@@ -177,10 +186,12 @@ async fn setup_with_testcontainers() -> String {
     DB_CONTAINER.set(container).ok();
     spawn_app(connection_string).await
 }
+
 #[cfg(feature = "external-infra")]
 async fn setup_with_testcontainers() -> String {
     panic!("Testcontainers disabled with external-infra feature. Set DATABASE_URL and S3_ENDPOINT.");
 }
+
 async fn setup_mock_appview(mock_server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/xrpc/app.bsky.actor.getProfile"))
@@ -310,6 +321,7 @@ async fn setup_mock_appview(mock_server: &MockServer) {
         .mount(mock_server)
         .await;
 }
+
 async fn spawn_app(database_url: String) -> String {
     use bspds::rate_limit::RateLimiters;
     let pool = PgPoolOptions::new()
@@ -342,6 +354,7 @@ async fn spawn_app(database_url: String) -> String {
     });
     format!("http://{}", addr)
 }
+
 #[allow(dead_code)]
 pub async fn get_db_connection_string() -> String {
     base_url().await;
@@ -360,6 +373,7 @@ pub async fn get_db_connection_string() -> String {
         }
     }
 }
+
 #[allow(dead_code)]
 pub async fn verify_new_account(client: &Client, did: &str) -> String {
     let conn_str = get_db_connection_string().await;
@@ -396,6 +410,7 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
         .expect("No accessJwt in confirmSignup response")
         .to_string()
 }
+
 #[allow(dead_code)]
 pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'static str) -> Value {
     let res = client
@@ -413,6 +428,7 @@ pub async fn upload_test_blob(client: &Client, data: &'static str, mime: &'stati
     let body: Value = res.json().await.expect("Blob upload response was not JSON");
     body["blob"].clone()
 }
+
 #[allow(dead_code)]
 pub async fn create_test_post(
     client: &Client,
@@ -463,6 +479,7 @@ pub async fn create_test_post(
         .to_string();
     (uri, cid, rkey)
 }
+
 #[allow(dead_code)]
 pub async fn create_account_and_login(client: &Client) -> (String, String) {
     let mut last_error = String::new();

@@ -1,6 +1,6 @@
 mod common;
-use common::*;
 
+use common::*;
 use cid::Cid;
 use futures::{stream::StreamExt, SinkExt};
 use iroh_car::CarReader;

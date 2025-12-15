@@ -8,10 +8,12 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, warn};
+
 #[derive(Deserialize)]
 pub struct DeleteAccountInput {
     pub did: String,
 }
+
 pub async fn delete_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

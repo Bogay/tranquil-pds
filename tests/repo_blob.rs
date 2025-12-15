@@ -2,6 +2,7 @@ mod common;
 use common::*;
 use reqwest::{StatusCode, header};
 use serde_json::Value;
+
 #[tokio::test]
 async fn test_upload_blob_no_auth() {
     let client = client();
@@ -19,6 +20,7 @@ async fn test_upload_blob_no_auth() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "AuthenticationRequired");
 }
+
 #[tokio::test]
 async fn test_upload_blob_success() {
     let client = client();
@@ -38,6 +40,7 @@ async fn test_upload_blob_success() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert!(body["blob"]["ref"]["$link"].as_str().is_some());
 }
+
 #[tokio::test]
 async fn test_upload_blob_bad_token() {
     let client = client();
@@ -56,6 +59,7 @@ async fn test_upload_blob_bad_token() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "AuthenticationFailed");
 }
+
 #[tokio::test]
 async fn test_upload_blob_unsupported_mime_type() {
     let client = client();
@@ -73,6 +77,7 @@ async fn test_upload_blob_unsupported_mime_type() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_list_missing_blobs() {
     let client = client();
@@ -90,6 +95,7 @@ async fn test_list_missing_blobs() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert!(body["blobs"].is_array());
 }
+
 #[tokio::test]
 async fn test_list_missing_blobs_no_auth() {
     let client = client();

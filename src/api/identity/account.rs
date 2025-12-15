@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{error, info, warn};
+
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
@@ -31,6 +32,7 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "unknown".to_string()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountInput {
@@ -45,6 +47,7 @@ pub struct CreateAccountInput {
     pub telegram_username: Option<String>,
     pub signal_number: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountOutput {
@@ -53,6 +56,7 @@ pub struct CreateAccountOutput {
     pub verification_required: bool,
     pub verification_channel: String,
 }
+
 pub async fn create_account(
     State(state): State<AppState>,
     headers: HeaderMap,

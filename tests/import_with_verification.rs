@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use std::collections::BTreeMap;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
 fn make_cid(data: &[u8]) -> Cid {
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -18,6 +19,7 @@ fn make_cid(data: &[u8]) -> Cid {
     let multihash = multihash::Multihash::wrap(0x12, &hash).unwrap();
     Cid::new_v1(0x71, multihash)
 }
+
 fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
     loop {
         let mut byte = (value & 0x7F) as u8;
@@ -31,6 +33,7 @@ fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
         }
     }
 }
+
 fn encode_car_block(cid: &Cid, data: &[u8]) -> Vec<u8> {
     let cid_bytes = cid.to_bytes();
     let mut result = Vec::new();
@@ -39,6 +42,7 @@ fn encode_car_block(cid: &Cid, data: &[u8]) -> Vec<u8> {
     result.extend_from_slice(data);
     result
 }
+
 fn get_multikey_from_signing_key(signing_key: &SigningKey) -> String {
     let public_key = signing_key.verifying_key();
     let compressed = public_key.to_sec1_bytes();
@@ -55,6 +59,7 @@ fn get_multikey_from_signing_key(signing_key: &SigningKey) -> String {
     buf.extend_from_slice(&compressed);
     multibase::encode(multibase::Base::Base58Btc, buf)
 }
+
 fn create_did_document(did: &str, handle: &str, signing_key: &SigningKey, pds_endpoint: &str) -> serde_json::Value {
     let multikey = get_multikey_from_signing_key(signing_key);
     json!({
@@ -77,6 +82,7 @@ fn create_did_document(did: &str, handle: &str, signing_key: &SigningKey, pds_en
         }]
     })
 }
+
 fn create_signed_commit(
     did: &str,
     data_cid: &Cid,
@@ -106,6 +112,7 @@ fn create_signed_commit(
     let cid = make_cid(&signed_bytes);
     (signed_bytes, cid)
 }
+
 fn create_mst_node(entries: Vec<(String, Cid)>) -> (Vec<u8>, Cid) {
     let ipld_entries: Vec<Ipld> = entries
         .into_iter()
@@ -124,6 +131,7 @@ fn create_mst_node(entries: Vec<(String, Cid)>) -> (Vec<u8>, Cid) {
     let cid = make_cid(&bytes);
     (bytes, cid)
 }
+
 fn create_record() -> (Vec<u8>, Cid) {
     let record = Ipld::Map(BTreeMap::from([
         ("$type".to_string(), Ipld::String("app.bsky.feed.post".to_string())),

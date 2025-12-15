@@ -10,12 +10,16 @@ use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info, warn};
+
 const BACKFILL_BATCH_SIZE: i64 = 1000;
+
 static SUBSCRIBER_COUNT: AtomicUsize = AtomicUsize::new(0);
+
 #[derive(Deserialize)]
 pub struct SubscribeReposParams {
     pub cursor: Option<i64>,
 }
+
 #[axum::debug_handler]
 pub async fn subscribe_repos(
     ws: WebSocketUpgrade,
@@ -24,6 +28,7 @@ pub async fn subscribe_repos(
 ) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state, params))
 }
+
 async fn send_event(
     socket: &mut WebSocket,
     state: &AppState,
@@ -33,9 +38,11 @@ async fn send_event(
     socket.send(Message::Binary(bytes.into())).await?;
     Ok(())
 }
+
 pub fn get_subscriber_count() -> usize {
     SUBSCRIBER_COUNT.load(Ordering::SeqCst)
 }
+
 async fn handle_socket(mut socket: WebSocket, state: AppState, params: SubscribeReposParams) {
     let count = SUBSCRIBER_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
     crate::metrics::set_firehose_subscribers(count);
@@ -45,6 +52,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, params: Subscribe
     crate::metrics::set_firehose_subscribers(count);
     info!(subscribers = count, "Firehose subscriber disconnected");
 }
+
 async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: SubscribeReposParams) -> Result<(), ()> {
     if let Some(cursor) = params.cursor {
         let mut current_cursor = cursor;

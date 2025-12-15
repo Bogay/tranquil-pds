@@ -1,15 +1,19 @@
 import { api, type Session, type CreateAccountParams, type CreateAccountResult, ApiError } from './api'
+
 const STORAGE_KEY = 'bspds_session'
+
 interface AuthState {
   session: Session | null
   loading: boolean
   error: string | null
 }
+
 let state = $state<AuthState>({
   session: null,
   loading: true,
   error: null,
 })
+
 function saveSession(session: Session | null) {
   if (session) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
@@ -17,6 +21,7 @@ function saveSession(session: Session | null) {
     localStorage.removeItem(STORAGE_KEY)
   }
 }
+
 function loadSession(): Session | null {
   const stored = localStorage.getItem(STORAGE_KEY)
   if (stored) {
@@ -28,6 +33,7 @@ function loadSession(): Session | null {
   }
   return null
 }
+
 export async function initAuth() {
   state.loading = true
   state.error = null
@@ -54,6 +60,7 @@ export async function initAuth() {
   }
   state.loading = false
 }
+
 export async function login(identifier: string, password: string): Promise<void> {
   state.loading = true
   state.error = null
@@ -72,6 +79,7 @@ export async function login(identifier: string, password: string): Promise<void>
     state.loading = false
   }
 }
+
 export async function register(params: CreateAccountParams): Promise<CreateAccountResult> {
   try {
     const result = await api.createAccount(params)
@@ -85,6 +93,7 @@ export async function register(params: CreateAccountParams): Promise<CreateAccou
     throw e
   }
 }
+
 export async function confirmSignup(did: string, verificationCode: string): Promise<void> {
   state.loading = true
   state.error = null
@@ -113,6 +122,7 @@ export async function confirmSignup(did: string, verificationCode: string): Prom
     state.loading = false
   }
 }
+
 export async function resendVerification(did: string): Promise<void> {
   try {
     await api.resendVerification(did)
@@ -123,6 +133,7 @@ export async function resendVerification(did: string): Promise<void> {
     throw new Error('Failed to resend verification code')
   }
 }
+
 export async function logout(): Promise<void> {
   if (state.session) {
     try {
@@ -134,20 +145,25 @@ export async function logout(): Promise<void> {
   state.session = null
   saveSession(null)
 }
+
 export function getAuthState() {
   return state
 }
+
 export function getToken(): string | null {
   return state.session?.accessJwt ?? null
 }
+
 export function isAuthenticated(): boolean {
   return state.session !== null
 }
+
 export function _testSetState(newState: { session: Session | null; loading: boolean; error: string | null }) {
   state.session = newState.session
   state.loading = newState.loading
   state.error = newState.error
 }
+
 export function _testReset() {
   state.session = null
   state.loading = true

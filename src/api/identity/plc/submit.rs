@@ -12,10 +12,12 @@ use k256::ecdsa::SigningKey;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::{error, info, warn};
+
 #[derive(Debug, Deserialize)]
 pub struct SubmitPlcOperationInput {
     pub operation: Value,
 }
+
 pub async fn submit_plc_operation(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

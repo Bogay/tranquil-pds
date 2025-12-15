@@ -2,11 +2,13 @@ use cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use crate::sync::firehose::SequencedEvent;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FrameHeader {
     pub op: i64,
     pub t: String,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CommitFrame {
     pub seq: i64,
@@ -25,6 +27,7 @@ pub struct CommitFrame {
     #[serde(rename = "prevData", skip_serializing_if = "Option::is_none")]
     pub prev_data: Option<Cid>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct JsonRepoOp {
     action: String,
@@ -32,6 +35,7 @@ struct JsonRepoOp {
     cid: Option<String>,
     prev: Option<String>,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RepoOp {
     pub action: String,
@@ -40,6 +44,7 @@ pub struct RepoOp {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prev: Option<Cid>,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityFrame {
     pub did: String,
@@ -48,6 +53,7 @@ pub struct IdentityFrame {
     pub seq: i64,
     pub time: String,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccountFrame {
     pub did: String,
@@ -57,6 +63,7 @@ pub struct AccountFrame {
     pub seq: i64,
     pub time: String,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncFrame {
     pub did: String,
@@ -66,6 +73,7 @@ pub struct SyncFrame {
     pub seq: i64,
     pub time: String,
 }
+
 pub struct CommitFrameBuilder {
     pub seq: i64,
     pub did: String,
@@ -75,6 +83,7 @@ pub struct CommitFrameBuilder {
     pub blobs: Vec<String>,
     pub time: chrono::DateTime<chrono::Utc>,
 }
+
 impl CommitFrameBuilder {
     pub fn build(self) -> Result<CommitFrame, &'static str> {
         let commit_cid = Cid::from_str(&self.commit_cid_str)
@@ -109,15 +118,19 @@ impl CommitFrameBuilder {
         })
     }
 }
+
 fn placeholder_rev() -> String {
     use jacquard::types::{integer::LimitedU32, string::Tid};
     Tid::now(LimitedU32::MIN).to_string()
 }
+
 fn format_atproto_time(dt: chrono::DateTime<chrono::Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
+
 impl TryFrom<SequencedEvent> for CommitFrame {
     type Error = &'static str;
+
     fn try_from(event: SequencedEvent) -> Result<Self, Self::Error> {
         let builder = CommitFrameBuilder {
             seq: event.seq,

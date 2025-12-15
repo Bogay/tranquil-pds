@@ -14,7 +14,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use tracing::error;
+
 const MAX_BLOB_SIZE: usize = 1_000_000;
+
 pub async fn upload_blob(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -154,22 +156,26 @@ pub async fn upload_blob(
     }))
     .into_response()
 }
+
 #[derive(Deserialize)]
 pub struct ListMissingBlobsParams {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordBlob {
     pub cid: String,
     pub record_uri: String,
 }
+
 #[derive(Serialize)]
 pub struct ListMissingBlobsOutput {
     pub cursor: Option<String>,
     pub blobs: Vec<RecordBlob>,
 }
+
 fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
     if let Some(obj) = val.as_object() {
         if let Some(type_val) = obj.get("$type") {
@@ -192,6 +198,7 @@ fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
         }
     }
 }
+
 pub async fn list_missing_blobs(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

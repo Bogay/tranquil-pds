@@ -3,6 +3,7 @@ use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
 use super::super::OAuthError;
+
 pub struct TwoFactorChallenge {
     pub id: Uuid,
     pub did: String,
@@ -12,11 +13,13 @@ pub struct TwoFactorChallenge {
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
+
 pub fn generate_2fa_code() -> String {
     let mut rng = rand::thread_rng();
     let code: u32 = rng.gen_range(0..1_000_000);
     format!("{:06}", code)
 }
+
 pub async fn create_2fa_challenge(
     pool: &PgPool,
     did: &str,
@@ -47,6 +50,7 @@ pub async fn create_2fa_challenge(
         expires_at: row.expires_at,
     })
 }
+
 pub async fn get_2fa_challenge(
     pool: &PgPool,
     request_uri: &str,
@@ -71,6 +75,7 @@ pub async fn get_2fa_challenge(
         expires_at: r.expires_at,
     }))
 }
+
 pub async fn increment_2fa_attempts(pool: &PgPool, id: Uuid) -> Result<i32, OAuthError> {
     let row = sqlx::query!(
         r#"
@@ -85,6 +90,7 @@ pub async fn increment_2fa_attempts(pool: &PgPool, id: Uuid) -> Result<i32, OAut
     .await?;
     Ok(row.attempts)
 }
+
 pub async fn delete_2fa_challenge(pool: &PgPool, id: Uuid) -> Result<(), OAuthError> {
     sqlx::query!(
         r#"
@@ -96,6 +102,7 @@ pub async fn delete_2fa_challenge(pool: &PgPool, id: Uuid) -> Result<(), OAuthEr
     .await?;
     Ok(())
 }
+
 pub async fn delete_2fa_challenge_by_request_uri(
     pool: &PgPool,
     request_uri: &str,
@@ -110,6 +117,7 @@ pub async fn delete_2fa_challenge_by_request_uri(
     .await?;
     Ok(())
 }
+
 pub async fn cleanup_expired_2fa_challenges(pool: &PgPool) -> Result<u64, OAuthError> {
     let result = sqlx::query!(
         r#"
@@ -120,6 +128,7 @@ pub async fn cleanup_expired_2fa_challenges(pool: &PgPool) -> Result<u64, OAuthE
     .await?;
     Ok(result.rows_affected())
 }
+
 pub async fn check_user_2fa_enabled(pool: &PgPool, did: &str) -> Result<bool, OAuthError> {
     let row = sqlx::query!(
         r#"

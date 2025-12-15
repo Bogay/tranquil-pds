@@ -8,10 +8,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
+
 #[derive(Deserialize)]
 pub struct GetAccountInfoParams {
     pub did: String,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountInfo {
@@ -24,11 +26,13 @@ pub struct AccountInfo {
     pub email_confirmed_at: Option<String>,
     pub deactivated_at: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAccountInfosOutput {
     pub infos: Vec<AccountInfo>,
 }
+
 pub async fn get_account_info(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -92,10 +96,12 @@ pub async fn get_account_info(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct GetAccountInfosParams {
     pub dids: String,
 }
+
 pub async fn get_account_infos(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

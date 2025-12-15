@@ -6,16 +6,20 @@ use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+
 pub mod tracking;
+
 #[derive(Clone)]
 pub struct PostgresBlockStore {
     pool: PgPool,
 }
+
 impl PostgresBlockStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
+
 impl BlockStore for PostgresBlockStore {
     async fn get(&self, cid: &Cid) -> Result<Option<Bytes>, RepoError> {
         crate::metrics::record_block_operation("get");
@@ -29,6 +33,7 @@ impl BlockStore for PostgresBlockStore {
             None => Ok(None),
         }
     }
+
     async fn put(&self, data: &[u8]) -> Result<Cid, RepoError> {
         crate::metrics::record_block_operation("put");
         let mut hasher = Sha256::new();
@@ -44,6 +49,7 @@ impl BlockStore for PostgresBlockStore {
             .map_err(|e| RepoError::storage(e))?;
         Ok(cid)
     }
+
     async fn has(&self, cid: &Cid) -> Result<bool, RepoError> {
         crate::metrics::record_block_operation("has");
         let cid_bytes = cid.to_bytes();
@@ -53,6 +59,7 @@ impl BlockStore for PostgresBlockStore {
             .map_err(|e| RepoError::storage(e))?;
         Ok(row.is_some())
     }
+
     async fn put_many(
         &self,
         blocks: impl IntoIterator<Item = (Cid, Bytes)> + Send,
@@ -78,6 +85,7 @@ impl BlockStore for PostgresBlockStore {
         .map_err(|e| RepoError::storage(e))?;
         Ok(())
     }
+
     async fn get_many(&self, cids: &[Cid]) -> Result<Vec<Option<Bytes>>, RepoError> {
         if cids.is_empty() {
             return Ok(Vec::new());
@@ -101,6 +109,7 @@ impl BlockStore for PostgresBlockStore {
             .collect();
         Ok(results)
     }
+
     async fn apply_commit(&self, commit: CommitData) -> Result<(), RepoError> {
         self.put_many(commit.blocks).await?;
         Ok(())

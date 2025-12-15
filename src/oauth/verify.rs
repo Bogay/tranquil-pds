@@ -10,11 +10,13 @@ use serde_json::json;
 use sha2::Sha256;
 use sqlx::PgPool;
 use subtle::ConstantTimeEq;
+
 use crate::config::AuthConfig;
 use crate::state::AppState;
 use super::db;
 use super::dpop::DPoPVerifier;
 use super::OAuthError;
+
 pub struct OAuthTokenInfo {
     pub did: String,
     pub token_id: String,
@@ -22,12 +24,14 @@ pub struct OAuthTokenInfo {
     pub scope: Option<String>,
     pub dpop_jkt: Option<String>,
 }
+
 pub struct VerifyResult {
     pub did: String,
     pub token_id: String,
     pub client_id: String,
     pub scope: Option<String>,
 }
+
 pub async fn verify_oauth_access_token(
     pool: &PgPool,
     access_token: &str,
@@ -69,6 +73,7 @@ pub async fn verify_oauth_access_token(
         scope: token_data.scope,
     })
 }
+
 pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
@@ -141,6 +146,7 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         dpop_jkt,
     })
 }
+
 fn compute_ath(access_token: &str) -> String {
     use sha2::Digest;
     let mut hasher = Sha256::new();
@@ -148,23 +154,27 @@ fn compute_ath(access_token: &str) -> String {
     let hash = hasher.finalize();
     URL_SAFE_NO_PAD.encode(&hash)
 }
+
 pub fn generate_dpop_nonce() -> String {
     let config = AuthConfig::get();
     let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
     verifier.generate_nonce()
 }
+
 pub struct OAuthUser {
     pub did: String,
     pub client_id: Option<String>,
     pub scope: Option<String>,
     pub is_oauth: bool,
 }
+
 pub struct OAuthAuthError {
     pub status: StatusCode,
     pub error: String,
     pub message: String,
     pub dpop_nonce: Option<String>,
 }
+
 impl IntoResponse for OAuthAuthError {
     fn into_response(self) -> Response {
         let mut response = (
@@ -184,8 +194,10 @@ impl IntoResponse for OAuthAuthError {
         response
     }
 }
+
 impl FromRequestParts<AppState> for OAuthUser {
     type Rejection = OAuthAuthError;
+
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
         let auth_header = parts
             .headers
@@ -258,9 +270,11 @@ impl FromRequestParts<AppState> for OAuthUser {
         }
     }
 }
+
 struct LegacyAuthResult {
     did: String,
 }
+
 async fn try_legacy_auth(pool: &PgPool, token: &str) -> Result<LegacyAuthResult, ()> {
     match crate::auth::validate_bearer_token(pool, token).await {
         Ok(user) if !user.is_oauth => Ok(LegacyAuthResult { did: user.did }),

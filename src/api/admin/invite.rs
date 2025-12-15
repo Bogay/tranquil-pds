@@ -8,12 +8,14 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisableInviteCodesInput {
     pub codes: Option<Vec<String>>,
     pub accounts: Option<Vec<String>>,
 }
+
 pub async fn disable_invite_codes(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -51,12 +53,14 @@ pub async fn disable_invite_codes(
     }
     (StatusCode::OK, Json(json!({}))).into_response()
 }
+
 #[derive(Deserialize)]
 pub struct GetInviteCodesParams {
     pub sort: Option<String>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeInfo {
@@ -68,17 +72,20 @@ pub struct InviteCodeInfo {
     pub created_at: String,
     pub uses: Vec<InviteCodeUseInfo>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeUseInfo {
     pub used_by: String,
     pub used_at: String,
 }
+
 #[derive(Serialize)]
 pub struct GetInviteCodesOutput {
     pub cursor: Option<String>,
     pub codes: Vec<InviteCodeInfo>,
 }
+
 pub async fn get_invite_codes(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -192,10 +199,12 @@ pub async fn get_invite_codes(
     )
         .into_response()
 }
+
 #[derive(Deserialize)]
 pub struct DisableAccountInvitesInput {
     pub account: String,
 }
+
 pub async fn disable_account_invites(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -241,10 +250,12 @@ pub async fn disable_account_invites(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct EnableAccountInvitesInput {
     pub account: String,
 }
+
 pub async fn enable_account_invites(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

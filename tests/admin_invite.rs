@@ -1,7 +1,9 @@
 mod common;
+
 use common::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_admin_get_invite_codes_success() {
     let client = client();
@@ -32,6 +34,7 @@ async fn test_admin_get_invite_codes_success() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert!(body["codes"].is_array());
 }
+
 #[tokio::test]
 async fn test_admin_get_invite_codes_with_limit() {
     let client = client();
@@ -65,6 +68,7 @@ async fn test_admin_get_invite_codes_with_limit() {
     let codes = body["codes"].as_array().unwrap();
     assert!(codes.len() <= 2);
 }
+
 #[tokio::test]
 async fn test_admin_get_invite_codes_no_auth() {
     let client = client();
@@ -78,6 +82,7 @@ async fn test_admin_get_invite_codes_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_disable_account_invites_success() {
     let client = client();
@@ -113,6 +118,7 @@ async fn test_disable_account_invites_success() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "InvitesDisabled");
 }
+
 #[tokio::test]
 async fn test_enable_account_invites_success() {
     let client = client();
@@ -158,6 +164,7 @@ async fn test_enable_account_invites_success() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_disable_account_invites_no_auth() {
     let client = client();
@@ -175,6 +182,7 @@ async fn test_disable_account_invites_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_disable_account_invites_not_found() {
     let client = client();
@@ -194,6 +202,7 @@ async fn test_disable_account_invites_not_found() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
 #[tokio::test]
 async fn test_disable_invite_codes_by_code() {
     let client = client();
@@ -242,6 +251,7 @@ async fn test_disable_invite_codes_by_code() {
     assert!(disabled_code.is_some());
     assert_eq!(disabled_code.unwrap()["disabled"], true);
 }
+
 #[tokio::test]
 async fn test_disable_invite_codes_by_account() {
     let client = client();
@@ -289,6 +299,7 @@ async fn test_disable_invite_codes_by_account() {
         assert_eq!(code["disabled"], true);
     }
 }
+
 #[tokio::test]
 async fn test_disable_invite_codes_no_auth() {
     let client = client();
@@ -306,6 +317,7 @@ async fn test_disable_invite_codes_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_admin_enable_account_invites_not_found() {
     let client = client();

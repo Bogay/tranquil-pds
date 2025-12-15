@@ -10,9 +10,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
+
 fn extract_rev_from_commit_bytes(commit_bytes: &[u8]) -> Option<String> {
     Commit::from_cbor(commit_bytes).ok().map(|c| c.rev().to_string())
 }
+
 async fn write_car_blocks(
     commit_cid: Cid,
     commit_bytes: Option<Bytes>,
@@ -37,9 +39,11 @@ async fn write_car_blocks(
         .map_err(|e| anyhow::anyhow!("flushing CAR buffer: {}", e))?;
     Ok(buffer.into_inner())
 }
+
 fn format_atproto_time(dt: chrono::DateTime<chrono::Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
+
 fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error> {
     let frame = IdentityFrame {
         did: event.did.clone(),
@@ -56,6 +60,7 @@ fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Erro
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
 }
+
 fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error> {
     let frame = AccountFrame {
         did: event.did.clone(),
@@ -73,6 +78,7 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
 }
+
 async fn format_sync_event(
     state: &AppState,
     event: &SequencedEvent,
@@ -101,6 +107,7 @@ async fn format_sync_event(
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
 }
+
 pub async fn format_event_for_sending(
     state: &AppState,
     event: SequencedEvent,
@@ -168,6 +175,7 @@ pub async fn format_event_for_sending(
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
 }
+
 pub async fn prefetch_blocks_for_events(
     state: &AppState,
     events: &[SequencedEvent],
@@ -206,6 +214,7 @@ pub async fn prefetch_blocks_for_events(
     }
     Ok(blocks_map)
 }
+
 fn format_sync_event_with_prefetched(
     event: &SequencedEvent,
     prefetched: &HashMap<Cid, Bytes>,
@@ -236,6 +245,7 @@ fn format_sync_event_with_prefetched(
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
 }
+
 pub async fn format_event_with_prefetched_blocks(
     event: SequencedEvent,
     prefetched: &HashMap<Cid, Bytes>,

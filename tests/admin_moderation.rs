@@ -1,7 +1,9 @@
 mod common;
+
 use common::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_get_subject_status_user_success() {
     let client = client();
@@ -22,6 +24,7 @@ async fn test_get_subject_status_user_success() {
     assert_eq!(body["subject"]["$type"], "com.atproto.admin.defs#repoRef");
     assert_eq!(body["subject"]["did"], did);
 }
+
 #[tokio::test]
 async fn test_get_subject_status_not_found() {
     let client = client();
@@ -40,6 +43,7 @@ async fn test_get_subject_status_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "SubjectNotFound");
 }
+
 #[tokio::test]
 async fn test_get_subject_status_no_param() {
     let client = client();
@@ -57,6 +61,7 @@ async fn test_get_subject_status_no_param() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_get_subject_status_no_auth() {
     let client = client();
@@ -71,6 +76,7 @@ async fn test_get_subject_status_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_update_subject_status_takedown_user() {
     let client = client();
@@ -115,6 +121,7 @@ async fn test_update_subject_status_takedown_user() {
     assert_eq!(status_body["takedown"]["applied"], true);
     assert_eq!(status_body["takedown"]["ref"], "mod-action-123");
 }
+
 #[tokio::test]
 async fn test_update_subject_status_remove_takedown() {
     let client = client();
@@ -171,6 +178,7 @@ async fn test_update_subject_status_remove_takedown() {
     let status_body: Value = status_res.json().await.unwrap();
     assert!(status_body["takedown"].is_null() || !status_body["takedown"]["applied"].as_bool().unwrap_or(false));
 }
+
 #[tokio::test]
 async fn test_update_subject_status_deactivate_user() {
     let client = client();
@@ -209,6 +217,7 @@ async fn test_update_subject_status_deactivate_user() {
     assert!(status_body["deactivated"].is_object());
     assert_eq!(status_body["deactivated"]["applied"], true);
 }
+
 #[tokio::test]
 async fn test_update_subject_status_invalid_type() {
     let client = client();
@@ -236,6 +245,7 @@ async fn test_update_subject_status_invalid_type() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_update_subject_status_no_auth() {
     let client = client();

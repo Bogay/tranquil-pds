@@ -16,6 +16,7 @@ use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
+
 #[derive(Deserialize)]
 pub struct DeleteRecordInput {
     pub repo: String,
@@ -26,6 +27,7 @@ pub struct DeleteRecordInput {
     #[serde(rename = "swapCommit")]
     pub swap_commit: Option<String>,
 }
+
 pub async fn delete_record(
     State(state): State<AppState>,
     headers: HeaderMap,

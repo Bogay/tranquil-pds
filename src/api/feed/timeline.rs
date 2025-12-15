@@ -15,12 +15,14 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::warn;
+
 #[derive(Deserialize)]
 pub struct GetTimelineParams {
     pub algorithm: Option<String>,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
+
 pub async fn get_timeline(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -56,6 +58,7 @@ pub async fn get_timeline(
     }
     get_timeline_local_only(&state, &auth_user.did).await
 }
+
 async fn get_timeline_with_appview(
     state: &AppState,
     headers: &axum::http::HeaderMap,
@@ -123,6 +126,7 @@ async fn get_timeline_with_appview(
     let lag = get_local_lag(&local_records);
     format_munged_response(feed_output, lag)
 }
+
 async fn get_timeline_local_only(state: &AppState, auth_did: &str) -> Response {
     let user_id: uuid::Uuid = match sqlx::query_scalar!(
         "SELECT id FROM users WHERE did = $1",

@@ -1,12 +1,14 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use super::super::{DeviceData, OAuthError};
+
 pub struct DeviceAccountRow {
     pub did: String,
     pub handle: String,
     pub email: Option<String>,
     pub last_used_at: DateTime<Utc>,
 }
+
 pub async fn create_device(
     pool: &PgPool,
     device_id: &str,
@@ -27,6 +29,7 @@ pub async fn create_device(
     .await?;
     Ok(())
 }
+
 pub async fn get_device(pool: &PgPool, device_id: &str) -> Result<Option<DeviceData>, OAuthError> {
     let row = sqlx::query!(
         r#"
@@ -45,6 +48,7 @@ pub async fn get_device(pool: &PgPool, device_id: &str) -> Result<Option<DeviceD
         last_seen_at: r.last_seen_at,
     }))
 }
+
 pub async fn update_device_last_seen(
     pool: &PgPool,
     device_id: &str,
@@ -61,6 +65,7 @@ pub async fn update_device_last_seen(
     .await?;
     Ok(())
 }
+
 pub async fn delete_device(pool: &PgPool, device_id: &str) -> Result<(), OAuthError> {
     sqlx::query!(
         r#"
@@ -72,6 +77,7 @@ pub async fn delete_device(pool: &PgPool, device_id: &str) -> Result<(), OAuthEr
     .await?;
     Ok(())
 }
+
 pub async fn upsert_account_device(
     pool: &PgPool,
     did: &str,
@@ -90,6 +96,7 @@ pub async fn upsert_account_device(
     .await?;
     Ok(())
 }
+
 pub async fn get_device_accounts(
     pool: &PgPool,
     device_id: &str,
@@ -118,6 +125,7 @@ pub async fn get_device_accounts(
         })
         .collect())
 }
+
 pub async fn verify_account_on_device(
     pool: &PgPool,
     device_id: &str,

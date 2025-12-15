@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
 fn encode_uvarint(mut x: u64) -> Vec<u8> {
     let mut out = Vec::new();
     while x >= 0x80 {
@@ -15,6 +16,7 @@ fn encode_uvarint(mut x: u64) -> Vec<u8> {
     out.push(x as u8);
     out
 }
+
 fn signing_key_to_did_key(signing_key: &SigningKey) -> String {
     let verifying_key = signing_key.verifying_key();
     let point = verifying_key.to_encoded_point(true);
@@ -24,6 +26,7 @@ fn signing_key_to_did_key(signing_key: &SigningKey) -> String {
     let encoded = multibase::encode(multibase::Base::Base58Btc, &prefixed);
     format!("did:key:{}", encoded)
 }
+
 fn get_multikey_from_signing_key(signing_key: &SigningKey) -> String {
     let public_key = signing_key.verifying_key();
     let compressed = public_key.to_sec1_bytes();
@@ -31,6 +34,7 @@ fn get_multikey_from_signing_key(signing_key: &SigningKey) -> String {
     buf.extend_from_slice(&compressed);
     multibase::encode(multibase::Base::Base58Btc, buf)
 }
+
 async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
     let db_url = get_db_connection_string().await;
     let pool = PgPool::connect(&db_url).await.ok()?;
@@ -48,6 +52,7 @@ async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
     .ok()??;
     bspds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
 }
+
 async fn get_plc_token_from_db(did: &str) -> Option<String> {
     let db_url = get_db_connection_string().await;
     let pool = PgPool::connect(&db_url).await.ok()?;
@@ -64,6 +69,7 @@ async fn get_plc_token_from_db(did: &str) -> Option<String> {
     .await
     .ok()?
 }
+
 async fn get_user_handle(did: &str) -> Option<String> {
     let db_url = get_db_connection_string().await;
     let pool = PgPool::connect(&db_url).await.ok()?;
@@ -75,6 +81,7 @@ async fn get_user_handle(did: &str) -> Option<String> {
     .await
     .ok()?
 }
+
 fn create_mock_last_op(
     _did: &str,
     handle: &str,
@@ -99,6 +106,7 @@ fn create_mock_last_op(
         "sig": "mock_signature_for_testing"
     })
 }
+
 fn create_did_document(did: &str, handle: &str, signing_key: &SigningKey, pds_endpoint: &str) -> Value {
     let multikey = get_multikey_from_signing_key(signing_key);
     json!({
@@ -121,6 +129,7 @@ fn create_did_document(did: &str, handle: &str, signing_key: &SigningKey, pds_en
         }]
     })
 }
+
 async fn setup_mock_plc_for_sign(
     did: &str,
     handle: &str,
@@ -137,6 +146,7 @@ async fn setup_mock_plc_for_sign(
         .await;
     mock_server
 }
+
 async fn setup_mock_plc_for_submit(
     did: &str,
     handle: &str,
@@ -158,6 +168,7 @@ async fn setup_mock_plc_for_submit(
         .await;
     mock_server
 }
+
 #[tokio::test]
 #[ignore = "requires mock PLC server setup that is flaky; run manually with --ignored"]
 async fn test_full_plc_operation_flow() {
@@ -213,6 +224,7 @@ async fn test_full_plc_operation_flow() {
     assert_eq!(operation.get("type").and_then(|v| v.as_str()), Some("plc_operation"));
     assert!(operation.get("prev").is_some(), "Operation should have prev reference");
 }
+
 #[tokio::test]
 #[ignore = "requires exclusive env var access; run with: cargo test test_sign_plc_operation_consumes_token -- --ignored --test-threads=1"]
 async fn test_sign_plc_operation_consumes_token() {
@@ -278,6 +290,7 @@ async fn test_sign_plc_operation_consumes_token() {
         "Error should indicate invalid/expired token"
     );
 }
+
 #[tokio::test]
 async fn test_sign_plc_operation_with_custom_fields() {
     let client = client();
@@ -337,6 +350,7 @@ async fn test_sign_plc_operation_with_custom_fields() {
     assert_eq!(also_known_as.unwrap().len(), 2, "Should have 2 aliases");
     assert_eq!(rotation_keys.unwrap().len(), 2, "Should have 2 rotation keys");
 }
+
 #[tokio::test]
 #[ignore = "requires mock PLC server setup that is flaky; run manually with --ignored"]
 async fn test_submit_plc_operation_success() {
@@ -390,6 +404,7 @@ async fn test_submit_plc_operation_success() {
         submit_body
     );
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_wrong_endpoint_rejected() {
     let client = client();
@@ -441,6 +456,7 @@ async fn test_submit_plc_operation_wrong_endpoint_rejected() {
     let body: Value = submit_res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_submit_plc_operation_wrong_signing_key_rejected() {
     let client = client();
@@ -494,6 +510,7 @@ async fn test_submit_plc_operation_wrong_signing_key_rejected() {
     let body: Value = submit_res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_full_sign_and_submit_flow() {
     let client = client();
@@ -593,6 +610,7 @@ async fn test_full_sign_and_submit_flow() {
         submit_body
     );
 }
+
 #[tokio::test]
 async fn test_cross_pds_migration_with_records() {
     let client = client();
@@ -692,6 +710,7 @@ async fn test_cross_pds_migration_with_records() {
         "Record content should match"
     );
 }
+
 #[tokio::test]
 async fn test_migration_rejects_wrong_did_document() {
     let client = client();
@@ -749,6 +768,7 @@ async fn test_migration_rejects_wrong_did_document() {
         "Error should mention signature verification failure"
     );
 }
+
 #[tokio::test]
 #[ignore = "requires exclusive env var access; run with: cargo test test_full_migration_flow_end_to_end -- --ignored --test-threads=1"]
 async fn test_full_migration_flow_end_to_end() {

@@ -5,9 +5,12 @@ use axum::{
     Json,
 };
 use serde_json::json;
+
 use crate::state::AppState;
 use super::{AuthenticatedUser, TokenValidationError, validate_bearer_token_cached, validate_bearer_token_cached_allow_deactivated};
+
 pub struct BearerAuth(pub AuthenticatedUser);
+
 #[derive(Debug)]
 pub enum AuthError {
     MissingToken,
@@ -16,6 +19,7 @@ pub enum AuthError {
     AccountDeactivated,
     AccountTakedown,
 }
+
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let (status, error, message) = match self {
@@ -45,41 +49,54 @@ impl IntoResponse for AuthError {
                 "Account has been taken down",
             ),
         };
+
         (status, Json(json!({ "error": error, "message": message }))).into_response()
     }
 }
+
 fn extract_bearer_token(auth_header: &str) -> Result<&str, AuthError> {
     let auth_header = auth_header.trim();
+
     if auth_header.len() < 8 {
         return Err(AuthError::InvalidFormat);
     }
+
     let prefix = &auth_header[..7];
     if !prefix.eq_ignore_ascii_case("bearer ") {
         return Err(AuthError::InvalidFormat);
     }
+
     let token = auth_header[7..].trim();
     if token.is_empty() {
         return Err(AuthError::InvalidFormat);
     }
+
     Ok(token)
 }
+
 pub fn extract_bearer_token_from_header(auth_header: Option<&str>) -> Option<String> {
     let header = auth_header?;
     let header = header.trim();
+
     if header.len() < 7 {
         return None;
     }
+
     if !header[..7].eq_ignore_ascii_case("bearer ") {
         return None;
     }
+
     let token = header[7..].trim();
     if token.is_empty() {
         return None;
     }
+
     Some(token.to_string())
 }
+
 impl FromRequestParts<AppState> for BearerAuth {
     type Rejection = AuthError;
+
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
@@ -90,7 +107,9 @@ impl FromRequestParts<AppState> for BearerAuth {
             .ok_or(AuthError::MissingToken)?
             .to_str()
             .map_err(|_| AuthError::InvalidFormat)?;
+
         let token = extract_bearer_token(auth_header)?;
+
         match validate_bearer_token_cached(&state.db, &state.cache, token).await {
             Ok(user) => Ok(BearerAuth(user)),
             Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
@@ -99,9 +118,12 @@ impl FromRequestParts<AppState> for BearerAuth {
         }
     }
 }
+
 pub struct BearerAuthAllowDeactivated(pub AuthenticatedUser);
+
 impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
     type Rejection = AuthError;
+
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
@@ -112,7 +134,9 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
             .ok_or(AuthError::MissingToken)?
             .to_str()
             .map_err(|_| AuthError::InvalidFormat)?;
+
         let token = extract_bearer_token(auth_header)?;
+
         match validate_bearer_token_cached_allow_deactivated(&state.db, &state.cache, token).await {
             Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
             Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
@@ -120,9 +144,11 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_extract_bearer_token() {
         assert_eq!(extract_bearer_token("Bearer abc123").unwrap(), "abc123");
@@ -130,6 +156,7 @@ mod tests {
         assert_eq!(extract_bearer_token("BEARER abc123").unwrap(), "abc123");
         assert_eq!(extract_bearer_token("Bearer  abc123").unwrap(), "abc123");
         assert_eq!(extract_bearer_token(" Bearer abc123 ").unwrap(), "abc123");
+
         assert!(extract_bearer_token("Basic abc123").is_err());
         assert!(extract_bearer_token("Bearer").is_err());
         assert!(extract_bearer_token("Bearer ").is_err());

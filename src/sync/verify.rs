@@ -8,6 +8,7 @@ use reqwest::Client;
 use std::collections::HashMap;
 use thiserror::Error;
 use tracing::{debug, warn};
+
 #[derive(Error, Debug)]
 pub enum VerifyError {
     #[error("Invalid commit: {0}")]
@@ -30,14 +31,17 @@ pub enum VerifyError {
     #[error("Invalid CBOR: {0}")]
     InvalidCbor(String),
 }
+
 pub struct CarVerifier {
     http_client: Client,
 }
+
 impl Default for CarVerifier {
     fn default() -> Self {
         Self::new()
     }
 }
+
 impl CarVerifier {
     pub fn new() -> Self {
         Self {
@@ -47,6 +51,7 @@ impl CarVerifier {
                 .unwrap_or_default(),
         }
     }
+
     pub async fn verify_car(
         &self,
         expected_did: &str,
@@ -80,6 +85,7 @@ impl CarVerifier {
             prev: commit.prev().cloned(),
         })
     }
+
     async fn resolve_did_signing_key(&self, did: &str) -> Result<PublicKey<'static>, VerifyError> {
         let did_doc = self.resolve_did_document(did).await?;
         did_doc
@@ -87,6 +93,7 @@ impl CarVerifier {
             .map_err(|e| VerifyError::DidResolutionFailed(e.to_string()))?
             .ok_or(VerifyError::NoSigningKey)
     }
+
     async fn resolve_did_document(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
         if did.starts_with("did:plc:") {
             self.resolve_plc_did(did).await
@@ -99,6 +106,7 @@ impl CarVerifier {
             )))
         }
     }
+
     async fn resolve_plc_did(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
         let plc_url = std::env::var("PLC_DIRECTORY_URL")
             .unwrap_or_else(|_| "https://plc.directory".to_string());
@@ -123,6 +131,7 @@ impl CarVerifier {
             .map_err(|e| VerifyError::DidResolutionFailed(e.to_string()))?;
         Ok(doc.into_static())
     }
+
     async fn resolve_web_did(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
         let domain = did
             .strip_prefix("did:web:")
@@ -154,12 +163,14 @@ impl CarVerifier {
             .map_err(|e| VerifyError::DidResolutionFailed(e.to_string()))?;
         Ok(doc.into_static())
     }
+
     fn verify_mst_structure(
         &self,
         data_cid: &Cid,
         blocks: &HashMap<Cid, Bytes>,
     ) -> Result<(), VerifyError> {
         use ipld_core::ipld::Ipld;
+
         let mut stack = vec![*data_cid];
         let mut visited = std::collections::HashSet::new();
         let mut node_count = 0;
@@ -246,6 +257,7 @@ impl CarVerifier {
         Ok(())
     }
 }
+
 #[derive(Debug, Clone)]
 pub struct VerifiedCar {
     pub did: String,
@@ -253,6 +265,7 @@ pub struct VerifiedCar {
     pub data_cid: Cid,
     pub prev: Option<Cid>,
 }
+
 #[cfg(test)]
 #[path = "verify_tests.rs"]
 mod tests;

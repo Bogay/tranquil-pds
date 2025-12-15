@@ -3,6 +3,7 @@ use cid::Cid;
 use std::collections::HashMap;
 use std::str::FromStr;
 mod common;
+
 #[tokio::test]
 async fn test_verify_live_commit() {
     let client = reqwest::Client::new();
@@ -51,6 +52,7 @@ async fn test_verify_live_commit() {
         }
     }
 }
+
 fn commit_unsigned_bytes(commit: &jacquard_repo::commit::Commit<'_>) -> Vec<u8> {
     #[derive(serde::Serialize)]
     struct UnsignedCommit<'a> {
@@ -72,6 +74,7 @@ fn commit_unsigned_bytes(commit: &jacquard_repo::commit::Commit<'_>) -> Vec<u8> 
     };
     serde_ipld_dagcbor::to_vec(&unsigned).unwrap()
 }
+
 fn parse_car(cursor: &mut std::io::Cursor<&[u8]>) -> Result<(Vec<Cid>, HashMap<Cid, Bytes>), Box<dyn std::error::Error>> {
     use std::io::Read;
     fn read_varint<R: Read>(r: &mut R) -> std::io::Result<u64> {

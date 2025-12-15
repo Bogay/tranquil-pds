@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "notification_channel", rename_all = "lowercase")]
 pub enum NotificationChannel {
@@ -10,6 +11,7 @@ pub enum NotificationChannel {
     Telegram,
     Signal,
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "notification_status", rename_all = "lowercase")]
 pub enum NotificationStatus {
@@ -18,6 +20,7 @@ pub enum NotificationStatus {
     Sent,
     Failed,
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
 #[sqlx(type_name = "notification_type", rename_all = "snake_case")]
 pub enum NotificationType {
@@ -30,6 +33,7 @@ pub enum NotificationType {
     PlcOperation,
     TwoFactorCode,
 }
+
 #[derive(Debug, Clone, FromRow)]
 pub struct QueuedNotification {
     pub id: Uuid,
@@ -49,6 +53,7 @@ pub struct QueuedNotification {
     pub scheduled_for: DateTime<Utc>,
     pub processed_at: Option<DateTime<Utc>>,
 }
+
 pub struct NewNotification {
     pub user_id: Uuid,
     pub channel: NotificationChannel,
@@ -58,6 +63,7 @@ pub struct NewNotification {
     pub body: String,
     pub metadata: Option<serde_json::Value>,
 }
+
 impl NewNotification {
     pub fn new(
         user_id: Uuid,
@@ -77,6 +83,7 @@ impl NewNotification {
             metadata: None,
         }
     }
+
     pub fn email(
         user_id: Uuid,
         notification_type: NotificationType,

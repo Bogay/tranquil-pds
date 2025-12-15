@@ -6,12 +6,15 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use crate::config::AuthConfig;
 use crate::oauth::OAuthError;
+
 const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 3600;
+
 pub struct TokenClaims {
     pub jti: String,
     pub exp: i64,
     pub iat: i64,
 }
+
 pub fn verify_pkce(code_challenge: &str, code_verifier: &str) -> Result<(), OAuthError> {
     let mut hasher = Sha256::new();
     hasher.update(code_verifier.as_bytes());
@@ -22,6 +25,7 @@ pub fn verify_pkce(code_challenge: &str, code_verifier: &str) -> Result<(), OAut
     }
     Ok(())
 }
+
 pub fn create_access_token(
     token_id: &str,
     sub: &str,
@@ -60,6 +64,7 @@ pub fn create_access_token(
     let signature_b64 = URL_SAFE_NO_PAD.encode(&signature);
     Ok(format!("{}.{}", signing_input, signature_b64))
 }
+
 pub fn extract_token_claims(token: &str) -> Result<TokenClaims, OAuthError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {

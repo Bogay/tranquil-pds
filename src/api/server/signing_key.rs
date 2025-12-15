@@ -10,7 +10,9 @@ use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info};
+
 const SECP256K1_MULTICODEC_PREFIX: [u8; 2] = [0xe7, 0x01];
+
 fn public_key_to_did_key(signing_key: &SigningKey) -> String {
     let verifying_key = signing_key.verifying_key();
     let compressed_pubkey = verifying_key.to_sec1_bytes();
@@ -20,15 +22,18 @@ fn public_key_to_did_key(signing_key: &SigningKey) -> String {
     let encoded = multibase::encode(multibase::Base::Base58Btc, &multicodec_key);
     format!("did:key:{}", encoded)
 }
+
 #[derive(Deserialize)]
 pub struct ReserveSigningKeyInput {
     pub did: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReserveSigningKeyOutput {
     pub signing_key: String,
 }
+
 pub async fn reserve_signing_key(
     State(state): State<AppState>,
     Json(input): Json<ReserveSigningKeyInput>,

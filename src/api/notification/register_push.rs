@@ -10,6 +10,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info};
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterPushInput {
@@ -18,7 +19,9 @@ pub struct RegisterPushInput {
     pub platform: String,
     pub app_id: String,
 }
+
 const VALID_PLATFORMS: &[&str] = &["ios", "android", "web"];
+
 pub async fn register_push(
     State(state): State<AppState>,
     headers: HeaderMap,

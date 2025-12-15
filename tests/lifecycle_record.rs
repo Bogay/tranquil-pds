@@ -6,6 +6,7 @@ use chrono::Utc;
 use reqwest::{StatusCode, header};
 use serde_json::{Value, json};
 use std::time::Duration;
+
 #[tokio::test]
 async fn test_post_crud_lifecycle() {
     let client = client();
@@ -155,6 +156,7 @@ async fn test_post_crud_lifecycle() {
         "Record was found, but it should be deleted"
     );
 }
+
 #[tokio::test]
 async fn test_record_update_conflict_lifecycle() {
     let client = client();
@@ -280,6 +282,7 @@ async fn test_record_update_conflict_lifecycle() {
         "v3 (good) update failed"
     );
 }
+
 #[tokio::test]
 async fn test_profile_lifecycle() {
     let client = client();
@@ -362,6 +365,7 @@ async fn test_profile_lifecycle() {
     let updated_body: Value = get_updated_res.json().await.unwrap();
     assert_eq!(updated_body["value"]["displayName"], "Updated User");
 }
+
 #[tokio::test]
 async fn test_reply_thread_lifecycle() {
     let client = client();
@@ -457,6 +461,7 @@ async fn test_reply_thread_lifecycle() {
         .expect("Failed to create nested reply");
     assert_eq!(nested_res.status(), StatusCode::OK, "Failed to create nested reply");
 }
+
 #[tokio::test]
 async fn test_blob_in_record_lifecycle() {
     let client = client();
@@ -514,6 +519,7 @@ async fn test_blob_in_record_lifecycle() {
     let profile: Value = get_res.json().await.unwrap();
     assert!(profile["value"]["avatar"]["ref"]["$link"].is_string());
 }
+
 #[tokio::test]
 async fn test_authorization_cannot_modify_other_repo() {
     let client = client();
@@ -545,6 +551,7 @@ async fn test_authorization_cannot_modify_other_repo() {
         res.status()
     );
 }
+
 #[tokio::test]
 async fn test_authorization_cannot_delete_other_record() {
     let client = client();
@@ -587,6 +594,7 @@ async fn test_authorization_cannot_delete_other_record() {
         .expect("Failed to verify record exists");
     assert_eq!(get_res.status(), StatusCode::OK, "Record should still exist");
 }
+
 #[tokio::test]
 async fn test_apply_writes_batch_lifecycle() {
     let client = client();
@@ -747,6 +755,7 @@ async fn test_apply_writes_batch_lifecycle() {
         "Batch-deleted post should be gone"
     );
 }
+
 async fn create_post_with_rkey(
     client: &reqwest::Client,
     did: &str,
@@ -781,6 +790,7 @@ async fn create_post_with_rkey(
         body["cid"].as_str().unwrap().to_string(),
     )
 }
+
 #[tokio::test]
 async fn test_list_records_default_order() {
     let client = client();
@@ -812,6 +822,7 @@ async fn test_list_records_default_order() {
         .collect();
     assert_eq!(rkeys, vec!["cccc", "bbbb", "aaaa"], "Default order should be DESC (newest first)");
 }
+
 #[tokio::test]
 async fn test_list_records_reverse_true() {
     let client = client();
@@ -843,6 +854,7 @@ async fn test_list_records_reverse_true() {
         .collect();
     assert_eq!(rkeys, vec!["aaaa", "bbbb", "cccc"], "reverse=true should give ASC order (oldest first)");
 }
+
 #[tokio::test]
 async fn test_list_records_cursor_pagination() {
     let client = client();
@@ -895,6 +907,7 @@ async fn test_list_records_cursor_pagination() {
     let unique_uris: std::collections::HashSet<&str> = all_uris.iter().copied().collect();
     assert_eq!(all_uris.len(), unique_uris.len(), "Cursor pagination should not repeat records");
 }
+
 #[tokio::test]
 async fn test_list_records_rkey_start() {
     let client = client();
@@ -928,6 +941,7 @@ async fn test_list_records_rkey_start() {
         assert!(*rkey >= "bbbb", "rkeyStart should filter records >= start");
     }
 }
+
 #[tokio::test]
 async fn test_list_records_rkey_end() {
     let client = client();
@@ -961,6 +975,7 @@ async fn test_list_records_rkey_end() {
         assert!(*rkey <= "cccc", "rkeyEnd should filter records <= end");
     }
 }
+
 #[tokio::test]
 async fn test_list_records_rkey_range() {
     let client = client();
@@ -997,6 +1012,7 @@ async fn test_list_records_rkey_range() {
     }
     assert!(!rkeys.is_empty(), "Should have at least some records in range");
 }
+
 #[tokio::test]
 async fn test_list_records_limit_clamping_max() {
     let client = client();
@@ -1022,6 +1038,7 @@ async fn test_list_records_limit_clamping_max() {
     let records = body["records"].as_array().unwrap();
     assert!(records.len() <= 100, "Limit should be clamped to max 100");
 }
+
 #[tokio::test]
 async fn test_list_records_limit_clamping_min() {
     let client = client();
@@ -1045,6 +1062,7 @@ async fn test_list_records_limit_clamping_min() {
     let records = body["records"].as_array().unwrap();
     assert!(records.len() >= 1, "Limit should be clamped to min 1");
 }
+
 #[tokio::test]
 async fn test_list_records_empty_collection() {
     let client = client();
@@ -1067,6 +1085,7 @@ async fn test_list_records_empty_collection() {
     assert!(records.is_empty(), "Empty collection should return empty array");
     assert!(body["cursor"].is_null(), "Empty collection should have no cursor");
 }
+
 #[tokio::test]
 async fn test_list_records_exact_limit() {
     let client = client();
@@ -1092,6 +1111,7 @@ async fn test_list_records_exact_limit() {
     let records = body["records"].as_array().unwrap();
     assert_eq!(records.len(), 5, "Should return exactly 5 records when limit=5");
 }
+
 #[tokio::test]
 async fn test_list_records_cursor_exhaustion() {
     let client = client();
@@ -1117,6 +1137,7 @@ async fn test_list_records_cursor_exhaustion() {
     let records = body["records"].as_array().unwrap();
     assert_eq!(records.len(), 3);
 }
+
 #[tokio::test]
 async fn test_list_records_repo_not_found() {
     let client = client();
@@ -1134,6 +1155,7 @@ async fn test_list_records_repo_not_found() {
         .expect("Failed to list records");
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
 #[tokio::test]
 async fn test_list_records_includes_cid() {
     let client = client();
@@ -1162,6 +1184,7 @@ async fn test_list_records_includes_cid() {
         assert!(cid.starts_with("bafy"), "CID should be valid");
     }
 }
+
 #[tokio::test]
 async fn test_list_records_cursor_with_reverse() {
     let client = client();

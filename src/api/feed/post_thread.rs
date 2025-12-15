@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::warn;
+
 #[derive(Deserialize)]
 pub struct GetPostThreadParams {
     pub uri: String,
@@ -20,6 +21,7 @@ pub struct GetPostThreadParams {
     #[serde(rename = "parentHeight")]
     pub parent_height: Option<u32>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadViewPost {
@@ -33,6 +35,7 @@ pub struct ThreadViewPost {
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ThreadNode {
@@ -40,6 +43,7 @@ pub enum ThreadNode {
     NotFound(ThreadNotFound),
     Blocked(ThreadBlocked),
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadNotFound {
@@ -48,6 +52,7 @@ pub struct ThreadNotFound {
     pub uri: String,
     pub not_found: bool,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadBlocked {
@@ -57,13 +62,16 @@ pub struct ThreadBlocked {
     pub blocked: bool,
     pub author: Value,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostThreadOutput {
     pub thread: ThreadNode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threadgate: Option<Value>,
 }
+
 const MAX_THREAD_DEPTH: usize = 10;
+
 fn add_replies_to_thread(
     thread: &mut ThreadViewPost,
     local_posts: &[RecordDescript<PostRecord>],
@@ -111,6 +119,7 @@ fn add_replies_to_thread(
         }
     }
 }
+
 pub async fn get_post_thread(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -190,6 +199,7 @@ pub async fn get_post_thread(
     let lag = get_local_lag(&local_records);
     format_munged_response(thread_output, lag)
 }
+
 async fn handle_not_found(
     state: &AppState,
     uri: &str,

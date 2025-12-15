@@ -4,6 +4,7 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use helpers::verify_new_account;
+
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
     sqlx::postgres::PgPoolOptions::new()
@@ -12,6 +13,7 @@ async fn get_pool() -> PgPool {
         .await
         .expect("Failed to connect to test database")
 }
+
 #[tokio::test]
 async fn test_reserve_signing_key_without_did() {
     let client = common::client();
@@ -34,6 +36,7 @@ async fn test_reserve_signing_key_without_did() {
         "Signing key should be in did:key format with multibase prefix"
     );
 }
+
 #[tokio::test]
 async fn test_reserve_signing_key_with_did() {
     let client = common::client();
@@ -63,6 +66,7 @@ async fn test_reserve_signing_key_with_did() {
     assert_eq!(row.did.as_deref(), Some(target_did));
     assert_eq!(row.public_key_did_key, signing_key);
 }
+
 #[tokio::test]
 async fn test_reserve_signing_key_stores_private_key() {
     let client = common::client();
@@ -91,6 +95,7 @@ async fn test_reserve_signing_key_stores_private_key() {
     assert!(row.used_at.is_none(), "Reserved key should not be marked as used yet");
     assert!(row.expires_at > chrono::Utc::now(), "Key should expire in the future");
 }
+
 #[tokio::test]
 async fn test_reserve_signing_key_unique_keys() {
     let client = common::client();
@@ -121,6 +126,7 @@ async fn test_reserve_signing_key_unique_keys() {
     let key2 = body2["signingKey"].as_str().unwrap();
     assert_ne!(key1, key2, "Each call should generate a unique signing key");
 }
+
 #[tokio::test]
 async fn test_reserve_signing_key_is_public() {
     let client = common::client();
@@ -140,6 +146,7 @@ async fn test_reserve_signing_key_is_public() {
         "reserveSigningKey should work without authentication"
     );
 }
+
 #[tokio::test]
 async fn test_create_account_with_reserved_signing_key() {
     let client = common::client();
@@ -190,6 +197,7 @@ async fn test_create_account_with_reserved_signing_key() {
         "Reserved key should be marked as used"
     );
 }
+
 #[tokio::test]
 async fn test_create_account_with_invalid_signing_key() {
     let client = common::client();
@@ -213,6 +221,7 @@ async fn test_create_account_with_invalid_signing_key() {
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidSigningKey");
 }
+
 #[tokio::test]
 async fn test_create_account_cannot_reuse_signing_key() {
     let client = common::client();
@@ -268,6 +277,7 @@ async fn test_create_account_cannot_reuse_signing_key() {
         .unwrap()
         .contains("already used"));
 }
+
 #[tokio::test]
 async fn test_reserved_key_tokens_work() {
     let client = common::client();

@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use super::super::{OAuthError, TokenData};
 use super::helpers::{from_json, to_json};
+
 pub async fn create_token(
     pool: &PgPool,
     data: &TokenData,
@@ -34,6 +35,7 @@ pub async fn create_token(
     .await?;
     Ok(row.id)
 }
+
 pub async fn get_token_by_id(
     pool: &PgPool,
     token_id: &str,
@@ -68,6 +70,7 @@ pub async fn get_token_by_id(
         None => Ok(None),
     }
 }
+
 pub async fn get_token_by_refresh_token(
     pool: &PgPool,
     refresh_token: &str,
@@ -105,6 +108,7 @@ pub async fn get_token_by_refresh_token(
         None => Ok(None),
     }
 }
+
 pub async fn rotate_token(
     pool: &PgPool,
     old_db_id: i32,
@@ -149,6 +153,7 @@ pub async fn rotate_token(
     tx.commit().await?;
     Ok(())
 }
+
 pub async fn check_refresh_token_used(
     pool: &PgPool,
     refresh_token: &str,
@@ -163,6 +168,7 @@ pub async fn check_refresh_token_used(
     .await?;
     Ok(row)
 }
+
 pub async fn delete_token(pool: &PgPool, token_id: &str) -> Result<(), OAuthError> {
     sqlx::query!(
         r#"
@@ -174,6 +180,7 @@ pub async fn delete_token(pool: &PgPool, token_id: &str) -> Result<(), OAuthErro
     .await?;
     Ok(())
 }
+
 pub async fn delete_token_family(pool: &PgPool, db_id: i32) -> Result<(), OAuthError> {
     sqlx::query!(
         r#"
@@ -185,6 +192,7 @@ pub async fn delete_token_family(pool: &PgPool, db_id: i32) -> Result<(), OAuthE
     .await?;
     Ok(())
 }
+
 pub async fn list_tokens_for_user(
     pool: &PgPool,
     did: &str,
@@ -220,6 +228,7 @@ pub async fn list_tokens_for_user(
     }
     Ok(tokens)
 }
+
 pub async fn count_tokens_for_user(pool: &PgPool, did: &str) -> Result<i64, OAuthError> {
     let count = sqlx::query_scalar!(
         r#"
@@ -231,6 +240,7 @@ pub async fn count_tokens_for_user(pool: &PgPool, did: &str) -> Result<i64, OAut
     .await?;
     Ok(count)
 }
+
 pub async fn delete_oldest_tokens_for_user(
     pool: &PgPool,
     did: &str,
@@ -253,7 +263,9 @@ pub async fn delete_oldest_tokens_for_user(
     .await?;
     Ok(result.rows_affected())
 }
+
 const MAX_TOKENS_PER_USER: i64 = 100;
+
 pub async fn enforce_token_limit_for_user(pool: &PgPool, did: &str) -> Result<(), OAuthError> {
     let count = count_tokens_for_user(pool, did).await?;
     if count > MAX_TOKENS_PER_USER {

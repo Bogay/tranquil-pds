@@ -3,6 +3,7 @@ use common::*;
 use reqwest::StatusCode;
 use reqwest::header;
 use serde_json::Value;
+
 #[tokio::test]
 async fn test_list_blobs_success() {
     let client = client();
@@ -35,6 +36,7 @@ async fn test_list_blobs_success() {
     let cids = body["cids"].as_array().unwrap();
     assert!(!cids.is_empty());
 }
+
 #[tokio::test]
 async fn test_list_blobs_not_found() {
     let client = client();
@@ -52,6 +54,7 @@ async fn test_list_blobs_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
+
 #[tokio::test]
 async fn test_get_blob_success() {
     let client = client();
@@ -91,6 +94,7 @@ async fn test_get_blob_success() {
     let body = res.text().await.expect("Failed to get body");
     assert_eq!(body, blob_content);
 }
+
 #[tokio::test]
 async fn test_get_blob_not_found() {
     let client = client();

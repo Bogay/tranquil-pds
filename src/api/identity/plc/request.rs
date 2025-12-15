@@ -9,9 +9,11 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde_json::json;
 use tracing::{error, info, warn};
+
 fn generate_plc_token() -> String {
     crate::util::generate_token_code()
 }
+
 pub async fn request_plc_operation_signature(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

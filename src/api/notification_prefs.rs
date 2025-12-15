@@ -10,6 +10,7 @@ use sqlx::Row;
 use tracing::info;
 use crate::auth::validate_bearer_token;
 use crate::state::AppState;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationPrefsResponse {
@@ -22,6 +23,7 @@ pub struct NotificationPrefsResponse {
     pub signal_number: Option<String>,
     pub signal_verified: bool,
 }
+
 pub async fn get_notification_prefs(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -96,6 +98,7 @@ pub async fn get_notification_prefs(
     })
     .into_response()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateNotificationPrefsInput {
@@ -104,6 +107,7 @@ pub struct UpdateNotificationPrefsInput {
     pub telegram_username: Option<String>,
     pub signal_number: Option<String>,
 }
+
 pub async fn update_notification_prefs(
     State(state): State<AppState>,
     headers: HeaderMap,

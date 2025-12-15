@@ -9,6 +9,7 @@ use std::io::Cursor;
 use thiserror::Error;
 use tracing::debug;
 use uuid::Uuid;
+
 #[derive(Error, Debug)]
 pub enum ImportError {
     #[error("CAR parsing error: {0}")]
@@ -36,11 +37,13 @@ pub enum ImportError {
     #[error("DID mismatch: CAR is for {car_did}, but authenticated as {auth_did}")]
     DidMismatch { car_did: String, auth_did: String },
 }
+
 #[derive(Debug, Clone)]
 pub struct BlobRef {
     pub cid: String,
     pub mime_type: Option<String>,
 }
+
 pub async fn parse_car(data: &[u8]) -> Result<(Cid, HashMap<Cid, Bytes>), ImportError> {
     let cursor = Cursor::new(data);
     let mut reader = CarReader::new(cursor)
@@ -61,6 +64,7 @@ pub async fn parse_car(data: &[u8]) -> Result<(Cid, HashMap<Cid, Bytes>), Import
     }
     Ok((root, blocks))
 }
+
 pub fn find_blob_refs_ipld(value: &Ipld, depth: usize) -> Vec<BlobRef> {
     if depth > 32 {
         return vec![];
@@ -91,6 +95,7 @@ pub fn find_blob_refs_ipld(value: &Ipld, depth: usize) -> Vec<BlobRef> {
         _ => vec![],
     }
 }
+
 pub fn find_blob_refs(value: &JsonValue, depth: usize) -> Vec<BlobRef> {
     if depth > 32 {
         return vec![];
@@ -124,6 +129,7 @@ pub fn find_blob_refs(value: &JsonValue, depth: usize) -> Vec<BlobRef> {
         _ => vec![],
     }
 }
+
 pub fn extract_links(value: &Ipld, links: &mut Vec<Cid>) {
     match value {
         Ipld::Link(cid) => {
@@ -142,6 +148,7 @@ pub fn extract_links(value: &Ipld, links: &mut Vec<Cid>) {
         _ => {}
     }
 }
+
 #[derive(Debug)]
 pub struct ImportedRecord {
     pub collection: String,
@@ -149,6 +156,7 @@ pub struct ImportedRecord {
     pub cid: Cid,
     pub blob_refs: Vec<BlobRef>,
 }
+
 pub fn walk_mst(
     blocks: &HashMap<Cid, Bytes>,
     root_cid: &Cid,
@@ -219,10 +227,12 @@ pub fn walk_mst(
     }
     Ok(records)
 }
+
 pub struct CommitInfo {
     pub rev: Option<String>,
     pub prev: Option<String>,
 }
+
 fn extract_commit_info(commit: &Ipld) -> Result<(Cid, CommitInfo), ImportError> {
     let obj = match commit {
         Ipld::Map(m) => m,
@@ -250,6 +260,7 @@ fn extract_commit_info(commit: &Ipld) -> Result<(Cid, CommitInfo), ImportError> 
     });
     Ok((data_cid, CommitInfo { rev, prev }))
 }
+
 pub async fn apply_import(
     db: &PgPool,
     user_id: Uuid,
@@ -344,9 +355,11 @@ pub async fn apply_import(
     );
     Ok(records)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_find_blob_refs() {
         let record = serde_json::json!({
@@ -377,6 +390,7 @@ mod tests {
         );
         assert_eq!(blob_refs[0].mime_type, Some("image/jpeg".to_string()));
     }
+
     #[test]
     fn test_find_blob_refs_no_blobs() {
         let record = serde_json::json!({
@@ -386,6 +400,7 @@ mod tests {
         let blob_refs = find_blob_refs(&record, 0);
         assert!(blob_refs.is_empty());
     }
+
     #[test]
     fn test_find_blob_refs_depth_limit() {
         fn deeply_nested(depth: usize) -> JsonValue {

@@ -2,6 +2,7 @@ mod grants;
 mod helpers;
 mod introspect;
 mod types;
+
 use axum::{
     Form, Json,
     extract::State,
@@ -9,12 +10,14 @@ use axum::{
 };
 use crate::state::{AppState, RateLimitKind};
 use crate::oauth::OAuthError;
+
 pub use grants::{handle_authorization_code_grant, handle_refresh_token_grant};
 pub use helpers::{create_access_token, extract_token_claims, verify_pkce, TokenClaims};
 pub use introspect::{
     introspect_token, revoke_token, IntrospectRequest, IntrospectResponse, RevokeRequest,
 };
 pub use types::{TokenRequest, TokenResponse};
+
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
@@ -30,6 +33,7 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "unknown".to_string()
 }
+
 pub async fn token_endpoint(
     State(state): State<AppState>,
     headers: HeaderMap,

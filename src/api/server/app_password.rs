@@ -11,6 +11,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppPassword {
@@ -18,10 +19,12 @@ pub struct AppPassword {
     pub created_at: String,
     pub privileged: bool,
 }
+
 #[derive(Serialize)]
 pub struct ListAppPasswordsOutput {
     pub passwords: Vec<AppPassword>,
 }
+
 pub async fn list_app_passwords(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
@@ -54,11 +57,13 @@ pub async fn list_app_passwords(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct CreateAppPasswordInput {
     pub name: String,
     pub privileged: Option<bool>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAppPasswordOutput {
@@ -67,6 +72,7 @@ pub struct CreateAppPasswordOutput {
     pub created_at: String,
     pub privileged: bool,
 }
+
 pub async fn create_app_password(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -146,10 +152,12 @@ pub async fn create_app_password(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct RevokeAppPasswordInput {
     pub name: String,
 }
+
 pub async fn revoke_app_password(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,

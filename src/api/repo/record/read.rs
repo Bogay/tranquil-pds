@@ -12,6 +12,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::error;
+
 #[derive(Deserialize)]
 pub struct GetRecordInput {
     pub repo: String,
@@ -19,6 +20,7 @@ pub struct GetRecordInput {
     pub rkey: String,
     pub cid: Option<String>,
 }
+
 pub async fn get_record(
     State(state): State<AppState>,
     Query(input): Query<GetRecordInput>,

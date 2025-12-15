@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
+
 #[derive(Error, Debug)]
 pub enum PlcError {
     #[error("HTTP request failed: {0}")]
@@ -27,6 +28,7 @@ pub enum PlcError {
     #[error("Service unavailable (circuit breaker open)")]
     CircuitBreakerOpen,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcOperation {
     #[serde(rename = "type")]
@@ -42,12 +44,14 @@ pub struct PlcOperation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sig: Option<String>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcService {
     #[serde(rename = "type")]
     pub service_type: String,
     pub endpoint: String,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcTombstone {
     #[serde(rename = "type")]
@@ -56,12 +60,14 @@ pub struct PlcTombstone {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sig: Option<String>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PlcOpOrTombstone {
     Operation(PlcOperation),
     Tombstone(PlcTombstone),
 }
+
 impl PlcOpOrTombstone {
     pub fn is_tombstone(&self) -> bool {
         match self {
@@ -70,10 +76,12 @@ impl PlcOpOrTombstone {
         }
     }
 }
+
 pub struct PlcClient {
     base_url: String,
     client: Client,
 }
+
 impl PlcClient {
     pub fn new(base_url: Option<String>) -> Self {
         let base_url = base_url.unwrap_or_else(|| {
@@ -99,9 +107,11 @@ impl PlcClient {
             client,
         }
     }
+
     fn encode_did(did: &str) -> String {
         urlencoding::encode(did).to_string()
     }
+
     pub async fn get_document(&self, did: &str) -> Result<Value, PlcError> {
         let url = format!("{}/{}", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
@@ -118,6 +128,7 @@ impl PlcClient {
         }
         response.json().await.map_err(|e| PlcError::InvalidResponse(e.to_string()))
     }
+
     pub async fn get_document_data(&self, did: &str) -> Result<Value, PlcError> {
         let url = format!("{}/{}/data", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
@@ -134,6 +145,7 @@ impl PlcClient {
         }
         response.json().await.map_err(|e| PlcError::InvalidResponse(e.to_string()))
     }
+
     pub async fn get_last_op(&self, did: &str) -> Result<PlcOpOrTombstone, PlcError> {
         let url = format!("{}/{}/log/last", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
@@ -150,6 +162,7 @@ impl PlcClient {
         }
         response.json().await.map_err(|e| PlcError::InvalidResponse(e.to_string()))
     }
+
     pub async fn get_audit_log(&self, did: &str) -> Result<Vec<Value>, PlcError> {
         let url = format!("{}/{}/log/audit", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
@@ -166,6 +179,7 @@ impl PlcClient {
         }
         response.json().await.map_err(|e| PlcError::InvalidResponse(e.to_string()))
     }
+
     pub async fn send_operation(&self, did: &str, operation: &Value) -> Result<(), PlcError> {
         let url = format!("{}/{}", self.base_url, Self::encode_did(did));
         let response = self.client
@@ -184,6 +198,7 @@ impl PlcClient {
         Ok(())
     }
 }
+
 pub fn cid_for_cbor(value: &Value) -> Result<String, PlcError> {
     let cbor_bytes = serde_ipld_dagcbor::to_vec(value)
         .map_err(|e| PlcError::Serialization(e.to_string()))?;
@@ -195,6 +210,7 @@ pub fn cid_for_cbor(value: &Value) -> Result<String, PlcError> {
     let cid = cid::Cid::new_v1(0x71, multihash);
     Ok(cid.to_string())
 }
+
 pub fn sign_operation(
     operation: &Value,
     signing_key: &SigningKey,
@@ -213,6 +229,7 @@ pub fn sign_operation(
     }
     Ok(op)
 }
+
 pub fn create_update_op(
     last_op: &PlcOpOrTombstone,
     rotation_keys: Option<Vec<String>>,
@@ -250,6 +267,7 @@ pub fn create_update_op(
     };
     serde_json::to_value(new_op).map_err(|e| PlcError::Serialization(e.to_string()))
 }
+
 pub fn signing_key_to_did_key(signing_key: &SigningKey) -> String {
     let verifying_key = signing_key.verifying_key();
     let point = verifying_key.to_encoded_point(true);
@@ -259,10 +277,12 @@ pub fn signing_key_to_did_key(signing_key: &SigningKey) -> String {
     let encoded = multibase::encode(multibase::Base::Base58Btc, &prefixed);
     format!("did:key:{}", encoded)
 }
+
 pub struct GenesisResult {
     pub did: String,
     pub signed_operation: Value,
 }
+
 pub fn create_genesis_operation(
     signing_key: &SigningKey,
     rotation_key: &str,
@@ -298,6 +318,7 @@ pub fn create_genesis_operation(
         signed_operation: signed_op,
     })
 }
+
 pub fn did_for_genesis_op(signed_op: &Value) -> Result<String, PlcError> {
     let cbor_bytes = serde_ipld_dagcbor::to_vec(signed_op)
         .map_err(|e| PlcError::Serialization(e.to_string()))?;
@@ -308,6 +329,7 @@ pub fn did_for_genesis_op(signed_op: &Value) -> Result<String, PlcError> {
     let truncated = &encoded[..24];
     Ok(format!("did:plc:{}", truncated))
 }
+
 pub fn validate_plc_operation(op: &Value) -> Result<(), PlcError> {
     let obj = op.as_object()
         .ok_or_else(|| PlcError::InvalidResponse("Operation must be an object".to_string()))?;
@@ -336,12 +358,14 @@ pub fn validate_plc_operation(op: &Value) -> Result<(), PlcError> {
     }
     Ok(())
 }
+
 pub struct PlcValidationContext {
     pub server_rotation_key: String,
     pub expected_signing_key: String,
     pub expected_handle: String,
     pub expected_pds_endpoint: String,
 }
+
 pub fn validate_plc_operation_for_submission(
     op: &Value,
     ctx: &PlcValidationContext,
@@ -407,6 +431,7 @@ pub fn validate_plc_operation_for_submission(
     }
     Ok(())
 }
+
 pub fn verify_operation_signature(
     op: &Value,
     rotation_keys: &[String],
@@ -434,6 +459,7 @@ pub fn verify_operation_signature(
     }
     Ok(false)
 }
+
 fn verify_signature_with_did_key(
     did_key: &str,
     message: &[u8],
@@ -461,15 +487,18 @@ fn verify_signature_with_did_key(
         .map_err(|e| PlcError::InvalidResponse(format!("Invalid public key: {}", e)))?;
     Ok(verifying_key.verify(message, signature).is_ok())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_signing_key_to_did_key() {
         let key = SigningKey::random(&mut rand::thread_rng());
         let did_key = signing_key_to_did_key(&key);
         assert!(did_key.starts_with("did:key:z"));
     }
+
     #[test]
     fn test_cid_for_cbor() {
         let value = json!({
@@ -479,6 +508,7 @@ mod tests {
         let cid = cid_for_cbor(&value).unwrap();
         assert!(cid.starts_with("bafyrei"));
     }
+
     #[test]
     fn test_sign_operation() {
         let key = SigningKey::random(&mut rand::thread_rng());

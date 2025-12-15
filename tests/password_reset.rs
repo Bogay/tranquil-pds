@@ -4,6 +4,7 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use helpers::verify_new_account;
+
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
     sqlx::postgres::PgPoolOptions::new()
@@ -12,6 +13,7 @@ async fn get_pool() -> PgPool {
         .await
         .expect("Failed to connect to test database")
 }
+
 #[tokio::test]
 async fn test_request_password_reset_creates_code() {
     let client = common::client();
@@ -51,6 +53,7 @@ async fn test_request_password_reset_creates_code() {
     assert!(code.contains('-'));
     assert_eq!(code.len(), 11);
 }
+
 #[tokio::test]
 async fn test_request_password_reset_unknown_email_returns_ok() {
     let client = common::client();
@@ -63,6 +66,7 @@ async fn test_request_password_reset_unknown_email_returns_ok() {
         .expect("Failed to request password reset");
     assert_eq!(res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_reset_password_with_valid_token() {
     let client = common::client();
@@ -142,6 +146,7 @@ async fn test_reset_password_with_valid_token() {
         .expect("Failed to login attempt");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_reset_password_with_invalid_token() {
     let client = common::client();
@@ -159,6 +164,7 @@ async fn test_reset_password_with_invalid_token() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidToken");
 }
+
 #[tokio::test]
 async fn test_reset_password_with_expired_token() {
     let client = common::client();
@@ -213,6 +219,7 @@ async fn test_reset_password_with_expired_token() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "ExpiredToken");
 }
+
 #[tokio::test]
 async fn test_reset_password_invalidates_sessions() {
     let client = common::client();
@@ -275,6 +282,7 @@ async fn test_reset_password_invalidates_sessions() {
         .expect("Failed to get session");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_request_password_reset_empty_email() {
     let client = common::client();
@@ -289,6 +297,7 @@ async fn test_request_password_reset_empty_email() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_reset_password_creates_notification() {
     let pool = get_pool().await;

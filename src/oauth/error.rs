@@ -4,6 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
+
 #[derive(Debug)]
 pub enum OAuthError {
     InvalidRequest(String),
@@ -20,11 +21,13 @@ pub enum OAuthError {
     InvalidToken(String),
     RateLimited,
 }
+
 #[derive(Serialize)]
 struct OAuthErrorResponse {
     error: String,
     error_description: Option<String>,
 }
+
 impl IntoResponse for OAuthError {
     fn into_response(self) -> Response {
         let (status, error, description) = match self {
@@ -86,12 +89,14 @@ impl IntoResponse for OAuthError {
             .into_response()
     }
 }
+
 impl From<sqlx::Error> for OAuthError {
     fn from(err: sqlx::Error) -> Self {
         tracing::error!("Database error in OAuth flow: {}", err);
         OAuthError::ServerError("An internal error occurred".to_string())
     }
 }
+
 impl From<anyhow::Error> for OAuthError {
     fn from(err: anyhow::Error) -> Self {
         tracing::error!("Internal error in OAuth flow: {}", err);

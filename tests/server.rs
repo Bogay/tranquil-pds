@@ -4,6 +4,7 @@ use common::*;
 use helpers::verify_new_account;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_health() {
     let client = client();
@@ -15,6 +16,7 @@ async fn test_health() {
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.text().await.unwrap(), "OK");
 }
+
 #[tokio::test]
 async fn test_describe_server() {
     let client = client();
@@ -30,6 +32,7 @@ async fn test_describe_server() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert!(body.get("availableUserDomains").is_some());
 }
+
 #[tokio::test]
 async fn test_create_session() {
     let client = client();
@@ -69,6 +72,7 @@ async fn test_create_session() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert!(body.get("accessJwt").is_some());
 }
+
 #[tokio::test]
 async fn test_create_session_missing_identifier() {
     let client = client();
@@ -90,6 +94,7 @@ async fn test_create_session_missing_identifier() {
         res.status()
     );
 }
+
 #[tokio::test]
 async fn test_create_account_invalid_handle() {
     let client = client();
@@ -113,6 +118,7 @@ async fn test_create_account_invalid_handle() {
         "Expected 400 for invalid handle chars"
     );
 }
+
 #[tokio::test]
 async fn test_get_session() {
     let client = client();
@@ -127,6 +133,7 @@ async fn test_get_session() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_refresh_session() {
     let client = client();
@@ -188,6 +195,7 @@ async fn test_refresh_session() {
     assert_ne!(body["accessJwt"].as_str().unwrap(), access_jwt);
     assert_ne!(body["refreshJwt"].as_str().unwrap(), refresh_jwt);
 }
+
 #[tokio::test]
 async fn test_delete_session() {
     let client = client();
@@ -202,6 +210,7 @@ async fn test_delete_session() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_get_service_auth_success() {
     let client = client();
@@ -230,6 +239,7 @@ async fn test_get_service_auth_success() {
     assert_eq!(claims["sub"], did);
     assert_eq!(claims["aud"], "did:web:example.com");
 }
+
 #[tokio::test]
 async fn test_get_service_auth_with_lxm() {
     let client = client();
@@ -255,6 +265,7 @@ async fn test_get_service_auth_with_lxm() {
     assert_eq!(claims["iss"], did);
     assert_eq!(claims["lxm"], "com.atproto.repo.getRecord");
 }
+
 #[tokio::test]
 async fn test_get_service_auth_no_auth() {
     let client = client();
@@ -272,6 +283,7 @@ async fn test_get_service_auth_no_auth() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "AuthenticationRequired");
 }
+
 #[tokio::test]
 async fn test_get_service_auth_missing_aud() {
     let client = client();
@@ -287,6 +299,7 @@ async fn test_get_service_auth_missing_aud() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_check_account_status_success() {
     let client = client();
@@ -308,6 +321,7 @@ async fn test_check_account_status_success() {
     assert!(body["repoRev"].is_string());
     assert!(body["indexedRecords"].is_number());
 }
+
 #[tokio::test]
 async fn test_check_account_status_no_auth() {
     let client = client();
@@ -323,6 +337,7 @@ async fn test_check_account_status_no_auth() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "AuthenticationRequired");
 }
+
 #[tokio::test]
 async fn test_activate_account_success() {
     let client = client();
@@ -338,6 +353,7 @@ async fn test_activate_account_success() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_activate_account_no_auth() {
     let client = client();
@@ -351,6 +367,7 @@ async fn test_activate_account_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_deactivate_account_success() {
     let client = client();

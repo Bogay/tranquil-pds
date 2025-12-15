@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
 use super::OAuthError;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientMetadata {
     pub client_id: String,
@@ -31,6 +33,7 @@ pub struct ClientMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub application_type: Option<String>,
 }
+
 impl Default for ClientMetadata {
     fn default() -> Self {
         Self {
@@ -50,6 +53,7 @@ impl Default for ClientMetadata {
         }
     }
 }
+
 #[derive(Clone)]
 pub struct ClientMetadataCache {
     cache: Arc<RwLock<HashMap<String, CachedMetadata>>>,
@@ -57,14 +61,17 @@ pub struct ClientMetadataCache {
     http_client: Client,
     cache_ttl_secs: u64,
 }
+
 struct CachedMetadata {
     metadata: ClientMetadata,
     cached_at: std::time::Instant,
 }
+
 struct CachedJwks {
     jwks: serde_json::Value,
     cached_at: std::time::Instant,
 }
+
 impl ClientMetadataCache {
     pub fn new(cache_ttl_secs: u64) -> Self {
         Self {
@@ -78,6 +85,7 @@ impl ClientMetadataCache {
             cache_ttl_secs,
         }
     }
+
     pub async fn get(&self, client_id: &str) -> Result<ClientMetadata, OAuthError> {
         {
             let cache = self.cache.read().await;
@@ -100,6 +108,7 @@ impl ClientMetadataCache {
         }
         Ok(metadata)
     }
+
     pub async fn get_jwks(&self, metadata: &ClientMetadata) -> Result<serde_json::Value, OAuthError> {
         if let Some(jwks) = &metadata.jwks {
             return Ok(jwks.clone());
@@ -130,6 +139,7 @@ impl ClientMetadataCache {
         }
         Ok(jwks)
     }
+
     async fn fetch_jwks(&self, jwks_uri: &str) -> Result<serde_json::Value, OAuthError> {
         if !jwks_uri.starts_with("https://") {
             if !jwks_uri.starts_with("http://")
@@ -166,6 +176,7 @@ impl ClientMetadataCache {
         }
         Ok(jwks)
     }
+
     async fn fetch_metadata(&self, client_id: &str) -> Result<ClientMetadata, OAuthError> {
         if !client_id.starts_with("http://") && !client_id.starts_with("https://") {
             return Err(OAuthError::InvalidClient(
@@ -207,6 +218,7 @@ impl ClientMetadataCache {
         self.validate_metadata(&metadata)?;
         Ok(metadata)
     }
+
     fn validate_metadata(&self, metadata: &ClientMetadata) -> Result<(), OAuthError> {
         if metadata.redirect_uris.is_empty() {
             return Err(OAuthError::InvalidClient(
@@ -232,6 +244,7 @@ impl ClientMetadataCache {
         }
         Ok(())
     }
+
     pub fn validate_redirect_uri(
         &self,
         metadata: &ClientMetadata,
@@ -244,6 +257,7 @@ impl ClientMetadataCache {
         }
         Ok(())
     }
+
     fn validate_redirect_uri_format(&self, uri: &str) -> Result<(), OAuthError> {
         if uri.contains('#') {
             return Err(OAuthError::InvalidClient(
@@ -278,16 +292,19 @@ impl ClientMetadataCache {
         Ok(())
     }
 }
+
 impl ClientMetadata {
     pub fn requires_dpop(&self) -> bool {
         self.dpop_bound_access_tokens.unwrap_or(false)
     }
+
     pub fn auth_method(&self) -> &str {
         self.token_endpoint_auth_method
             .as_deref()
             .unwrap_or("none")
     }
 }
+
 pub async fn verify_client_auth(
     cache: &ClientMetadataCache,
     metadata: &ClientMetadata,
@@ -321,6 +338,7 @@ pub async fn verify_client_auth(
         ))),
     }
 }
+
 async fn verify_private_key_jwt_async(
     cache: &ClientMetadataCache,
     metadata: &ClientMetadata,
@@ -425,6 +443,7 @@ async fn verify_private_key_jwt_async(
         "client_assertion signature verification failed".to_string(),
     ))
 }
+
 fn verify_es256(
     key: &serde_json::Value,
     signing_input: &str,
@@ -456,6 +475,7 @@ fn verify_es256(
         .verify(signing_input.as_bytes(), &sig)
         .map_err(|_| OAuthError::InvalidClient("ES256 signature verification failed".to_string()))
 }
+
 fn verify_es384(
     key: &serde_json::Value,
     signing_input: &str,
@@ -487,6 +507,7 @@ fn verify_es384(
         .verify(signing_input.as_bytes(), &sig)
         .map_err(|_| OAuthError::InvalidClient("ES384 signature verification failed".to_string()))
 }
+
 fn verify_rsa(
     _alg: &str,
     _key: &serde_json::Value,
@@ -497,6 +518,7 @@ fn verify_rsa(
         "RSA signature verification not yet supported - use EC keys".to_string(),
     ))
 }
+
 fn verify_eddsa(
     key: &serde_json::Value,
     signing_input: &str,

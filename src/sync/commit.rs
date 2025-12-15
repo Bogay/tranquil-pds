@@ -12,21 +12,25 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
 use tracing::error;
+
 async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<String> {
     let cid = Cid::from_str(cid_str).ok()?;
     let block = state.block_store.get(&cid).await.ok()??;
     let commit = Commit::from_cbor(&block).ok()?;
     Some(commit.rev().to_string())
 }
+
 #[derive(Deserialize)]
 pub struct GetLatestCommitParams {
     pub did: String,
 }
+
 #[derive(Serialize)]
 pub struct GetLatestCommitOutput {
     pub cid: String,
     pub rev: String,
 }
+
 pub async fn get_latest_commit(
     State(state): State<AppState>,
     Query(params): Query<GetLatestCommitParams>,
@@ -78,11 +82,13 @@ pub async fn get_latest_commit(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct ListReposParams {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoInfo {
@@ -91,11 +97,13 @@ pub struct RepoInfo {
     pub rev: String,
     pub active: bool,
 }
+
 #[derive(Serialize)]
 pub struct ListReposOutput {
     pub cursor: Option<String>,
     pub repos: Vec<RepoInfo>,
 }
+
 pub async fn list_repos(
     State(state): State<AppState>,
     Query(params): Query<ListReposParams>,
@@ -154,16 +162,19 @@ pub async fn list_repos(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct GetRepoStatusParams {
     pub did: String,
 }
+
 #[derive(Serialize)]
 pub struct GetRepoStatusOutput {
     pub did: String,
     pub active: bool,
     pub rev: Option<String>,
 }
+
 pub async fn get_repo_status(
     State(state): State<AppState>,
     Query(params): Query<GetRepoStatusParams>,

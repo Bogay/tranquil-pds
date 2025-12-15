@@ -3,7 +3,9 @@ use crate::sync::firehose::SequencedEvent;
 use sqlx::postgres::PgListener;
 use std::sync::atomic::{AtomicI64, Ordering};
 use tracing::{debug, error, info, warn};
+
 static LAST_BROADCAST_SEQ: AtomicI64 = AtomicI64::new(0);
+
 pub async fn start_sequencer_listener(state: AppState) {
     let initial_seq = sqlx::query_scalar!("SELECT COALESCE(MAX(seq), 0) as max FROM repo_seq")
         .fetch_one(&state.db)
@@ -22,6 +24,7 @@ pub async fn start_sequencer_listener(state: AppState) {
         }
     });
 }
+
 async fn listen_loop(state: AppState) -> anyhow::Result<()> {
     let mut listener = PgListener::connect_with(&state.db).await?;
     listener.listen("repo_updates").await?;

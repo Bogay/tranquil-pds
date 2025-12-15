@@ -8,6 +8,7 @@ use crate::sync::firehose::SequencedEvent;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
@@ -19,6 +20,7 @@ pub struct AppState {
     pub cache: Arc<dyn Cache>,
     pub distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
 }
+
 pub enum RateLimitKind {
     Login,
     AccountCreation,
@@ -32,6 +34,7 @@ pub enum RateLimitKind {
     AppPassword,
     EmailUpdate,
 }
+
 impl RateLimitKind {
     fn key_prefix(&self) -> &'static str {
         match self {
@@ -48,6 +51,7 @@ impl RateLimitKind {
             Self::EmailUpdate => "email_update",
         }
     }
+
     fn limit_and_window_ms(&self) -> (u32, u64) {
         match self {
             Self::Login => (10, 60_000),
@@ -64,19 +68,24 @@ impl RateLimitKind {
         }
     }
 }
+
 impl AppState {
     pub async fn new(db: PgPool) -> Self {
         AuthConfig::init();
+
         let block_store = PostgresBlockStore::new(db.clone());
         let blob_store = S3BlobStorage::new().await;
+
         let firehose_buffer_size: usize = std::env::var("FIREHOSE_BUFFER_SIZE")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(10000);
+
         let (firehose_tx, _) = broadcast::channel(firehose_buffer_size);
         let rate_limiters = Arc::new(RateLimiters::new());
         let circuit_breakers = Arc::new(CircuitBreakers::new());
         let (cache, distributed_rate_limiter) = create_cache().await;
+
         Self {
             db,
             block_store,
@@ -88,25 +97,31 @@ impl AppState {
             distributed_rate_limiter,
         }
     }
+
     pub fn with_rate_limiters(mut self, rate_limiters: RateLimiters) -> Self {
         self.rate_limiters = Arc::new(rate_limiters);
         self
     }
+
     pub fn with_circuit_breakers(mut self, circuit_breakers: CircuitBreakers) -> Self {
         self.circuit_breakers = Arc::new(circuit_breakers);
         self
     }
+
     pub async fn check_rate_limit(&self, kind: RateLimitKind, client_ip: &str) -> bool {
         if std::env::var("DISABLE_RATE_LIMITING").is_ok() {
             return true;
         }
+
         let key = format!("{}:{}", kind.key_prefix(), client_ip);
         let limiter_name = kind.key_prefix();
         let (limit, window_ms) = kind.limit_and_window_ms();
+
         if !self.distributed_rate_limiter.check_rate_limit(&key, limit, window_ms).await {
             crate::metrics::record_rate_limit_rejection(limiter_name);
             return false;
         }
+
         let limiter = match kind {
             RateLimitKind::Login => &self.rate_limiters.login,
             RateLimitKind::AccountCreation => &self.rate_limiters.account_creation,
@@ -120,6 +135,7 @@ impl AppState {
             RateLimitKind::AppPassword => &self.rate_limiters.app_password,
             RateLimitKind::EmailUpdate => &self.rate_limiters.email_update,
         };
+
         let ok = limiter.check_key(&client_ip.to_string()).is_ok();
         if !ok {
             crate::metrics::record_rate_limit_rejection(limiter_name);

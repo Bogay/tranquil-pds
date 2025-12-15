@@ -3,6 +3,7 @@ use common::*;
 use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_apply_writes_create() {
     let client = client();
@@ -50,6 +51,7 @@ async fn test_apply_writes_create() {
     assert!(results[0]["uri"].is_string());
     assert!(results[0]["cid"].is_string());
 }
+
 #[tokio::test]
 async fn test_apply_writes_update() {
     let client = client();
@@ -108,6 +110,7 @@ async fn test_apply_writes_update() {
     assert_eq!(results.len(), 1);
     assert!(results[0]["uri"].is_string());
 }
+
 #[tokio::test]
 async fn test_apply_writes_delete() {
     let client = client();
@@ -171,6 +174,7 @@ async fn test_apply_writes_delete() {
         .expect("Failed to verify");
     assert_eq!(get_res.status(), StatusCode::NOT_FOUND);
 }
+
 #[tokio::test]
 async fn test_apply_writes_mixed_operations() {
     let client = client();
@@ -258,6 +262,7 @@ async fn test_apply_writes_mixed_operations() {
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 3);
 }
+
 #[tokio::test]
 async fn test_apply_writes_no_auth() {
     let client = client();
@@ -286,6 +291,7 @@ async fn test_apply_writes_no_auth() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_apply_writes_empty_writes() {
     let client = client();

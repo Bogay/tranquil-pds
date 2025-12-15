@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 use super::super::OAuthError;
+
 pub async fn check_and_record_dpop_jti(
     pool: &PgPool,
     jti: &str,
@@ -16,6 +17,7 @@ pub async fn check_and_record_dpop_jti(
     .await?;
     Ok(result.rows_affected() > 0)
 }
+
 pub async fn cleanup_expired_dpop_jtis(
     pool: &PgPool,
     max_age_secs: i64,

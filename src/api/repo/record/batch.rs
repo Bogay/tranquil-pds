@@ -17,7 +17,9 @@ use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
+
 const MAX_BATCH_WRITES: usize = 200;
+
 #[derive(Deserialize)]
 #[serde(tag = "$type")]
 pub enum WriteOp {
@@ -36,6 +38,7 @@ pub enum WriteOp {
     #[serde(rename = "com.atproto.repo.applyWrites#delete")]
     Delete { collection: String, rkey: String },
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplyWritesInput {
@@ -44,6 +47,7 @@ pub struct ApplyWritesInput {
     pub writes: Vec<WriteOp>,
     pub swap_commit: Option<String>,
 }
+
 #[derive(Serialize)]
 #[serde(tag = "$type")]
 pub enum WriteResult {
@@ -54,16 +58,19 @@ pub enum WriteResult {
     #[serde(rename = "com.atproto.repo.applyWrites#deleteResult")]
     DeleteResult {},
 }
+
 #[derive(Serialize)]
 pub struct ApplyWritesOutput {
     pub commit: CommitInfo,
     pub results: Vec<WriteResult>,
 }
+
 #[derive(Serialize)]
 pub struct CommitInfo {
     pub cid: String,
     pub rev: String,
 }
+
 pub async fn apply_writes(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

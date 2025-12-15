@@ -11,8 +11,10 @@ use crate::oauth::{
 };
 use super::types::{TokenRequest, TokenResponse};
 use super::helpers::{create_access_token, verify_pkce};
+
 const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 3600;
 const REFRESH_TOKEN_EXPIRY_DAYS: i64 = 60;
+
 pub async fn handle_authorization_code_grant(
     state: AppState,
     _headers: HeaderMap,
@@ -125,6 +127,7 @@ pub async fn handle_authorization_code_grant(
         }),
     ))
 }
+
 pub async fn handle_refresh_token_grant(
     state: AppState,
     _headers: HeaderMap,

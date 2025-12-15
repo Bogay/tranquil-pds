@@ -1,5 +1,6 @@
 mod common;
 mod helpers;
+
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use common::{base_url, client};
@@ -9,6 +10,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use wiremock::matchers::{method, path};
+
 fn generate_pkce() -> (String, String) {
     let verifier_bytes: [u8; 32] = rand::random();
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
@@ -18,12 +20,14 @@ fn generate_pkce() -> (String, String) {
     let code_challenge = URL_SAFE_NO_PAD.encode(&hash);
     (code_verifier, code_challenge)
 }
+
 fn no_redirect_client() -> reqwest::Client {
     reqwest::Client::builder()
         .redirect(redirect::Policy::none())
         .build()
         .unwrap()
 }
+
 async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
     let mock_server = MockServer::start().await;
     let client_id = mock_server.uri();
@@ -43,12 +47,14 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
         .await;
     mock_server
 }
+
 struct OAuthSession {
     access_token: String,
     refresh_token: String,
     did: String,
     client_id: String,
 }
+
 async fn create_user_and_oauth_session(handle_prefix: &str, redirect_uri: &str) -> (OAuthSession, MockServer) {
     let url = base_url().await;
     let http_client = client();
@@ -125,6 +131,7 @@ async fn create_user_and_oauth_session(handle_prefix: &str, redirect_uri: &str) 
     };
     (session, mock_client)
 }
+
 #[tokio::test]
 async fn test_oauth_token_can_create_and_read_records() {
     let url = base_url().await;
@@ -169,6 +176,7 @@ async fn test_oauth_token_can_create_and_read_records() {
     let get_body: Value = get_res.json().await.unwrap();
     assert_eq!(get_body["value"]["text"], post_text);
 }
+
 #[tokio::test]
 async fn test_oauth_token_can_upload_blob() {
     let url = base_url().await;
@@ -191,6 +199,7 @@ async fn test_oauth_token_can_upload_blob() {
     assert!(upload_body["blob"]["ref"]["$link"].is_string());
     assert_eq!(upload_body["blob"]["mimeType"], "text/plain");
 }
+
 #[tokio::test]
 async fn test_oauth_token_can_describe_repo() {
     let url = base_url().await;
@@ -211,6 +220,7 @@ async fn test_oauth_token_can_describe_repo() {
     assert_eq!(describe_body["did"], session.did);
     assert!(describe_body["handle"].is_string());
 }
+
 #[tokio::test]
 async fn test_oauth_full_post_lifecycle_create_edit_delete() {
     let url = base_url().await;
@@ -300,6 +310,7 @@ async fn test_oauth_full_post_lifecycle_create_edit_delete() {
         get_deleted_res.status()
     );
 }
+
 #[tokio::test]
 async fn test_oauth_batch_operations_apply_writes() {
     let url = base_url().await;
@@ -367,6 +378,7 @@ async fn test_oauth_batch_operations_apply_writes() {
     let records = list_body["records"].as_array().unwrap();
     assert!(records.len() >= 3, "Should have at least 3 records from batch");
 }
+
 #[tokio::test]
 async fn test_oauth_token_refresh_maintains_access() {
     let url = base_url().await;
@@ -437,6 +449,7 @@ async fn test_oauth_token_refresh_maintains_access() {
     let records = list_body["records"].as_array().unwrap();
     assert_eq!(records.len(), 2, "Should have both posts");
 }
+
 #[tokio::test]
 async fn test_oauth_revoked_token_cannot_access_resources() {
     let url = base_url().await;
@@ -481,6 +494,7 @@ async fn test_oauth_revoked_token_cannot_access_resources() {
         .unwrap();
     assert_eq!(refresh_res.status(), StatusCode::BAD_REQUEST, "Revoked refresh token should not work");
 }
+
 #[tokio::test]
 async fn test_oauth_multiple_clients_same_user() {
     let url = base_url().await;
@@ -640,6 +654,7 @@ async fn test_oauth_multiple_clients_same_user() {
     let records = list_body["records"].as_array().unwrap();
     assert_eq!(records.len(), 2, "Both posts should be visible to either client");
 }
+
 #[tokio::test]
 async fn test_oauth_social_interactions_follow_like_repost() {
     let url = base_url().await;
@@ -757,6 +772,7 @@ async fn test_oauth_social_interactions_follow_like_repost() {
     let likes = likes_body["records"].as_array().unwrap();
     assert_eq!(likes.len(), 1, "Bob should have 1 like");
 }
+
 #[tokio::test]
 async fn test_oauth_cannot_modify_other_users_repo() {
     let url = base_url().await;
@@ -804,6 +820,7 @@ async fn test_oauth_cannot_modify_other_users_repo() {
     let posts = posts_body["records"].as_array().unwrap();
     assert_eq!(posts.len(), 0, "Alice's repo should have no posts from Bob");
 }
+
 #[tokio::test]
 async fn test_oauth_session_isolation_between_users() {
     let url = base_url().await;
@@ -878,6 +895,7 @@ async fn test_oauth_session_isolation_between_users() {
     assert_eq!(bob_posts.len(), 1);
     assert_eq!(bob_posts[0]["value"]["text"], "Bob's different thoughts");
 }
+
 #[tokio::test]
 async fn test_oauth_token_works_with_sync_endpoints() {
     let url = base_url().await;

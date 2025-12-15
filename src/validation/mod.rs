@@ -1,5 +1,6 @@
 use serde_json::Value;
 use thiserror::Error;
+
 #[derive(Debug, Error)]
 pub enum ValidationError {
     #[error("No $type provided")]
@@ -17,30 +18,36 @@ pub enum ValidationError {
     #[error("Unknown record type: {0}")]
     UnknownType(String),
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationStatus {
     Valid,
     Unknown,
     Invalid,
 }
+
 pub struct RecordValidator {
     require_lexicon: bool,
 }
+
 impl Default for RecordValidator {
     fn default() -> Self {
         Self::new()
     }
 }
+
 impl RecordValidator {
     pub fn new() -> Self {
         Self {
             require_lexicon: false,
         }
     }
+
     pub fn require_lexicon(mut self, require: bool) -> Self {
         self.require_lexicon = require;
         self
     }
+
     pub fn validate(
         &self,
         record: &Value,
@@ -83,6 +90,7 @@ impl RecordValidator {
         }
         Ok(ValidationStatus::Valid)
     }
+
     fn validate_post(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("text") {
             return Err(ValidationError::MissingField("text".to_string()));
@@ -127,6 +135,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_profile(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
             let grapheme_count = display_name.chars().count();
@@ -148,6 +157,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_like(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
@@ -158,6 +168,7 @@ impl RecordValidator {
         self.validate_strong_ref(obj.get("subject"), "subject")?;
         Ok(())
     }
+
     fn validate_repost(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
@@ -168,6 +179,7 @@ impl RecordValidator {
         self.validate_strong_ref(obj.get("subject"), "subject")?;
         Ok(())
     }
+
     fn validate_follow(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
@@ -185,6 +197,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_block(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
@@ -202,6 +215,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_list(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("name") {
             return Err(ValidationError::MissingField("name".to_string()));
@@ -222,6 +236,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_list_item(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
@@ -234,6 +249,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_feed_generator(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("did") {
             return Err(ValidationError::MissingField("did".to_string()));
@@ -254,6 +270,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_threadgate(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("post") {
             return Err(ValidationError::MissingField("post".to_string()));
@@ -263,6 +280,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_labeler_service(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("policies") {
             return Err(ValidationError::MissingField("policies".to_string()));
@@ -272,6 +290,7 @@ impl RecordValidator {
         }
         Ok(())
     }
+
     fn validate_strong_ref(&self, value: Option<&Value>, path: &str) -> Result<(), ValidationError> {
         let obj = value
             .and_then(|v| v.as_object())
@@ -296,6 +315,7 @@ impl RecordValidator {
         Ok(())
     }
 }
+
 fn validate_datetime(value: &str, path: &str) -> Result<(), ValidationError> {
     if chrono::DateTime::parse_from_rfc3339(value).is_err() {
         return Err(ValidationError::InvalidDatetime {
@@ -304,6 +324,7 @@ fn validate_datetime(value: &str, path: &str) -> Result<(), ValidationError> {
     }
     Ok(())
 }
+
 pub fn validate_record_key(rkey: &str) -> Result<(), ValidationError> {
     if rkey.is_empty() {
         return Err(ValidationError::InvalidRecord("Record key cannot be empty".to_string()));
@@ -324,6 +345,7 @@ pub fn validate_record_key(rkey: &str) -> Result<(), ValidationError> {
     }
     Ok(())
 }
+
 pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError> {
     if collection.is_empty() {
         return Err(ValidationError::InvalidRecord("Collection NSID cannot be empty".to_string()));
@@ -348,10 +370,12 @@ pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError>
     }
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
     #[test]
     fn test_validate_post() {
         let validator = RecordValidator::new();
@@ -365,6 +389,7 @@ mod tests {
             ValidationStatus::Valid
         );
     }
+
     #[test]
     fn test_validate_post_missing_text() {
         let validator = RecordValidator::new();
@@ -374,6 +399,7 @@ mod tests {
         });
         assert!(validator.validate(&invalid_post, "app.bsky.feed.post").is_err());
     }
+
     #[test]
     fn test_validate_type_mismatch() {
         let validator = RecordValidator::new();
@@ -385,6 +411,7 @@ mod tests {
         let result = validator.validate(&record, "app.bsky.feed.post");
         assert!(matches!(result, Err(ValidationError::TypeMismatch { .. })));
     }
+
     #[test]
     fn test_validate_unknown_type() {
         let validator = RecordValidator::new();
@@ -397,6 +424,7 @@ mod tests {
             ValidationStatus::Unknown
         );
     }
+
     #[test]
     fn test_validate_unknown_type_strict() {
         let validator = RecordValidator::new().require_lexicon(true);
@@ -407,6 +435,7 @@ mod tests {
         let result = validator.validate(&record, "com.example.custom");
         assert!(matches!(result, Err(ValidationError::UnknownType(_))));
     }
+
     #[test]
     fn test_validate_record_key() {
         assert!(validate_record_key("valid-key_123").is_ok());
@@ -416,6 +445,7 @@ mod tests {
         assert!(validate_record_key("").is_err());
         assert!(validate_record_key("invalid/key").is_err());
     }
+
     #[test]
     fn test_validate_collection_nsid() {
         assert!(validate_collection_nsid("app.bsky.feed.post").is_ok());

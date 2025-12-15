@@ -17,8 +17,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
 pub const REPO_REV_HEADER: &str = "atproto-repo-rev";
 pub const UPSTREAM_LAG_HEADER: &str = "atproto-upstream-lag";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostRecord {
@@ -39,6 +41,7 @@ pub struct PostRecord {
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileRecord {
@@ -55,6 +58,7 @@ pub struct ProfileRecord {
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
+
 #[derive(Debug, Clone)]
 pub struct RecordDescript<T> {
     pub uri: String,
@@ -62,6 +66,7 @@ pub struct RecordDescript<T> {
     pub indexed_at: DateTime<Utc>,
     pub record: T,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LikeRecord {
@@ -72,12 +77,14 @@ pub struct LikeRecord {
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LikeSubject {
     pub uri: String,
     pub cid: String,
 }
+
 #[derive(Debug, Default)]
 pub struct LocalRecords {
     pub count: usize,
@@ -85,6 +92,7 @@ pub struct LocalRecords {
     pub posts: Vec<RecordDescript<PostRecord>>,
     pub likes: Vec<RecordDescript<LikeRecord>>,
 }
+
 pub async fn get_records_since_rev(
     state: &AppState,
     did: &str,
@@ -187,6 +195,7 @@ pub async fn get_records_since_rev(
     }
     Ok(result)
 }
+
 pub fn get_local_lag(local: &LocalRecords) -> Option<i64> {
     let mut oldest: Option<DateTime<Utc>> = local.profile.as_ref().map(|p| p.indexed_at);
     for post in &local.posts {
@@ -205,18 +214,21 @@ pub fn get_local_lag(local: &LocalRecords) -> Option<i64> {
     }
     oldest.map(|o| (Utc::now() - o).num_milliseconds())
 }
+
 pub fn extract_repo_rev(headers: &HeaderMap) -> Option<String> {
     headers
         .get(REPO_REV_HEADER)
         .and_then(|h| h.to_str().ok())
         .map(|s| s.to_string())
 }
+
 #[derive(Debug)]
 pub struct ProxyResponse {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: bytes::Bytes,
 }
+
 pub async fn proxy_to_appview(
     method: &str,
     params: &HashMap<String, String>,
@@ -297,6 +309,7 @@ pub async fn proxy_to_appview(
         }
     }
 }
+
 pub fn format_munged_response<T: Serialize>(data: T, lag: Option<i64>) -> Response {
     let mut response = (StatusCode::OK, Json(data)).into_response();
     if let Some(lag_ms) = lag {
@@ -308,6 +321,7 @@ pub fn format_munged_response<T: Serialize>(data: T, lag: Option<i64>) -> Respon
     }
     response
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorView {
@@ -320,6 +334,7 @@ pub struct AuthorView {
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostView {
@@ -341,6 +356,7 @@ pub struct PostView {
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedViewPost {
@@ -354,12 +370,14 @@ pub struct FeedViewPost {
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeedOutput {
     pub feed: Vec<FeedViewPost>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
 }
+
 pub fn format_local_post(
     descript: &RecordDescript<PostRecord>,
     author_did: &str,
@@ -387,6 +405,7 @@ pub fn format_local_post(
         extra: HashMap::new(),
     }
 }
+
 pub fn insert_posts_into_feed(feed: &mut Vec<FeedViewPost>, posts: Vec<PostView>) {
     if posts.is_empty() {
         return;

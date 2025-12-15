@@ -6,6 +6,7 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use std::time::Duration;
 use chrono::Utc;
+
 #[tokio::test]
 async fn test_social_flow_lifecycle() {
     let client = client();
@@ -111,6 +112,7 @@ async fn test_social_flow_lifecycle() {
         "Only post 2 should remain"
     );
 }
+
 #[tokio::test]
 async fn test_like_lifecycle() {
     let client = client();
@@ -166,6 +168,7 @@ async fn test_like_lifecycle() {
         .expect("Failed to check deleted like");
     assert_eq!(get_deleted_res.status(), StatusCode::NOT_FOUND, "Like should be deleted");
 }
+
 #[tokio::test]
 async fn test_repost_lifecycle() {
     let client = client();
@@ -207,6 +210,7 @@ async fn test_repost_lifecycle() {
         .expect("Failed to delete repost");
     assert_eq!(delete_res.status(), StatusCode::OK, "Failed to delete repost");
 }
+
 #[tokio::test]
 async fn test_unfollow_lifecycle() {
     let client = client();
@@ -259,6 +263,7 @@ async fn test_unfollow_lifecycle() {
         .expect("Failed to check deleted follow");
     assert_eq!(get_deleted_res.status(), StatusCode::NOT_FOUND, "Follow should be deleted");
 }
+
 #[tokio::test]
 async fn test_timeline_after_unfollow() {
     let client = client();
@@ -311,6 +316,7 @@ async fn test_timeline_after_unfollow() {
     let feed_after = timeline_after["feed"].as_array().unwrap();
     assert_eq!(feed_after.len(), 0, "Should see 0 posts after unfollowing");
 }
+
 #[tokio::test]
 async fn test_mutual_follow_lifecycle() {
     let client = client();
@@ -348,6 +354,7 @@ async fn test_mutual_follow_lifecycle() {
     let bob_feed = bob_tl["feed"].as_array().unwrap();
     assert_eq!(bob_feed.len(), 1, "Bob should see Alice's 1 post");
 }
+
 #[tokio::test]
 async fn test_account_to_post_full_lifecycle() {
     let client = client();

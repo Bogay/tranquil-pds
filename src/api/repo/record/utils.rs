@@ -28,6 +28,7 @@ struct UnsignedCommit<'a> {
     rev: &'a str,
     version: i64,
 }
+
 fn create_signed_commit(
     did: &str,
     data: Cid,
@@ -68,15 +69,18 @@ fn create_signed_commit(
         .map_err(|e| format!("Failed to serialize signed commit: {:?}", e))?;
     Ok((signed_bytes, sig_bytes))
 }
+
 pub enum RecordOp {
     Create { collection: String, rkey: String, cid: Cid },
     Update { collection: String, rkey: String, cid: Cid, prev: Option<Cid> },
     Delete { collection: String, rkey: String, prev: Option<Cid> },
 }
+
 pub struct CommitResult {
     pub commit_cid: Cid,
     pub rev: String,
 }
+
 pub async fn commit_and_log(
     state: &AppState,
     did: &str,

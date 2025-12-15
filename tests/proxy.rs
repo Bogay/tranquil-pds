@@ -4,6 +4,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Client;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+
 async fn spawn_mock_upstream() -> (
     String,
     tokio::sync::mpsc::Receiver<(String, String, Option<String>)>,
@@ -31,6 +32,7 @@ async fn spawn_mock_upstream() -> (
     });
     (format!("http://{}", addr), rx)
 }
+
 #[tokio::test]
 async fn test_proxy_via_header() {
     let app_url = common::base_url().await;
@@ -49,6 +51,7 @@ async fn test_proxy_via_header() {
     assert_eq!(uri, "/xrpc/com.example.test");
     assert_eq!(auth, Some("Bearer test-token".to_string()));
 }
+
 #[tokio::test]
 async fn test_proxy_auth_signing() {
     let app_url = common::base_url().await;
@@ -77,6 +80,7 @@ async fn test_proxy_auth_signing() {
     assert_eq!(claims["aud"], upstream_url);
     assert_eq!(claims["lxm"], "com.example.signed");
 }
+
 #[tokio::test]
 async fn test_proxy_post_with_body() {
     let app_url = common::base_url().await;
@@ -100,6 +104,7 @@ async fn test_proxy_post_with_body() {
     assert_eq!(uri, "/xrpc/com.example.postMethod");
     assert_eq!(auth, Some("Bearer test-token".to_string()));
 }
+
 #[tokio::test]
 async fn test_proxy_with_query_params() {
     let app_url = common::base_url().await;

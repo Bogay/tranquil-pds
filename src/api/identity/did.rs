@@ -13,10 +13,12 @@ use reqwest;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, warn};
+
 #[derive(Deserialize)]
 pub struct ResolveHandleParams {
     pub handle: String,
 }
+
 pub async fn resolve_handle(
     State(state): State<AppState>,
     Query(params): Query<ResolveHandleParams>,
@@ -63,6 +65,7 @@ pub async fn resolve_handle(
         }
     }
 }
+
 pub fn get_jwk(key_bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
     let secret_key = SecretKey::from_slice(key_bytes).map_err(|_| "Invalid key length")?;
     let public_key = secret_key.public_key();
@@ -78,6 +81,7 @@ pub fn get_jwk(key_bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
         "y": y_b64
     }))
 }
+
 pub async fn well_known_did(State(_state): State<AppState>) -> impl IntoResponse {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     // Kinda for local dev, encode hostname if it contains port
@@ -96,6 +100,7 @@ pub async fn well_known_did(State(_state): State<AppState>) -> impl IntoResponse
         }]
     }))
 }
+
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let user = sqlx::query!("SELECT id, did FROM users WHERE handle = $1", handle)
@@ -174,6 +179,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         }]
     })).into_response()
 }
+
 pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(), String> {
     let expected_prefix = if hostname.contains(':') {
         format!("did:web:{}", hostname.replace(':', "%3A"))
@@ -242,6 +248,7 @@ pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(
         }
     }
 }
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetRecommendedDidCredentialsOutput {
@@ -250,16 +257,19 @@ pub struct GetRecommendedDidCredentialsOutput {
     pub verification_methods: VerificationMethods,
     pub services: Services,
 }
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationMethods {
     pub atproto: String,
 }
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Services {
     pub atproto_pds: AtprotoPds,
 }
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AtprotoPds {
@@ -267,6 +277,7 @@ pub struct AtprotoPds {
     pub service_type: String,
     pub endpoint: String,
 }
+
 pub async fn get_recommended_did_credentials(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -329,10 +340,12 @@ pub async fn get_recommended_did_credentials(
     )
         .into_response()
 }
+
 #[derive(Deserialize)]
 pub struct UpdateHandleInput {
     pub handle: String,
 }
+
 pub async fn update_handle(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -410,6 +423,7 @@ pub async fn update_handle(
         }
     }
 }
+
 pub async fn well_known_atproto_did(
     State(state): State<AppState>,
     headers: HeaderMap,

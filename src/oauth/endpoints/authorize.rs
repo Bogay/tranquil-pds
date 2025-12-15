@@ -11,7 +11,9 @@ use urlencoding::encode as url_encode;
 use crate::state::{AppState, RateLimitKind};
 use crate::oauth::{Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, db, templates};
 use crate::notifications::{NotificationChannel, channel_display_name, enqueue_2fa_code};
+
 const DEVICE_COOKIE_NAME: &str = "oauth_device_id";
+
 fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
     headers
         .get("cookie")
@@ -26,6 +28,7 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
             None
         })
 }
+
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for") {
         if let Ok(value) = forwarded.to_str() {
@@ -41,12 +44,14 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
     }
     "0.0.0.0".to_string()
 }
+
 fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
     headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
 }
+
 fn make_device_cookie(device_id: &str) -> String {
     format!(
         "{}={}; Path=/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000",
@@ -54,12 +59,14 @@ fn make_device_cookie(device_id: &str) -> String {
         device_id
     )
 }
+
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeQuery {
     pub request_uri: Option<String>,
     pub client_id: Option<String>,
     pub new_account: Option<bool>,
 }
+
 #[derive(Debug, Serialize)]
 pub struct AuthorizeResponse {
     pub client_id: String,
@@ -69,6 +76,7 @@ pub struct AuthorizeResponse {
     pub state: Option<String>,
     pub login_hint: Option<String>,
 }
+
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeSubmit {
     pub request_uri: String,
@@ -77,11 +85,13 @@ pub struct AuthorizeSubmit {
     #[serde(default)]
     pub remember_device: bool,
 }
+
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeSelectSubmit {
     pub request_uri: String,
     pub did: String,
 }
+
 fn wants_json(headers: &HeaderMap) -> bool {
     headers
         .get("accept")
@@ -89,6 +99,7 @@ fn wants_json(headers: &HeaderMap) -> bool {
         .map(|accept| accept.contains("application/json"))
         .unwrap_or(false)
 }
+
 pub async fn authorize_get(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -216,6 +227,7 @@ pub async fn authorize_get(
         request_data.parameters.login_hint.as_deref(),
     )).into_response()
 }
+
 pub async fn authorize_get_json(
     State(state): State<AppState>,
     Query(query): Query<AuthorizeQuery>,
@@ -239,6 +251,7 @@ pub async fn authorize_get_json(
         login_hint: request_data.parameters.login_hint.clone(),
     }))
 }
+
 pub async fn authorize_post(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -441,6 +454,7 @@ pub async fn authorize_post(
         redirect.into_response()
     }
 }
+
 pub async fn authorize_select(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -574,6 +588,7 @@ pub async fn authorize_select(
     );
     Redirect::temporary(&redirect_url).into_response()
 }
+
 fn build_success_redirect(redirect_uri: &str, code: &str, state: Option<&str>) -> String {
     let mut redirect_url = redirect_uri.to_string();
     let separator = if redirect_url.contains('?') { '&' } else { '?' };
@@ -586,11 +601,13 @@ fn build_success_redirect(redirect_uri: &str, code: &str, state: Option<&str>) -
     redirect_url.push_str(&format!("&iss={}", url_encode(&format!("https://{}", pds_hostname))));
     redirect_url
 }
+
 #[derive(Debug, Serialize)]
 pub struct AuthorizeDenyResponse {
     pub error: String,
     pub error_description: String,
 }
+
 pub async fn authorize_deny(
     State(state): State<AppState>,
     Form(form): Form<AuthorizeDenyForm>,
@@ -610,21 +627,26 @@ pub async fn authorize_deny(
     }
     Ok(Redirect::temporary(&redirect_url).into_response())
 }
+
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeDenyForm {
     pub request_uri: String,
 }
+
 #[derive(Debug, Deserialize)]
 pub struct Authorize2faQuery {
     pub request_uri: String,
     pub channel: Option<String>,
 }
+
 #[derive(Debug, Deserialize)]
 pub struct Authorize2faSubmit {
     pub request_uri: String,
     pub code: String,
 }
+
 const MAX_2FA_ATTEMPTS: i32 = 5;
+
 pub async fn authorize_2fa_get(
     State(state): State<AppState>,
     Query(query): Query<Authorize2faQuery>,
@@ -673,6 +695,7 @@ pub async fn authorize_2fa_get(
         None,
     )).into_response()
 }
+
 pub async fn authorize_2fa_post(
     State(state): State<AppState>,
     headers: HeaderMap,

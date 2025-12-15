@@ -8,11 +8,13 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use tracing::error;
+
 #[derive(Deserialize)]
 pub struct UpdateAccountEmailInput {
     pub account: String,
     pub email: String,
 }
+
 pub async fn update_account_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -59,11 +61,13 @@ pub async fn update_account_email(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct UpdateAccountHandleInput {
     pub did: String,
     pub handle: String,
 }
+
 pub async fn update_account_handle(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -139,11 +143,13 @@ pub async fn update_account_handle(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct UpdateAccountPasswordInput {
     pub did: String,
     pub password: String,
 }
+
 pub async fn update_account_password(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

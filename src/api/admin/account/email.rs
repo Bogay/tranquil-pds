@@ -8,6 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendEmailInput {
@@ -17,10 +18,12 @@ pub struct SendEmailInput {
     pub subject: Option<String>,
     pub comment: Option<String>,
 }
+
 #[derive(Serialize)]
 pub struct SendEmailOutput {
     pub sent: bool,
 }
+
 pub async fn send_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

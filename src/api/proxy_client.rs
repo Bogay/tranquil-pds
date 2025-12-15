@@ -3,11 +3,14 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::OnceLock;
 use std::time::Duration;
 use tracing::warn;
+
 pub const DEFAULT_HEADERS_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_BODY_TIMEOUT: Duration = Duration::from_secs(30);
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_RESPONSE_SIZE: u64 = 10 * 1024 * 1024;
+
 static PROXY_CLIENT: OnceLock<Client> = OnceLock::new();
+
 pub fn proxy_client() -> &'static Client {
     PROXY_CLIENT.get_or_init(|| {
         ClientBuilder::new()
@@ -20,6 +23,7 @@ pub fn proxy_client() -> &'static Client {
             .expect("Failed to build HTTP client - this indicates a TLS or system configuration issue")
     })
 }
+
 pub fn is_ssrf_safe(url: &str) -> Result<(), SsrfError> {
     let parsed = Url::parse(url).map_err(|_| SsrfError::InvalidUrl)?;
     let scheme = parsed.scheme();
@@ -61,6 +65,7 @@ pub fn is_ssrf_safe(url: &str) -> Result<(), SsrfError> {
     }
     Ok(())
 }
+
 fn is_unicast_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -74,6 +79,7 @@ fn is_unicast_ip(ip: &IpAddr) -> bool {
         IpAddr::V6(v6) => !v6.is_loopback() && !v6.is_multicast() && !v6.is_unspecified(),
     }
 }
+
 fn is_private_v4(ip: &std::net::Ipv4Addr) -> bool {
     let octets = ip.octets();
     octets[0] == 10
@@ -81,6 +87,7 @@ fn is_private_v4(ip: &std::net::Ipv4Addr) -> bool {
         || (octets[0] == 192 && octets[1] == 168)
         || (octets[0] == 169 && octets[1] == 254)
 }
+
 #[derive(Debug, Clone)]
 pub enum SsrfError {
     InvalidUrl,
@@ -89,6 +96,7 @@ pub enum SsrfError {
     NonUnicastIp(String),
     DnsResolutionFailed(String),
 }
+
 impl std::fmt::Display for SsrfError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -100,7 +108,9 @@ impl std::fmt::Display for SsrfError {
         }
     }
 }
+
 impl std::error::Error for SsrfError {}
+
 pub const HEADERS_TO_FORWARD: &[&str] = &[
     "accept-language",
     "atproto-accept-labelers",
@@ -112,6 +122,7 @@ pub const RESPONSE_HEADERS_TO_FORWARD: &[&str] = &[
     "retry-after",
     "content-type",
 ];
+
 pub fn validate_at_uri(uri: &str) -> Result<AtUriParts, &'static str> {
     if !uri.starts_with("at://") {
         return Err("URI must start with at://");
@@ -137,12 +148,14 @@ pub fn validate_at_uri(uri: &str) -> Result<AtUriParts, &'static str> {
         rkey: parts.get(2).map(|s| s.to_string()),
     })
 }
+
 #[derive(Debug, Clone)]
 pub struct AtUriParts {
     pub did: String,
     pub collection: Option<String>,
     pub rkey: Option<String>,
 }
+
 pub fn validate_limit(limit: Option<u32>, default: u32, max: u32) -> u32 {
     match limit {
         Some(l) if l == 0 => default,
@@ -151,6 +164,7 @@ pub fn validate_limit(limit: Option<u32>, default: u32, max: u32) -> u32 {
         None => default,
     }
 }
+
 pub fn validate_did(did: &str) -> Result<(), &'static str> {
     if !did.starts_with("did:") {
         return Err("Invalid DID format");
@@ -165,6 +179,7 @@ pub fn validate_did(did: &str) -> Result<(), &'static str> {
     }
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

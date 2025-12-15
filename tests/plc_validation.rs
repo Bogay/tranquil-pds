@@ -7,6 +7,7 @@ use bspds::plc::{
 use k256::ecdsa::SigningKey;
 use serde_json::json;
 use std::collections::HashMap;
+
 fn create_valid_operation() -> serde_json::Value {
     let key = SigningKey::random(&mut rand::thread_rng());
     let did_key = signing_key_to_did_key(&key);
@@ -27,12 +28,14 @@ fn create_valid_operation() -> serde_json::Value {
     });
     sign_operation(&op, &key).unwrap()
 }
+
 #[test]
 fn test_validate_plc_operation_valid() {
     let op = create_valid_operation();
     let result = validate_plc_operation(&op);
     assert!(result.is_ok());
 }
+
 #[test]
 fn test_validate_plc_operation_missing_type() {
     let op = json!({
@@ -45,6 +48,7 @@ fn test_validate_plc_operation_missing_type() {
     let result = validate_plc_operation(&op);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("Missing type")));
 }
+
 #[test]
 fn test_validate_plc_operation_invalid_type() {
     let op = json!({
@@ -54,6 +58,7 @@ fn test_validate_plc_operation_invalid_type() {
     let result = validate_plc_operation(&op);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("Invalid type")));
 }
+
 #[test]
 fn test_validate_plc_operation_missing_sig() {
     let op = json!({
@@ -66,6 +71,7 @@ fn test_validate_plc_operation_missing_sig() {
     let result = validate_plc_operation(&op);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("Missing sig")));
 }
+
 #[test]
 fn test_validate_plc_operation_missing_rotation_keys() {
     let op = json!({
@@ -78,6 +84,7 @@ fn test_validate_plc_operation_missing_rotation_keys() {
     let result = validate_plc_operation(&op);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("rotationKeys")));
 }
+
 #[test]
 fn test_validate_plc_operation_missing_verification_methods() {
     let op = json!({
@@ -90,6 +97,7 @@ fn test_validate_plc_operation_missing_verification_methods() {
     let result = validate_plc_operation(&op);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("verificationMethods")));
 }
+
 #[test]
 fn test_validate_plc_operation_missing_also_known_as() {
     let op = json!({
@@ -102,6 +110,7 @@ fn test_validate_plc_operation_missing_also_known_as() {
     let result = validate_plc_operation(&op);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("alsoKnownAs")));
 }
+
 #[test]
 fn test_validate_plc_operation_missing_services() {
     let op = json!({
@@ -114,6 +123,7 @@ fn test_validate_plc_operation_missing_services() {
     let result = validate_plc_operation(&op);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("services")));
 }
+
 #[test]
 fn test_validate_rotation_key_required() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -141,6 +151,7 @@ fn test_validate_rotation_key_required() {
     let result = validate_plc_operation_for_submission(&op, &ctx);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("rotation key")));
 }
+
 #[test]
 fn test_validate_signing_key_match() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -168,6 +179,7 @@ fn test_validate_signing_key_match() {
     let result = validate_plc_operation_for_submission(&op, &ctx);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("signing key")));
 }
+
 #[test]
 fn test_validate_handle_match() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -194,6 +206,7 @@ fn test_validate_handle_match() {
     let result = validate_plc_operation_for_submission(&op, &ctx);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("handle")));
 }
+
 #[test]
 fn test_validate_pds_service_type() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -220,6 +233,7 @@ fn test_validate_pds_service_type() {
     let result = validate_plc_operation_for_submission(&op, &ctx);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("type")));
 }
+
 #[test]
 fn test_validate_pds_endpoint_match() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -246,6 +260,7 @@ fn test_validate_pds_endpoint_match() {
     let result = validate_plc_operation_for_submission(&op, &ctx);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("endpoint")));
 }
+
 #[test]
 fn test_verify_signature_secp256k1() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -264,6 +279,7 @@ fn test_verify_signature_secp256k1() {
     assert!(result.is_ok());
     assert!(result.unwrap());
 }
+
 #[test]
 fn test_verify_signature_wrong_key() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -283,6 +299,7 @@ fn test_verify_signature_wrong_key() {
     assert!(result.is_ok());
     assert!(!result.unwrap());
 }
+
 #[test]
 fn test_verify_signature_invalid_did_key_format() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -300,6 +317,7 @@ fn test_verify_signature_invalid_did_key_format() {
     assert!(result.is_ok());
     assert!(!result.unwrap());
 }
+
 #[test]
 fn test_tombstone_validation() {
     let op = json!({
@@ -310,6 +328,7 @@ fn test_tombstone_validation() {
     let result = validate_plc_operation(&op);
     assert!(result.is_ok());
 }
+
 #[test]
 fn test_cid_for_cbor_deterministic() {
     let value = json!({
@@ -321,6 +340,7 @@ fn test_cid_for_cbor_deterministic() {
     assert_eq!(cid1, cid2, "CID generation should be deterministic");
     assert!(cid1.starts_with("bafyrei"), "CID should start with bafyrei (dag-cbor + sha256)");
 }
+
 #[test]
 fn test_cid_different_for_different_data() {
     let value1 = json!({"data": 1});
@@ -329,6 +349,7 @@ fn test_cid_different_for_different_data() {
     let cid2 = cid_for_cbor(&value2).unwrap();
     assert_ne!(cid1, cid2, "Different data should produce different CIDs");
 }
+
 #[test]
 fn test_signing_key_to_did_key_format() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -336,6 +357,7 @@ fn test_signing_key_to_did_key_format() {
     assert!(did_key.starts_with("did:key:z"), "Should start with did:key:z");
     assert!(did_key.len() > 50, "Did key should be reasonably long");
 }
+
 #[test]
 fn test_signing_key_to_did_key_unique() {
     let key1 = SigningKey::random(&mut rand::thread_rng());
@@ -344,6 +366,7 @@ fn test_signing_key_to_did_key_unique() {
     let did2 = signing_key_to_did_key(&key2);
     assert_ne!(did1, did2, "Different keys should produce different did:keys");
 }
+
 #[test]
 fn test_signing_key_to_did_key_consistent() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -351,6 +374,7 @@ fn test_signing_key_to_did_key_consistent() {
     let did2 = signing_key_to_did_key(&key);
     assert_eq!(did1, did2, "Same key should produce same did:key");
 }
+
 #[test]
 fn test_sign_operation_removes_existing_sig() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -367,11 +391,13 @@ fn test_sign_operation_removes_existing_sig() {
     let new_sig = signed.get("sig").and_then(|v| v.as_str()).unwrap();
     assert_ne!(new_sig, "old_signature", "Should replace old signature");
 }
+
 #[test]
 fn test_validate_plc_operation_not_object() {
     let result = validate_plc_operation(&json!("not an object"));
     assert!(matches!(result, Err(PlcError::InvalidResponse(_))));
 }
+
 #[test]
 fn test_validate_for_submission_tombstone_passes() {
     let key = SigningKey::random(&mut rand::thread_rng());
@@ -390,6 +416,7 @@ fn test_validate_for_submission_tombstone_passes() {
     let result = validate_plc_operation_for_submission(&op, &ctx);
     assert!(result.is_ok(), "Tombstone should pass submission validation");
 }
+
 #[test]
 fn test_verify_signature_missing_sig() {
     let op = json!({
@@ -402,6 +429,7 @@ fn test_verify_signature_missing_sig() {
     let result = verify_operation_signature(&op, &[]);
     assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("sig")));
 }
+
 #[test]
 fn test_verify_signature_invalid_base64() {
     let op = json!({
@@ -415,6 +443,7 @@ fn test_verify_signature_invalid_base64() {
     let result = verify_operation_signature(&op, &[]);
     assert!(matches!(result, Err(PlcError::InvalidResponse(_))));
 }
+
 #[test]
 fn test_plc_operation_struct() {
     let mut services = HashMap::new();

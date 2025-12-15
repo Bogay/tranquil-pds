@@ -10,11 +10,13 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
+
 #[derive(Deserialize)]
 pub struct GetBlobParams {
     pub did: String,
     pub cid: String,
 }
+
 pub async fn get_blob(
     State(state): State<AppState>,
     Query(params): Query<GetBlobParams>,
@@ -94,6 +96,7 @@ pub async fn get_blob(
         }
     }
 }
+
 #[derive(Deserialize)]
 pub struct ListBlobsParams {
     pub did: String,
@@ -101,11 +104,13 @@ pub struct ListBlobsParams {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
+
 #[derive(Serialize)]
 pub struct ListBlobsOutput {
     pub cursor: Option<String>,
     pub cids: Vec<String>,
 }
+
 pub async fn list_blobs(
     State(state): State<AppState>,
     Query(params): Query<ListBlobsParams>,

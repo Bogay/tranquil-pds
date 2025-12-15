@@ -11,6 +11,7 @@ pub mod repo;
 pub mod subscribe_repos;
 pub mod util;
 pub mod verify;
+
 pub use blob::{get_blob, list_blobs};
 pub use commit::{get_latest_commit, get_repo_status, list_repos};
 pub use crawl::{notify_of_update, request_crawl};

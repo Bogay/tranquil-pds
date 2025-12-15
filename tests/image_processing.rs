@@ -1,30 +1,35 @@
 use bspds::image::{ImageProcessor, ImageError, OutputFormat, THUMB_SIZE_FEED, THUMB_SIZE_FULL, DEFAULT_MAX_FILE_SIZE};
 use image::{DynamicImage, ImageFormat};
 use std::io::Cursor;
+
 fn create_test_png(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
     img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png).unwrap();
     buf
 }
+
 fn create_test_jpeg(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
     img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg).unwrap();
     buf
 }
+
 fn create_test_gif(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
     img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Gif).unwrap();
     buf
 }
+
 fn create_test_webp(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
     img.write_to(&mut Cursor::new(&mut buf), ImageFormat::WebP).unwrap();
     buf
 }
+
 #[test]
 fn test_process_png() {
     let processor = ImageProcessor::new();
@@ -33,6 +38,7 @@ fn test_process_png() {
     assert_eq!(result.original.width, 500);
     assert_eq!(result.original.height, 500);
 }
+
 #[test]
 fn test_process_jpeg() {
     let processor = ImageProcessor::new();
@@ -41,6 +47,7 @@ fn test_process_jpeg() {
     assert_eq!(result.original.width, 400);
     assert_eq!(result.original.height, 300);
 }
+
 #[test]
 fn test_process_gif() {
     let processor = ImageProcessor::new();
@@ -49,6 +56,7 @@ fn test_process_gif() {
     assert_eq!(result.original.width, 200);
     assert_eq!(result.original.height, 200);
 }
+
 #[test]
 fn test_process_webp() {
     let processor = ImageProcessor::new();
@@ -57,6 +65,7 @@ fn test_process_webp() {
     assert_eq!(result.original.width, 300);
     assert_eq!(result.original.height, 200);
 }
+
 #[test]
 fn test_thumbnail_feed_size() {
     let processor = ImageProcessor::new();
@@ -66,6 +75,7 @@ fn test_thumbnail_feed_size() {
     assert!(thumb.width <= THUMB_SIZE_FEED);
     assert!(thumb.height <= THUMB_SIZE_FEED);
 }
+
 #[test]
 fn test_thumbnail_full_size() {
     let processor = ImageProcessor::new();
@@ -75,6 +85,7 @@ fn test_thumbnail_full_size() {
     assert!(thumb.width <= THUMB_SIZE_FULL);
     assert!(thumb.height <= THUMB_SIZE_FULL);
 }
+
 #[test]
 fn test_no_thumbnail_small_image() {
     let processor = ImageProcessor::new();
@@ -83,6 +94,7 @@ fn test_no_thumbnail_small_image() {
     assert!(result.thumbnail_feed.is_none(), "Small image should not get feed thumbnail");
     assert!(result.thumbnail_full.is_none(), "Small image should not get full thumbnail");
 }
+
 #[test]
 fn test_webp_conversion() {
     let processor = ImageProcessor::new().with_output_format(OutputFormat::WebP);
@@ -90,6 +102,7 @@ fn test_webp_conversion() {
     let result = processor.process(&data, "image/png").unwrap();
     assert_eq!(result.original.mime_type, "image/webp");
 }
+
 #[test]
 fn test_jpeg_output_format() {
     let processor = ImageProcessor::new().with_output_format(OutputFormat::Jpeg);
@@ -97,6 +110,7 @@ fn test_jpeg_output_format() {
     let result = processor.process(&data, "image/png").unwrap();
     assert_eq!(result.original.mime_type, "image/jpeg");
 }
+
 #[test]
 fn test_png_output_format() {
     let processor = ImageProcessor::new().with_output_format(OutputFormat::Png);
@@ -104,6 +118,7 @@ fn test_png_output_format() {
     let result = processor.process(&data, "image/jpeg").unwrap();
     assert_eq!(result.original.mime_type, "image/png");
 }
+
 #[test]
 fn test_max_dimension_enforced() {
     let processor = ImageProcessor::new().with_max_dimension(1000);
@@ -116,6 +131,7 @@ fn test_max_dimension_enforced() {
         assert_eq!(max_dimension, 1000);
     }
 }
+
 #[test]
 fn test_file_size_limit() {
     let processor = ImageProcessor::new().with_max_file_size(100);
@@ -127,10 +143,12 @@ fn test_file_size_limit() {
         assert_eq!(max_size, 100);
     }
 }
+
 #[test]
 fn test_default_max_file_size() {
     assert_eq!(DEFAULT_MAX_FILE_SIZE, 10 * 1024 * 1024);
 }
+
 #[test]
 fn test_unsupported_format_rejected() {
     let processor = ImageProcessor::new();
@@ -138,6 +156,7 @@ fn test_unsupported_format_rejected() {
     let result = processor.process(data, "application/octet-stream");
     assert!(matches!(result, Err(ImageError::UnsupportedFormat(_))));
 }
+
 #[test]
 fn test_corrupted_image_handling() {
     let processor = ImageProcessor::new();
@@ -145,6 +164,7 @@ fn test_corrupted_image_handling() {
     let result = processor.process(data, "image/png");
     assert!(matches!(result, Err(ImageError::DecodeError(_))));
 }
+
 #[test]
 fn test_aspect_ratio_preserved_landscape() {
     let processor = ImageProcessor::new();
@@ -155,6 +175,7 @@ fn test_aspect_ratio_preserved_landscape() {
     let thumb_ratio = thumb.width as f64 / thumb.height as f64;
     assert!((original_ratio - thumb_ratio).abs() < 0.1, "Aspect ratio should be preserved");
 }
+
 #[test]
 fn test_aspect_ratio_preserved_portrait() {
     let processor = ImageProcessor::new();
@@ -165,6 +186,7 @@ fn test_aspect_ratio_preserved_portrait() {
     let thumb_ratio = thumb.width as f64 / thumb.height as f64;
     assert!((original_ratio - thumb_ratio).abs() < 0.1, "Aspect ratio should be preserved");
 }
+
 #[test]
 fn test_mime_type_detection_auto() {
     let processor = ImageProcessor::new();
@@ -172,6 +194,7 @@ fn test_mime_type_detection_auto() {
     let result = processor.process(&data, "application/octet-stream");
     assert!(result.is_ok(), "Should detect PNG format from data");
 }
+
 #[test]
 fn test_is_supported_mime_type() {
     assert!(ImageProcessor::is_supported_mime_type("image/jpeg"));
@@ -186,6 +209,7 @@ fn test_is_supported_mime_type() {
     assert!(!ImageProcessor::is_supported_mime_type("text/plain"));
     assert!(!ImageProcessor::is_supported_mime_type("application/json"));
 }
+
 #[test]
 fn test_strip_exif() {
     let data = create_test_jpeg(100, 100);
@@ -194,6 +218,7 @@ fn test_strip_exif() {
     let stripped = result.unwrap();
     assert!(!stripped.is_empty());
 }
+
 #[test]
 fn test_with_thumbnails_disabled() {
     let processor = ImageProcessor::new().with_thumbnails(false);
@@ -202,6 +227,7 @@ fn test_with_thumbnails_disabled() {
     assert!(result.thumbnail_feed.is_none(), "Thumbnails should be disabled");
     assert!(result.thumbnail_full.is_none(), "Thumbnails should be disabled");
 }
+
 #[test]
 fn test_builder_chaining() {
     let processor = ImageProcessor::new()
@@ -213,6 +239,7 @@ fn test_builder_chaining() {
     let result = processor.process(&data, "image/png").unwrap();
     assert_eq!(result.original.mime_type, "image/jpeg");
 }
+
 #[test]
 fn test_processed_image_fields() {
     let processor = ImageProcessor::new();
@@ -223,6 +250,7 @@ fn test_processed_image_fields() {
     assert!(result.original.width > 0);
     assert!(result.original.height > 0);
 }
+
 #[test]
 fn test_only_feed_thumbnail_for_medium_images() {
     let processor = ImageProcessor::new();
@@ -231,6 +259,7 @@ fn test_only_feed_thumbnail_for_medium_images() {
     assert!(result.thumbnail_feed.is_some(), "Should have feed thumbnail");
     assert!(result.thumbnail_full.is_none(), "Should NOT have full thumbnail for 500px image");
 }
+
 #[test]
 fn test_both_thumbnails_for_large_images() {
     let processor = ImageProcessor::new();
@@ -239,6 +268,7 @@ fn test_both_thumbnails_for_large_images() {
     assert!(result.thumbnail_feed.is_some(), "Should have feed thumbnail");
     assert!(result.thumbnail_full.is_some(), "Should have full thumbnail for 2000px image");
 }
+
 #[test]
 fn test_exact_threshold_boundary_feed() {
     let processor = ImageProcessor::new();
@@ -249,6 +279,7 @@ fn test_exact_threshold_boundary_feed() {
     let result = processor.process(&above_threshold, "image/png").unwrap();
     assert!(result.thumbnail_feed.is_some(), "Above threshold should generate thumbnail");
 }
+
 #[test]
 fn test_exact_threshold_boundary_full() {
     let processor = ImageProcessor::new();

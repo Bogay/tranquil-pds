@@ -8,24 +8,28 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
+
 #[derive(Deserialize)]
 pub struct GetSubjectStatusParams {
     pub did: Option<String>,
     pub uri: Option<String>,
     pub blob: Option<String>,
 }
+
 #[derive(Serialize)]
 pub struct SubjectStatus {
     pub subject: serde_json::Value,
     pub takedown: Option<StatusAttr>,
     pub deactivated: Option<StatusAttr>,
 }
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusAttr {
     pub applied: bool,
     pub r#ref: Option<String>,
 }
+
 pub async fn get_subject_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -184,6 +188,7 @@ pub async fn get_subject_status(
     )
         .into_response()
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSubjectStatusInput {
@@ -191,11 +196,13 @@ pub struct UpdateSubjectStatusInput {
     pub takedown: Option<StatusAttrInput>,
     pub deactivated: Option<StatusAttrInput>,
 }
+
 #[derive(Deserialize)]
 pub struct StatusAttrInput {
     pub apply: bool,
     pub r#ref: Option<String>,
 }
+
 pub async fn update_subject_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

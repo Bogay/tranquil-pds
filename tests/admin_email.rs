@@ -1,7 +1,9 @@
 mod common;
+
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use sqlx::PgPool;
+
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
     sqlx::postgres::PgPoolOptions::new()
@@ -10,6 +12,7 @@ async fn get_pool() -> PgPool {
         .await
         .expect("Failed to connect to test database")
 }
+
 #[tokio::test]
 async fn test_send_email_success() {
     let client = common::client();
@@ -45,6 +48,7 @@ async fn test_send_email_success() {
     assert_eq!(notification.subject.as_deref(), Some("Test Admin Email"));
     assert!(notification.body.contains("Hello, this is a test email from the admin."));
 }
+
 #[tokio::test]
 async fn test_send_email_default_subject() {
     let client = common::client();
@@ -79,6 +83,7 @@ async fn test_send_email_default_subject() {
     assert!(notification.subject.is_some());
     assert!(notification.subject.unwrap().contains("Message from"));
 }
+
 #[tokio::test]
 async fn test_send_email_recipient_not_found() {
     let client = common::client();
@@ -99,6 +104,7 @@ async fn test_send_email_recipient_not_found() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "AccountNotFound");
 }
+
 #[tokio::test]
 async fn test_send_email_missing_content() {
     let client = common::client();
@@ -119,6 +125,7 @@ async fn test_send_email_missing_content() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_send_email_missing_recipient() {
     let client = common::client();
@@ -139,6 +146,7 @@ async fn test_send_email_missing_recipient() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_send_email_requires_auth() {
     let client = common::client();

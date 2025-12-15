@@ -5,6 +5,7 @@ use helpers::*;
 use reqwest::StatusCode;
 use reqwest::header;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_get_latest_commit_success() {
     let client = client();
@@ -24,6 +25,7 @@ async fn test_get_latest_commit_success() {
     assert!(body["cid"].is_string());
     assert!(body["rev"].is_string());
 }
+
 #[tokio::test]
 async fn test_get_latest_commit_not_found() {
     let client = client();
@@ -41,6 +43,7 @@ async fn test_get_latest_commit_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
+
 #[tokio::test]
 async fn test_get_latest_commit_missing_param() {
     let client = client();
@@ -54,6 +57,7 @@ async fn test_get_latest_commit_missing_param() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_list_repos() {
     let client = client();
@@ -76,6 +80,7 @@ async fn test_list_repos() {
     assert!(repo["head"].is_string());
     assert!(repo["active"].is_boolean());
 }
+
 #[tokio::test]
 async fn test_list_repos_with_limit() {
     let client = client();
@@ -97,6 +102,7 @@ async fn test_list_repos_with_limit() {
     let repos = body["repos"].as_array().unwrap();
     assert!(repos.len() <= 2);
 }
+
 #[tokio::test]
 async fn test_list_repos_pagination() {
     let client = client();
@@ -135,6 +141,7 @@ async fn test_list_repos_pagination() {
         assert_ne!(repos[0]["did"], repos2[0]["did"]);
     }
 }
+
 #[tokio::test]
 async fn test_get_repo_status_success() {
     let client = client();
@@ -155,6 +162,7 @@ async fn test_get_repo_status_success() {
     assert_eq!(body["active"], true);
     assert!(body["rev"].is_string());
 }
+
 #[tokio::test]
 async fn test_get_repo_status_not_found() {
     let client = client();
@@ -172,6 +180,7 @@ async fn test_get_repo_status_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
+
 #[tokio::test]
 async fn test_notify_of_update() {
     let client = client();
@@ -187,6 +196,7 @@ async fn test_notify_of_update() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_request_crawl() {
     let client = client();
@@ -202,6 +212,7 @@ async fn test_request_crawl() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_get_repo_success() {
     let client = client();
@@ -245,6 +256,7 @@ async fn test_get_repo_success() {
     let body = res.bytes().await.expect("Failed to get body");
     assert!(!body.is_empty());
 }
+
 #[tokio::test]
 async fn test_get_repo_not_found() {
     let client = client();
@@ -262,6 +274,7 @@ async fn test_get_repo_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
+
 #[tokio::test]
 async fn test_get_record_sync_success() {
     let client = client();
@@ -312,6 +325,7 @@ async fn test_get_record_sync_success() {
     let body = res.bytes().await.expect("Failed to get body");
     assert!(!body.is_empty());
 }
+
 #[tokio::test]
 async fn test_get_record_sync_not_found() {
     let client = client();
@@ -334,6 +348,7 @@ async fn test_get_record_sync_not_found() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RecordNotFound");
 }
+
 #[tokio::test]
 async fn test_get_blocks_success() {
     let client = client();
@@ -369,6 +384,7 @@ async fn test_get_blocks_success() {
         Some("application/vnd.ipld.car")
     );
 }
+
 #[tokio::test]
 async fn test_get_blocks_not_found() {
     let client = client();
@@ -383,6 +399,7 @@ async fn test_get_blocks_not_found() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
 #[tokio::test]
 async fn test_sync_record_lifecycle() {
     let client = client();
@@ -491,6 +508,7 @@ async fn test_sync_record_lifecycle() {
         "Second post should still be accessible"
     );
 }
+
 #[tokio::test]
 async fn test_sync_repo_export_lifecycle() {
     let client = client();

@@ -7,10 +7,12 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
+
 #[derive(Deserialize)]
 pub struct DescribeRepoInput {
     pub repo: String,
 }
+
 pub async fn describe_repo(
     State(state): State<AppState>,
     Query(input): Query<DescribeRepoInput>,

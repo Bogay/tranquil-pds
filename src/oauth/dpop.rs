@@ -3,20 +3,25 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
 use super::OAuthError;
+
 const DPOP_NONCE_VALIDITY_SECS: i64 = 300;
 const DPOP_MAX_AGE_SECS: i64 = 300;
+
 #[derive(Debug, Clone)]
 pub struct DPoPVerifyResult {
     pub jkt: String,
     pub jti: String,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DPoPProofHeader {
     pub typ: String,
     pub alg: String,
     pub jwk: DPoPJwk,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DPoPJwk {
     pub kty: String,
@@ -27,6 +32,7 @@ pub struct DPoPJwk {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y: Option<String>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DPoPProofPayload {
     pub jti: String,
@@ -38,15 +44,18 @@ pub struct DPoPProofPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
 }
+
 pub struct DPoPVerifier {
     secret: Vec<u8>,
 }
+
 impl DPoPVerifier {
     pub fn new(secret: &[u8]) -> Self {
         Self {
             secret: secret.to_vec(),
         }
     }
+
     pub fn generate_nonce(&self) -> String {
         let timestamp = Utc::now().timestamp();
         let timestamp_bytes = timestamp.to_be_bytes();
@@ -59,6 +68,7 @@ impl DPoPVerifier {
         nonce_data.extend_from_slice(&hash[..16]);
         URL_SAFE_NO_PAD.encode(&nonce_data)
     }
+
     pub fn validate_nonce(&self, nonce: &str) -> Result<(), OAuthError> {
         let nonce_bytes = URL_SAFE_NO_PAD
             .decode(nonce)
@@ -83,6 +93,7 @@ impl DPoPVerifier {
         }
         Ok(())
     }
+
     pub fn verify_proof(
         &self,
         dpop_header: &str,
@@ -152,6 +163,7 @@ impl DPoPVerifier {
         })
     }
 }
+
 fn verify_dpop_signature(
     alg: &str,
     jwk: &DPoPJwk,
@@ -168,6 +180,7 @@ fn verify_dpop_signature(
         ))),
     }
 }
+
 fn verify_es256(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), OAuthError> {
     use p256::ecdsa::signature::Verifier;
     use p256::ecdsa::{Signature, VerifyingKey};
@@ -208,6 +221,7 @@ fn verify_es256(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         .verify(message, &sig)
         .map_err(|_| OAuthError::InvalidDpopProof("Signature verification failed".to_string()))
 }
+
 fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), OAuthError> {
     use p384::ecdsa::signature::Verifier;
     use p384::ecdsa::{Signature, VerifyingKey};
@@ -248,6 +262,7 @@ fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         .verify(message, &sig)
         .map_err(|_| OAuthError::InvalidDpopProof("Signature verification failed".to_string()))
 }
+
 fn verify_eddsa(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), OAuthError> {
     use ed25519_dalek::{Signature, VerifyingKey};
     let crv = jwk.crv.as_ref().ok_or_else(|| {
@@ -277,6 +292,7 @@ fn verify_eddsa(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         .verify_strict(message, &sig)
         .map_err(|_| OAuthError::InvalidDpopProof("Signature verification failed".to_string()))
 }
+
 pub fn compute_jwk_thumbprint(jwk: &DPoPJwk) -> Result<String, OAuthError> {
     let canonical = match jwk.kty.as_str() {
         "EC" => {
@@ -319,15 +335,18 @@ pub fn compute_jwk_thumbprint(jwk: &DPoPJwk) -> Result<String, OAuthError> {
     let hash = hasher.finalize();
     Ok(URL_SAFE_NO_PAD.encode(&hash))
 }
+
 pub fn compute_access_token_hash(access_token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(access_token.as_bytes());
     let hash = hasher.finalize();
     URL_SAFE_NO_PAD.encode(&hash)
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_nonce_generation_and_validation() {
         let secret = b"test-secret-key-32-bytes-long!!!";
@@ -335,6 +354,7 @@ mod tests {
         let nonce = verifier.generate_nonce();
         assert!(verifier.validate_nonce(&nonce).is_ok());
     }
+
     #[test]
     fn test_jwk_thumbprint_ec() {
         let jwk = DPoPJwk {

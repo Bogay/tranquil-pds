@@ -3,6 +3,7 @@ use common::*;
 use iroh_car::CarHeader;
 use reqwest::StatusCode;
 use serde_json::json;
+
 #[tokio::test]
 async fn test_import_repo_requires_auth() {
     let client = client();
@@ -15,6 +16,7 @@ async fn test_import_repo_requires_auth() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
 #[tokio::test]
 async fn test_import_repo_invalid_car() {
     let client = client();
@@ -31,6 +33,7 @@ async fn test_import_repo_invalid_car() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_import_repo_empty_body() {
     let client = client();
@@ -45,6 +48,7 @@ async fn test_import_repo_empty_body() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
     loop {
         let mut byte = (value & 0x7F) as u8;
@@ -58,6 +62,7 @@ fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
         }
     }
 }
+
 #[tokio::test]
 async fn test_import_rejects_car_for_different_user() {
     let client = client();
@@ -90,6 +95,7 @@ async fn test_import_rejects_car_for_different_user() {
         body
     );
 }
+
 #[tokio::test]
 async fn test_import_accepts_own_exported_repo() {
     let client = client();
@@ -135,6 +141,7 @@ async fn test_import_accepts_own_exported_repo() {
         .expect("Failed to import repo");
     assert_eq!(import_res.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_import_repo_size_limit() {
     let client = client();
@@ -165,6 +172,7 @@ async fn test_import_repo_size_limit() {
         }
     }
 }
+
 #[tokio::test]
 async fn test_import_deactivated_account_rejected() {
     let client = client();
@@ -205,6 +213,7 @@ async fn test_import_deactivated_account_rejected() {
         import_res.status()
     );
 }
+
 #[tokio::test]
 async fn test_import_invalid_car_structure() {
     let client = client();
@@ -220,6 +229,7 @@ async fn test_import_invalid_car_structure() {
         .expect("Request failed");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
 #[tokio::test]
 async fn test_import_car_with_no_roots() {
     let client = client();
@@ -241,6 +251,7 @@ async fn test_import_car_with_no_roots() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
 }
+
 #[tokio::test]
 async fn test_import_preserves_records_after_reimport() {
     let client = client();

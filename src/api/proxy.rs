@@ -8,6 +8,7 @@ use axum::{
 use crate::api::proxy_client::proxy_client;
 use std::collections::HashMap;
 use tracing::{error, info};
+
 pub async fn proxy_handler(
     State(state): State<AppState>,
     Path(method): Path<String>,

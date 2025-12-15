@@ -5,6 +5,7 @@ use helpers::*;
 use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+
 #[tokio::test]
 async fn test_session_lifecycle_wrong_password() {
     let client = client();
@@ -28,6 +29,7 @@ async fn test_session_lifecycle_wrong_password() {
         res.status()
     );
 }
+
 #[tokio::test]
 async fn test_session_lifecycle_multiple_sessions() {
     let client = client();
@@ -103,6 +105,7 @@ async fn test_session_lifecycle_multiple_sessions() {
         .expect("Failed getSession 2");
     assert_eq!(get2.status(), StatusCode::OK);
 }
+
 #[tokio::test]
 async fn test_session_lifecycle_refresh_invalidates_old() {
     let client = client();
@@ -169,6 +172,7 @@ async fn test_session_lifecycle_refresh_invalidates_old() {
         "Old refresh token should be invalid after use"
     );
 }
+
 #[tokio::test]
 async fn test_app_password_lifecycle() {
     let client = client();
@@ -275,6 +279,7 @@ async fn test_app_password_lifecycle() {
     let passwords_after = list_after["passwords"].as_array().unwrap();
     assert_eq!(passwords_after.len(), 0, "No app passwords should remain");
 }
+
 #[tokio::test]
 async fn test_account_deactivation_lifecycle() {
     let client = client();
@@ -362,6 +367,7 @@ async fn test_account_deactivation_lifecycle() {
     let (new_post_uri, _) = create_post(&client, &did, &jwt, "Post after reactivation").await;
     assert!(!new_post_uri.is_empty(), "Should be able to post after reactivation");
 }
+
 #[tokio::test]
 async fn test_service_auth_lifecycle() {
     let client = client();
@@ -393,6 +399,7 @@ async fn test_service_auth_lifecycle() {
     assert_eq!(claims["aud"], "did:web:api.bsky.app");
     assert_eq!(claims["lxm"], "com.atproto.repo.uploadBlob");
 }
+
 #[tokio::test]
 async fn test_request_account_delete() {
     let client = client();

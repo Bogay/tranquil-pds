@@ -9,16 +9,19 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::error;
+
 #[derive(Deserialize)]
 pub struct GetServiceAuthParams {
     pub aud: String,
     pub lxm: Option<String>,
     pub exp: Option<i64>,
 }
+
 #[derive(Serialize)]
 pub struct GetServiceAuthOutput {
     pub token: String,
 }
+
 pub async fn get_service_auth(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

@@ -13,6 +13,7 @@ use axum::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use tracing::warn;
+
 #[derive(Deserialize)]
 pub struct GetAuthorFeedParams {
     pub actor: String,
@@ -22,6 +23,7 @@ pub struct GetAuthorFeedParams {
     #[serde(rename = "includePins")]
     pub include_pins: Option<bool>,
 }
+
 fn update_author_profile_in_feed(
     feed: &mut [FeedViewPost],
     author_did: &str,
@@ -35,6 +37,7 @@ fn update_author_profile_in_feed(
         }
     }
 }
+
 pub async fn get_author_feed(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

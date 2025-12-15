@@ -18,6 +18,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
+
 pub async fn has_verified_notification_channel(db: &PgPool, did: &str) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
         r#"
@@ -44,6 +45,7 @@ pub async fn has_verified_notification_channel(db: &PgPool, did: &str) -> Result
         None => Ok(false),
     }
 }
+
 pub async fn prepare_repo_write(
     state: &AppState,
     headers: &HeaderMap,

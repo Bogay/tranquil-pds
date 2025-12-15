@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 use super::super::{AuthorizedClientData, OAuthError};
 use super::helpers::{from_json, to_json};
+
 pub async fn upsert_authorized_client(
     pool: &PgPool,
     did: &str,
@@ -22,6 +23,7 @@ pub async fn upsert_authorized_client(
     .await?;
     Ok(())
 }
+
 pub async fn get_authorized_client(
     pool: &PgPool,
     did: &str,

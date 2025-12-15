@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Deserialize)]
 pub struct TokenRequest {
     pub grant_type: String,
@@ -19,6 +20,7 @@ pub struct TokenRequest {
     #[serde(default)]
     pub client_assertion_type: Option<String>,
 }
+
 #[derive(Debug, Serialize)]
 pub struct TokenResponse {
     pub access_token: String,

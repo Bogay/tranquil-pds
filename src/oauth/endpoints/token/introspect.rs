@@ -6,12 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::state::{AppState, RateLimitKind};
 use crate::oauth::{OAuthError, db};
 use super::helpers::extract_token_claims;
+
 #[derive(Debug, Deserialize)]
 pub struct RevokeRequest {
     pub token: Option<String>,
     #[serde(default)]
     pub token_type_hint: Option<String>,
 }
+
 pub async fn revoke_token(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -31,12 +33,14 @@ pub async fn revoke_token(
     }
     Ok(StatusCode::OK)
 }
+
 #[derive(Debug, Deserialize)]
 pub struct IntrospectRequest {
     pub token: String,
     #[serde(default)]
     pub token_type_hint: Option<String>,
 }
+
 #[derive(Debug, Serialize)]
 pub struct IntrospectResponse {
     pub active: bool,
@@ -63,6 +67,7 @@ pub struct IntrospectResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jti: Option<String>,
 }
+
 pub async fn introspect_token(
     State(state): State<AppState>,
     headers: HeaderMap,
