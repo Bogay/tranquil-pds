@@ -273,6 +273,10 @@ pub fn app(state: AppState) -> Router {
             get(api::admin::get_invite_codes),
         )
         .route(
+            "/xrpc/com.bspds.admin.getServerStats",
+            get(api::admin::get_server_stats),
+        )
+        .route(
             "/xrpc/com.atproto.admin.disableAccountInvites",
             post(api::admin::disable_account_invites),
         )
@@ -387,6 +391,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.bspds.account.updateNotificationPrefs",
             post(api::notification_prefs::update_notification_prefs),
+        )
+        .route(
+            "/xrpc/com.bspds.account.getNotificationHistory",
+            get(api::notification_prefs::get_notification_history),
+        )
+        .route(
+            "/xrpc/com.bspds.account.confirmChannelVerification",
+            post(api::verification::confirm_channel_verification),
         )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
         .layer(middleware::from_fn(metrics::metrics_middleware))

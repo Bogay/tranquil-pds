@@ -1,5 +1,6 @@
 pub mod account;
 pub mod invite;
+pub mod server_stats;
 pub mod status;
 
 pub use account::{
@@ -9,4 +10,5 @@ pub use account::{
 pub use invite::{
     disable_account_invites, disable_invite_codes, enable_account_invites, get_invite_codes,
 };
+pub use server_stats::get_server_stats;
 pub use status::{get_subject_status, update_subject_status};

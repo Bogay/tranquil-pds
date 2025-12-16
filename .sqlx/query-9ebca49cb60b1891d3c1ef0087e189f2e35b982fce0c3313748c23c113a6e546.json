@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at)\n        VALUES ($1, $2::notification_channel, $3, $4, $5)\n        ON CONFLICT (user_id, channel) DO UPDATE\n        SET code = $3, pending_identifier = $4, expires_at = $5, created_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "notification_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ebca49cb60b1891d3c1ef0087e189f2e35b982fce0c3313748c23c113a6e546"
+}

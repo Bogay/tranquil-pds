@@ -244,10 +244,10 @@ Absolutely subject to change, "bspds" isn't even the real name of this pds thus 
 Anyway... endpoints for PDS settings not covered by standard ATProto:
 - [x] `com.bspds.account.getNotificationPrefs` - get preferred channel, verified channels
 - [x] `com.bspds.account.updateNotificationPrefs` - set preferred channel
-- [ ] `com.bspds.account.getNotificationHistory` - list past notifications
-- [ ] `com.bspds.account.verifyChannel` - initiate verification for Discord/Telegram/Signal
-- [ ] `com.bspds.account.confirmChannelVerification` - confirm with code
-- [ ] `com.bspds.admin.getServerStats` - user count, storage usage, etc.
+- [x] `com.bspds.account.getNotificationHistory` - list past notifications
+- [x] `com.bspds.account.verifyChannel` - initiate verification for Discord/Telegram/Signal
+- [x] `com.bspds.account.confirmChannelVerification` - confirm with code
+- [x] `com.bspds.admin.getServerStats` - user count, storage usage, etc.
 ### Frontend Views
 Uses existing ATProto endpoints where possible:
 Authentication
@@ -262,7 +262,7 @@ User Dashboard
 - [x] Invite codes (uses `com.atproto.server.getAccountInviteCodes`, `createInviteCode`)
 Notification Preferences
 - [x] Channel selector (uses `com.bspds.account.*` endpoints above)
-- [ ] Verification flows for Discord/Telegram/Signal
+- [x] Verification flows for Discord/Telegram/Signal
 - [ ] Notification history view
 Account Settings
 - [x] Email change (uses `com.atproto.server.requestEmailUpdate`, `updateEmail`)

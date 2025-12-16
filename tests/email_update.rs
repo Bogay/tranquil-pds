@@ -59,19 +59,20 @@ async fn test_email_update_flow_success() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["tokenRequired"], true);
-    let user = sqlx::query!(
-        "SELECT email_pending_verification, email_confirmation_code, email FROM users WHERE handle = $1",
+
+    let verification = sqlx::query!(
+        "SELECT pending_identifier, code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
         handle
     )
     .fetch_one(&pool)
     .await
-    .expect("User not found");
+    .expect("Verification not found");
+
     assert_eq!(
-        user.email_pending_verification.as_deref(),
+        verification.pending_identifier.as_deref(),
         Some(new_email.as_str())
     );
-    assert!(user.email_confirmation_code.is_some());
-    let code = user.email_confirmation_code.unwrap();
+    let code = verification.code;
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.confirmEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -84,15 +85,22 @@ async fn test_email_update_flow_success() {
         .expect("Failed to confirm email");
     assert_eq!(res.status(), StatusCode::OK);
     let user = sqlx::query!(
-        "SELECT email, email_pending_verification, email_confirmation_code FROM users WHERE handle = $1",
+        "SELECT email FROM users WHERE handle = $1",
         handle
     )
     .fetch_one(&pool)
     .await
     .expect("User not found");
     assert_eq!(user.email, Some(new_email));
-    assert!(user.email_pending_verification.is_none());
-    assert!(user.email_confirmation_code.is_none());
+
+    let verification = sqlx::query!(
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
+        handle
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("DB error");
+    assert!(verification.is_none());
 }
 
 #[tokio::test]
@@ -174,14 +182,14 @@ async fn test_confirm_email_wrong_email() {
         .await
         .expect("Failed to request email update");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT email_confirmation_code FROM users WHERE handle = $1",
+    let verification = sqlx::query!(
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
         handle
     )
     .fetch_one(&pool)
     .await
-    .expect("User not found");
-    let code = user.email_confirmation_code.unwrap();
+    .expect("Verification not found");
+    let code = verification.code;
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.confirmEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -293,14 +301,14 @@ async fn test_update_email_with_valid_token() {
         .await
         .expect("Failed to request email update");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT email_confirmation_code FROM users WHERE handle = $1",
+    let verification = sqlx::query!(
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
         handle
     )
     .fetch_one(&pool)
     .await
-    .expect("User not found");
-    let code = user.email_confirmation_code.unwrap();
+    .expect("Verification not found");
+    let code = verification.code;
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -313,14 +321,21 @@ async fn test_update_email_with_valid_token() {
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK);
     let user = sqlx::query!(
-        "SELECT email, email_pending_verification FROM users WHERE handle = $1",
+        "SELECT email FROM users WHERE handle = $1",
         handle
     )
     .fetch_one(&pool)
     .await
     .expect("User not found");
     assert_eq!(user.email, Some(new_email));
-    assert!(user.email_pending_verification.is_none());
+    let verification = sqlx::query!(
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
+        handle
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("DB error");
+    assert!(verification.is_none());
 }
 
 #[tokio::test]

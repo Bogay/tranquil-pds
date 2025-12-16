@@ -382,17 +382,14 @@ pub async fn create_account(
     let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
         r#"INSERT INTO users (
             handle, email, did, password_hash,
-            email_confirmation_code, email_confirmation_code_expires_at,
             preferred_notification_channel,
             discord_id, telegram_username, signal_number
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7::notification_channel, $8, $9, $10) RETURNING id"#,
+        ) VALUES ($1, $2, $3, $4, $5::notification_channel, $6, $7, $8) RETURNING id"#,
     )
     .bind(short_handle)
     .bind(&email)
     .bind(&did)
     .bind(&password_hash)
-    .bind(&verification_code)
-    .bind(code_expires_at)
     .bind(verification_channel)
     .bind(
         input
@@ -460,6 +457,23 @@ pub async fn create_account(
                 .into_response();
         }
     };
+
+    if let Err(e) = sqlx::query!(
+        "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, 'email', $2, $3, $4)",
+        user_id,
+        verification_code,
+        email,
+        code_expires_at
+    )
+    .execute(&mut *tx)
+    .await {
+        error!("Error inserting verification code: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(enc) => enc,
         Err(e) => {

@@ -6,14 +6,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
-
-fn generate_confirmation_code() -> String {
-    crate::util::generate_token_code()
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +37,7 @@ pub async fn request_email_update(
         )
             .into_response();
     }
+
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
@@ -53,12 +50,14 @@ pub async fn request_email_update(
                 .into_response();
         }
     };
+
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
     let did = match auth_result {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
-    let user = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
+
+    let user = match sqlx::query!("SELECT id, handle, email FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
     {
@@ -71,9 +70,12 @@ pub async fn request_email_update(
                 .into_response();
         }
     };
+
     let user_id = user.id;
     let handle = user.handle;
+    let current_email = user.email;
     let email = input.email.trim().to_lowercase();
+
     if !crate::api::validation::is_valid_email(&email) {
         return (
             StatusCode::BAD_REQUEST,
@@ -81,9 +83,19 @@ pub async fn request_email_update(
         )
             .into_response();
     }
-    let exists = sqlx::query!("SELECT 1 as one FROM users WHERE LOWER(email) = $1", email)
-        .fetch_optional(&state.db)
-        .await;
+
+    if current_email.as_ref().map(|e| e.to_lowercase()) == Some(email.clone()) {
+        return (StatusCode::OK, Json(json!({ "tokenRequired": false }))).into_response();
+    }
+
+    let exists = sqlx::query!(
+        "SELECT 1 as one FROM users WHERE LOWER(email) = $1 AND id != $2",
+        email,
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await;
+
     if let Ok(Some(_)) = exists {
         return (
             StatusCode::BAD_REQUEST,
@@ -91,33 +103,24 @@ pub async fn request_email_update(
         )
             .into_response();
     }
-    let code = generate_confirmation_code();
-    let expires_at = Utc::now() + Duration::minutes(10);
-    let update = sqlx::query!(
-        "UPDATE users SET email_pending_verification = $1, email_confirmation_code = $2, email_confirmation_code_expires_at = $3 WHERE id = $4",
-        email,
-        code,
-        expires_at,
-        user_id
+
+    if let Err(e) = crate::api::notification_prefs::request_channel_verification(
+        &state.db,
+        user_id,
+        "email",
+        &email,
+        Some(&handle),
     )
-    .execute(&state.db)
-    .await;
-    if let Err(e) = update {
-        error!("DB error setting email update code: {:?}", e);
+    .await
+    {
+        error!("Failed to request email verification: {}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),
         )
             .into_response();
     }
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_email_update(
-        &state.db, user_id, &email, &handle, &code, &hostname,
-    )
-    .await
-    {
-        warn!("Failed to enqueue email update notification: {:?}", e);
-    }
+
     info!("Email update requested for user {}", user_id);
     (StatusCode::OK, Json(json!({ "tokenRequired": true }))).into_response()
 }
@@ -149,6 +152,7 @@ pub async fn confirm_email(
         )
             .into_response();
     }
+
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
@@ -161,20 +165,19 @@ pub async fn confirm_email(
                 .into_response();
         }
     };
+
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
     let did = match auth_result {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
-    let user = match sqlx::query!(
-        "SELECT id, email_confirmation_code, email_confirmation_code_expires_at, email_pending_verification FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
+
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_one(&state.db)
+        .await
     {
-        Ok(Some(row)) => row,
-        _ => {
+        Ok(id) => id,
+        Err(_) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -182,25 +185,28 @@ pub async fn confirm_email(
                 .into_response();
         }
     };
-    let user_id = user.id;
-    let stored_code = user.email_confirmation_code;
-    let expires_at = user.email_confirmation_code_expires_at;
-    let email_pending_verification = user.email_pending_verification;
-    let email = input.email.trim().to_lowercase();
-    let confirmation_code = input.token.trim();
-    let (pending_email, saved_code, expiry) =
-        match (email_pending_verification, stored_code, expires_at) {
-            (Some(p), Some(c), Some(e)) => (p, c, e),
-            _ => {
-                return (
+
+    let verification = match sqlx::query!(
+        "SELECT code, pending_identifier, expires_at FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        _ => {
+            return (
                 StatusCode::BAD_REQUEST,
-                Json(
-                    json!({"error": "InvalidRequest", "message": "No pending email update found"}),
-                ),
+                Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
             )
                 .into_response();
-            }
-        };
+        }
+    };
+
+    let pending_email = verification.pending_identifier.unwrap_or_default();
+    let email = input.email.trim().to_lowercase();
+    let confirmation_code = input.token.trim();
+
     if pending_email != email {
         return (
             StatusCode::BAD_REQUEST,
@@ -208,27 +214,36 @@ pub async fn confirm_email(
         )
             .into_response();
     }
-    if saved_code != confirmation_code {
+
+    if verification.code != confirmation_code {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidToken", "message": "Invalid token"})),
         )
             .into_response();
     }
-    if Utc::now() > expiry {
+
+    if Utc::now() > verification.expires_at {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
         )
             .into_response();
     }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(_) => return ApiError::InternalError.into_response(),
+    };
+
     let update = sqlx::query!(
-        "UPDATE users SET email = $1, email_pending_verification = NULL, email_confirmation_code = NULL, email_confirmation_code_expires_at = NULL WHERE id = $2",
+        "UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2",
         pending_email,
         user_id
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
+
     if let Err(e) = update {
         error!("DB error finalizing email update: {:?}", e);
         if e.as_database_error()
@@ -247,6 +262,22 @@ pub async fn confirm_email(
         )
             .into_response();
     }
+
+    if let Err(e) = sqlx::query!(
+        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
+        user_id
+    )
+    .execute(&mut *tx)
+    .await
+    {
+        error!("Failed to delete verification record: {:?}", e);
+        return ApiError::InternalError.into_response();
+    }
+
+    if let Err(_) = tx.commit().await {
+        return ApiError::InternalError.into_response();
+    }
+
     info!("Email updated for user {}", user_id);
     (StatusCode::OK, Json(json!({}))).into_response()
 }
@@ -277,13 +308,15 @@ pub async fn update_email(
                 .into_response();
         }
     };
+
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
     let did = match auth_result {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
+
     let user = match sqlx::query!(
-        "SELECT id, email, email_confirmation_code, email_confirmation_code_expires_at, email_pending_verification FROM users WHERE did = $1",
+        "SELECT id, email FROM users WHERE did = $1",
         did
     )
     .fetch_optional(&state.db)
@@ -298,12 +331,11 @@ pub async fn update_email(
                 .into_response();
         }
     };
+
     let user_id = user.id;
     let current_email = user.email;
-    let stored_code = user.email_confirmation_code;
-    let expires_at = user.email_confirmation_code_expires_at;
-    let email_pending_verification = user.email_pending_verification;
     let new_email = input.email.trim().to_lowercase();
+
     if !crate::api::validation::is_valid_email(&new_email) {
         return (
             StatusCode::BAD_REQUEST,
@@ -311,32 +343,34 @@ pub async fn update_email(
         )
             .into_response();
     }
+
     if let Some(ref current) = current_email
-        && new_email == current.to_lowercase() {
-            return (StatusCode::OK, Json(json!({}))).into_response();
-        }
-    let email_confirmed = stored_code.is_some() && email_pending_verification.is_some();
-    if email_confirmed {
+        && new_email == current.to_lowercase()
+    {
+        return (StatusCode::OK, Json(json!({}))).into_response();
+    }
+
+    let verification = sqlx::query!(
+        "SELECT code, pending_identifier, expires_at FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or(None);
+
+    if let Some(ver) = verification {
         let confirmation_token = match &input.token {
             Some(t) => t.trim(),
             None => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "TokenRequired", "message": "Token required for confirmed accounts. Call requestEmailUpdate first."})),
+                    Json(json!({"error": "TokenRequired", "message": "Token required. Call requestEmailUpdate first."})),
                 )
                     .into_response();
             }
         };
-        let pending_email = match email_pending_verification {
-            Some(p) => p,
-            None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
-                )
-                    .into_response();
-            }
-        };
+
+        let pending_email = ver.pending_identifier.unwrap_or_default();
         if pending_email.to_lowercase() != new_email {
             return (
                 StatusCode::BAD_REQUEST,
@@ -344,32 +378,24 @@ pub async fn update_email(
             )
                 .into_response();
         }
-        let saved_code = match stored_code {
-            Some(c) => c,
-            None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
-                )
-                    .into_response();
-            }
-        };
-        if saved_code != confirmation_token {
+
+        if ver.code != confirmation_token {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "InvalidToken", "message": "Invalid token"})),
             )
                 .into_response();
         }
-        if let Some(exp) = expires_at
-            && Utc::now() > exp {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
-                )
-                    .into_response();
-            }
+
+        if Utc::now() > ver.expires_at {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
+            )
+                .into_response();
+        }
     }
+
     let exists = sqlx::query!(
         "SELECT 1 as one FROM users WHERE LOWER(email) = $1 AND id != $2",
         new_email,
@@ -377,6 +403,7 @@ pub async fn update_email(
     )
     .fetch_optional(&state.db)
     .await;
+
     if let Ok(Some(_)) = exists {
         return (
             StatusCode::BAD_REQUEST,
@@ -384,43 +411,62 @@ pub async fn update_email(
         )
             .into_response();
     }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(_) => return ApiError::InternalError.into_response(),
+    };
+
     let update = sqlx::query!(
-        r#"
-        UPDATE users
-        SET email = $1,
-            email_pending_verification = NULL,
-            email_confirmation_code = NULL,
-            email_confirmation_code_expires_at = NULL,
-            updated_at = NOW()
-        WHERE id = $2
-        "#,
+        "UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2",
         new_email,
         user_id
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
-    match update {
-        Ok(_) => {
-            info!("Email updated for user {}", user_id);
-            (StatusCode::OK, Json(json!({}))).into_response()
-        }
-        Err(e) => {
-            error!("DB error finalizing email update: {:?}", e);
-            if e.as_database_error()
-                .map(|db_err| db_err.is_unique_violation())
-                .unwrap_or(false)
-            {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "Email already in use"})),
-                )
-                    .into_response();
-            }
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
+
+    if let Err(e) = update {
+        error!("DB error finalizing email update: {:?}", e);
+        if e.as_database_error()
+            .map(|db_err| db_err.is_unique_violation())
+            .unwrap_or(false)
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidRequest", "message": "Email already in use"})),
             )
-                .into_response()
+                .into_response();
         }
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
     }
+
+    let _ = sqlx::query!(
+        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
+        user_id
+    )
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(_) = tx.commit().await {
+        return ApiError::InternalError.into_response();
+    }
+
+    match sqlx::query!(
+        "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, 'email_auth_factor', $2) ON CONFLICT (user_id, name) DO UPDATE SET value_json = $2",
+        user_id,
+        json!(input.email_auth_factor.unwrap_or(false))
+    )
+    .execute(&state.db)
+    .await
+    {
+        Ok(_) => {}
+        Err(e) => warn!("Failed to update email_auth_factor preference: {}", e),
+    }
+
+    info!("Email updated for user {}", user_id);
+    (StatusCode::OK, Json(json!({}))).into_response()
 }

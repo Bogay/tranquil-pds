@@ -872,13 +872,12 @@ async fn test_jwt_security_refresh_token_replay_protection() {
         .await
         .expect("Failed to connect to test database");
     let verification_code: String = sqlx::query_scalar!(
-        "SELECT email_confirmation_code FROM users WHERE did = $1",
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
         did
     )
     .fetch_one(&pool)
     .await
-    .expect("Failed to get verification code")
-    .expect("No verification code found");
+    .expect("Failed to get verification code");
     let confirm_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.confirmSignup", url))
         .json(&json!({

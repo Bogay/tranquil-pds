@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO notification_queue (user_id, channel, notification_type, recipient, subject, body, metadata)\n            VALUES ($1, $2::notification_channel, 'channel_verification', $3, 'Verify your channel', $4, $5)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "notification_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0bb332a1a1b648aaeca02415b8d2fc39c045bac9b3897b1c886b6ffc68538bac"
+}

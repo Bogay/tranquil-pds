@@ -79,6 +79,9 @@ pub async fn base_url() -> &'static str {
     SERVER_URL.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
+            unsafe {
+                std::env::set_var("BSPDS_ALLOW_INSECURE_SECRETS", "1");
+            }
             if std::env::var("DOCKER_HOST").is_err() {
                 if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
                     let podman_sock = std::path::Path::new(&runtime_dir).join("podman/podman.sock");
@@ -406,13 +409,13 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
         .await
         .expect("Failed to connect to test database");
     let verification_code: String = sqlx::query_scalar!(
-        "SELECT email_confirmation_code FROM users WHERE did = $1",
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
         did
     )
     .fetch_one(&pool)
     .await
-    .expect("Failed to get verification code")
-    .expect("No verification code found");
+    .expect("Failed to get verification code");
+
     let confirm_payload = json!({
         "did": did,
         "verificationCode": verification_code
@@ -548,13 +551,13 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
                 .await
                 .expect("Failed to connect to test database");
             let verification_code: String = sqlx::query_scalar!(
-                "SELECT email_confirmation_code FROM users WHERE did = $1",
+                "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
                 &did
             )
             .fetch_one(&pool)
             .await
-            .expect("Failed to get verification code")
-            .expect("No verification code found");
+            .expect("Failed to get verification code");
+
             let confirm_payload = json!({
                 "did": did,
                 "verificationCode": verification_code

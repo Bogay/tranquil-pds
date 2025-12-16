@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at)\n        VALUES ($1, 'email', $2, $3, $4)\n        ON CONFLICT (user_id, channel) DO UPDATE\n        SET code = $2, pending_identifier = $3, expires_at = $4, created_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4513affeac5d8f9b93be23bef92e88b6949869e7d2cd3b40125597e29d7e0d20"
+}

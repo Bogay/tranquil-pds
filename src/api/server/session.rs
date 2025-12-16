@@ -475,8 +475,6 @@ pub async fn confirm_signup(
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.email,
-            u.email_confirmation_code,
-            u.email_confirmation_code_expires_at,
             u.preferred_notification_channel as "channel: crate::notifications::NotificationChannel",
             k.key_bytes, k.encryption_version
         FROM users u
@@ -497,23 +495,35 @@ pub async fn confirm_signup(
             return ApiError::InternalError.into_response();
         }
     };
-    let stored_code = match &row.email_confirmation_code {
-        Some(code) => code,
-        None => {
+
+    let verification = match sqlx::query!(
+        "SELECT code, expires_at FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
+        row.id
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(v)) => v,
+        Ok(None) => {
             warn!("No verification code found for user: {}", input.did);
             return ApiError::InvalidRequest("No pending verification".into()).into_response();
         }
+        Err(e) => {
+            error!("Database error fetching verification: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
     };
-    if stored_code != &input.verification_code {
+
+    if verification.code != input.verification_code {
         warn!("Invalid verification code for user: {}", input.did);
         return ApiError::InvalidRequest("Invalid verification code".into()).into_response();
     }
-    if let Some(expires_at) = row.email_confirmation_code_expires_at
-        && expires_at < Utc::now() {
-            warn!("Verification code expired for user: {}", input.did);
-            return ApiError::ExpiredTokenMsg("Verification code has expired".into())
-                .into_response();
-        }
+    if verification.expires_at < Utc::now() {
+        warn!("Verification code expired for user: {}", input.did);
+        return ApiError::ExpiredTokenMsg("Verification code has expired".into())
+            .into_response();
+    }
+
     let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
         Ok(k) => k,
         Err(e) => {
@@ -528,7 +538,7 @@ pub async fn confirm_signup(
         crate::notifications::NotificationChannel::Signal => "signal_verified",
     };
     let update_query = format!(
-        "UPDATE users SET {} = TRUE, email_confirmation_code = NULL, email_confirmation_code_expires_at = NULL WHERE did = $1",
+        "UPDATE users SET {} = TRUE WHERE did = $1",
         verified_column
     );
     if let Err(e) = sqlx::query(&update_query)
@@ -539,6 +549,16 @@ pub async fn confirm_signup(
         error!("Failed to update verification status: {:?}", e);
         return ApiError::InternalError.into_response();
     }
+
+    if let Err(e) = sqlx::query!(
+        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
+        row.id
+    )
+    .execute(&state.db)
+    .await {
+        error!("Failed to delete verification record: {:?}", e);
+    }
+
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -634,11 +654,20 @@ pub async fn resend_verification(
     }
     let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let code_expires_at = Utc::now() + chrono::Duration::minutes(30);
+
+    let email = row.email.clone();
+
     if let Err(e) = sqlx::query!(
-        "UPDATE users SET email_confirmation_code = $1, email_confirmation_code_expires_at = $2 WHERE did = $3",
+        r#"
+        INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at)
+        VALUES ($1, 'email', $2, $3, $4)
+        ON CONFLICT (user_id, channel) DO UPDATE
+        SET code = $2, pending_identifier = $3, expires_at = $4, created_at = NOW()
+        "#,
+        row.id,
         verification_code,
-        code_expires_at,
-        input.did
+        email,
+        code_expires_at
     )
     .execute(&state.db)
     .await
@@ -648,7 +677,7 @@ pub async fn resend_verification(
     }
     let (channel_str, recipient) = match row.channel {
         crate::notifications::NotificationChannel::Email => {
-            ("email", row.email.clone().unwrap_or_default())
+            ("email", row.email.unwrap_or_default())
         }
         crate::notifications::NotificationChannel::Discord => {
             ("discord", row.discord_id.unwrap_or_default())

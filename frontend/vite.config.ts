@@ -1,18 +1,24 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
-export default defineConfig({
-  plugins: [svelte()],
-  build: {
-    outDir: 'dist',
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      '/xrpc': 'http://localhost:3000',
-      '/oauth': 'http://localhost:3000',
-      '/.well-known': 'http://localhost:3000',
-      '/health': 'http://localhost:3000',
-      '/u': 'http://localhost:3000',
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const target = env.VITE_API_URL || 'http://localhost:3000'
+
+  return {
+    plugins: [svelte()],
+    build: {
+      outDir: 'dist',
+    },
+    server: {
+      port: 5173,
+      proxy: {
+        '/xrpc': target,
+        '/oauth': target,
+        '/.well-known': target,
+        '/health': target,
+        '/u': target,
+      }
     }
   }
 })

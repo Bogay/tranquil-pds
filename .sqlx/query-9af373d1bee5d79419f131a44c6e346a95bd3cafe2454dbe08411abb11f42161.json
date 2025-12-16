@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'discord'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9af373d1bee5d79419f131a44c6e346a95bd3cafe2454dbe08411abb11f42161"
+}

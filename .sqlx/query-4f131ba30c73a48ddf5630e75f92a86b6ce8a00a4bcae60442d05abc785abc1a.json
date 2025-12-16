@@ -1,0 +1,93 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            created_at,\n            channel as \"channel: String\",\n            notification_type as \"notification_type: String\",\n            status as \"status: String\",\n            subject,\n            body\n        FROM notification_queue\n        WHERE user_id = $1\n        ORDER BY created_at DESC\n        LIMIT 50\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel: String",
+        "type_info": {
+          "Custom": {
+            "name": "notification_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "notification_type: String",
+        "type_info": {
+          "Custom": {
+            "name": "notification_type",
+            "kind": {
+              "Enum": [
+                "welcome",
+                "email_verification",
+                "password_reset",
+                "email_update",
+                "account_deletion",
+                "admin_email",
+                "plc_operation",
+                "two_factor_code",
+                "channel_verification"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status: String",
+        "type_info": {
+          "Custom": {
+            "name": "notification_status",
+            "kind": {
+              "Enum": [
+                "pending",
+                "processing",
+                "sent",
+                "failed"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "body",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "4f131ba30c73a48ddf5630e75f92a86b6ce8a00a4bcae60442d05abc785abc1a"
+}
