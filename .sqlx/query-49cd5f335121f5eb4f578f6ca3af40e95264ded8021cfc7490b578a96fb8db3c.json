@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref,\n                      k.key_bytes as \"key_bytes?\", k.encryption_version as \"encryption_version?\"\n               FROM oauth_token t\n               JOIN users u ON t.did = u.did\n               LEFT JOIN user_keys k ON u.id = k.user_id\n               WHERE t.token_id = $1",
+  "query": "SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref, u.is_admin,\n                      k.key_bytes as \"key_bytes?\", k.encryption_version as \"encryption_version?\"\n               FROM oauth_token t\n               JOIN users u ON t.did = u.did\n               LEFT JOIN user_keys k ON u.id = k.user_id\n               WHERE t.token_id = $1",
   "describe": {
     "columns": [
       {
@@ -25,11 +25,16 @@
       },
       {
         "ordinal": 4,
+        "name": "is_admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
         "name": "key_bytes?",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "encryption_version?",
         "type_info": "Int4"
       }
@@ -45,8 +50,9 @@
       true,
       true,
       false,
+      false,
       true
     ]
   },
-  "hash": "bee4276cbb537512cced16f7017d8f7c068d30f319ef965fa9ec9fb1a3490151"
+  "hash": "49cd5f335121f5eb4f578f6ca3af40e95264ded8021cfc7490b578a96fb8db3c"
 }

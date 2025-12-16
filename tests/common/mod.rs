@@ -511,6 +511,15 @@ pub async fn create_test_post(
 
 #[allow(dead_code)]
 pub async fn create_account_and_login(client: &Client) -> (String, String) {
+    create_account_and_login_internal(client, false).await
+}
+
+#[allow(dead_code)]
+pub async fn create_admin_account_and_login(client: &Client) -> (String, String) {
+    create_account_and_login_internal(client, true).await
+}
+
+async fn create_account_and_login_internal(client: &Client, make_admin: bool) -> (String, String) {
     let mut last_error = String::new();
     for attempt in 0..3 {
         if attempt > 0 {
@@ -539,10 +548,6 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
         };
         if res.status() == StatusCode::OK {
             let body: Value = res.json().await.expect("Invalid JSON");
-            if let Some(access_jwt) = body["accessJwt"].as_str() {
-                let did = body["did"].as_str().expect("No did").to_string();
-                return (access_jwt.to_string(), did);
-            }
             let did = body["did"].as_str().expect("No did").to_string();
             let conn_str = get_db_connection_string().await;
             let pool = sqlx::postgres::PgPoolOptions::new()
@@ -550,6 +555,15 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
                 .connect(&conn_str)
                 .await
                 .expect("Failed to connect to test database");
+            if make_admin {
+                sqlx::query!("UPDATE users SET is_admin = TRUE WHERE did = $1", &did)
+                    .execute(&pool)
+                    .await
+                    .expect("Failed to mark user as admin");
+            }
+            if let Some(access_jwt) = body["accessJwt"].as_str() {
+                return (access_jwt.to_string(), did);
+            }
             let verification_code: String = sqlx::query_scalar!(
                 "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
                 &did

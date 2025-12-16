@@ -1,3 +1,4 @@
+use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -16,17 +17,9 @@ pub struct DeleteAccountInput {
 
 pub async fn delete_account(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<DeleteAccountInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let did = input.did.trim();
     if did.is_empty() {
         return (

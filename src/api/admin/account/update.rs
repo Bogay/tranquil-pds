@@ -1,3 +1,4 @@
+use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -17,17 +18,9 @@ pub struct UpdateAccountEmailInput {
 
 pub async fn update_account_email(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<UpdateAccountEmailInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let account = input.account.trim();
     let email = input.email.trim();
     if account.is_empty() || email.is_empty() {
@@ -70,17 +63,9 @@ pub struct UpdateAccountHandleInput {
 
 pub async fn update_account_handle(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<UpdateAccountHandleInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let did = input.did.trim();
     let handle = input.handle.trim();
     if did.is_empty() || handle.is_empty() {
@@ -158,17 +143,9 @@ pub struct UpdateAccountPasswordInput {
 
 pub async fn update_account_password(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<UpdateAccountPasswordInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let did = input.did.trim();
     let password = input.password.trim();
     if did.is_empty() || password.is_empty() {

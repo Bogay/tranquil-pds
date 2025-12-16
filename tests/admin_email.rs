@@ -18,7 +18,7 @@ async fn test_send_email_success() {
     let client = common::client();
     let base_url = common::base_url().await;
     let pool = get_pool().await;
-    let (access_jwt, did) = common::create_account_and_login(&client).await;
+    let (access_jwt, did) = common::create_admin_account_and_login(&client).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -58,7 +58,7 @@ async fn test_send_email_default_subject() {
     let client = common::client();
     let base_url = common::base_url().await;
     let pool = get_pool().await;
-    let (access_jwt, did) = common::create_account_and_login(&client).await;
+    let (access_jwt, did) = common::create_admin_account_and_login(&client).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -92,7 +92,7 @@ async fn test_send_email_default_subject() {
 async fn test_send_email_recipient_not_found() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let (access_jwt, _) = common::create_account_and_login(&client).await;
+    let (access_jwt, _) = common::create_admin_account_and_login(&client).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -113,7 +113,7 @@ async fn test_send_email_recipient_not_found() {
 async fn test_send_email_missing_content() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let (access_jwt, did) = common::create_account_and_login(&client).await;
+    let (access_jwt, did) = common::create_admin_account_and_login(&client).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -134,7 +134,7 @@ async fn test_send_email_missing_content() {
 async fn test_send_email_missing_recipient() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let (access_jwt, _) = common::create_account_and_login(&client).await;
+    let (access_jwt, _) = common::create_admin_account_and_login(&client).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.admin.sendEmail", base_url))
         .bearer_auth(&access_jwt)

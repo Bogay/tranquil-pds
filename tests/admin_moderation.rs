@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 #[tokio::test]
 async fn test_get_subject_status_user_success() {
     let client = client();
-    let (access_jwt, did) = create_account_and_login(&client).await;
+    let (access_jwt, did) = create_admin_account_and_login(&client).await;
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.admin.getSubjectStatus",
@@ -28,7 +28,7 @@ async fn test_get_subject_status_user_success() {
 #[tokio::test]
 async fn test_get_subject_status_not_found() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.admin.getSubjectStatus",
@@ -47,7 +47,7 @@ async fn test_get_subject_status_not_found() {
 #[tokio::test]
 async fn test_get_subject_status_no_param() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.admin.getSubjectStatus",
@@ -80,11 +80,12 @@ async fn test_get_subject_status_no_auth() {
 #[tokio::test]
 async fn test_update_subject_status_takedown_user() {
     let client = client();
-    let (access_jwt, did) = create_account_and_login(&client).await;
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let (_, target_did) = create_account_and_login(&client).await;
     let payload = json!({
         "subject": {
             "$type": "com.atproto.admin.defs#repoRef",
-            "did": did
+            "did": target_did
         },
         "takedown": {
             "apply": true,
@@ -96,7 +97,7 @@ async fn test_update_subject_status_takedown_user() {
             "{}/xrpc/com.atproto.admin.updateSubjectStatus",
             base_url().await
         ))
-        .bearer_auth(&access_jwt)
+        .bearer_auth(&admin_jwt)
         .json(&payload)
         .send()
         .await
@@ -111,8 +112,8 @@ async fn test_update_subject_status_takedown_user() {
             "{}/xrpc/com.atproto.admin.getSubjectStatus",
             base_url().await
         ))
-        .bearer_auth(&access_jwt)
-        .query(&[("did", did.as_str())])
+        .bearer_auth(&admin_jwt)
+        .query(&[("did", target_did.as_str())])
         .send()
         .await
         .expect("Failed to send request");
@@ -125,11 +126,12 @@ async fn test_update_subject_status_takedown_user() {
 #[tokio::test]
 async fn test_update_subject_status_remove_takedown() {
     let client = client();
-    let (access_jwt, did) = create_account_and_login(&client).await;
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let (_, target_did) = create_account_and_login(&client).await;
     let takedown_payload = json!({
         "subject": {
             "$type": "com.atproto.admin.defs#repoRef",
-            "did": did
+            "did": target_did
         },
         "takedown": {
             "apply": true,
@@ -141,14 +143,14 @@ async fn test_update_subject_status_remove_takedown() {
             "{}/xrpc/com.atproto.admin.updateSubjectStatus",
             base_url().await
         ))
-        .bearer_auth(&access_jwt)
+        .bearer_auth(&admin_jwt)
         .json(&takedown_payload)
         .send()
         .await;
     let remove_payload = json!({
         "subject": {
             "$type": "com.atproto.admin.defs#repoRef",
-            "did": did
+            "did": target_did
         },
         "takedown": {
             "apply": false
@@ -159,7 +161,7 @@ async fn test_update_subject_status_remove_takedown() {
             "{}/xrpc/com.atproto.admin.updateSubjectStatus",
             base_url().await
         ))
-        .bearer_auth(&access_jwt)
+        .bearer_auth(&admin_jwt)
         .json(&remove_payload)
         .send()
         .await
@@ -170,8 +172,8 @@ async fn test_update_subject_status_remove_takedown() {
             "{}/xrpc/com.atproto.admin.getSubjectStatus",
             base_url().await
         ))
-        .bearer_auth(&access_jwt)
-        .query(&[("did", did.as_str())])
+        .bearer_auth(&admin_jwt)
+        .query(&[("did", target_did.as_str())])
         .send()
         .await
         .expect("Failed to send request");
@@ -187,11 +189,12 @@ async fn test_update_subject_status_remove_takedown() {
 #[tokio::test]
 async fn test_update_subject_status_deactivate_user() {
     let client = client();
-    let (access_jwt, did) = create_account_and_login(&client).await;
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let (_, target_did) = create_account_and_login(&client).await;
     let payload = json!({
         "subject": {
             "$type": "com.atproto.admin.defs#repoRef",
-            "did": did
+            "did": target_did
         },
         "deactivated": {
             "apply": true
@@ -202,7 +205,7 @@ async fn test_update_subject_status_deactivate_user() {
             "{}/xrpc/com.atproto.admin.updateSubjectStatus",
             base_url().await
         ))
-        .bearer_auth(&access_jwt)
+        .bearer_auth(&admin_jwt)
         .json(&payload)
         .send()
         .await
@@ -213,8 +216,8 @@ async fn test_update_subject_status_deactivate_user() {
             "{}/xrpc/com.atproto.admin.getSubjectStatus",
             base_url().await
         ))
-        .bearer_auth(&access_jwt)
-        .query(&[("did", did.as_str())])
+        .bearer_auth(&admin_jwt)
+        .query(&[("did", target_did.as_str())])
         .send()
         .await
         .expect("Failed to send request");
@@ -226,7 +229,7 @@ async fn test_update_subject_status_deactivate_user() {
 #[tokio::test]
 async fn test_update_subject_status_invalid_type() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     let payload = json!({
         "subject": {
             "$type": "invalid.type",

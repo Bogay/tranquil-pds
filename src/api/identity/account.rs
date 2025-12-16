@@ -379,12 +379,18 @@ pub async fn create_account(
     };
     let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let code_expires_at = chrono::Utc::now() + chrono::Duration::minutes(30);
+    let is_first_user = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
+        .fetch_one(&mut *tx)
+        .await
+        .map(|c| c.unwrap_or(0) == 0)
+        .unwrap_or(false);
     let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
         r#"INSERT INTO users (
             handle, email, did, password_hash,
             preferred_notification_channel,
-            discord_id, telegram_username, signal_number
-        ) VALUES ($1, $2, $3, $4, $5::notification_channel, $6, $7, $8) RETURNING id"#,
+            discord_id, telegram_username, signal_number,
+            is_admin
+        ) VALUES ($1, $2, $3, $4, $5::notification_channel, $6, $7, $8, $9) RETURNING id"#,
     )
     .bind(short_handle)
     .bind(&email)
@@ -412,6 +418,7 @@ pub async fn create_account(
             .map(|s| s.trim())
             .filter(|s| !s.is_empty()),
     )
+    .bind(is_first_user)
     .fetch_one(&mut *tx)
     .await;
     let user_id = match user_insert {

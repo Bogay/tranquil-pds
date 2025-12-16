@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 #[tokio::test]
 async fn test_admin_get_invite_codes_success() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     let create_payload = json!({
         "useCount": 3
     });
@@ -38,7 +38,7 @@ async fn test_admin_get_invite_codes_success() {
 #[tokio::test]
 async fn test_admin_get_invite_codes_with_limit() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     for _ in 0..5 {
         let create_payload = json!({
             "useCount": 1
@@ -86,7 +86,7 @@ async fn test_admin_get_invite_codes_no_auth() {
 #[tokio::test]
 async fn test_disable_account_invites_success() {
     let client = client();
-    let (access_jwt, did) = create_account_and_login(&client).await;
+    let (access_jwt, did) = create_admin_account_and_login(&client).await;
     let payload = json!({
         "account": did
     });
@@ -122,7 +122,7 @@ async fn test_disable_account_invites_success() {
 #[tokio::test]
 async fn test_enable_account_invites_success() {
     let client = client();
-    let (access_jwt, did) = create_account_and_login(&client).await;
+    let (access_jwt, did) = create_admin_account_and_login(&client).await;
     let disable_payload = json!({
         "account": did
     });
@@ -186,7 +186,7 @@ async fn test_disable_account_invites_no_auth() {
 #[tokio::test]
 async fn test_disable_account_invites_not_found() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     let payload = json!({
         "account": "did:plc:nonexistent"
     });
@@ -206,7 +206,7 @@ async fn test_disable_account_invites_not_found() {
 #[tokio::test]
 async fn test_disable_invite_codes_by_code() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     let create_payload = json!({
         "useCount": 5
     });
@@ -255,7 +255,7 @@ async fn test_disable_invite_codes_by_code() {
 #[tokio::test]
 async fn test_disable_invite_codes_by_account() {
     let client = client();
-    let (access_jwt, did) = create_account_and_login(&client).await;
+    let (access_jwt, did) = create_admin_account_and_login(&client).await;
     for _ in 0..3 {
         let create_payload = json!({
             "useCount": 1
@@ -321,7 +321,7 @@ async fn test_disable_invite_codes_no_auth() {
 #[tokio::test]
 async fn test_admin_enable_account_invites_not_found() {
     let client = client();
-    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
     let payload = json!({
         "account": "did:plc:nonexistent"
     });

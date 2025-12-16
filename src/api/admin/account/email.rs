@@ -1,3 +1,4 @@
+use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -26,17 +27,9 @@ pub struct SendEmailOutput {
 
 pub async fn send_email(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<SendEmailInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let recipient_did = input.recipient_did.trim();
     let content = input.content.trim();
     if recipient_did.is_empty() {

@@ -11,7 +11,7 @@ pub mod token;
 pub mod verify;
 
 pub use extractor::{
-    AuthError, BearerAuth, BearerAuthAllowDeactivated, ExtractedToken,
+    AuthError, BearerAuth, BearerAuthAdmin, BearerAuthAllowDeactivated, ExtractedToken,
     extract_auth_token_from_header, extract_bearer_token_from_header,
 };
 pub use token::{
@@ -50,6 +50,7 @@ pub struct AuthenticatedUser {
     pub did: String,
     pub key_bytes: Option<Vec<u8>>,
     pub is_oauth: bool,
+    pub is_admin: bool,
 }
 
 pub async fn validate_bearer_token(
@@ -103,9 +104,9 @@ async fn validate_bearer_token_with_options_internal(
             }
         }
 
-        let (decrypted_key, deactivated_at, takedown_ref) = if let Some(key) = cached_key {
+        let (decrypted_key, deactivated_at, takedown_ref, is_admin) = if let Some(key) = cached_key {
             let user_status = sqlx::query!(
-                "SELECT deactivated_at, takedown_ref FROM users WHERE did = $1",
+                "SELECT deactivated_at, takedown_ref, is_admin FROM users WHERE did = $1",
                 did
             )
             .fetch_optional(db)
@@ -114,11 +115,11 @@ async fn validate_bearer_token_with_options_internal(
             .flatten();
 
             match user_status {
-                Some(status) => (Some(key), status.deactivated_at, status.takedown_ref),
-                None => (None, None, None),
+                Some(status) => (Some(key), status.deactivated_at, status.takedown_ref, status.is_admin),
+                None => (None, None, None, false),
             }
         } else if let Some(user) = sqlx::query!(
-            "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref
+            "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref, u.is_admin
              FROM users u
              JOIN user_keys k ON u.id = k.user_id
              WHERE u.did = $1",
@@ -142,9 +143,9 @@ async fn validate_bearer_token_with_options_internal(
                     .await;
             }
 
-            (Some(key), user.deactivated_at, user.takedown_ref)
+            (Some(key), user.deactivated_at, user.takedown_ref, user.is_admin)
         } else {
-            (None, None, None)
+            (None, None, None, false)
         };
 
         if let Some(decrypted_key) = decrypted_key {
@@ -200,6 +201,7 @@ async fn validate_bearer_token_with_options_internal(
                         did: did.clone(),
                         key_bytes: Some(decrypted_key),
                         is_oauth: false,
+                        is_admin,
                     });
                 }
             }
@@ -208,7 +210,7 @@ async fn validate_bearer_token_with_options_internal(
 
     if let Ok(oauth_info) = crate::oauth::verify::extract_oauth_token_info(token)
         && let Some(oauth_token) = sqlx::query!(
-            r#"SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref,
+            r#"SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref, u.is_admin,
                       k.key_bytes as "key_bytes?", k.encryption_version as "encryption_version?"
                FROM oauth_token t
                JOIN users u ON t.did = u.did
@@ -242,6 +244,7 @@ async fn validate_bearer_token_with_options_internal(
                     did: oauth_token.did,
                     key_bytes,
                     is_oauth: true,
+                    is_admin: oauth_token.is_admin,
                 });
             }
         }
@@ -280,43 +283,37 @@ pub async fn validate_token_with_dpop(
     .await
     {
         Ok(result) => {
-            if !allow_deactivated {
-                let deactivated = sqlx::query_scalar!(
-                    "SELECT deactivated_at FROM users WHERE did = $1",
-                    result.did
-                )
-                .fetch_optional(db)
-                .await
-                .ok()
-                .flatten()
-                .flatten();
-                if deactivated.is_some() {
-                    return Err(TokenValidationError::AccountDeactivated);
-                }
-            }
-            let takedown =
-                sqlx::query_scalar!("SELECT takedown_ref FROM users WHERE did = $1", result.did)
-                    .fetch_optional(db)
-                    .await
-                    .ok()
-                    .flatten()
-                    .flatten();
-            if takedown.is_some() {
-                return Err(TokenValidationError::AccountTakedown);
-            }
-            let key_bytes = sqlx::query!(
-                "SELECT k.key_bytes, k.encryption_version FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1",
+            let user_info = sqlx::query!(
+                r#"SELECT u.deactivated_at, u.takedown_ref, u.is_admin,
+                          k.key_bytes as "key_bytes?", k.encryption_version as "encryption_version?"
+                   FROM users u
+                   LEFT JOIN user_keys k ON u.id = k.user_id
+                   WHERE u.did = $1"#,
                 result.did
             )
             .fetch_optional(db)
             .await
             .ok()
-            .flatten()
-            .and_then(|row| crate::config::decrypt_key(&row.key_bytes, row.encryption_version).ok());
+            .flatten();
+            let Some(user_info) = user_info else {
+                return Err(TokenValidationError::AuthenticationFailed);
+            };
+            if !allow_deactivated && user_info.deactivated_at.is_some() {
+                return Err(TokenValidationError::AccountDeactivated);
+            }
+            if user_info.takedown_ref.is_some() {
+                return Err(TokenValidationError::AccountTakedown);
+            }
+            let key_bytes = if let (Some(kb), Some(ev)) = (&user_info.key_bytes, user_info.encryption_version) {
+                crate::config::decrypt_key(kb, Some(ev)).ok()
+            } else {
+                None
+            };
             Ok(AuthenticatedUser {
                 did: result.did,
                 key_bytes,
                 is_oauth: true,
+                is_admin: user_info.is_admin,
             })
         }
         Err(_) => Err(TokenValidationError::AuthenticationFailed),

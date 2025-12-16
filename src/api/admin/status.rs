@@ -1,3 +1,4 @@
+use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -32,17 +33,9 @@ pub struct StatusAttr {
 
 pub async fn get_subject_status(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Query(params): Query<GetSubjectStatusParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     if params.did.is_none() && params.uri.is_none() && params.blob.is_none() {
         return (
             StatusCode::BAD_REQUEST,
@@ -208,17 +201,9 @@ pub struct StatusAttrInput {
 
 pub async fn update_subject_status(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<UpdateSubjectStatusInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let subject_type = input.subject.get("$type").and_then(|t| t.as_str());
     match subject_type {
         Some("com.atproto.admin.defs#repoRef") => {

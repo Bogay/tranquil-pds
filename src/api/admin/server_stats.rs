@@ -1,12 +1,11 @@
+use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
-use serde_json::json;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,17 +18,8 @@ pub struct ServerStatsResponse {
 
 pub async fn get_server_stats(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: BearerAuthAdmin,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
-
     let user_count: i64 = match sqlx::query_scalar!("SELECT COUNT(*) FROM users")
         .fetch_one(&state.db)
         .await

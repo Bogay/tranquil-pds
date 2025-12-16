@@ -21,6 +21,7 @@ pub enum AuthError {
     AuthenticationFailed,
     AccountDeactivated,
     AccountTakedown,
+    AdminRequired,
 }
 
 impl IntoResponse for AuthError {
@@ -50,6 +51,11 @@ impl IntoResponse for AuthError {
                 StatusCode::UNAUTHORIZED,
                 "AccountTakedown",
                 "Account has been taken down",
+            ),
+            AuthError::AdminRequired => (
+                StatusCode::FORBIDDEN,
+                "AdminRequired",
+                "This action requires admin privileges",
             ),
         };
 
@@ -176,6 +182,38 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
 
         match validate_bearer_token_cached_allow_deactivated(&state.db, &state.cache, token).await {
             Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
+            Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+            Err(_) => Err(AuthError::AuthenticationFailed),
+        }
+    }
+}
+
+pub struct BearerAuthAdmin(pub AuthenticatedUser);
+
+impl FromRequestParts<AppState> for BearerAuthAdmin {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let auth_header = parts
+            .headers
+            .get(AUTHORIZATION)
+            .ok_or(AuthError::MissingToken)?
+            .to_str()
+            .map_err(|_| AuthError::InvalidFormat)?;
+
+        let token = extract_bearer_token(auth_header)?;
+
+        match validate_bearer_token_cached(&state.db, &state.cache, token).await {
+            Ok(user) => {
+                if !user.is_admin {
+                    return Err(AuthError::AdminRequired);
+                }
+                Ok(BearerAuthAdmin(user))
+            }
+            Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
             Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
             Err(_) => Err(AuthError::AuthenticationFailed),
         }

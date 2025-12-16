@@ -1,3 +1,4 @@
+use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -35,17 +36,9 @@ pub struct GetAccountInfosOutput {
 
 pub async fn get_account_info(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Query(params): Query<GetAccountInfoParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let did = params.did.trim();
     if did.is_empty() {
         return (
@@ -102,17 +95,9 @@ pub struct GetAccountInfosParams {
 
 pub async fn get_account_infos(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Query(params): Query<GetAccountInfosParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let dids: Vec<&str> = params.dids.split(',').map(|s| s.trim()).collect();
     if dids.is_empty() {
         return (

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref\n             FROM users u\n             JOIN user_keys k ON u.id = k.user_id\n             WHERE u.did = $1",
+  "query": "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref, u.is_admin\n             FROM users u\n             JOIN user_keys k ON u.id = k.user_id\n             WHERE u.did = $1",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "takedown_ref",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_admin",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       true,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "6b67b2b6759f01be11d5997a3ad68d381f59a02235a6940877f62193af8d9761"
+  "hash": "cc68023c320bc4376925c2cd921cd48045a47ca5841eef8c8889894f2c2452f6"
 }

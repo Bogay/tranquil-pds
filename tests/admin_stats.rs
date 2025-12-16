@@ -1,14 +1,14 @@
 mod common;
-use common::{base_url, client, create_account_and_login};
+use common::{base_url, client, create_admin_account_and_login};
 use serde_json::Value;
 
 #[tokio::test]
 async fn test_get_server_stats() {
     let client = client();
     let base = base_url().await;
-    let (token1, _) = create_account_and_login(&client).await;
+    let (token1, _) = create_admin_account_and_login(&client).await;
 
-    let (_, _) = create_account_and_login(&client).await;
+    let (_, _) = create_admin_account_and_login(&client).await;
 
     let resp = client
         .get(format!("{}/xrpc/com.bspds.admin.getServerStats", base))

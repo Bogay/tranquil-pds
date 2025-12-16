@@ -1,3 +1,4 @@
+use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -18,17 +19,9 @@ pub struct DisableInviteCodesInput {
 
 pub async fn disable_invite_codes(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<DisableInviteCodesInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     if let Some(codes) = &input.codes {
         for code in codes {
             let _ = sqlx::query!(
@@ -91,17 +84,9 @@ pub struct GetInviteCodesOutput {
 
 pub async fn get_invite_codes(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Query(params): Query<GetInviteCodesParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
     let sort = params.sort.as_deref().unwrap_or("recent");
     let order_clause = match sort {
@@ -229,17 +214,9 @@ pub struct DisableAccountInvitesInput {
 
 pub async fn disable_account_invites(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<DisableAccountInvitesInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let account = input.account.trim();
     if account.is_empty() {
         return (
@@ -283,17 +260,9 @@ pub struct EnableAccountInvitesInput {
 
 pub async fn enable_account_invites(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _auth: BearerAuthAdmin,
     Json(input): Json<EnableAccountInvitesInput>,
 ) -> Response {
-    let auth_header = headers.get("Authorization");
-    if auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response();
-    }
     let account = input.account.trim();
     if account.is_empty() {
         return (
