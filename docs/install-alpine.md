@@ -1,17 +1,12 @@
 # BSPDS Production Installation on Alpine Linux
 > **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
+
 This guide covers installing BSPDS on Alpine Linux 3.23 (current stable as of December 2025).
-## Choose Your Installation Method
-| Method | Best For |
-|--------|----------|
-| **Native (this guide)** | Maximum performance, minimal footprint, full control |
-| **[Containerized](install-containers.md)** | Easier updates, isolation, reproducible deployments |
-| **[Kubernetes](install-kubernetes.md)** | Multi-node, high availability, auto-scaling |
-This guide covers native installation. For containerized deployment with podman and systemd quadlets, see the [container guide](install-containers.md).
----
+
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
 - A domain name pointing to your server's IP
+- A **wildcard TLS certificate** for `*.pds.example.com` (user handles are served as subdomains)
 - Root access
 ## 1. System Setup
 ```sh
@@ -178,13 +173,27 @@ EOF
 rc-update add nginx
 rc-service nginx start
 ```
-## 12. Obtain SSL Certificate
+## 12. Obtain Wildcard SSL Certificate
+User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate.
+
+Wildcard certs require DNS-01 validation. For manual DNS validation (works with any provider):
 ```sh
-certbot --nginx -d pds.example.com
+certbot certonly --manual --preferred-challenges dns \
+  -d pds.example.com -d '*.pds.example.com'
 ```
-Set up auto-renewal:
+Follow the prompts to add TXT records to your DNS.
+
+If your DNS provider has a certbot plugin, you can use that for auto-renewal:
 ```sh
-echo "0 0 * * * certbot renew --quiet" | crontab -
+apk add certbot-dns-cloudflare
+certbot certonly --dns-cloudflare \
+  --dns-cloudflare-credentials /etc/cloudflare.ini \
+  -d pds.example.com -d '*.pds.example.com'
+```
+
+After obtaining the cert, update nginx to use it, then set up auto-renewal:
+```sh
+echo "0 0 * * * certbot renew --quiet && rc-service nginx reload" | crontab -
 ```
 ## 13. Configure Firewall
 ```sh

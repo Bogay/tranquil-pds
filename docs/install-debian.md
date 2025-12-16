@@ -1,17 +1,12 @@
 # BSPDS Production Installation on Debian
 > **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
+
 This guide covers installing BSPDS on Debian 13 "Trixie" (current stable as of December 2025).
-## Choose Your Installation Method
-| Method | Best For |
-|--------|----------|
-| **Native (this guide)** | Maximum performance, full control, simpler debugging |
-| **[Containerized](install-containers.md)** | Easier updates, isolation, reproducible deployments |
-| **[Kubernetes](install-kubernetes.md)** | Multi-node, high availability, auto-scaling |
-This guide covers native installation. For containerized deployment with podman and systemd quadlets, see the [container guide](install-containers.md).
----
+
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
 - A domain name pointing to your server's IP
+- A **wildcard TLS certificate** for `*.pds.example.com` (user handles are served as subdomains)
 - Root or sudo access
 ## 1. System Setup
 ```bash
@@ -168,11 +163,25 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 ```
-## 12. Obtain SSL Certificate
+## 12. Obtain Wildcard SSL Certificate
+User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate.
+
+Wildcard certs require DNS-01 validation. If your DNS provider has a certbot plugin:
 ```bash
-certbot --nginx -d pds.example.com
+apt install -y python3-certbot-dns-cloudflare
+certbot certonly --dns-cloudflare \
+  --dns-cloudflare-credentials /etc/cloudflare.ini \
+  -d pds.example.com -d '*.pds.example.com'
 ```
-Certbot automatically configures nginx for HTTP/2 and sets up auto-renewal.
+
+For manual DNS validation (works with any provider):
+```bash
+certbot certonly --manual --preferred-challenges dns \
+  -d pds.example.com -d '*.pds.example.com'
+```
+Follow the prompts to add TXT records to your DNS. Note: manual mode doesn't auto-renew.
+
+After obtaining the cert, update nginx to use it and reload.
 ## 13. Configure Firewall
 ```bash
 apt install -y ufw

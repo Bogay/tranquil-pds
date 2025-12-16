@@ -4,6 +4,7 @@ This guide covers installing BSPDS on OpenBSD 7.8 (current release as of Decembe
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
 - A domain name pointing to your server's IP
+- A **wildcard TLS certificate** for `*.pds.example.com` (user handles are served as subdomains)
 - Root access (or doas configured)
 ## Why nginx over relayd?
 OpenBSD's native `relayd` supports WebSockets but does **not** support HTTP/2. For a modern PDS deployment, we recommend nginx which provides HTTP/2, WebSocket support, and automatic OCSP stapling.
@@ -80,7 +81,7 @@ mc alias set local http://localhost:9000 minioadmin your-minio-password
 mc mb local/pds-blobs
 ```
 ## 5. Install redis
-OpenBSD has redis in ports (valkey may not be available yet):
+OpenBSD has redis in ports (valkey not available yet):
 ```sh
 pkg_add redis
 rcctl enable redis
@@ -194,37 +195,32 @@ EOF
 mkdir -p /var/www/acme
 rcctl enable nginx
 ```
-## 12. Obtain SSL Certificate with acme-client
-OpenBSD's native acme-client works well:
+## 12. Obtain Wildcard SSL Certificate
+User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate.
+
+OpenBSD's native `acme-client` only supports HTTP-01 validation, which can't issue wildcard certs. You have a few options:
+
+**Option A: Use certbot with DNS validation (recommended)**
 ```sh
-cat >> /etc/acme-client.conf << 'EOF'
-authority letsencrypt {
-    api url "https://acme-v02.api.letsencrypt.org/directory"
-    account key "/etc/acme/letsencrypt-privkey.pem"
-}
-domain pds.example.com {
-    domain key "/etc/ssl/private/pds.example.com.key"
-    domain full chain certificate "/etc/ssl/pds.example.com.fullchain.pem"
-    sign with letsencrypt
-}
-EOF
-mkdir -p /etc/acme
-rcctl start nginx
-acme-client -v pds.example.com
+pkg_add certbot
+certbot certonly --manual --preferred-challenges dns \
+  -d pds.example.com -d '*.pds.example.com'
+```
+Follow the prompts to add TXT records to your DNS. Then update nginx.conf to point to the certbot certs.
+
+**Option B: Use a managed DNS provider with API**
+If your DNS provider has a certbot plugin, you can automate renewal.
+
+**Option C: Use acme.sh**
+[acme.sh](https://github.com/acmesh-official/acme.sh) supports many DNS providers for automated wildcard cert renewal.
+
+After obtaining the cert, update nginx to use it and restart:
+```sh
 rcctl restart nginx
-```
-Set up auto-renewal in root's crontab:
-```sh
-crontab -e
-```
-Add:
-```
-0 0 * * * acme-client pds.example.com && rcctl reload nginx
 ```
 ## 13. Configure Packet Filter (pf)
 ```sh
 cat >> /etc/pf.conf << 'EOF'
-# BSPDS rules
 pass in on egress proto tcp from any to any port { 22, 80, 443 }
 EOF
 pfctl -f /etc/pf.conf

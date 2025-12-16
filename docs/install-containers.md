@@ -6,19 +6,25 @@ This guide covers deploying BSPDS using containers with podman.
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
 - A domain name pointing to your server's IP
+- A **wildcard TLS certificate** for `*.pds.example.com` (user handles are served as subdomains)
 - Root or sudo access
 ## Quick Start (Docker/Podman Compose)
 If you just want to get running quickly:
 ```sh
 cp .env.example .env
-# Edit .env with your values
-# Generate secrets: openssl rand -base64 48
-# Build and start
+```
+
+Edit `.env` with your values. Generate secrets with `openssl rand -base64 48`.
+
+Build and start:
+```sh
 podman-compose -f docker-compose.prod.yml up -d
-# Get initial certificate (after DNS is configured)
+```
+
+Get initial certificate (after DNS is configured):
+```sh
 podman-compose -f docker-compose.prod.yml run --rm certbot certonly \
   --webroot -w /var/www/acme -d pds.example.com
-# Restart nginx to load certificate
 podman-compose -f docker-compose.prod.yml restart nginx
 ```
 For production setups with proper service management, continue to either the Debian or Alpine section below.
@@ -74,31 +80,49 @@ echo "$MINIO_ROOT_PASSWORD" | podman secret create bspds-minio-password -
 systemctl daemon-reload
 systemctl start bspds-db bspds-minio bspds-valkey
 sleep 10
-# Create MinIO bucket
+```
+
+Create the minio bucket:
+```bash
 podman run --rm --pod bspds \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=your-minio-password \
   docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
   sh -c "mc alias set local http://localhost:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs"
-# Run migrations
+```
+
+Run migrations:
+```bash
 cargo install sqlx-cli --no-default-features --features postgres
 DATABASE_URL="postgres://bspds:your-db-password@localhost:5432/pds" sqlx migrate run --source /opt/bspds/migrations
 ```
-## 9. Obtain SSL Certificate
-Create temporary self-signed cert:
+## 9. Obtain Wildcard SSL Certificate
+User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
+
+Create temporary self-signed cert to start services:
 ```bash
 openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
   -keyout /srv/bspds/certs/privkey.pem \
   -out /srv/bspds/certs/fullchain.pem \
   -subj "/CN=pds.example.com"
 systemctl start bspds-app bspds-nginx
-# Get real certificate
-podman run --rm \
+```
+
+Get a wildcard certificate using DNS validation:
+```bash
+podman run --rm -it \
   -v /srv/bspds/certs:/etc/letsencrypt:Z \
-  -v /srv/bspds/acme:/var/www/acme:Z \
   docker.io/certbot/certbot:v5.2.2 certonly \
-  --webroot -w /var/www/acme -d pds.example.com --agree-tos --email you@example.com
-# Link certificates
+  --manual --preferred-challenges dns \
+  -d pds.example.com -d '*.pds.example.com' \
+  --agree-tos --email you@example.com
+```
+Follow the prompts to add TXT records to your DNS. Note: manual mode doesn't auto-renew.
+
+For automated renewal, use a DNS provider plugin (e.g., cloudflare, route53).
+
+Link certificates and restart:
+```bash
 ln -sf /srv/bspds/certs/live/pds.example.com/fullchain.pem /srv/bspds/certs/fullchain.pem
 ln -sf /srv/bspds/certs/live/pds.example.com/privkey.pem /srv/bspds/certs/privkey.pem
 systemctl restart bspds-nginx
@@ -200,42 +224,56 @@ EOF
 chmod +x /etc/init.d/bspds
 ```
 ## 7. Initialize Services
+Start services:
 ```sh
-# Start services
 rc-service bspds start
 sleep 15
-# Create MinIO bucket
+```
+
+Create the minio bucket:
+```sh
 source /srv/bspds/config/bspds.env
 podman run --rm --network bspds_default \
   -e MINIO_ROOT_USER="$MINIO_ROOT_USER" \
   -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
   docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
   sh -c 'mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs'
-# Run migrations
+```
+
+Run migrations:
+```sh
 apk add rustup
 rustup-init -y
 source ~/.cargo/env
 cargo install sqlx-cli --no-default-features --features postgres
-# Get database container IP
 DB_IP=$(podman inspect bspds-db-1 --format '{{.NetworkSettings.Networks.bspds_default.IPAddress}}')
 DATABASE_URL="postgres://bspds:$DB_PASSWORD@$DB_IP:5432/pds" sqlx migrate run --source /opt/bspds/migrations
 ```
-## 8. Obtain SSL Certificate
-Create temporary self-signed cert:
+## 8. Obtain Wildcard SSL Certificate
+User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
+
+Create temporary self-signed cert to start services:
 ```sh
 openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
   -keyout /srv/bspds/data/certs/privkey.pem \
   -out /srv/bspds/data/certs/fullchain.pem \
   -subj "/CN=pds.example.com"
 rc-service bspds restart
-# Get real certificate
-podman run --rm \
+```
+
+Get a wildcard certificate using DNS validation:
+```sh
+podman run --rm -it \
   -v /srv/bspds/data/certs:/etc/letsencrypt \
-  -v /srv/bspds/data/acme:/var/www/acme \
-  --network bspds_default \
   docker.io/certbot/certbot:v5.2.2 certonly \
-  --webroot -w /var/www/acme -d pds.example.com --agree-tos --email you@example.com
-# Link certificates
+  --manual --preferred-challenges dns \
+  -d pds.example.com -d '*.pds.example.com' \
+  --agree-tos --email you@example.com
+```
+Follow the prompts to add TXT records to your DNS. Note: manual mode doesn't auto-renew.
+
+Link certificates and restart:
+```sh
 ln -sf /srv/bspds/data/certs/live/pds.example.com/fullchain.pem /srv/bspds/data/certs/fullchain.pem
 ln -sf /srv/bspds/data/certs/live/pds.example.com/privkey.pem /srv/bspds/data/certs/privkey.pem
 rc-service bspds restart
@@ -292,9 +330,15 @@ podman logs -f bspds-bspds-1
 cd /opt/bspds
 git pull
 podman build -t bspds:latest .
-# Debian:
+```
+
+Debian:
+```bash
 systemctl restart bspds-app
-# Alpine:
+```
+
+Alpine:
+```sh
 rc-service bspds restart
 ```
 ## Backup Database
