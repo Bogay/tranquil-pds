@@ -8,7 +8,10 @@ use serde_json::json;
 async fn test_import_repo_requires_auth() {
     let client = client();
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .header("Content-Type", "application/vnd.ipld.car")
         .body(vec![0u8; 100])
         .send()
@@ -22,7 +25,10 @@ async fn test_import_repo_invalid_car() {
     let client = client();
     let (token, _did) = create_account_and_login(&client).await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(vec![0u8; 100])
@@ -39,7 +45,10 @@ async fn test_import_repo_empty_body() {
     let client = client();
     let (token, _did) = create_account_and_login(&client).await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(vec![])
@@ -80,7 +89,10 @@ async fn test_import_rejects_car_for_different_user() {
     assert_eq!(export_res.status(), StatusCode::OK);
     let car_bytes = export_res.bytes().await.unwrap();
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token_a)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes.to_vec())
@@ -132,7 +144,10 @@ async fn test_import_accepts_own_exported_repo() {
     assert_eq!(export_res.status(), StatusCode::OK);
     let car_bytes = export_res.bytes().await.unwrap();
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes.to_vec())
@@ -148,7 +163,10 @@ async fn test_import_repo_size_limit() {
     let (token, _did) = create_account_and_login(&client).await;
     let oversized_body = vec![0u8; 110 * 1024 * 1024];
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(oversized_body)
@@ -161,11 +179,11 @@ async fn test_import_repo_size_limit() {
         Err(e) => {
             let error_str = e.to_string().to_lowercase();
             assert!(
-                error_str.contains("broken pipe") ||
-                error_str.contains("connection") ||
-                error_str.contains("reset") ||
-                error_str.contains("request") ||
-                error_str.contains("body"),
+                error_str.contains("broken pipe")
+                    || error_str.contains("connection")
+                    || error_str.contains("reset")
+                    || error_str.contains("request")
+                    || error_str.contains("body"),
                 "Expected connection error or PAYLOAD_TOO_LARGE, got: {}",
                 e
             );
@@ -200,7 +218,10 @@ async fn test_import_deactivated_account_rejected() {
         .expect("Deactivate failed");
     assert!(deactivate_res.status().is_success());
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes.to_vec())
@@ -208,7 +229,8 @@ async fn test_import_deactivated_account_rejected() {
         .await
         .expect("Import failed");
     assert!(
-        import_res.status() == StatusCode::FORBIDDEN || import_res.status() == StatusCode::UNAUTHORIZED,
+        import_res.status() == StatusCode::FORBIDDEN
+            || import_res.status() == StatusCode::UNAUTHORIZED,
         "Expected FORBIDDEN (403) or UNAUTHORIZED (401), got {}",
         import_res.status()
     );
@@ -220,7 +242,10 @@ async fn test_import_invalid_car_structure() {
     let (token, _did) = create_account_and_login(&client).await;
     let invalid_car = vec![0x0a, 0xa1, 0x65, 0x72, 0x6f, 0x6f, 0x74, 0x73, 0x80];
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(invalid_car)
@@ -240,7 +265,10 @@ async fn test_import_car_with_no_roots() {
     write_varint(&mut car, header_cbor.len() as u64);
     car.extend_from_slice(&header_cbor);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car)
@@ -294,7 +322,12 @@ async fn test_import_preserves_records_after_reimport() {
             .send()
             .await
             .expect("Failed to get record before export");
-        assert_eq!(get_res.status(), StatusCode::OK, "Record {} not found before export", rkey);
+        assert_eq!(
+            get_res.status(),
+            StatusCode::OK,
+            "Record {} not found before export",
+            rkey
+        );
     }
     let export_res = client
         .get(format!(
@@ -308,7 +341,10 @@ async fn test_import_preserves_records_after_reimport() {
     assert_eq!(export_res.status(), StatusCode::OK);
     let car_bytes = export_res.bytes().await.unwrap();
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes.to_vec())
@@ -327,7 +363,10 @@ async fn test_import_preserves_records_after_reimport() {
         .expect("Failed to list records after import");
     assert_eq!(list_res.status(), StatusCode::OK);
     let list_body: serde_json::Value = list_res.json().await.unwrap();
-    let records_after = list_body["records"].as_array().map(|a| a.len()).unwrap_or(0);
+    let records_after = list_body["records"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
     assert!(
         records_after >= 1,
         "Expected at least 1 record after import, found {}. Note: MST walk may have timing issues.",

@@ -35,7 +35,7 @@ pub async fn create_report(
     Json(input): Json<CreateReportInput>,
 ) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),

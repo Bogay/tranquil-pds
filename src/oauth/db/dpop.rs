@@ -1,10 +1,7 @@
-use sqlx::PgPool;
 use super::super::OAuthError;
+use sqlx::PgPool;
 
-pub async fn check_and_record_dpop_jti(
-    pool: &PgPool,
-    jti: &str,
-) -> Result<bool, OAuthError> {
+pub async fn check_and_record_dpop_jti(pool: &PgPool, jti: &str) -> Result<bool, OAuthError> {
     let result = sqlx::query!(
         r#"
         INSERT INTO oauth_dpop_jti (jti)

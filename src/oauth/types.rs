@@ -22,7 +22,10 @@ pub struct RefreshToken(pub String);
 
 impl RequestId {
     pub fn generate() -> Self {
-        Self(format!("urn:ietf:params:oauth:request_uri:{}", uuid::Uuid::new_v4()))
+        Self(format!(
+            "urn:ietf:params:oauth:request_uri:{}",
+            uuid::Uuid::new_v4()
+        ))
     }
 }
 

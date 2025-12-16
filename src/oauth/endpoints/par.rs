@@ -1,16 +1,11 @@
-use axum::{
-    Form, Json,
-    extract::State,
-    http::HeaderMap,
-};
-use chrono::{Duration, Utc};
-use serde::{Deserialize, Serialize};
-use crate::state::{AppState, RateLimitKind};
 use crate::oauth::{
     AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData, RequestId,
-    client::ClientMetadataCache,
-    db,
+    client::ClientMetadataCache, db,
 };
+use crate::state::{AppState, RateLimitKind};
+use axum::{Form, Json, extract::State, http::HeaderMap};
+use chrono::{Duration, Utc};
+use serde::{Deserialize, Serialize};
 
 const PAR_EXPIRY_SECONDS: i64 = 600;
 const SUPPORTED_SCOPES: &[&str] = &["atproto", "transition:generic", "transition:chat.bsky"];
@@ -52,7 +47,10 @@ pub async fn pushed_authorization_request(
     Form(request): Form<ParRequest>,
 ) -> Result<(axum::http::StatusCode, Json<ParResponse>), OAuthError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.check_rate_limit(RateLimitKind::OAuthPar, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::OAuthPar, &client_ip)
+        .await
+    {
         tracing::warn!(ip = %client_ip, "OAuth PAR rate limit exceeded");
         return Err(OAuthError::RateLimited);
     }
@@ -61,7 +59,9 @@ pub async fn pushed_authorization_request(
             "response_type must be 'code'".to_string(),
         ));
     }
-    let code_challenge = request.code_challenge.as_ref()
+    let code_challenge = request
+        .code_challenge
+        .as_ref()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| OAuthError::InvalidRequest("code_challenge is required".to_string()))?;
     let code_challenge_method = request.code_challenge_method.as_deref().unwrap_or("");

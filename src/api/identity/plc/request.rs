@@ -1,10 +1,10 @@
 use crate::api::ApiError;
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use chrono::{Duration, Utc};
 use serde_json::json;
@@ -67,16 +67,14 @@ pub async fn request_plc_operation_signature(
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_plc_operation(
-        &state.db,
-        user.id,
-        &plc_token,
-        &hostname,
-    )
-    .await
+    if let Err(e) =
+        crate::notifications::enqueue_plc_operation(&state.db, user.id, &plc_token, &hostname).await
     {
         warn!("Failed to enqueue PLC operation notification: {:?}", e);
     }
-    info!("PLC operation signature requested for user {}", auth_user.did);
+    info!(
+        "PLC operation signature requested for user {}",
+        auth_user.did
+    );
     (StatusCode::OK, Json(json!({}))).into_response()
 }

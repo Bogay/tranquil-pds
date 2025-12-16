@@ -80,7 +80,8 @@ impl EmailSender {
         Self {
             from_address,
             from_name,
-            sendmail_path: std::env::var("SENDMAIL_PATH").unwrap_or_else(|_| "/usr/sbin/sendmail".to_string()),
+            sendmail_path: std::env::var("SENDMAIL_PATH")
+                .unwrap_or_else(|_| "/usr/sbin/sendmail".to_string()),
         }
     }
 
@@ -91,19 +92,21 @@ impl EmailSender {
     }
 
     pub fn format_email(&self, notification: &QueuedNotification) -> String {
-        let subject = sanitize_header_value(notification.subject.as_deref().unwrap_or("Notification"));
+        let subject =
+            sanitize_header_value(notification.subject.as_deref().unwrap_or("Notification"));
         let recipient = sanitize_header_value(&notification.recipient);
         let from_header = if self.from_name.is_empty() {
             self.from_address.clone()
         } else {
-            format!("{} <{}>", sanitize_header_value(&self.from_name), self.from_address)
+            format!(
+                "{} <{}>",
+                sanitize_header_value(&self.from_name),
+                self.from_address
+            )
         };
         format!(
             "From: {}\r\nTo: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\nMIME-Version: 1.0\r\n\r\n{}",
-            from_header,
-            recipient,
-            subject,
-            notification.body
+            from_header, recipient, subject, notification.body
         )
     }
 }
@@ -195,7 +198,7 @@ impl NotificationSender for DiscordSender {
                 Err(e) => {
                     if e.is_timeout() {
                         if attempt < MAX_RETRIES - 1 {
-                            last_error = Some(format!("Discord request timed out"));
+                            last_error = Some("Discord request timed out".to_string());
                             retry_delay(attempt).await;
                             continue;
                         }
@@ -243,10 +246,7 @@ impl NotificationSender for TelegramSender {
         let chat_id = &notification.recipient;
         let subject = notification.subject.as_deref().unwrap_or("Notification");
         let text = format!("*{}*\n\n{}", subject, notification.body);
-        let url = format!(
-            "https://api.telegram.org/bot{}/sendMessage",
-            self.bot_token
-        );
+        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
         let payload = json!({
             "chat_id": chat_id,
             "text": text,
@@ -254,12 +254,7 @@ impl NotificationSender for TelegramSender {
         });
         let mut last_error = None;
         for attempt in 0..MAX_RETRIES {
-            let result = self
-                .http_client
-                .post(&url)
-                .json(&payload)
-                .send()
-                .await;
+            let result = self.http_client.post(&url).json(&payload).send().await;
             match result {
                 Ok(response) => {
                     if response.status().is_success() {
@@ -280,7 +275,7 @@ impl NotificationSender for TelegramSender {
                 Err(e) => {
                     if e.is_timeout() {
                         if attempt < MAX_RETRIES - 1 {
-                            last_error = Some(format!("Telegram request timed out"));
+                            last_error = Some("Telegram request timed out".to_string());
                             retry_delay(attempt).await;
                             continue;
                         }

@@ -65,22 +65,20 @@ pub async fn get_account_info(
     .fetch_optional(&state.db)
     .await;
     match result {
-        Ok(Some(row)) => {
-            (
-                StatusCode::OK,
-                Json(AccountInfo {
-                    did: row.did,
-                    handle: row.handle,
-                    email: row.email,
-                    indexed_at: row.created_at.to_rfc3339(),
-                    invite_note: None,
-                    invites_disabled: false,
-                    email_confirmed_at: None,
-                    deactivated_at: None,
-                }),
-            )
-                .into_response()
-        }
+        Ok(Some(row)) => (
+            StatusCode::OK,
+            Json(AccountInfo {
+                did: row.did,
+                handle: row.handle,
+                email: row.email,
+                indexed_at: row.created_at.to_rfc3339(),
+                invite_note: None,
+                invites_disabled: false,
+                email_confirmed_at: None,
+                deactivated_at: None,
+            }),
+        )
+            .into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(json!({"error": "AccountNotFound", "message": "Account not found"})),

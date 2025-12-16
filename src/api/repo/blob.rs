@@ -30,7 +30,7 @@ pub async fn upload_blob(
             .into_response();
     }
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
@@ -122,8 +122,12 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-    if was_inserted {
-        if let Err(e) = state.blob_store.put_bytes(&storage_key, bytes::Bytes::from(data)).await {
+    if was_inserted
+        && let Err(e) = state
+            .blob_store
+            .put_bytes(&storage_key, bytes::Bytes::from(data))
+            .await
+        {
             error!("Failed to upload blob to storage: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -131,14 +135,15 @@ pub async fn upload_blob(
             )
                 .into_response();
         }
-    }
     if let Err(e) = tx.commit().await {
         error!("Failed to commit blob transaction: {:?}", e);
-        if was_inserted {
-            if let Err(cleanup_err) = state.blob_store.delete(&storage_key).await {
-                error!("Failed to cleanup orphaned blob {}: {:?}", storage_key, cleanup_err);
+        if was_inserted
+            && let Err(cleanup_err) = state.blob_store.delete(&storage_key).await {
+                error!(
+                    "Failed to cleanup orphaned blob {}: {:?}",
+                    storage_key, cleanup_err
+                );
             }
-        }
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),
@@ -179,17 +184,13 @@ pub struct ListMissingBlobsOutput {
 
 fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
     if let Some(obj) = val.as_object() {
-        if let Some(type_val) = obj.get("$type") {
-            if type_val == "blob" {
-                if let Some(r) = obj.get("ref") {
-                    if let Some(link) = r.get("$link") {
-                        if let Some(s) = link.as_str() {
+        if let Some(type_val) = obj.get("$type")
+            && type_val == "blob"
+                && let Some(r) = obj.get("ref")
+                    && let Some(link) = r.get("$link")
+                        && let Some(s) = link.as_str() {
                             blobs.push(s.to_string());
                         }
-                    }
-                }
-            }
-        }
         for (_, v) in obj {
             find_blobs(v, blobs);
         }
@@ -206,7 +207,7 @@ pub async fn list_missing_blobs(
     Query(params): Query<ListMissingBlobsParams>,
 ) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
@@ -276,7 +277,7 @@ pub async fn list_missing_blobs(
         let rkey = &row.rkey;
         let record_cid_str = &row.record_cid;
         last_cursor = Some(format!("{}|{}", collection, rkey));
-        let record_cid = match Cid::from_str(&record_cid_str) {
+        let record_cid = match Cid::from_str(record_cid_str) {
             Ok(c) => c,
             Err(_) => continue,
         };
@@ -291,9 +292,13 @@ pub async fn list_missing_blobs(
         let mut blobs = Vec::new();
         find_blobs(&record_val, &mut blobs);
         for blob_cid_str in blobs {
-            let exists = sqlx::query!("SELECT 1 as one FROM blobs WHERE cid = $1 AND created_by_user = $2", blob_cid_str, user_id)
-                .fetch_optional(&state.db)
-                .await;
+            let exists = sqlx::query!(
+                "SELECT 1 as one FROM blobs WHERE cid = $1 AND created_by_user = $2",
+                blob_cid_str,
+                user_id
+            )
+            .fetch_optional(&state.db)
+            .await;
             match exists {
                 Ok(None) => {
                     missing_blobs.push(RecordBlob {

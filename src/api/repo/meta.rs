@@ -18,15 +18,21 @@ pub async fn describe_repo(
     Query(input): Query<DescribeRepoInput>,
 ) -> Response {
     let user_row = if input.repo.starts_with("did:") {
-        sqlx::query!("SELECT id, handle, did FROM users WHERE did = $1", input.repo)
-            .fetch_optional(&state.db)
-            .await
-            .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
+        sqlx::query!(
+            "SELECT id, handle, did FROM users WHERE did = $1",
+            input.repo
+        )
+        .fetch_optional(&state.db)
+        .await
+        .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
     } else {
-        sqlx::query!("SELECT id, handle, did FROM users WHERE handle = $1", input.repo)
-            .fetch_optional(&state.db)
-            .await
-            .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
+        sqlx::query!(
+            "SELECT id, handle, did FROM users WHERE handle = $1",
+            input.repo
+        )
+        .fetch_optional(&state.db)
+        .await
+        .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
     };
     let (user_id, handle, did) = match user_row {
         Ok(Some((id, handle, did))) => (id, handle, did),
@@ -38,10 +44,12 @@ pub async fn describe_repo(
                 .into_response();
         }
     };
-    let collections_query =
-        sqlx::query!("SELECT DISTINCT collection FROM records WHERE repo_id = $1", user_id)
-            .fetch_all(&state.db)
-            .await;
+    let collections_query = sqlx::query!(
+        "SELECT DISTINCT collection FROM records WHERE repo_id = $1",
+        user_id
+    )
+    .fetch_all(&state.db)
+    .await;
     let collections: Vec<String> = match collections_query {
         Ok(rows) => rows.iter().map(|r| r.collection.clone()).collect(),
         Err(_) => Vec::new(),

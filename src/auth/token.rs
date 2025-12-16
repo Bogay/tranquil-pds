@@ -33,11 +33,26 @@ pub fn create_refresh_token(did: &str, key_bytes: &[u8]) -> Result<String> {
 }
 
 pub fn create_access_token_with_metadata(did: &str, key_bytes: &[u8]) -> Result<TokenWithMetadata> {
-    create_signed_token_with_metadata(did, SCOPE_ACCESS, TOKEN_TYPE_ACCESS, key_bytes, Duration::minutes(120))
+    create_signed_token_with_metadata(
+        did,
+        SCOPE_ACCESS,
+        TOKEN_TYPE_ACCESS,
+        key_bytes,
+        Duration::minutes(120),
+    )
 }
 
-pub fn create_refresh_token_with_metadata(did: &str, key_bytes: &[u8]) -> Result<TokenWithMetadata> {
-    create_signed_token_with_metadata(did, SCOPE_REFRESH, TOKEN_TYPE_REFRESH, key_bytes, Duration::days(90))
+pub fn create_refresh_token_with_metadata(
+    did: &str,
+    key_bytes: &[u8],
+) -> Result<TokenWithMetadata> {
+    create_signed_token_with_metadata(
+        did,
+        SCOPE_REFRESH,
+        TOKEN_TYPE_REFRESH,
+        key_bytes,
+        Duration::days(90),
+    )
 }
 
 pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -> Result<String> {
@@ -132,15 +147,38 @@ pub fn create_refresh_token_hs256(did: &str, secret: &[u8]) -> Result<String> {
     Ok(create_refresh_token_hs256_with_metadata(did, secret)?.token)
 }
 
-pub fn create_access_token_hs256_with_metadata(did: &str, secret: &[u8]) -> Result<TokenWithMetadata> {
-    create_hs256_token_with_metadata(did, SCOPE_ACCESS, TOKEN_TYPE_ACCESS, secret, Duration::minutes(120))
+pub fn create_access_token_hs256_with_metadata(
+    did: &str,
+    secret: &[u8],
+) -> Result<TokenWithMetadata> {
+    create_hs256_token_with_metadata(
+        did,
+        SCOPE_ACCESS,
+        TOKEN_TYPE_ACCESS,
+        secret,
+        Duration::minutes(120),
+    )
 }
 
-pub fn create_refresh_token_hs256_with_metadata(did: &str, secret: &[u8]) -> Result<TokenWithMetadata> {
-    create_hs256_token_with_metadata(did, SCOPE_REFRESH, TOKEN_TYPE_REFRESH, secret, Duration::days(90))
+pub fn create_refresh_token_hs256_with_metadata(
+    did: &str,
+    secret: &[u8],
+) -> Result<TokenWithMetadata> {
+    create_hs256_token_with_metadata(
+        did,
+        SCOPE_REFRESH,
+        TOKEN_TYPE_REFRESH,
+        secret,
+        Duration::days(90),
+    )
 }
 
-pub fn create_service_token_hs256(did: &str, aud: &str, lxm: &str, secret: &[u8]) -> Result<String> {
+pub fn create_service_token_hs256(
+    did: &str,
+    aud: &str,
+    lxm: &str,
+    secret: &[u8],
+) -> Result<String> {
     let expiration = Utc::now()
         .checked_add_signed(Duration::seconds(60))
         .expect("valid timestamp")

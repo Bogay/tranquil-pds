@@ -8,8 +8,8 @@ mod two_factor;
 
 pub use client::{get_authorized_client, upsert_authorized_client};
 pub use device::{
-    create_device, delete_device, get_device, get_device_accounts, update_device_last_seen,
-    upsert_account_device, verify_account_on_device, DeviceAccountRow,
+    DeviceAccountRow, create_device, delete_device, get_device, get_device_accounts,
+    update_device_last_seen, upsert_account_device, verify_account_on_device,
 };
 pub use dpop::{check_and_record_dpop_jti, cleanup_expired_dpop_jtis};
 pub use request::{
@@ -23,7 +23,7 @@ pub use token::{
     get_token_by_refresh_token, list_tokens_for_user, rotate_token,
 };
 pub use two_factor::{
-    check_user_2fa_enabled, cleanup_expired_2fa_challenges, create_2fa_challenge,
-    delete_2fa_challenge, delete_2fa_challenge_by_request_uri, generate_2fa_code,
-    get_2fa_challenge, increment_2fa_attempts, TwoFactorChallenge,
+    TwoFactorChallenge, check_user_2fa_enabled, cleanup_expired_2fa_challenges,
+    create_2fa_challenge, delete_2fa_challenge, delete_2fa_challenge_by_request_uri,
+    generate_2fa_code, get_2fa_challenge, increment_2fa_attempts,
 };

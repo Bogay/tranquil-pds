@@ -1,19 +1,19 @@
 use crate::api::ApiError;
-use crate::circuit_breaker::{with_circuit_breaker, CircuitBreakerError};
+use crate::circuit_breaker::{CircuitBreakerError, with_circuit_breaker};
 use crate::plc::{
-    create_update_op, sign_operation, PlcClient, PlcError, PlcOpOrTombstone, PlcService,
+    PlcClient, PlcError, PlcOpOrTombstone, PlcService, create_update_op, sign_operation,
 };
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use chrono::Utc;
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use tracing::{error, info, warn};
 
@@ -59,8 +59,9 @@ pub async fn sign_plc_operation(
         Some(t) => t,
         None => {
             return ApiError::InvalidRequest(
-                "Email confirmation token required to sign PLC operations".into()
-            ).into_response();
+                "Email confirmation token required to sign PLC operations".into(),
+            )
+            .into_response();
         }
     };
     let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", did)
@@ -105,9 +106,12 @@ pub async fn sign_plc_operation(
         }
     };
     if Utc::now() > token_row.expires_at {
-        let _ = sqlx::query!("DELETE FROM plc_operation_tokens WHERE id = $1", token_row.id)
-            .execute(&state.db)
-            .await;
+        let _ = sqlx::query!(
+            "DELETE FROM plc_operation_tokens WHERE id = $1",
+            token_row.id
+        )
+        .execute(&state.db)
+        .await;
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({
@@ -158,11 +162,11 @@ pub async fn sign_plc_operation(
     };
     let plc_client = PlcClient::new(None);
     let did_clone = did.clone();
-    let result: Result<PlcOpOrTombstone, CircuitBreakerError<PlcError>> = with_circuit_breaker(
-        &state.circuit_breakers.plc_directory,
-        || async { plc_client.get_last_op(&did_clone).await },
-    )
-    .await;
+    let result: Result<PlcOpOrTombstone, CircuitBreakerError<PlcError>> =
+        with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
+            plc_client.get_last_op(&did_clone).await
+        })
+        .await;
     let last_op = match result {
         Ok(op) => op,
         Err(CircuitBreakerError::CircuitOpen(e)) => {
@@ -259,9 +263,12 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-    let _ = sqlx::query!("DELETE FROM plc_operation_tokens WHERE id = $1", token_row.id)
-        .execute(&state.db)
-        .await;
+    let _ = sqlx::query!(
+        "DELETE FROM plc_operation_tokens WHERE id = $1",
+        token_row.id
+    )
+    .execute(&state.db)
+    .await;
     info!("Signed PLC operation for user {}", did);
     (
         StatusCode::OK,

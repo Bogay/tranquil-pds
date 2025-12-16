@@ -56,7 +56,8 @@ pub async fn get_latest_commit(
     .await;
     match result {
         Ok(Some(row)) => {
-            let rev = get_rev_from_commit(&state, &row.repo_root_cid).await
+            let rev = get_rev_from_commit(&state, &row.repo_root_cid)
+                .await
                 .unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
             (
                 StatusCode::OK,
@@ -129,7 +130,8 @@ pub async fn list_repos(
             let has_more = rows.len() as i64 > limit;
             let mut repos: Vec<RepoInfo> = Vec::new();
             for row in rows.iter().take(limit as usize) {
-                let rev = get_rev_from_commit(&state, &row.repo_root_cid).await
+                let rev = get_rev_from_commit(&state, &row.repo_root_cid)
+                    .await
                     .unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
                 repos.push(RepoInfo {
                     did: row.did.clone(),

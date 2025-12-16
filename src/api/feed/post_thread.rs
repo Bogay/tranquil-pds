@@ -1,16 +1,16 @@
 use crate::api::read_after_write::{
-    extract_repo_rev, format_local_post, format_munged_response, get_local_lag,
-    get_records_since_rev, proxy_to_appview, PostRecord, PostView, RecordDescript,
+    PostRecord, PostView, RecordDescript, extract_repo_rev, format_local_post,
+    format_munged_response, get_local_lag, get_records_since_rev, proxy_to_appview,
 };
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use tracing::warn;
 
@@ -39,7 +39,7 @@ pub struct ThreadViewPost {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ThreadNode {
-    Post(ThreadViewPost),
+    Post(Box<ThreadViewPost>),
     NotFound(ThreadNotFound),
     Blocked(ThreadBlocked),
 }
@@ -96,13 +96,13 @@ fn add_replies_to_thread(
         })
         .map(|p| {
             let post_view = format_local_post(p, author_did, author_handle, None);
-            ThreadNode::Post(ThreadViewPost {
+            ThreadNode::Post(Box::new(ThreadViewPost {
                 thread_type: Some("app.bsky.feed.defs#threadViewPost".to_string()),
                 post: post_view,
                 parent: None,
                 replies: None,
                 extra: HashMap::new(),
-            })
+            }))
         })
         .collect();
     if !replies.is_empty() {
@@ -114,7 +114,13 @@ fn add_replies_to_thread(
     if let Some(ref mut existing_replies) = thread.replies {
         for reply in existing_replies.iter_mut() {
             if let ThreadNode::Post(reply_thread) = reply {
-                add_replies_to_thread(reply_thread, local_posts, author_did, author_handle, depth + 1);
+                add_replies_to_thread(
+                    reply_thread,
+                    local_posts,
+                    author_did,
+                    author_handle,
+                    depth + 1,
+                );
             }
         }
     }
@@ -128,7 +134,9 @@ pub async fn get_post_thread(
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
+            crate::auth::validate_bearer_token(&state.db, &token)
+                .await
+                .ok()
         } else {
             None
         }
@@ -145,11 +153,17 @@ pub async fn get_post_thread(
     if let Some(parent_height) = params.parent_height {
         query_params.insert("parentHeight".to_string(), parent_height.to_string());
     }
-    let proxy_result =
-        match proxy_to_appview("app.bsky.feed.getPostThread", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
+    let proxy_result = match proxy_to_appview(
+        "app.bsky.feed.getPostThread",
+        &query_params,
+        auth_did.as_deref().unwrap_or(""),
+        auth_key_bytes.as_deref(),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
     if proxy_result.status == StatusCode::NOT_FOUND {
         return handle_not_found(&state, &params.uri, auth_did, &proxy_result.headers).await;
     }
@@ -193,7 +207,13 @@ pub async fn get_post_thread(
         }
     };
     if let ThreadNode::Post(ref mut thread_post) = thread_output.thread {
-        add_replies_to_thread(thread_post, &local_records.posts, &requester_did, &handle, 0);
+        add_replies_to_thread(
+            thread_post,
+            &local_records.posts,
+            &requester_did,
+            &handle,
+            0,
+        );
     }
     let lag = get_local_lag(&local_records);
     format_munged_response(thread_output, lag)
@@ -212,7 +232,7 @@ async fn handle_not_found(
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "NotFound", "message": "Post not found"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     let requester_did = match auth_did {
@@ -222,7 +242,7 @@ async fn handle_not_found(
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "NotFound", "message": "Post not found"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     let uri_parts: Vec<&str> = uri.trim_start_matches("at://").split('/').collect();
@@ -248,7 +268,7 @@ async fn handle_not_found(
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "NotFound", "message": "Post not found"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     let local_post = local_records.posts.iter().find(|p| p.uri == uri);
@@ -259,7 +279,7 @@ async fn handle_not_found(
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "NotFound", "message": "Post not found"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     let handle = match sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", requester_did)
@@ -280,13 +300,13 @@ async fn handle_not_found(
         local_records.profile.as_ref(),
     );
     let thread = PostThreadOutput {
-        thread: ThreadNode::Post(ThreadViewPost {
+        thread: ThreadNode::Post(Box::new(ThreadViewPost {
             thread_type: Some("app.bsky.feed.defs#threadViewPost".to_string()),
             post: post_view,
             parent: None,
             replies: None,
             extra: HashMap::new(),
-        }),
+        })),
         threadgate: None,
     };
     let lag = get_local_lag(&local_records);

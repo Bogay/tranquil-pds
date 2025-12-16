@@ -1,5 +1,5 @@
 use super::did::verify_did_web;
-use crate::plc::{create_genesis_operation, signing_key_to_did_key, PlcClient};
+use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
@@ -10,7 +10,7 @@ use axum::{
 use bcrypt::{DEFAULT_COST, hash};
 use jacquard::types::{did::Did, integer::LimitedU32, string::Tid};
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
-use k256::{ecdsa::SigningKey, SecretKey};
+use k256::{SecretKey, ecdsa::SigningKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -18,18 +18,15 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for") {
-        if let Ok(value) = forwarded.to_str() {
-            if let Some(first_ip) = value.split(',').next() {
+    if let Some(forwarded) = headers.get("x-forwarded-for")
+        && let Ok(value) = forwarded.to_str()
+            && let Some(first_ip) = value.split(',').next() {
                 return first_ip.trim().to_string();
             }
-        }
-    }
-    if let Some(real_ip) = headers.get("x-real-ip") {
-        if let Ok(value) = real_ip.to_str() {
+    if let Some(real_ip) = headers.get("x-real-ip")
+        && let Ok(value) = real_ip.to_str() {
             return value.trim().to_string();
         }
-    }
     "unknown".to_string()
 }
 
@@ -64,7 +61,10 @@ pub async fn create_account(
 ) -> Response {
     info!("create_account called");
     let client_ip = extract_client_ip(&headers);
-    if !state.check_rate_limit(RateLimitKind::AccountCreation, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::AccountCreation, &client_ip)
+        .await
+    {
         warn!(ip = %client_ip, "Account creation rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -84,18 +84,19 @@ pub async fn create_account(
         )
             .into_response();
     }
-    let email: Option<String> = input.email.as_ref()
+    let email: Option<String> = input
+        .email
+        .as_ref()
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
-    if let Some(ref email) = email {
-        if !crate::api::validation::is_valid_email(email) {
+    if let Some(ref email) = email
+        && !crate::api::validation::is_valid_email(email) {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
             )
                 .into_response();
         }
-    }
     let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
     let valid_channels = ["email", "discord", "telegram", "signal"];
     if !valid_channels.contains(&verification_channel) {
@@ -220,7 +221,10 @@ pub async fn create_account(
                 }
             };
             let plc_client = PlcClient::new(None);
-            if let Err(e) = plc_client.send_operation(&genesis_result.did, &genesis_result.signed_operation).await {
+            if let Err(e) = plc_client
+                .send_operation(&genesis_result.did, &genesis_result.signed_operation)
+                .await
+            {
                 error!("Failed to submit PLC genesis operation: {:?}", e);
                 return (
                     StatusCode::BAD_GATEWAY,
@@ -269,7 +273,10 @@ pub async fn create_account(
             }
         };
         let plc_client = PlcClient::new(None);
-        if let Err(e) = plc_client.send_operation(&genesis_result.did, &genesis_result.signed_operation).await {
+        if let Err(e) = plc_client
+            .send_operation(&genesis_result.did, &genesis_result.signed_operation)
+            .await
+        {
             error!("Failed to submit PLC genesis operation: {:?}", e);
             return (
                 StatusCode::BAD_GATEWAY,
@@ -316,10 +323,12 @@ pub async fn create_account(
         Ok(None) => {}
     }
     if let Some(code) = &input.invite_code {
-        let invite_query =
-            sqlx::query!("SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE", code)
-                .fetch_optional(&mut *tx)
-                .await;
+        let invite_query = sqlx::query!(
+            "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
+            code
+        )
+        .fetch_optional(&mut *tx)
+        .await;
         match invite_query {
             Ok(Some(row)) => {
                 if row.available_uses <= 0 {
@@ -378,23 +387,41 @@ pub async fn create_account(
             discord_id, telegram_username, signal_number
         ) VALUES ($1, $2, $3, $4, $5, $6, $7::notification_channel, $8, $9, $10) RETURNING id"#,
     )
-        .bind(short_handle)
-        .bind(&email)
-        .bind(&did)
-        .bind(&password_hash)
-        .bind(&verification_code)
-        .bind(&code_expires_at)
-        .bind(verification_channel)
-        .bind(input.discord_id.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()))
-        .bind(input.telegram_username.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()))
-        .bind(input.signal_number.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()))
-        .fetch_one(&mut *tx)
-        .await;
+    .bind(short_handle)
+    .bind(&email)
+    .bind(&did)
+    .bind(&password_hash)
+    .bind(&verification_code)
+    .bind(code_expires_at)
+    .bind(verification_channel)
+    .bind(
+        input
+            .discord_id
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty()),
+    )
+    .bind(
+        input
+            .telegram_username
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty()),
+    )
+    .bind(
+        input
+            .signal_number
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty()),
+    )
+    .fetch_one(&mut *tx)
+    .await;
     let user_id = match user_insert {
         Ok((id,)) => id,
         Err(e) => {
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.code().as_deref() == Some("23505") {
+            if let Some(db_err) = e.as_database_error()
+                && db_err.code().as_deref() == Some("23505") {
                     let constraint = db_err.constraint().unwrap_or("");
                     if constraint.contains("handle") || constraint.contains("users_handle") {
                         return (
@@ -425,7 +452,6 @@ pub async fn create_account(
                             .into_response();
                     }
                 }
-            }
             error!("Error inserting user: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -535,9 +561,13 @@ pub async fn create_account(
         }
     };
     let commit_cid_str = commit_cid.to_string();
-    let repo_insert = sqlx::query!("INSERT INTO repos (user_id, repo_root_cid) VALUES ($1, $2)", user_id, commit_cid_str)
-        .execute(&mut *tx)
-        .await;
+    let repo_insert = sqlx::query!(
+        "INSERT INTO repos (user_id, repo_root_cid) VALUES ($1, $2)",
+        user_id,
+        commit_cid_str
+    )
+    .execute(&mut *tx)
+    .await;
     if let Err(e) = repo_insert {
         error!("Error initializing repo: {:?}", e);
         return (
@@ -547,10 +577,13 @@ pub async fn create_account(
             .into_response();
     }
     if let Some(code) = &input.invite_code {
-        let use_insert =
-            sqlx::query!("INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)", code, user_id)
-                .execute(&mut *tx)
-                .await;
+        let use_insert = sqlx::query!(
+            "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
+            code,
+            user_id
+        )
+        .execute(&mut *tx)
+        .await;
         if let Err(e) = use_insert {
             error!("Error recording invite usage: {:?}", e);
             return (
@@ -568,10 +601,13 @@ pub async fn create_account(
         )
             .into_response();
     }
-    if let Err(e) = crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle)).await {
+    if let Err(e) =
+        crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle)).await
+    {
         warn!("Failed to sequence identity event for {}: {}", did, e);
     }
-    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, &did, true, None).await {
+    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+    {
         warn!("Failed to sequence account event for {}: {}", did, e);
     }
     let profile_record = json!({
@@ -584,7 +620,9 @@ pub async fn create_account(
         "app.bsky.actor.profile",
         "self",
         &profile_record,
-    ).await {
+    )
+    .await
+    {
         warn!("Failed to create default profile for {}: {}", did, e);
     }
     if let Err(e) = crate::notifications::enqueue_signup_verification(
@@ -593,8 +631,13 @@ pub async fn create_account(
         verification_channel,
         &verification_recipient,
         &verification_code,
-    ).await {
-        warn!("Failed to enqueue signup verification notification: {:?}", e);
+    )
+    .await
+    {
+        warn!(
+            "Failed to enqueue signup verification notification: {:?}",
+            e
+        );
     }
     (
         StatusCode::OK,

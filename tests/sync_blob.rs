@@ -101,7 +101,10 @@ async fn test_get_blob_not_found() {
     let (_, did) = create_account_and_login(&client).await;
     let params = [
         ("did", did.as_str()),
-        ("cid", "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"),
+        (
+            "cid",
+            "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku",
+        ),
     ];
     let res = client
         .get(format!(

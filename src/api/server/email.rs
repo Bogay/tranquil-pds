@@ -27,7 +27,10 @@ pub async fn request_email_update(
     Json(input): Json<RequestEmailUpdateInput>,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.check_rate_limit(RateLimitKind::EmailUpdate, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::EmailUpdate, &client_ip)
+        .await
+    {
         warn!(ip = %client_ip, "Email update rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -35,10 +38,11 @@ pub async fn request_email_update(
                 "error": "RateLimitExceeded",
                 "message": "Too many requests. Please try again later."
             })),
-        ).into_response();
+        )
+            .into_response();
     }
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
@@ -108,12 +112,7 @@ pub async fn request_email_update(
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) = crate::notifications::enqueue_email_update(
-        &state.db,
-        user_id,
-        &email,
-        &handle,
-        &code,
-        &hostname,
+        &state.db, user_id, &email, &handle, &code, &hostname,
     )
     .await
     {
@@ -136,7 +135,10 @@ pub async fn confirm_email(
     Json(input): Json<ConfirmEmailInput>,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.check_rate_limit(RateLimitKind::AppPassword, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::AppPassword, &client_ip)
+        .await
+    {
         warn!(ip = %client_ip, "Confirm email rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -144,10 +146,11 @@ pub async fn confirm_email(
                 "error": "RateLimitExceeded",
                 "message": "Too many requests. Please try again later."
             })),
-        ).into_response();
+        )
+            .into_response();
     }
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
@@ -185,16 +188,19 @@ pub async fn confirm_email(
     let email_pending_verification = user.email_pending_verification;
     let email = input.email.trim().to_lowercase();
     let confirmation_code = input.token.trim();
-    let (pending_email, saved_code, expiry) = match (email_pending_verification, stored_code, expires_at) {
-        (Some(p), Some(c), Some(e)) => (p, c, e),
-        _ => {
-            return (
+    let (pending_email, saved_code, expiry) =
+        match (email_pending_verification, stored_code, expires_at) {
+            (Some(p), Some(c), Some(e)) => (p, c, e),
+            _ => {
+                return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "No pending email update found"})),
+                Json(
+                    json!({"error": "InvalidRequest", "message": "No pending email update found"}),
+                ),
             )
                 .into_response();
-        }
-    };
+            }
+        };
     if pending_email != email {
         return (
             StatusCode::BAD_REQUEST,
@@ -203,7 +209,7 @@ pub async fn confirm_email(
             .into_response();
     }
     if saved_code != confirmation_code {
-         return (
+        return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidToken", "message": "Invalid token"})),
         )
@@ -225,13 +231,16 @@ pub async fn confirm_email(
     .await;
     if let Err(e) = update {
         error!("DB error finalizing email update: {:?}", e);
-         if e.as_database_error().map(|db_err| db_err.is_unique_violation()).unwrap_or(false) {
-             return (
+        if e.as_database_error()
+            .map(|db_err| db_err.is_unique_violation())
+            .unwrap_or(false)
+        {
+            return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "EmailTaken", "message": "Email already taken"})),
             )
                 .into_response();
-         }
+        }
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),
@@ -257,7 +266,7 @@ pub async fn update_email(
     Json(input): Json<UpdateEmailInput>,
 ) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
@@ -302,11 +311,10 @@ pub async fn update_email(
         )
             .into_response();
     }
-    if let Some(ref current) = current_email {
-        if new_email == current.to_lowercase() {
+    if let Some(ref current) = current_email
+        && new_email == current.to_lowercase() {
             return (StatusCode::OK, Json(json!({}))).into_response();
         }
-    }
     let email_confirmed = stored_code.is_some() && email_pending_verification.is_some();
     if email_confirmed {
         let confirmation_token = match &input.token {
@@ -353,15 +361,14 @@ pub async fn update_email(
             )
                 .into_response();
         }
-        if let Some(exp) = expires_at {
-            if Utc::now() > exp {
+        if let Some(exp) = expires_at
+            && Utc::now() > exp {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
                 )
                     .into_response();
             }
-        }
     }
     let exists = sqlx::query!(
         "SELECT 1 as one FROM users WHERE LOWER(email) = $1 AND id != $2",

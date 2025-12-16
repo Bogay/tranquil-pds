@@ -1,11 +1,11 @@
-use axum::{Form, Json};
+use super::helpers::extract_token_claims;
+use crate::oauth::{OAuthError, db};
+use crate::state::{AppState, RateLimitKind};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::{Form, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use crate::state::{AppState, RateLimitKind};
-use crate::oauth::{OAuthError, db};
-use super::helpers::extract_token_claims;
 
 #[derive(Debug, Deserialize)]
 pub struct RevokeRequest {
@@ -20,7 +20,10 @@ pub async fn revoke_token(
     Form(request): Form<RevokeRequest>,
 ) -> Result<StatusCode, OAuthError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.check_rate_limit(RateLimitKind::OAuthIntrospect, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::OAuthIntrospect, &client_ip)
+        .await
+    {
         tracing::warn!(ip = %client_ip, "OAuth revoke rate limit exceeded");
         return Err(OAuthError::RateLimited);
     }
@@ -74,7 +77,10 @@ pub async fn introspect_token(
     Form(request): Form<IntrospectRequest>,
 ) -> Result<Json<IntrospectResponse>, OAuthError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.check_rate_limit(RateLimitKind::OAuthIntrospect, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::OAuthIntrospect, &client_ip)
+        .await
+    {
         tracing::warn!(ip = %client_ip, "OAuth introspect rate limit exceeded");
         return Err(OAuthError::RateLimited);
     }

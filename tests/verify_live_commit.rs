@@ -5,15 +5,23 @@ use std::str::FromStr;
 mod common;
 
 #[tokio::test]
+#[ignore = "depends on external live server state; run manually with --ignored"]
 async fn test_verify_live_commit() {
     let client = reqwest::Client::new();
     let did = "did:plc:zp3oggo2mikqntmhrc4scby4";
     let resp = client
-        .get(format!("https://testpds.wizardry.systems/xrpc/com.atproto.sync.getRepo?did={}", did))
+        .get(format!(
+            "https://testpds.wizardry.systems/xrpc/com.atproto.sync.getRepo?did={}",
+            did
+        ))
         .send()
         .await
         .expect("Failed to fetch repo");
-    assert!(resp.status().is_success(), "getRepo failed: {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "getRepo failed: {}",
+        resp.status()
+    );
     let car_bytes = resp.bytes().await.expect("Failed to read body");
     println!("CAR bytes: {} bytes", car_bytes.len());
     let mut cursor = std::io::Cursor::new(&car_bytes[..]);
@@ -23,7 +31,8 @@ async fn test_verify_live_commit() {
     assert!(!roots.is_empty(), "No roots in CAR");
     let root_cid = roots[0];
     let root_block = blocks.get(&root_cid).expect("Root block not found");
-    let commit = jacquard_repo::commit::Commit::from_cbor(root_block).expect("Failed to parse commit");
+    let commit =
+        jacquard_repo::commit::Commit::from_cbor(root_block).expect("Failed to parse commit");
     println!("Commit DID: {}", commit.did().as_str());
     println!("Commit rev: {}", commit.rev());
     println!("Commit prev: {:?}", commit.prev());
@@ -37,7 +46,8 @@ async fn test_verify_live_commit() {
     println!("DID doc: {}", did_doc_text);
     let did_doc: jacquard::common::types::did_doc::DidDocument<'_> =
         serde_json::from_str(&did_doc_text).expect("Failed to parse DID doc");
-    let pubkey = did_doc.atproto_public_key()
+    let pubkey = did_doc
+        .atproto_public_key()
         .expect("Failed to get public key")
         .expect("No public key");
     println!("Public key codec: {:?}", pubkey.codec);
@@ -75,7 +85,9 @@ fn commit_unsigned_bytes(commit: &jacquard_repo::commit::Commit<'_>) -> Vec<u8> 
     serde_ipld_dagcbor::to_vec(&unsigned).unwrap()
 }
 
-fn parse_car(cursor: &mut std::io::Cursor<&[u8]>) -> Result<(Vec<Cid>, HashMap<Cid, Bytes>), Box<dyn std::error::Error>> {
+fn parse_car(
+    cursor: &mut std::io::Cursor<&[u8]>,
+) -> Result<(Vec<Cid>, HashMap<Cid, Bytes>), Box<dyn std::error::Error>> {
     use std::io::Read;
     fn read_varint<R: Read>(r: &mut R) -> std::io::Result<u64> {
         let mut result = 0u64;
@@ -126,7 +138,10 @@ fn parse_cid(bytes: &[u8]) -> Result<(Cid, usize), Box<dyn std::error::Error>> {
         let hash_type = bytes[2];
         let hash_len = bytes[3] as usize;
         let cid_len = 4 + hash_len;
-        let cid = Cid::new_v1(codec as u64, cid::multihash::Multihash::from_bytes(&bytes[2..cid_len])?);
+        let cid = Cid::new_v1(
+            codec as u64,
+            cid::multihash::Multihash::from_bytes(&bytes[2..cid_len])?,
+        );
         Ok((cid, cid_len))
     } else {
         Err("Unsupported CID version".into())

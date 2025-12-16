@@ -1,8 +1,8 @@
 use bytes::Bytes;
 use cid::Cid;
+use jacquard::common::IntoStatic;
 use jacquard::common::types::crypto::PublicKey;
 use jacquard::common::types::did_doc::DidDocument;
-use jacquard::common::IntoStatic;
 use jacquard_repo::commit::Commit;
 use reqwest::Client;
 use std::collections::HashMap;
@@ -61,8 +61,8 @@ impl CarVerifier {
         let root_block = blocks
             .get(root_cid)
             .ok_or_else(|| VerifyError::BlockNotFound(root_cid.to_string()))?;
-        let commit = Commit::from_cbor(root_block)
-            .map_err(|e| VerifyError::InvalidCommit(e.to_string()))?;
+        let commit =
+            Commit::from_cbor(root_block).map_err(|e| VerifyError::InvalidCommit(e.to_string()))?;
         let commit_did = commit.did().as_str();
         if commit_did != expected_did {
             return Err(VerifyError::DidMismatch {
@@ -133,16 +133,12 @@ impl CarVerifier {
     }
 
     async fn resolve_web_did(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
-        let domain = did
-            .strip_prefix("did:web:")
-            .ok_or_else(|| VerifyError::DidResolutionFailed("Invalid did:web format".to_string()))?;
+        let domain = did.strip_prefix("did:web:").ok_or_else(|| {
+            VerifyError::DidResolutionFailed("Invalid did:web format".to_string())
+        })?;
         let domain_decoded = urlencoding::decode(domain)
             .map_err(|e| VerifyError::DidResolutionFailed(e.to_string()))?;
-        let url = if domain_decoded.contains(':') || domain_decoded.contains('/') {
-            format!("https://{}/.well-known/did.json", domain_decoded)
-        } else {
-            format!("https://{}/.well-known/did.json", domain_decoded)
-        };
+        let url = format!("https://{}/.well-known/did.json", domain_decoded);
         let response = self
             .http_client
             .get(&url)
@@ -205,10 +201,13 @@ impl CarVerifier {
                     let mut last_full_key: Vec<u8> = Vec::new();
                     for entry in entries {
                         if let Ipld::Map(entry_obj) = entry {
-                            let prefix_len = entry_obj.get("p").and_then(|p| match p {
-                                Ipld::Integer(i) => Some(*i as usize),
-                                _ => None,
-                            }).unwrap_or(0);
+                            let prefix_len = entry_obj
+                                .get("p")
+                                .and_then(|p| match p {
+                                    Ipld::Integer(i) => Some(*i as usize),
+                                    _ => None,
+                                })
+                                .unwrap_or(0);
                             let key_suffix = entry_obj.get("k").and_then(|k| match k {
                                 Ipld::Bytes(b) => Some(b.clone()),
                                 Ipld::String(s) => Some(s.as_bytes().to_vec()),
@@ -236,14 +235,13 @@ impl CarVerifier {
                                 }
                                 stack.push(*tree_cid);
                             }
-                            if let Some(Ipld::Link(value_cid)) = entry_obj.get("v") {
-                                if !blocks.contains_key(value_cid) {
+                            if let Some(Ipld::Link(value_cid)) = entry_obj.get("v")
+                                && !blocks.contains_key(value_cid) {
                                     warn!(
                                         "Record block {} referenced in MST not in CAR (may be expected for partial export)",
                                         value_cid
                                     );
                                 }
-                            }
                         }
                     }
                 }

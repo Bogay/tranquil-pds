@@ -62,7 +62,8 @@ impl BlobStorage for S3BlobStorage {
     }
 
     async fn put_bytes(&self, key: &str, data: Bytes) -> Result<(), StorageError> {
-        let result = self.client
+        let result = self
+            .client
             .put_object()
             .bucket(&self.bucket)
             .key(key)
@@ -112,7 +113,8 @@ impl BlobStorage for S3BlobStorage {
     }
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        let result = self.client
+        let result = self
+            .client
             .delete_object()
             .bucket(&self.bucket)
             .key(key)

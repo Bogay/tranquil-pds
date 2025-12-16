@@ -1,16 +1,16 @@
-use axum::http::HeaderMap;
-use axum::Json;
-use chrono::{Duration, Utc};
+use super::helpers::{create_access_token, verify_pkce};
+use super::types::{TokenRequest, TokenResponse};
 use crate::config::AuthConfig;
-use crate::state::AppState;
 use crate::oauth::{
     ClientAuth, OAuthError, RefreshToken, TokenData, TokenId,
     client::{ClientMetadataCache, verify_client_auth},
     db,
     dpop::DPoPVerifier,
 };
-use super::types::{TokenRequest, TokenResponse};
-use super::helpers::{create_access_token, verify_pkce};
+use crate::state::AppState;
+use axum::Json;
+use axum::http::HeaderMap;
+use chrono::{Duration, Utc};
 
 const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 3600;
 const REFRESH_TOKEN_EXPIRY_DAYS: i64 = 60;
@@ -31,19 +31,22 @@ pub async fn handle_authorization_code_grant(
         .await?
         .ok_or_else(|| OAuthError::InvalidGrant("Invalid or expired code".to_string()))?;
     if auth_request.expires_at < Utc::now() {
-        return Err(OAuthError::InvalidGrant("Authorization code has expired".to_string()));
+        return Err(OAuthError::InvalidGrant(
+            "Authorization code has expired".to_string(),
+        ));
     }
-    if let Some(request_client_id) = &request.client_id {
-        if request_client_id != &auth_request.client_id {
+    if let Some(request_client_id) = &request.client_id
+        && request_client_id != &auth_request.client_id {
             return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
         }
-    }
     let did = auth_request
         .did
         .ok_or_else(|| OAuthError::InvalidGrant("Authorization not completed".to_string()))?;
     let client_metadata_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_metadata_cache.get(&auth_request.client_id).await?;
-    let client_auth = if let (Some(assertion), Some(assertion_type)) = (&request.client_assertion, &request.client_assertion_type) {
+    let client_auth = if let (Some(assertion), Some(assertion_type)) =
+        (&request.client_assertion, &request.client_assertion_type)
+    {
         if assertion_type != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
             return Err(OAuthError::InvalidClient(
                 "Unsupported client_assertion_type".to_string(),
@@ -61,15 +64,17 @@ pub async fn handle_authorization_code_grant(
     };
     verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
     verify_pkce(&auth_request.parameters.code_challenge, &code_verifier)?;
-    if let Some(redirect_uri) = &request.redirect_uri {
-        if redirect_uri != &auth_request.parameters.redirect_uri {
-            return Err(OAuthError::InvalidGrant("redirect_uri mismatch".to_string()));
+    if let Some(redirect_uri) = &request.redirect_uri
+        && redirect_uri != &auth_request.parameters.redirect_uri {
+            return Err(OAuthError::InvalidGrant(
+                "redirect_uri mismatch".to_string(),
+            ));
         }
-    }
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-        let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let pds_hostname =
+            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
         if !db::check_and_record_dpop_jti(&state.db, &result.jti).await? {
@@ -77,13 +82,12 @@ pub async fn handle_authorization_code_grant(
                 "DPoP proof has already been used".to_string(),
             ));
         }
-        if let Some(expected_jkt) = &auth_request.parameters.dpop_jkt {
-            if &result.jkt != expected_jkt {
+        if let Some(expected_jkt) = &auth_request.parameters.dpop_jkt
+            && &result.jkt != expected_jkt {
                 return Err(OAuthError::InvalidDpopProof(
                     "DPoP key binding mismatch".to_string(),
                 ));
             }
-        }
         Some(result.jkt)
     } else if auth_request.parameters.dpop_jkt.is_some() {
         return Err(OAuthError::InvalidRequest(
@@ -124,10 +128,7 @@ pub async fn handle_authorization_code_grant(
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();
     let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-    response_headers.insert(
-        "DPoP-Nonce",
-        verifier.generate_nonce().parse().unwrap(),
-    );
+    response_headers.insert("DPoP-Nonce", verifier.generate_nonce().parse().unwrap());
     Ok((
         response_headers,
         Json(TokenResponse {
@@ -161,12 +162,15 @@ pub async fn handle_refresh_token_grant(
         .ok_or_else(|| OAuthError::InvalidGrant("Invalid refresh token".to_string()))?;
     if token_data.expires_at < Utc::now() {
         db::delete_token_family(&state.db, db_id).await?;
-        return Err(OAuthError::InvalidGrant("Refresh token has expired".to_string()));
+        return Err(OAuthError::InvalidGrant(
+            "Refresh token has expired".to_string(),
+        ));
     }
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-        let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let pds_hostname =
+            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
         if !db::check_and_record_dpop_jti(&state.db, &result.jti).await? {
@@ -174,13 +178,12 @@ pub async fn handle_refresh_token_grant(
                 "DPoP proof has already been used".to_string(),
             ));
         }
-        if let Some(expected_jkt) = &token_data.parameters.dpop_jkt {
-            if &result.jkt != expected_jkt {
+        if let Some(expected_jkt) = &token_data.parameters.dpop_jkt
+            && &result.jkt != expected_jkt {
                 return Err(OAuthError::InvalidDpopProof(
                     "DPoP key binding mismatch".to_string(),
                 ));
             }
-        }
         Some(result.jkt)
     } else if token_data.parameters.dpop_jkt.is_some() {
         return Err(OAuthError::InvalidRequest(
@@ -204,10 +207,7 @@ pub async fn handle_refresh_token_grant(
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();
     let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-    response_headers.insert(
-        "DPoP-Nonce",
-        verifier.generate_nonce().parse().unwrap(),
-    );
+    response_headers.insert("DPoP-Nonce", verifier.generate_nonce().parse().unwrap());
     Ok((
         response_headers,
         Json(TokenResponse {

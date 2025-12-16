@@ -142,9 +142,12 @@ pub async fn get_subject_status(
         }
     }
     if let Some(blob_cid) = &params.blob {
-        let blob = sqlx::query!("SELECT cid, takedown_ref FROM blobs WHERE cid = $1", blob_cid)
-            .fetch_optional(&state.db)
-            .await;
+        let blob = sqlx::query!(
+            "SELECT cid, takedown_ref FROM blobs WHERE cid = $1",
+            blob_cid
+        )
+        .fetch_optional(&state.db)
+        .await;
         match blob {
             Ok(Some(row)) => {
                 let takedown = row.takedown_ref.as_ref().map(|r| StatusAttr {
@@ -263,15 +266,15 @@ pub async fn update_subject_status(
                         .execute(&mut *tx)
                         .await
                     } else {
-                        sqlx::query!(
-                            "UPDATE users SET deactivated_at = NULL WHERE did = $1",
-                            did
-                        )
-                        .execute(&mut *tx)
-                        .await
+                        sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
+                            .execute(&mut *tx)
+                            .await
                     };
                     if let Err(e) = result {
-                        error!("Failed to update user deactivation status for {}: {:?}", did, e);
+                        error!(
+                            "Failed to update user deactivation status for {}: {:?}",
+                            did, e
+                        );
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             Json(json!({"error": "InternalError", "message": "Failed to update deactivation status"})),
@@ -288,20 +291,43 @@ pub async fn update_subject_status(
                         .into_response();
                 }
                 if let Some(takedown) = &input.takedown {
-                    let status = if takedown.apply { Some("takendown") } else { None };
-                    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, did, !takedown.apply, status).await {
+                    let status = if takedown.apply {
+                        Some("takendown")
+                    } else {
+                        None
+                    };
+                    if let Err(e) = crate::api::repo::record::sequence_account_event(
+                        &state,
+                        did,
+                        !takedown.apply,
+                        status,
+                    )
+                    .await
+                    {
                         warn!("Failed to sequence account event for takedown: {}", e);
                     }
                 }
                 if let Some(deactivated) = &input.deactivated {
-                    let status = if deactivated.apply { Some("deactivated") } else { None };
-                    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, did, !deactivated.apply, status).await {
+                    let status = if deactivated.apply {
+                        Some("deactivated")
+                    } else {
+                        None
+                    };
+                    if let Err(e) = crate::api::repo::record::sequence_account_event(
+                        &state,
+                        did,
+                        !deactivated.apply,
+                        status,
+                    )
+                    .await
+                    {
                         warn!("Failed to sequence account event for deactivation: {}", e);
                     }
                 }
-                if let Ok(Some(handle)) = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
-                    .fetch_optional(&state.db)
-                    .await
+                if let Ok(Some(handle)) =
+                    sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+                        .fetch_optional(&state.db)
+                        .await
                 {
                     let _ = state.cache.delete(&format!("handle:{}", handle)).await;
                 }
@@ -338,7 +364,10 @@ pub async fn update_subject_status(
                     .execute(&state.db)
                     .await
                     {
-                        error!("Failed to update record takedown status for {}: {:?}", uri, e);
+                        error!(
+                            "Failed to update record takedown status for {}: {:?}",
+                            uri, e
+                        );
                         return (
                             StatusCode::INTERNAL_SERVER_ERROR,
                             Json(json!({"error": "InternalError", "message": "Failed to update takedown status"})),

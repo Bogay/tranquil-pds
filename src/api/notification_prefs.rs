@@ -1,3 +1,5 @@
+use crate::auth::validate_bearer_token;
+use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
@@ -8,8 +10,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use tracing::info;
-use crate::auth::validate_bearer_token;
-use crate::state::AppState;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,21 +24,16 @@ pub struct NotificationPrefsResponse {
     pub signal_verified: bool,
 }
 
-pub async fn get_notification_prefs(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn get_notification_prefs(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired", "message": "Authentication required"})),
-            )
-                .into_response()
-        }
+        None => return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired", "message": "Authentication required"})),
+        )
+            .into_response(),
     };
     let user = match validate_bearer_token(&state.db, &token).await {
         Ok(u) => u,
@@ -47,11 +42,12 @@ pub async fn get_notification_prefs(
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "AuthenticationFailed", "message": "Invalid token"})),
             )
-                .into_response()
+                .into_response();
         }
     };
-    let row = match sqlx::query(
-        r#"
+    let row =
+        match sqlx::query(
+            r#"
         SELECT
             email,
             preferred_notification_channel::text as channel,
@@ -63,21 +59,21 @@ pub async fn get_notification_prefs(
             signal_verified
         FROM users
         WHERE did = $1
-        "#
-    )
-    .bind(&user.did)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            return (
+        "#,
+        )
+        .bind(&user.did)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
+                Json(
+                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
     let email: String = row.get("email");
     let channel: String = row.get("channel");
     let discord_id: Option<String> = row.get("discord_id");
@@ -117,13 +113,11 @@ pub async fn update_notification_prefs(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired", "message": "Authentication required"})),
-            )
-                .into_response()
-        }
+        None => return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "AuthenticationRequired", "message": "Authentication required"})),
+        )
+            .into_response(),
     };
     let user = match validate_bearer_token(&state.db, &token).await {
         Ok(u) => u,
@@ -132,7 +126,7 @@ pub async fn update_notification_prefs(
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "AuthenticationFailed", "message": "Invalid token"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     if let Some(ref channel) = input.preferred_channel {
@@ -208,7 +202,11 @@ pub async fn update_notification_prefs(
         info!(did = %user.did, "Updated Telegram username");
     }
     if let Some(ref signal) = input.signal_number {
-        let signal_clean: Option<&str> = if signal.is_empty() { None } else { Some(signal.as_str()) };
+        let signal_clean: Option<&str> = if signal.is_empty() {
+            None
+        } else {
+            Some(signal.as_str())
+        };
         if let Err(e) = sqlx::query(
             r#"UPDATE users SET signal_number = $1, signal_verified = FALSE, updated_at = NOW() WHERE did = $2"#
         )

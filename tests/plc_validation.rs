@@ -1,7 +1,6 @@
 use bspds::plc::{
-    PlcError, PlcOperation, PlcService, PlcValidationContext,
-    cid_for_cbor, sign_operation, signing_key_to_did_key,
-    validate_plc_operation, validate_plc_operation_for_submission,
+    PlcError, PlcOperation, PlcService, PlcValidationContext, cid_for_cbor, sign_operation,
+    signing_key_to_did_key, validate_plc_operation, validate_plc_operation_for_submission,
     verify_operation_signature,
 };
 use k256::ecdsa::SigningKey;
@@ -95,7 +94,9 @@ fn test_validate_plc_operation_missing_verification_methods() {
         "sig": "test"
     });
     let result = validate_plc_operation(&op);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("verificationMethods")));
+    assert!(
+        matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("verificationMethods"))
+    );
 }
 
 #[test]
@@ -338,7 +339,10 @@ fn test_cid_for_cbor_deterministic() {
     let cid1 = cid_for_cbor(&value).unwrap();
     let cid2 = cid_for_cbor(&value).unwrap();
     assert_eq!(cid1, cid2, "CID generation should be deterministic");
-    assert!(cid1.starts_with("bafyrei"), "CID should start with bafyrei (dag-cbor + sha256)");
+    assert!(
+        cid1.starts_with("bafyrei"),
+        "CID should start with bafyrei (dag-cbor + sha256)"
+    );
 }
 
 #[test]
@@ -354,7 +358,10 @@ fn test_cid_different_for_different_data() {
 fn test_signing_key_to_did_key_format() {
     let key = SigningKey::random(&mut rand::thread_rng());
     let did_key = signing_key_to_did_key(&key);
-    assert!(did_key.starts_with("did:key:z"), "Should start with did:key:z");
+    assert!(
+        did_key.starts_with("did:key:z"),
+        "Should start with did:key:z"
+    );
     assert!(did_key.len() > 50, "Did key should be reasonably long");
 }
 
@@ -364,7 +371,10 @@ fn test_signing_key_to_did_key_unique() {
     let key2 = SigningKey::random(&mut rand::thread_rng());
     let did1 = signing_key_to_did_key(&key1);
     let did2 = signing_key_to_did_key(&key2);
-    assert_ne!(did1, did2, "Different keys should produce different did:keys");
+    assert_ne!(
+        did1, did2,
+        "Different keys should produce different did:keys"
+    );
 }
 
 #[test]
@@ -414,7 +424,10 @@ fn test_validate_for_submission_tombstone_passes() {
         expected_pds_endpoint: "https://pds.example.com".to_string(),
     };
     let result = validate_plc_operation_for_submission(&op, &ctx);
-    assert!(result.is_ok(), "Tombstone should pass submission validation");
+    assert!(
+        result.is_ok(),
+        "Tombstone should pass submission validation"
+    );
 }
 
 #[test]
@@ -447,10 +460,13 @@ fn test_verify_signature_invalid_base64() {
 #[test]
 fn test_plc_operation_struct() {
     let mut services = HashMap::new();
-    services.insert("atproto_pds".to_string(), PlcService {
-        service_type: "AtprotoPersonalDataServer".to_string(),
-        endpoint: "https://pds.example.com".to_string(),
-    });
+    services.insert(
+        "atproto_pds".to_string(),
+        PlcService {
+            service_type: "AtprotoPersonalDataServer".to_string(),
+            endpoint: "https://pds.example.com".to_string(),
+        },
+    );
     let mut verification_methods = HashMap::new();
     verification_methods.insert("atproto".to_string(), "did:key:zTest123".to_string());
     let op = PlcOperation {

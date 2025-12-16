@@ -61,7 +61,7 @@ impl DPoPVerifier {
         let timestamp_bytes = timestamp.to_be_bytes();
         let mut hasher = Sha256::new();
         hasher.update(&self.secret);
-        hasher.update(&timestamp_bytes);
+        hasher.update(timestamp_bytes);
         let hash = hasher.finalize();
         let mut nonce_data = Vec::with_capacity(8 + 16);
         nonce_data.extend_from_slice(&timestamp_bytes);
@@ -74,7 +74,9 @@ impl DPoPVerifier {
             .decode(nonce)
             .map_err(|_| OAuthError::InvalidDpopProof("Invalid nonce encoding".to_string()))?;
         if nonce_bytes.len() < 24 {
-            return Err(OAuthError::InvalidDpopProof("Invalid nonce length".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "Invalid nonce length".to_string(),
+            ));
         }
         let timestamp_bytes: [u8; 8] = nonce_bytes[..8]
             .try_into()
@@ -86,10 +88,12 @@ impl DPoPVerifier {
         }
         let mut hasher = Sha256::new();
         hasher.update(&self.secret);
-        hasher.update(&timestamp_bytes);
+        hasher.update(timestamp_bytes);
         let expected_hash = hasher.finalize();
         if nonce_bytes[8..24] != expected_hash[..16] {
-            return Err(OAuthError::InvalidDpopProof("Invalid nonce signature".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "Invalid nonce signature".to_string(),
+            ));
         }
         Ok(())
     }
@@ -103,7 +107,9 @@ impl DPoPVerifier {
     ) -> Result<DPoPVerifyResult, OAuthError> {
         let parts: Vec<&str> = dpop_header.split('.').collect();
         if parts.len() != 3 {
-            return Err(OAuthError::InvalidDpopProof("Invalid DPoP proof format".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "Invalid DPoP proof format".to_string(),
+            ));
         }
         let header_json = URL_SAFE_NO_PAD
             .decode(parts[0])
@@ -116,22 +122,32 @@ impl DPoPVerifier {
         let payload: DPoPProofPayload = serde_json::from_slice(&payload_json)
             .map_err(|_| OAuthError::InvalidDpopProof("Invalid payload JSON".to_string()))?;
         if header.typ != "dpop+jwt" {
-            return Err(OAuthError::InvalidDpopProof("Invalid typ claim".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "Invalid typ claim".to_string(),
+            ));
         }
         if !matches!(header.alg.as_str(), "ES256" | "ES384" | "ES512" | "EdDSA") {
-            return Err(OAuthError::InvalidDpopProof("Unsupported algorithm".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "Unsupported algorithm".to_string(),
+            ));
         }
         if payload.htm.to_uppercase() != http_method.to_uppercase() {
-            return Err(OAuthError::InvalidDpopProof("HTTP method mismatch".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "HTTP method mismatch".to_string(),
+            ));
         }
         let proof_uri = payload.htu.split('?').next().unwrap_or(&payload.htu);
         let request_uri = http_uri.split('?').next().unwrap_or(http_uri);
         if proof_uri != request_uri {
-            return Err(OAuthError::InvalidDpopProof("HTTP URI mismatch".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "HTTP URI mismatch".to_string(),
+            ));
         }
         let now = Utc::now().timestamp();
         if (now - payload.iat).abs() > DPOP_MAX_AGE_SECS {
-            return Err(OAuthError::InvalidDpopProof("Proof too old or from the future".to_string()));
+            return Err(OAuthError::InvalidDpopProof(
+                "Proof too old or from the future".to_string(),
+            ));
         }
         if let Some(nonce) = &payload.nonce {
             self.validate_nonce(nonce)?;
@@ -155,7 +171,12 @@ impl DPoPVerifier {
             .decode(parts[2])
             .map_err(|_| OAuthError::InvalidDpopProof("Invalid signature encoding".to_string()))?;
         let signing_input = format!("{}.{}", parts[0], parts[1]);
-        verify_dpop_signature(&header.alg, &header.jwk, signing_input.as_bytes(), &signature_bytes)?;
+        verify_dpop_signature(
+            &header.alg,
+            &header.jwk,
+            signing_input.as_bytes(),
+            &signature_bytes,
+        )?;
         let jkt = compute_jwk_thumbprint(&header.jwk)?;
         Ok(DPoPVerifyResult {
             jkt,
@@ -186,9 +207,10 @@ fn verify_es256(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
     use p256::ecdsa::{Signature, VerifyingKey};
     use p256::elliptic_curve::sec1::FromEncodedPoint;
     use p256::{AffinePoint, EncodedPoint};
-    let crv = jwk.crv.as_ref().ok_or_else(|| {
-        OAuthError::InvalidDpopProof("Missing crv for ES256".to_string())
-    })?;
+    let crv = jwk
+        .crv
+        .as_ref()
+        .ok_or_else(|| OAuthError::InvalidDpopProof("Missing crv for ES256".to_string()))?;
     if crv != "P-256" {
         return Err(OAuthError::InvalidDpopProof(format!(
             "Invalid curve for ES256: {}",
@@ -196,14 +218,18 @@ fn verify_es256(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         )));
     }
     let x_bytes = URL_SAFE_NO_PAD
-        .decode(jwk.x.as_ref().ok_or_else(|| {
-            OAuthError::InvalidDpopProof("Missing x coordinate".to_string())
-        })?)
+        .decode(
+            jwk.x
+                .as_ref()
+                .ok_or_else(|| OAuthError::InvalidDpopProof("Missing x coordinate".to_string()))?,
+        )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid x encoding".to_string()))?;
     let y_bytes = URL_SAFE_NO_PAD
-        .decode(jwk.y.as_ref().ok_or_else(|| {
-            OAuthError::InvalidDpopProof("Missing y coordinate".to_string())
-        })?)
+        .decode(
+            jwk.y
+                .as_ref()
+                .ok_or_else(|| OAuthError::InvalidDpopProof("Missing y coordinate".to_string()))?,
+        )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid y encoding".to_string()))?;
     let point = EncodedPoint::from_affine_coordinates(
         x_bytes.as_slice().into(),
@@ -211,8 +237,8 @@ fn verify_es256(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         false,
     );
     let affine_opt: Option<AffinePoint> = AffinePoint::from_encoded_point(&point).into();
-    let affine = affine_opt
-        .ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
+    let affine =
+        affine_opt.ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
     let verifying_key = VerifyingKey::from_affine(affine)
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid verifying key".to_string()))?;
     let sig = Signature::from_slice(signature)
@@ -227,9 +253,10 @@ fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
     use p384::ecdsa::{Signature, VerifyingKey};
     use p384::elliptic_curve::sec1::FromEncodedPoint;
     use p384::{AffinePoint, EncodedPoint};
-    let crv = jwk.crv.as_ref().ok_or_else(|| {
-        OAuthError::InvalidDpopProof("Missing crv for ES384".to_string())
-    })?;
+    let crv = jwk
+        .crv
+        .as_ref()
+        .ok_or_else(|| OAuthError::InvalidDpopProof("Missing crv for ES384".to_string()))?;
     if crv != "P-384" {
         return Err(OAuthError::InvalidDpopProof(format!(
             "Invalid curve for ES384: {}",
@@ -237,14 +264,18 @@ fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         )));
     }
     let x_bytes = URL_SAFE_NO_PAD
-        .decode(jwk.x.as_ref().ok_or_else(|| {
-            OAuthError::InvalidDpopProof("Missing x coordinate".to_string())
-        })?)
+        .decode(
+            jwk.x
+                .as_ref()
+                .ok_or_else(|| OAuthError::InvalidDpopProof("Missing x coordinate".to_string()))?,
+        )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid x encoding".to_string()))?;
     let y_bytes = URL_SAFE_NO_PAD
-        .decode(jwk.y.as_ref().ok_or_else(|| {
-            OAuthError::InvalidDpopProof("Missing y coordinate".to_string())
-        })?)
+        .decode(
+            jwk.y
+                .as_ref()
+                .ok_or_else(|| OAuthError::InvalidDpopProof("Missing y coordinate".to_string()))?,
+        )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid y encoding".to_string()))?;
     let point = EncodedPoint::from_affine_coordinates(
         x_bytes.as_slice().into(),
@@ -252,8 +283,8 @@ fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         false,
     );
     let affine_opt: Option<AffinePoint> = AffinePoint::from_encoded_point(&point).into();
-    let affine = affine_opt
-        .ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
+    let affine =
+        affine_opt.ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
     let verifying_key = VerifyingKey::from_affine(affine)
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid verifying key".to_string()))?;
     let sig = Signature::from_slice(signature)
@@ -265,9 +296,10 @@ fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
 
 fn verify_eddsa(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), OAuthError> {
     use ed25519_dalek::{Signature, VerifyingKey};
-    let crv = jwk.crv.as_ref().ok_or_else(|| {
-        OAuthError::InvalidDpopProof("Missing crv for EdDSA".to_string())
-    })?;
+    let crv = jwk
+        .crv
+        .as_ref()
+        .ok_or_else(|| OAuthError::InvalidDpopProof("Missing crv for EdDSA".to_string()))?;
     if crv != "Ed25519" {
         return Err(OAuthError::InvalidDpopProof(format!(
             "Invalid curve for EdDSA: {}",
@@ -275,13 +307,15 @@ fn verify_eddsa(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
         )));
     }
     let x_bytes = URL_SAFE_NO_PAD
-        .decode(jwk.x.as_ref().ok_or_else(|| {
-            OAuthError::InvalidDpopProof("Missing x coordinate".to_string())
-        })?)
+        .decode(
+            jwk.x
+                .as_ref()
+                .ok_or_else(|| OAuthError::InvalidDpopProof("Missing x coordinate".to_string()))?,
+        )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid x encoding".to_string()))?;
-    let key_bytes: [u8; 32] = x_bytes.try_into().map_err(|_| {
-        OAuthError::InvalidDpopProof("Invalid Ed25519 key length".to_string())
-    })?;
+    let key_bytes: [u8; 32] = x_bytes
+        .try_into()
+        .map_err(|_| OAuthError::InvalidDpopProof("Invalid Ed25519 key length".to_string()))?;
     let verifying_key = VerifyingKey::from_bytes(&key_bytes)
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid Ed25519 key".to_string()))?;
     let sig_bytes: [u8; 64] = signature.try_into().map_err(|_| {
@@ -308,10 +342,7 @@ pub fn compute_jwk_thumbprint(jwk: &DPoPJwk) -> Result<String, OAuthError> {
                 .y
                 .as_ref()
                 .ok_or_else(|| OAuthError::InvalidDpopProof("Missing y".to_string()))?;
-            format!(
-                r#"{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}}"#,
-                crv, x, y
-            )
+            format!(r#"{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}}"#, crv, x, y)
         }
         "OKP" => {
             let crv = jwk
@@ -333,14 +364,14 @@ pub fn compute_jwk_thumbprint(jwk: &DPoPJwk) -> Result<String, OAuthError> {
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
     let hash = hasher.finalize();
-    Ok(URL_SAFE_NO_PAD.encode(&hash))
+    Ok(URL_SAFE_NO_PAD.encode(hash))
 }
 
 pub fn compute_access_token_hash(access_token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(access_token.as_bytes());
     let hash = hasher.finalize();
-    URL_SAFE_NO_PAD.encode(&hash)
+    URL_SAFE_NO_PAD.encode(hash)
 }
 
 #[cfg(test)]

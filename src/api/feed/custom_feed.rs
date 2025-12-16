@@ -1,7 +1,7 @@
-use crate::api::proxy_client::{
-    is_ssrf_safe, proxy_client, validate_at_uri, validate_limit, MAX_RESPONSE_SIZE,
-};
 use crate::api::ApiError;
+use crate::api::proxy_client::{
+    MAX_RESPONSE_SIZE, is_ssrf_safe, proxy_client, validate_at_uri, validate_limit,
+};
 use crate::state::AppState;
 use axum::{
     extract::{Query, State},
@@ -61,10 +61,17 @@ pub async fn get_feed(
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(&query_params);
     if let Some(key_bytes) = auth_user.key_bytes.as_ref() {
-        let appview_did = std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
-        match crate::auth::create_service_token(&auth_user.did, &appview_did, "app.bsky.feed.getFeed", key_bytes) {
+        let appview_did =
+            std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
+        match crate::auth::create_service_token(
+            &auth_user.did,
+            &appview_did,
+            "app.bsky.feed.getFeed",
+            key_bytes,
+        ) {
             Ok(service_token) => {
-                request_builder = request_builder.header("Authorization", format!("Bearer {}", service_token));
+                request_builder =
+                    request_builder.header("Authorization", format!("Bearer {}", service_token));
             }
             Err(e) => {
                 error!(error = ?e, "Failed to create service token for getFeed");

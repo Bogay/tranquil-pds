@@ -27,7 +27,7 @@ impl BlockStore for PostgresBlockStore {
         let row = sqlx::query!("SELECT data FROM blocks WHERE cid = $1", &cid_bytes)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| RepoError::storage(e))?;
+            .map_err(RepoError::storage)?;
         match row {
             Some(row) => Ok(Some(Bytes::from(row.data))),
             None => Ok(None),
@@ -39,14 +39,22 @@ impl BlockStore for PostgresBlockStore {
         let mut hasher = Sha256::new();
         hasher.update(data);
         let hash = hasher.finalize();
-        let multihash = Multihash::wrap(0x12, &hash)
-            .map_err(|e| RepoError::storage(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Failed to wrap multihash: {:?}", e))))?;
+        let multihash = Multihash::wrap(0x12, &hash).map_err(|e| {
+            RepoError::storage(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to wrap multihash: {:?}", e),
+            ))
+        })?;
         let cid = Cid::new_v1(0x71, multihash);
         let cid_bytes = cid.to_bytes();
-        sqlx::query!("INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING", &cid_bytes, data)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| RepoError::storage(e))?;
+        sqlx::query!(
+            "INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING",
+            &cid_bytes,
+            data
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(RepoError::storage)?;
         Ok(cid)
     }
 
@@ -56,7 +64,7 @@ impl BlockStore for PostgresBlockStore {
         let row = sqlx::query!("SELECT 1 as one FROM blocks WHERE cid = $1", &cid_bytes)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| RepoError::storage(e))?;
+            .map_err(RepoError::storage)?;
         Ok(row.is_some())
     }
 
@@ -82,7 +90,7 @@ impl BlockStore for PostgresBlockStore {
         )
         .execute(&self.pool)
         .await
-        .map_err(|e| RepoError::storage(e))?;
+        .map_err(RepoError::storage)?;
         Ok(())
     }
 
@@ -98,7 +106,7 @@ impl BlockStore for PostgresBlockStore {
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| RepoError::storage(e))?;
+        .map_err(RepoError::storage)?;
         let found: std::collections::HashMap<Vec<u8>, Bytes> = rows
             .into_iter()
             .map(|row| (row.cid, Bytes::from(row.data)))

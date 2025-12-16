@@ -51,8 +51,12 @@ impl BlockStore for TrackingBlockStore {
         let result = self.inner.get(cid).await?;
         if result.is_some() {
             match self.read_cids.lock() {
-                Ok(mut guard) => { guard.insert(*cid); },
-                Err(poisoned) => { poisoned.into_inner().insert(*cid); },
+                Ok(mut guard) => {
+                    guard.insert(*cid);
+                }
+                Err(poisoned) => {
+                    poisoned.into_inner().insert(*cid);
+                }
             }
         }
         Ok(result)
@@ -61,8 +65,8 @@ impl BlockStore for TrackingBlockStore {
     async fn put(&self, data: &[u8]) -> Result<Cid, RepoError> {
         let cid = self.inner.put(data).await?;
         match self.written_cids.lock() {
-            Ok(mut guard) => guard.push(cid.clone()),
-            Err(poisoned) => poisoned.into_inner().push(cid.clone()),
+            Ok(mut guard) => guard.push(cid),
+            Err(poisoned) => poisoned.into_inner().push(cid),
         }
         Ok(cid)
     }
@@ -76,7 +80,7 @@ impl BlockStore for TrackingBlockStore {
         blocks: impl IntoIterator<Item = (Cid, Bytes)> + Send,
     ) -> Result<(), RepoError> {
         let blocks: Vec<_> = blocks.into_iter().collect();
-        let cids: Vec<Cid> = blocks.iter().map(|(cid, _)| cid.clone()).collect();
+        let cids: Vec<Cid> = blocks.iter().map(|(cid, _)| *cid).collect();
         self.inner.put_many(blocks).await?;
         match self.written_cids.lock() {
             Ok(mut guard) => guard.extend(cids),
@@ -90,8 +94,12 @@ impl BlockStore for TrackingBlockStore {
         for (cid, result) in cids.iter().zip(results.iter()) {
             if result.is_some() {
                 match self.read_cids.lock() {
-                    Ok(mut guard) => { guard.insert(*cid); },
-                    Err(poisoned) => { poisoned.into_inner().insert(*cid); },
+                    Ok(mut guard) => {
+                        guard.insert(*cid);
+                    }
+                    Err(poisoned) => {
+                        poisoned.into_inner().insert(*cid);
+                    }
                 }
             }
         }

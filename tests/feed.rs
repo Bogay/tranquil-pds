@@ -90,10 +90,7 @@ async fn test_register_push_requires_auth() {
     let client = client();
     let base = base_url().await;
     let res = client
-        .post(format!(
-            "{}/xrpc/app.bsky.notification.registerPush",
-            base
-        ))
+        .post(format!("{}/xrpc/app.bsky.notification.registerPush", base))
         .json(&json!({
             "serviceDid": "did:web:example.com",
             "token": "test-token",

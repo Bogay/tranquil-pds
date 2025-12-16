@@ -1,12 +1,12 @@
-use crate::api::repo::record::utils::{commit_and_log, RecordOp};
+use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::api::repo::record::write::prepare_repo_write;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
 use cid::Cid;
 use jacquard::types::string::Nsid;
@@ -38,32 +38,45 @@ pub async fn delete_record(
             Ok(res) => res,
             Err(err_res) => return err_res,
         };
-    if let Some(swap_commit) = &input.swap_commit {
-        if Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
+    if let Some(swap_commit) = &input.swap_commit
+        && Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
             return (
                 StatusCode::CONFLICT,
                 Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
             )
                 .into_response();
         }
-    }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
-        _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Commit block not found"}))).into_response(),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Commit block not found"})),
+            )
+                .into_response();
+        }
     };
     let commit = match Commit::from_cbor(&commit_bytes) {
         Ok(c) => c,
-        _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to parse commit"}))).into_response(),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to parse commit"})),
+            )
+                .into_response();
+        }
     };
-    let mst = Mst::load(
-        Arc::new(tracking_store.clone()),
-        commit.data,
-        None,
-    );
+    let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let collection_nsid = match input.collection.parse::<Nsid>() {
         Ok(n) => n,
-        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidCollection"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidCollection"})),
+            )
+                .into_response();
+        }
     };
     let key = format!("{}/{}", collection_nsid, input.rkey);
     if let Some(swap_record_str) = &input.swap_record {
@@ -88,15 +101,23 @@ pub async fn delete_record(
         Ok(c) => c,
         Err(e) => {
             error!("Failed to persist MST: {:?}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to persist MST"}))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to persist MST"})),
+            )
+                .into_response();
         }
     };
-    let op = RecordOp::Delete { collection: input.collection, rkey: input.rkey, prev: prev_record_cid };
+    let op = RecordOp::Delete {
+        collection: input.collection,
+        rkey: input.rkey,
+        prev: prev_record_cid,
+    };
     let mut relevant_blocks = std::collections::BTreeMap::new();
-    if let Err(_) = new_mst.blocks_for_path(&key, &mut relevant_blocks).await {
+    if new_mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
     }
-    if let Err(_) = mst.blocks_for_path(&key, &mut relevant_blocks).await {
+    if mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get old MST blocks for path"}))).into_response();
     }
     let mut written_cids = tracking_store.get_all_relevant_cids();
@@ -105,9 +126,29 @@ pub async fn delete_record(
             written_cids.push(*cid);
         }
     }
-    let written_cids_str = written_cids.iter().map(|c| c.to_string()).collect::<Vec<_>>();
-    if let Err(e) = commit_and_log(&state, &did, user_id, Some(current_root_cid), Some(commit.data), new_mst_root, vec![op], &written_cids_str).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": e}))).into_response();
+    let written_cids_str = written_cids
+        .iter()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>();
+    if let Err(e) = commit_and_log(
+        &state,
+        CommitParams {
+            did: &did,
+            user_id,
+            current_root_cid: Some(current_root_cid),
+            prev_data_cid: Some(commit.data),
+            new_mst_root,
+            ops: vec![op],
+            blocks_cids: &written_cids_str,
+        },
+    )
+    .await
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError", "message": e})),
+        )
+            .into_response();
     };
     (StatusCode::OK, Json(json!({}))).into_response()
 }

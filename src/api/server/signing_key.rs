@@ -58,11 +58,7 @@ pub async fn reserve_signing_key(
     .await;
     match result {
         Ok(row) => {
-            info!(
-                "Reserved signing key {} for did {:?}",
-                row.id,
-                input.did
-            );
+            info!("Reserved signing key {} for did {:?}", row.id, input.did);
             (
                 StatusCode::OK,
                 Json(ReserveSigningKeyOutput {

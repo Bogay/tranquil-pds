@@ -143,17 +143,18 @@ pub async fn create_invite_codes(
         });
     } else {
         for account_did in for_accounts {
-            let target_user_id = match sqlx::query!("SELECT id FROM users WHERE did = $1", account_did)
-                .fetch_optional(&state.db)
-                .await
-            {
-                Ok(Some(row)) => row.id,
-                Ok(None) => continue,
-                Err(e) => {
-                    error!("DB error looking up target account: {:?}", e);
-                    return ApiError::InternalError.into_response();
-                }
-            };
+            let target_user_id =
+                match sqlx::query!("SELECT id FROM users WHERE did = $1", account_did)
+                    .fetch_optional(&state.db)
+                    .await
+                {
+                    Ok(Some(row)) => row.id,
+                    Ok(None) => continue,
+                    Err(e) => {
+                        error!("DB error looking up target account: {:?}", e);
+                        return ApiError::InternalError.into_response();
+                    }
+                };
             let mut codes = Vec::new();
             for _ in 0..code_count {
                 let code = Uuid::new_v4().to_string();
@@ -177,7 +178,10 @@ pub async fn create_invite_codes(
             });
         }
     }
-    Json(CreateInviteCodesOutput { codes: result_codes }).into_response()
+    Json(CreateInviteCodesOutput {
+        codes: result_codes,
+    })
+    .into_response()
 }
 
 #[derive(Deserialize)]

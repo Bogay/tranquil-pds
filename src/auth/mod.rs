@@ -10,15 +10,19 @@ pub mod extractor;
 pub mod token;
 pub mod verify;
 
-pub use extractor::{BearerAuth, BearerAuthAllowDeactivated, AuthError, extract_bearer_token_from_header, extract_auth_token_from_header, ExtractedToken};
-pub use token::{
-    create_access_token, create_refresh_token, create_service_token,
-    create_access_token_with_metadata, create_refresh_token_with_metadata,
-    TokenWithMetadata,
-    TOKEN_TYPE_ACCESS, TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE,
-    SCOPE_ACCESS, SCOPE_REFRESH, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED,
+pub use extractor::{
+    AuthError, BearerAuth, BearerAuthAllowDeactivated, ExtractedToken,
+    extract_auth_token_from_header, extract_bearer_token_from_header,
 };
-pub use verify::{get_did_from_token, get_jti_from_token, verify_token, verify_access_token, verify_refresh_token};
+pub use token::{
+    SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH, TOKEN_TYPE_ACCESS,
+    TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, TokenWithMetadata, create_access_token,
+    create_access_token_with_metadata, create_refresh_token, create_refresh_token_with_metadata,
+    create_service_token,
+};
+pub use verify::{
+    get_did_from_token, get_jti_from_token, verify_access_token, verify_refresh_token, verify_token,
+};
 
 const KEY_CACHE_TTL_SECS: u64 = 300;
 const SESSION_CACHE_TTL_SECS: u64 = 60;
@@ -113,30 +117,34 @@ async fn validate_bearer_token_with_options_internal(
                 Some(status) => (Some(key), status.deactivated_at, status.takedown_ref),
                 None => (None, None, None),
             }
-        } else {
-            if let Some(user) = sqlx::query!(
-                "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref
-                 FROM users u
-                 JOIN user_keys k ON u.id = k.user_id
-                 WHERE u.did = $1",
-                did
-            )
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten()
-            {
-                let key = crate::config::decrypt_key(&user.key_bytes, user.encryption_version)
-                    .map_err(|_| TokenValidationError::KeyDecryptionFailed)?;
+        } else if let Some(user) = sqlx::query!(
+            "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref
+             FROM users u
+             JOIN user_keys k ON u.id = k.user_id
+             WHERE u.did = $1",
+            did
+        )
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        {
+            let key = crate::config::decrypt_key(&user.key_bytes, user.encryption_version)
+                .map_err(|_| TokenValidationError::KeyDecryptionFailed)?;
 
-                if let Some(c) = cache {
-                    let _ = c.set_bytes(&key_cache_key, &key, Duration::from_secs(KEY_CACHE_TTL_SECS)).await;
-                }
-
-                (Some(key), user.deactivated_at, user.takedown_ref)
-            } else {
-                (None, None, None)
+            if let Some(c) = cache {
+                let _ = c
+                    .set_bytes(
+                        &key_cache_key,
+                        &key,
+                        Duration::from_secs(KEY_CACHE_TTL_SECS),
+                    )
+                    .await;
             }
+
+            (Some(key), user.deactivated_at, user.takedown_ref)
+        } else {
+            (None, None, None)
         };
 
         if let Some(decrypted_key) = decrypted_key {
@@ -175,11 +183,16 @@ async fn validate_bearer_token_with_options_internal(
 
                     session_valid = session_exists.is_some();
 
-                    if session_valid {
-                        if let Some(c) = cache {
-                            let _ = c.set(&session_cache_key, "1", Duration::from_secs(SESSION_CACHE_TTL_SECS)).await;
+                    if session_valid
+                        && let Some(c) = cache {
+                            let _ = c
+                                .set(
+                                    &session_cache_key,
+                                    "1",
+                                    Duration::from_secs(SESSION_CACHE_TTL_SECS),
+                                )
+                                .await;
                         }
-                    }
                 }
 
                 if session_valid {
@@ -193,8 +206,8 @@ async fn validate_bearer_token_with_options_internal(
         }
     }
 
-    if let Ok(oauth_info) = crate::oauth::verify::extract_oauth_token_info(token) {
-        if let Some(oauth_token) = sqlx::query!(
+    if let Ok(oauth_info) = crate::oauth::verify::extract_oauth_token_info(token)
+        && let Some(oauth_token) = sqlx::query!(
             r#"SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref,
                       k.key_bytes as "key_bytes?", k.encryption_version as "encryption_version?"
                FROM oauth_token t
@@ -218,7 +231,9 @@ async fn validate_bearer_token_with_options_internal(
 
             let now = chrono::Utc::now();
             if oauth_token.expires_at > now {
-                let key_bytes = if let (Some(kb), Some(ev)) = (&oauth_token.key_bytes, oauth_token.encryption_version) {
+                let key_bytes = if let (Some(kb), Some(ev)) =
+                    (&oauth_token.key_bytes, oauth_token.encryption_version)
+                {
                     crate::config::decrypt_key(kb, Some(ev)).ok()
                 } else {
                     None
@@ -230,7 +245,6 @@ async fn validate_bearer_token_with_options_internal(
                 });
             }
         }
-    }
 
     Err(TokenValidationError::AuthenticationFailed)
 }
@@ -256,7 +270,15 @@ pub async fn validate_token_with_dpop(
             return validate_bearer_token(db, token).await;
         }
     }
-    match crate::oauth::verify::verify_oauth_access_token(db, token, dpop_proof, http_method, http_uri).await {
+    match crate::oauth::verify::verify_oauth_access_token(
+        db,
+        token,
+        dpop_proof,
+        http_method,
+        http_uri,
+    )
+    .await
+    {
         Ok(result) => {
             if !allow_deactivated {
                 let deactivated = sqlx::query_scalar!(
@@ -272,15 +294,13 @@ pub async fn validate_token_with_dpop(
                     return Err(TokenValidationError::AccountDeactivated);
                 }
             }
-            let takedown = sqlx::query_scalar!(
-                "SELECT takedown_ref FROM users WHERE did = $1",
-                result.did
-            )
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten()
-            .flatten();
+            let takedown =
+                sqlx::query_scalar!("SELECT takedown_ref FROM users WHERE did = $1", result.did)
+                    .fetch_optional(db)
+                    .await
+                    .ok()
+                    .flatten()
+                    .flatten();
             if takedown.is_some() {
                 return Err(TokenValidationError::AccountTakedown);
             }

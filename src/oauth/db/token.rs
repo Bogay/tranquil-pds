@@ -1,12 +1,9 @@
-use chrono::{DateTime, Utc};
-use sqlx::PgPool;
 use super::super::{OAuthError, TokenData};
 use super::helpers::{from_json, to_json};
+use chrono::{DateTime, Utc};
+use sqlx::PgPool;
 
-pub async fn create_token(
-    pool: &PgPool,
-    data: &TokenData,
-) -> Result<i32, OAuthError> {
+pub async fn create_token(pool: &PgPool, data: &TokenData) -> Result<i32, OAuthError> {
     let client_auth_json = to_json(&data.client_auth)?;
     let parameters_json = to_json(&data.parameters)?;
     let row = sqlx::query!(
@@ -193,10 +190,7 @@ pub async fn delete_token_family(pool: &PgPool, db_id: i32) -> Result<(), OAuthE
     Ok(())
 }
 
-pub async fn list_tokens_for_user(
-    pool: &PgPool,
-    did: &str,
-) -> Result<Vec<TokenData>, OAuthError> {
+pub async fn list_tokens_for_user(pool: &PgPool, did: &str) -> Result<Vec<TokenData>, OAuthError> {
     let rows = sqlx::query!(
         r#"
         SELECT did, token_id, created_at, updated_at, expires_at, client_id, client_auth,

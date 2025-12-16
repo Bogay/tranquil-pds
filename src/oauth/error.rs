@@ -37,21 +37,15 @@ impl IntoResponse for OAuthError {
             OAuthError::InvalidClient(msg) => {
                 (StatusCode::UNAUTHORIZED, "invalid_client", Some(msg))
             }
-            OAuthError::InvalidGrant(msg) => {
-                (StatusCode::BAD_REQUEST, "invalid_grant", Some(msg))
-            }
+            OAuthError::InvalidGrant(msg) => (StatusCode::BAD_REQUEST, "invalid_grant", Some(msg)),
             OAuthError::UnauthorizedClient(msg) => {
                 (StatusCode::UNAUTHORIZED, "unauthorized_client", Some(msg))
             }
             OAuthError::UnsupportedGrantType(msg) => {
                 (StatusCode::BAD_REQUEST, "unsupported_grant_type", Some(msg))
             }
-            OAuthError::InvalidScope(msg) => {
-                (StatusCode::BAD_REQUEST, "invalid_scope", Some(msg))
-            }
-            OAuthError::AccessDenied(msg) => {
-                (StatusCode::FORBIDDEN, "access_denied", Some(msg))
-            }
+            OAuthError::InvalidScope(msg) => (StatusCode::BAD_REQUEST, "invalid_scope", Some(msg)),
+            OAuthError::AccessDenied(msg) => (StatusCode::FORBIDDEN, "access_denied", Some(msg)),
             OAuthError::ServerError(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "server_error", Some(msg))
             }
@@ -69,15 +63,13 @@ impl IntoResponse for OAuthError {
             OAuthError::InvalidDpopProof(msg) => {
                 (StatusCode::UNAUTHORIZED, "invalid_dpop_proof", Some(msg))
             }
-            OAuthError::ExpiredToken(msg) => {
-                (StatusCode::UNAUTHORIZED, "invalid_token", Some(msg))
-            }
-            OAuthError::InvalidToken(msg) => {
-                (StatusCode::UNAUTHORIZED, "invalid_token", Some(msg))
-            }
-            OAuthError::RateLimited => {
-                (StatusCode::TOO_MANY_REQUESTS, "rate_limited", Some("Too many requests. Please try again later.".to_string()))
-            }
+            OAuthError::ExpiredToken(msg) => (StatusCode::UNAUTHORIZED, "invalid_token", Some(msg)),
+            OAuthError::InvalidToken(msg) => (StatusCode::UNAUTHORIZED, "invalid_token", Some(msg)),
+            OAuthError::RateLimited => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                Some("Too many requests. Please try again later.".to_string()),
+            ),
         };
         (
             status,

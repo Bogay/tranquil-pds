@@ -1,12 +1,12 @@
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const APP_BSKY_NAMESPACE: &str = "app.bsky";
 const MAX_PREFERENCES_COUNT: usize = 100;
@@ -75,7 +75,8 @@ pub async fn get_preferences(
     let preferences: Vec<Value> = prefs
         .into_iter()
         .filter(|row| {
-            row.name == APP_BSKY_NAMESPACE || row.name.starts_with(&format!("{}.", APP_BSKY_NAMESPACE))
+            row.name == APP_BSKY_NAMESPACE
+                || row.name.starts_with(&format!("{}.", APP_BSKY_NAMESPACE))
         })
         .filter_map(|row| {
             if row.name == "app.bsky.actor.defs#declaredAgePref" {
@@ -221,7 +222,7 @@ pub async fn put_preferences(
                 .into_response();
         }
     }
-    if let Err(_) = tx.commit().await {
+    if tx.commit().await.is_err() {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError", "message": "Failed to commit transaction"})),

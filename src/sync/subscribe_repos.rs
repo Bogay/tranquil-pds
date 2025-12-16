@@ -1,8 +1,10 @@
 use crate::state::AppState;
 use crate::sync::firehose::SequencedEvent;
-use crate::sync::util::{format_event_for_sending, format_event_with_prefetched_blocks, prefetch_blocks_for_events};
+use crate::sync::util::{
+    format_event_for_sending, format_event_with_prefetched_blocks, prefetch_blocks_for_events,
+};
 use axum::{
-    extract::{ws::Message, ws::WebSocket, ws::WebSocketUpgrade, Query, State},
+    extract::{Query, State, ws::Message, ws::WebSocket, ws::WebSocketUpgrade},
     response::Response,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
@@ -53,7 +55,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState, params: Subscribe
     info!(subscribers = count, "Firehose subscriber disconnected");
 }
 
-async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: SubscribeReposParams) -> Result<(), ()> {
+async fn handle_socket_inner(
+    socket: &mut WebSocket,
+    state: &AppState,
+    params: SubscribeReposParams,
+) -> Result<(), ()> {
     if let Some(cursor) = params.cursor {
         let mut current_cursor = cursor;
         loop {
@@ -87,13 +93,14 @@ async fn handle_socket_inner(socket: &mut WebSocket, state: &AppState, params: S
                     };
                     for event in events {
                         current_cursor = event.seq;
-                        let bytes = match format_event_with_prefetched_blocks(event, &prefetched).await {
-                            Ok(b) => b,
-                            Err(e) => {
-                                warn!("Failed to format backfill event: {}", e);
-                                return Err(());
-                            }
-                        };
+                        let bytes =
+                            match format_event_with_prefetched_blocks(event, &prefetched).await {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    warn!("Failed to format backfill event: {}", e);
+                                    return Err(());
+                                }
+                            };
                         if let Err(e) = socket.send(Message::Binary(bytes.into())).await {
                             warn!("Failed to send backfill event: {}", e);
                             return Err(());

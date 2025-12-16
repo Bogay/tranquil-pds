@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -22,7 +22,12 @@ pub struct CircuitBreaker {
 }
 
 impl CircuitBreaker {
-    pub fn new(name: &str, failure_threshold: u32, success_threshold: u32, timeout_secs: u64) -> Self {
+    pub fn new(
+        name: &str,
+        failure_threshold: u32,
+        success_threshold: u32,
+        timeout_secs: u64,
+    ) -> Self {
         Self {
             name: name.to_string(),
             failure_threshold,

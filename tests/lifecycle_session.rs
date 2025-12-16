@@ -1,8 +1,8 @@
 mod common;
 mod helpers;
+use chrono::Utc;
 use common::*;
 use helpers::*;
-use chrono::Utc;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 
@@ -168,7 +168,8 @@ async fn test_session_lifecycle_refresh_invalidates_old() {
         .await
         .expect("Failed reuse attempt");
     assert!(
-        reuse_res.status() == StatusCode::UNAUTHORIZED || reuse_res.status() == StatusCode::BAD_REQUEST,
+        reuse_res.status() == StatusCode::UNAUTHORIZED
+            || reuse_res.status() == StatusCode::BAD_REQUEST,
         "Old refresh token should be invalid after use"
     );
 }
@@ -237,7 +238,11 @@ async fn test_app_password_lifecycle() {
         .send()
         .await
         .expect("Failed to login with app password");
-    assert_eq!(login_res.status(), StatusCode::OK, "App password login should work");
+    assert_eq!(
+        login_res.status(),
+        StatusCode::OK,
+        "App password login should work"
+    );
     let revoke_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.revokeAppPassword",
@@ -342,7 +347,11 @@ async fn test_account_deactivation_lifecycle() {
         .send()
         .await
         .expect("Failed to get post while deactivated");
-    assert_eq!(get_post_res.status(), StatusCode::OK, "Records should still be readable");
+    assert_eq!(
+        get_post_res.status(),
+        StatusCode::OK,
+        "Records should still be readable"
+    );
     let activate_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.activateAccount",
@@ -365,7 +374,10 @@ async fn test_account_deactivation_lifecycle() {
         .expect("Failed to check status after activate");
     assert_eq!(status_after_activate.status(), StatusCode::OK);
     let (new_post_uri, _) = create_post(&client, &did, &jwt, "Post after reactivation").await;
-    assert!(!new_post_uri.is_empty(), "Should be able to post after reactivation");
+    assert!(
+        !new_post_uri.is_empty(),
+        "Should be able to post after reactivation"
+    );
 }
 
 #[tokio::test]
@@ -415,11 +427,16 @@ async fn test_request_account_delete() {
         .expect("Failed to request account deletion");
     assert_eq!(res.status(), StatusCode::OK);
     let db_url = get_db_connection_string().await;
-    let pool = sqlx::PgPool::connect(&db_url).await.expect("Failed to connect to test DB");
-    let row = sqlx::query!("SELECT token, expires_at FROM account_deletion_requests WHERE did = $1", did)
-        .fetch_optional(&pool)
+    let pool = sqlx::PgPool::connect(&db_url)
         .await
-        .expect("Failed to query DB");
+        .expect("Failed to connect to test DB");
+    let row = sqlx::query!(
+        "SELECT token, expires_at FROM account_deletion_requests WHERE did = $1",
+        did
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("Failed to query DB");
     assert!(row.is_some(), "Deletion token should exist in DB");
     let row = row.unwrap();
     assert!(!row.token.is_empty(), "Token should not be empty");

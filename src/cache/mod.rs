@@ -32,8 +32,7 @@ pub struct ValkeyCache {
 
 impl ValkeyCache {
     pub async fn new(url: &str) -> Result<Self, CacheError> {
-        let client = redis::Client::open(url)
-            .map_err(|e| CacheError::Connection(e.to_string()))?;
+        let client = redis::Client::open(url).map_err(|e| CacheError::Connection(e.to_string()))?;
         let manager = client
             .get_connection_manager()
             .await
@@ -118,7 +117,7 @@ impl DistributedRateLimiter for RedisRateLimiter {
     async fn check_rate_limit(&self, key: &str, limit: u32, window_ms: u64) -> bool {
         let mut conn = self.conn.clone();
         let full_key = format!("rl:{}", key);
-        let window_secs = ((window_ms + 999) / 1000).max(1) as i64;
+        let window_secs = window_ms.div_ceil(1000).max(1) as i64;
         let count: Result<i64, _> = redis::cmd("INCR")
             .arg(&full_key)
             .query_async(&mut conn)
@@ -147,46 +146,6 @@ pub struct NoOpRateLimiter;
 impl DistributedRateLimiter for NoOpRateLimiter {
     async fn check_rate_limit(&self, _key: &str, _limit: u32, _window_ms: u64) -> bool {
         true
-    }
-}
-
-pub enum CacheBackend {
-    Valkey(ValkeyCache),
-    NoOp,
-}
-
-impl CacheBackend {
-    pub fn rate_limiter(&self) -> Arc<dyn DistributedRateLimiter> {
-        match self {
-            CacheBackend::Valkey(cache) => {
-                Arc::new(RedisRateLimiter::new(cache.connection()))
-            }
-            CacheBackend::NoOp => Arc::new(NoOpRateLimiter),
-        }
-    }
-}
-
-#[async_trait]
-impl Cache for CacheBackend {
-    async fn get(&self, key: &str) -> Option<String> {
-        match self {
-            CacheBackend::Valkey(c) => c.get(key).await,
-            CacheBackend::NoOp => None,
-        }
-    }
-
-    async fn set(&self, key: &str, value: &str, ttl: Duration) -> Result<(), CacheError> {
-        match self {
-            CacheBackend::Valkey(c) => c.set(key, value, ttl).await,
-            CacheBackend::NoOp => Ok(()),
-        }
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), CacheError> {
-        match self {
-            CacheBackend::Valkey(c) => c.delete(key).await,
-            CacheBackend::NoOp => Ok(()),
-        }
     }
 }
 

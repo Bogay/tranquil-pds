@@ -109,18 +109,9 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.atproto.sync.getLatestCommit",
             get(sync::get_latest_commit),
         )
-        .route(
-            "/xrpc/com.atproto.sync.listRepos",
-            get(sync::list_repos),
-        )
-        .route(
-            "/xrpc/com.atproto.sync.getBlob",
-            get(sync::get_blob),
-        )
-        .route(
-            "/xrpc/com.atproto.sync.listBlobs",
-            get(sync::list_blobs),
-        )
+        .route("/xrpc/com.atproto.sync.listRepos", get(sync::list_repos))
+        .route("/xrpc/com.atproto.sync.getBlob", get(sync::get_blob))
+        .route("/xrpc/com.atproto.sync.listBlobs", get(sync::list_blobs))
         .route(
             "/xrpc/com.atproto.sync.getRepoStatus",
             get(sync::get_repo_status),
@@ -145,26 +136,14 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.atproto.sync.requestCrawl",
             post(sync::request_crawl),
         )
-        .route(
-            "/xrpc/com.atproto.sync.getBlocks",
-            get(sync::get_blocks),
-        )
-        .route(
-            "/xrpc/com.atproto.sync.getRepo",
-            get(sync::get_repo),
-        )
-        .route(
-            "/xrpc/com.atproto.sync.getRecord",
-            get(sync::get_record),
-        )
+        .route("/xrpc/com.atproto.sync.getBlocks", get(sync::get_blocks))
+        .route("/xrpc/com.atproto.sync.getRepo", get(sync::get_repo))
+        .route("/xrpc/com.atproto.sync.getRecord", get(sync::get_record))
         .route(
             "/xrpc/com.atproto.sync.subscribeRepos",
             get(sync::subscribe_repos),
         )
-        .route(
-            "/xrpc/com.atproto.sync.getHead",
-            get(sync::get_head),
-        )
+        .route("/xrpc/com.atproto.sync.getHead", get(sync::get_head))
         .route(
             "/xrpc/com.atproto.sync.getCheckout",
             get(sync::get_checkout),
@@ -349,16 +328,16 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/app.bsky.feed.getPostThread",
             get(api::feed::get_post_thread),
         )
-        .route(
-            "/xrpc/app.bsky.feed.getFeed",
-            get(api::feed::get_feed),
-        )
+        .route("/xrpc/app.bsky.feed.getFeed", get(api::feed::get_feed))
         .route(
             "/xrpc/app.bsky.notification.registerPush",
             post(api::notification::register_push),
         )
         .route("/.well-known/did.json", get(api::identity::well_known_did))
-        .route("/.well-known/atproto-did", get(api::identity::well_known_atproto_did))
+        .route(
+            "/.well-known/atproto-did",
+            get(api::identity::well_known_atproto_did),
+        )
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))
         .route(
             "/.well-known/oauth-protected-resource",
@@ -375,13 +354,28 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/oauth/authorize", get(oauth::endpoints::authorize_get))
         .route("/oauth/authorize", post(oauth::endpoints::authorize_post))
-        .route("/oauth/authorize/select", post(oauth::endpoints::authorize_select))
-        .route("/oauth/authorize/2fa", get(oauth::endpoints::authorize_2fa_get))
-        .route("/oauth/authorize/2fa", post(oauth::endpoints::authorize_2fa_post))
-        .route("/oauth/authorize/deny", post(oauth::endpoints::authorize_deny))
+        .route(
+            "/oauth/authorize/select",
+            post(oauth::endpoints::authorize_select),
+        )
+        .route(
+            "/oauth/authorize/2fa",
+            get(oauth::endpoints::authorize_2fa_get),
+        )
+        .route(
+            "/oauth/authorize/2fa",
+            post(oauth::endpoints::authorize_2fa_post),
+        )
+        .route(
+            "/oauth/authorize/deny",
+            post(oauth::endpoints::authorize_deny),
+        )
         .route("/oauth/token", post(oauth::endpoints::token_endpoint))
         .route("/oauth/revoke", post(oauth::endpoints::revoke_token))
-        .route("/oauth/introspect", post(oauth::endpoints::introspect_token))
+        .route(
+            "/oauth/introspect",
+            post(oauth::endpoints::introspect_token),
+        )
         .route(
             "/xrpc/com.atproto.temp.checkSignupQueue",
             get(api::temp::check_signup_queue),
@@ -404,13 +398,15 @@ pub fn app(state: AppState) -> Router {
         )
         .with_state(state);
 
-    let frontend_dir = std::env::var("FRONTEND_DIR")
-        .unwrap_or_else(|_| "./frontend/dist".to_string());
+    let frontend_dir =
+        std::env::var("FRONTEND_DIR").unwrap_or_else(|_| "./frontend/dist".to_string());
 
-    if std::path::Path::new(&frontend_dir).join("index.html").exists() {
+    if std::path::Path::new(&frontend_dir)
+        .join("index.html")
+        .exists()
+    {
         let index_path = format!("{}/index.html", frontend_dir);
-        let serve_dir = ServeDir::new(&frontend_dir)
-            .not_found_service(ServeFile::new(index_path));
+        let serve_dir = ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(index_path));
         router.fallback_service(serve_dir)
     } else {
         router

@@ -404,8 +404,7 @@ async fn test_get_blocks_not_found() {
 async fn test_sync_record_lifecycle() {
     let client = client();
     let (did, jwt) = setup_new_user("sync-record-lifecycle").await;
-    let (post_uri, _post_cid) =
-        create_post(&client, &did, &jwt, "Post for sync record test").await;
+    let (post_uri, _post_cid) = create_post(&client, &did, &jwt, "Post for sync record test").await;
     let post_rkey = post_uri.split('/').last().unwrap();
     let sync_record_res = client
         .get(format!(
@@ -453,7 +452,10 @@ async fn test_sync_record_lifecycle() {
         .expect("Failed to get latest commit after");
     let latest_after_body: Value = latest_after.json().await.unwrap();
     let rev_after = latest_after_body["rev"].as_str().unwrap().to_string();
-    assert_ne!(rev_before, rev_after, "Revision should change after new record");
+    assert_ne!(
+        rev_before, rev_after,
+        "Revision should change after new record"
+    );
     let delete_payload = json!({
         "repo": did,
         "collection": "app.bsky.feed.post",
@@ -551,7 +553,10 @@ async fn test_sync_repo_export_lifecycle() {
         .expect("Failed to upload blob");
     assert_eq!(upload_res.status(), StatusCode::OK);
     let blob_body: Value = upload_res.json().await.unwrap();
-    let blob_cid = blob_body["blob"]["ref"]["$link"].as_str().unwrap().to_string();
+    let blob_cid = blob_body["blob"]["ref"]["$link"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let repo_status_res = client
         .get(format!(
             "{}/xrpc/com.atproto.sync.getRepoStatus",
@@ -583,7 +588,10 @@ async fn test_sync_repo_export_lifecycle() {
         Some("application/vnd.ipld.car")
     );
     let repo_car = get_repo_res.bytes().await.unwrap();
-    assert!(repo_car.len() > 100, "Repo CAR should have substantial data");
+    assert!(
+        repo_car.len() > 100,
+        "Repo CAR should have substantial data"
+    );
     let list_blobs_res = client
         .get(format!(
             "{}/xrpc/com.atproto.sync.listBlobs",

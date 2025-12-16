@@ -74,7 +74,9 @@ pub async fn create_profile(
         "app.bsky.actor.profile",
         "self",
         &profile_record,
-    ).await {
+    )
+    .await
+    {
         Ok((uri, commit_cid)) => {
             info!(did = %did, uri = %uri, "Created profile for user");
             (
@@ -120,17 +122,11 @@ pub async fn create_record_admin(
             .into_response();
     }
 
-    let rkey = input.rkey.unwrap_or_else(|| {
-        chrono::Utc::now().format("%Y%m%d%H%M%S%f").to_string()
-    });
+    let rkey = input
+        .rkey
+        .unwrap_or_else(|| chrono::Utc::now().format("%Y%m%d%H%M%S%f").to_string());
 
-    match create_record_internal(
-        &state,
-        did,
-        &input.collection,
-        &rkey,
-        &input.record,
-    ).await {
+    match create_record_internal(&state, did, &input.collection, &rkey, &input.record).await {
         Ok((uri, commit_cid)) => {
             info!(did = %did, uri = %uri, "Admin created record");
             (

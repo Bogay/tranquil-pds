@@ -1,16 +1,21 @@
+use crate::notifications::{NotificationChannel, channel_display_name, enqueue_2fa_code};
+use crate::oauth::{
+    Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, db, templates,
+};
+use crate::state::{AppState, RateLimitKind};
 use axum::{
     Form, Json,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode, header::{SET_COOKIE, LOCATION}},
-    response::{IntoResponse, Redirect, Response, Html},
+    http::{
+        HeaderMap, StatusCode,
+        header::{LOCATION, SET_COOKIE},
+    },
+    response::{Html, IntoResponse, Redirect, Response},
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use urlencoding::encode as url_encode;
-use crate::state::{AppState, RateLimitKind};
-use crate::oauth::{Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, db, templates};
-use crate::notifications::{NotificationChannel, channel_display_name, enqueue_2fa_code};
 
 const DEVICE_COOKIE_NAME: &str = "oauth_device_id";
 
@@ -34,18 +39,15 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
 }
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for") {
-        if let Ok(value) = forwarded.to_str() {
-            if let Some(first_ip) = value.split(',').next() {
+    if let Some(forwarded) = headers.get("x-forwarded-for")
+        && let Ok(value) = forwarded.to_str()
+            && let Some(first_ip) = value.split(',').next() {
                 return first_ip.trim().to_string();
             }
-        }
-    }
-    if let Some(real_ip) = headers.get("x-real-ip") {
-        if let Ok(value) = real_ip.to_str() {
+    if let Some(real_ip) = headers.get("x-real-ip")
+        && let Ok(value) = real_ip.to_str() {
             return value.trim().to_string();
         }
-    }
     "0.0.0.0".to_string()
 }
 
@@ -59,8 +61,7 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
 fn make_device_cookie(device_id: &str) -> String {
     format!(
         "{}={}; Path=/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000",
-        DEVICE_COOKIE_NAME,
-        device_id
+        DEVICE_COOKIE_NAME, device_id
     )
 }
 
@@ -127,7 +128,8 @@ pub async fn authorize_get(
                     "invalid_request",
                     Some("Missing request_uri parameter. Use PAR to initiate authorization."),
                 )),
-            ).into_response();
+            )
+                .into_response();
         }
     };
     let request_data = match db::get_authorization_request(&state.db, &request_uri).await {
@@ -146,9 +148,12 @@ pub async fn authorize_get(
                 axum::http::StatusCode::BAD_REQUEST,
                 Html(templates::error_page(
                     "invalid_request",
-                    Some("Invalid or expired request_uri. Please start a new authorization request."),
+                    Some(
+                        "Invalid or expired request_uri. Please start a new authorization request.",
+                    ),
                 )),
-            ).into_response();
+            )
+                .into_response();
         }
         Err(e) => {
             if wants_json(&headers) {
@@ -158,7 +163,8 @@ pub async fn authorize_get(
                         "error": "server_error",
                         "error_description": format!("Database error: {:?}", e)
                     })),
-                ).into_response();
+                )
+                    .into_response();
             }
             return (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -166,7 +172,8 @@ pub async fn authorize_get(
                     "server_error",
                     Some(&format!("Database error: {:?}", e)),
                 )),
-            ).into_response();
+            )
+                .into_response();
         }
     };
     if request_data.expires_at < Utc::now() {
@@ -186,7 +193,8 @@ pub async fn authorize_get(
                 "invalid_request",
                 Some("Authorization request has expired. Please start a new request."),
             )),
-        ).into_response();
+        )
+            .into_response();
     }
     if wants_json(&headers) {
         return Json(AuthorizeResponse {
@@ -196,13 +204,14 @@ pub async fn authorize_get(
             redirect_uri: request_data.parameters.redirect_uri.clone(),
             state: request_data.parameters.state.clone(),
             login_hint: request_data.parameters.login_hint.clone(),
-        }).into_response();
+        })
+        .into_response();
     }
     let force_new_account = query.new_account.unwrap_or(false);
-    if !force_new_account {
-        if let Some(device_id) = extract_device_cookie(&headers) {
-            if let Ok(accounts) = db::get_device_accounts(&state.db, &device_id).await {
-                if !accounts.is_empty() {
+    if !force_new_account
+        && let Some(device_id) = extract_device_cookie(&headers)
+            && let Ok(accounts) = db::get_device_accounts(&state.db, &device_id).await
+                && !accounts.is_empty() {
                     let device_accounts: Vec<DeviceAccount> = accounts
                         .into_iter()
                         .map(|row| DeviceAccount {
@@ -217,11 +226,9 @@ pub async fn authorize_get(
                         None,
                         &request_uri,
                         &device_accounts,
-                    )).into_response();
+                    ))
+                    .into_response();
                 }
-            }
-        }
-    }
     Html(templates::login_page(
         &request_data.parameters.client_id,
         None,
@@ -229,22 +236,25 @@ pub async fn authorize_get(
         &request_uri,
         None,
         request_data.parameters.login_hint.as_deref(),
-    )).into_response()
+    ))
+    .into_response()
 }
 
 pub async fn authorize_get_json(
     State(state): State<AppState>,
     Query(query): Query<AuthorizeQuery>,
 ) -> Result<Json<AuthorizeResponse>, OAuthError> {
-    let request_uri = query.request_uri.ok_or_else(|| {
-        OAuthError::InvalidRequest("request_uri is required".to_string())
-    })?;
+    let request_uri = query
+        .request_uri
+        .ok_or_else(|| OAuthError::InvalidRequest("request_uri is required".to_string()))?;
     let request_data = db::get_authorization_request(&state.db, &request_uri)
         .await?
         .ok_or_else(|| OAuthError::InvalidRequest("Invalid or expired request_uri".to_string()))?;
     if request_data.expires_at < Utc::now() {
         db::delete_authorization_request(&state.db, &request_uri).await?;
-        return Err(OAuthError::InvalidRequest("request_uri has expired".to_string()));
+        return Err(OAuthError::InvalidRequest(
+            "request_uri has expired".to_string(),
+        ));
     }
     Ok(Json(AuthorizeResponse {
         client_id: request_data.parameters.client_id.clone(),
@@ -263,7 +273,10 @@ pub async fn authorize_post(
 ) -> Response {
     let json_response = wants_json(&headers);
     let client_ip = extract_client_ip(&headers);
-    if !state.check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip)
+        .await
+    {
         tracing::warn!(ip = %client_ip, "OAuth authorize rate limit exceeded");
         if json_response {
             return (
@@ -272,7 +285,8 @@ pub async fn authorize_post(
                     "error": "RateLimitExceeded",
                     "error_description": "Too many login attempts. Please try again later."
                 })),
-            ).into_response();
+            )
+                .into_response();
         }
         return (
             axum::http::StatusCode::TOO_MANY_REQUESTS,
@@ -280,7 +294,8 @@ pub async fn authorize_post(
                 "RateLimitExceeded",
                 Some("Too many login attempts. Please try again later."),
             )),
-        ).into_response();
+        )
+            .into_response();
     }
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
         Ok(Some(data)) => data,
@@ -292,12 +307,14 @@ pub async fn authorize_post(
                         "error": "invalid_request",
                         "error_description": "Invalid or expired request_uri."
                     })),
-                ).into_response();
+                )
+                    .into_response();
             }
             return Html(templates::error_page(
                 "invalid_request",
                 Some("Invalid or expired request_uri. Please start a new authorization request."),
-            )).into_response();
+            ))
+            .into_response();
         }
         Err(e) => {
             if json_response {
@@ -307,12 +324,14 @@ pub async fn authorize_post(
                         "error": "server_error",
                         "error_description": format!("Database error: {:?}", e)
                     })),
-                ).into_response();
+                )
+                    .into_response();
             }
             return Html(templates::error_page(
                 "server_error",
                 Some(&format!("Database error: {:?}", e)),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     if request_data.expires_at < Utc::now() {
@@ -324,12 +343,14 @@ pub async fn authorize_post(
                     "error": "invalid_request",
                     "error_description": "Authorization request has expired."
                 })),
-            ).into_response();
+            )
+                .into_response();
         }
         return Html(templates::error_page(
             "invalid_request",
             Some("Authorization request has expired. Please start a new request."),
-        )).into_response();
+        ))
+        .into_response();
     }
     let show_login_error = |error_msg: &str, json: bool| -> Response {
         if json {
@@ -339,7 +360,8 @@ pub async fn authorize_post(
                     "error": "access_denied",
                     "error_description": error_msg
                 })),
-            ).into_response();
+            )
+                .into_response();
         }
         Html(templates::login_page(
             &request_data.parameters.client_id,
@@ -348,12 +370,17 @@ pub async fn authorize_post(
             &form.request_uri,
             Some(error_msg),
             Some(&form.username),
-        )).into_response()
+        ))
+        .into_response()
     };
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let normalized_username = form.username.trim();
-    let normalized_username = normalized_username.strip_prefix('@').unwrap_or(normalized_username);
-    let normalized_username = if let Some(bare_handle) = normalized_username.strip_suffix(&format!(".{}", pds_hostname)) {
+    let normalized_username = normalized_username
+        .strip_prefix('@')
+        .unwrap_or(normalized_username);
+    let normalized_username = if let Some(bare_handle) =
+        normalized_username.strip_suffix(&format!(".{}", pds_hostname))
+    {
         bare_handle.to_string()
     } else {
         normalized_username.to_string()
@@ -401,13 +428,11 @@ pub async fn authorize_post(
         let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
         match db::create_2fa_challenge(&state.db, &user.did, &form.request_uri).await {
             Ok(challenge) => {
-                let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-                if let Err(e) = enqueue_2fa_code(
-                    &state.db,
-                    user.id,
-                    &challenge.code,
-                    &hostname,
-                ).await {
+                let hostname =
+                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                if let Err(e) =
+                    enqueue_2fa_code(&state.db, user.id, &challenge.code, &hostname).await
+                {
                     tracing::warn!(
                         did = %user.did,
                         error = %e,
@@ -441,7 +466,10 @@ pub async fn authorize_post(
                 ip_address: extract_client_ip(&headers),
                 last_seen_at: Utc::now(),
             };
-            if db::create_device(&state.db, &new_id.0, &device_data).await.is_ok() {
+            if db::create_device(&state.db, &new_id.0, &device_data)
+                .await
+                .is_ok()
+            {
                 new_cookie = Some(make_device_cookie(&new_id.0));
                 device_id = Some(new_id.0.clone());
             }
@@ -449,7 +477,7 @@ pub async fn authorize_post(
         };
         let _ = db::upsert_account_device(&state.db, &user.did, &final_device_id).await;
     }
-    if let Err(_) = db::update_authorization_request(
+    if db::update_authorization_request(
         &state.db,
         &form.request_uri,
         &user.did,
@@ -457,6 +485,7 @@ pub async fn authorize_post(
         &code.0,
     )
     .await
+    .is_err()
     {
         return show_login_error("An error occurred. Please try again.", json_response);
     }
@@ -466,7 +495,11 @@ pub async fn authorize_post(
         request_data.parameters.state.as_deref(),
     );
     if let Some(cookie) = new_cookie {
-        (StatusCode::SEE_OTHER, [(SET_COOKIE, cookie), (LOCATION, redirect_url)]).into_response()
+        (
+            StatusCode::SEE_OTHER,
+            [(SET_COOKIE, cookie), (LOCATION, redirect_url)],
+        )
+            .into_response()
     } else {
         redirect_see_other(&redirect_url)
     }
@@ -483,13 +516,15 @@ pub async fn authorize_select(
             return Html(templates::error_page(
                 "invalid_request",
                 Some("Invalid or expired request_uri. Please start a new authorization request."),
-            )).into_response();
+            ))
+            .into_response();
         }
         Err(_) => {
             return Html(templates::error_page(
                 "server_error",
                 Some("An error occurred. Please try again."),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     if request_data.expires_at < Utc::now() {
@@ -497,7 +532,8 @@ pub async fn authorize_select(
         return Html(templates::error_page(
             "invalid_request",
             Some("Authorization request has expired. Please start a new request."),
-        )).into_response();
+        ))
+        .into_response();
     }
     let device_id = match extract_device_cookie(&headers) {
         Some(id) => id,
@@ -505,7 +541,8 @@ pub async fn authorize_select(
             return Html(templates::error_page(
                 "invalid_request",
                 Some("No device session found. Please sign in."),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     let account_valid = match db::verify_account_on_device(&state.db, &device_id, &form.did).await {
@@ -514,14 +551,16 @@ pub async fn authorize_select(
             return Html(templates::error_page(
                 "server_error",
                 Some("An error occurred. Please try again."),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     if !account_valid {
         return Html(templates::error_page(
             "access_denied",
             Some("This account is not available on this device. Please sign in."),
-        )).into_response();
+        ))
+        .into_response();
     }
     let user = match sqlx::query!(
         r#"
@@ -553,13 +592,11 @@ pub async fn authorize_select(
         let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
         match db::create_2fa_challenge(&state.db, &form.did, &form.request_uri).await {
             Ok(challenge) => {
-                let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-                if let Err(e) = enqueue_2fa_code(
-                    &state.db,
-                    user.id,
-                    &challenge.code,
-                    &hostname,
-                ).await {
+                let hostname =
+                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                if let Err(e) =
+                    enqueue_2fa_code(&state.db, user.id, &challenge.code, &hostname).await
+                {
                     tracing::warn!(
                         did = %form.did,
                         error = %e,
@@ -578,13 +615,14 @@ pub async fn authorize_select(
                 return Html(templates::error_page(
                     "server_error",
                     Some("An error occurred. Please try again."),
-                )).into_response();
+                ))
+                .into_response();
             }
         }
     }
     let _ = db::upsert_account_device(&state.db, &form.did, &device_id).await;
     let code = Code::generate();
-    if let Err(_) = db::update_authorization_request(
+    if db::update_authorization_request(
         &state.db,
         &form.request_uri,
         &form.did,
@@ -592,11 +630,13 @@ pub async fn authorize_select(
         &code.0,
     )
     .await
+    .is_err()
     {
         return Html(templates::error_page(
             "server_error",
             Some("An error occurred. Please try again."),
-        )).into_response();
+        ))
+        .into_response();
     }
     let redirect_url = build_success_redirect(
         &request_data.parameters.redirect_uri,
@@ -615,7 +655,10 @@ fn build_success_redirect(redirect_uri: &str, code: &str, state: Option<&str>) -
         redirect_url.push_str(&format!("&state={}", url_encode(req_state)));
     }
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    redirect_url.push_str(&format!("&iss={}", url_encode(&format!("https://{}", pds_hostname))));
+    redirect_url.push_str(&format!(
+        "&iss={}",
+        url_encode(&format!("https://{}", pds_hostname))
+    ));
     redirect_url
 }
 
@@ -674,13 +717,15 @@ pub async fn authorize_2fa_get(
             return Html(templates::error_page(
                 "invalid_request",
                 Some("No 2FA challenge found. Please start over."),
-            )).into_response();
+            ))
+            .into_response();
         }
         Err(_) => {
             return Html(templates::error_page(
                 "server_error",
                 Some("An error occurred. Please try again."),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     if challenge.expires_at < Utc::now() {
@@ -688,7 +733,8 @@ pub async fn authorize_2fa_get(
         return Html(templates::error_page(
             "invalid_request",
             Some("2FA code has expired. Please start over."),
-        )).into_response();
+        ))
+        .into_response();
     }
     let _request_data = match db::get_authorization_request(&state.db, &query.request_uri).await {
         Ok(Some(d)) => d,
@@ -696,13 +742,15 @@ pub async fn authorize_2fa_get(
             return Html(templates::error_page(
                 "invalid_request",
                 Some("Authorization request not found. Please start over."),
-            )).into_response();
+            ))
+            .into_response();
         }
         Err(_) => {
             return Html(templates::error_page(
                 "server_error",
                 Some("An error occurred. Please try again."),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     let channel = query.channel.as_deref().unwrap_or("email");
@@ -710,7 +758,8 @@ pub async fn authorize_2fa_get(
         &query.request_uri,
         channel,
         None,
-    )).into_response()
+    ))
+    .into_response()
 }
 
 pub async fn authorize_2fa_post(
@@ -719,7 +768,10 @@ pub async fn authorize_2fa_post(
     Form(form): Form<Authorize2faSubmit>,
 ) -> Response {
     let client_ip = extract_client_ip(&headers);
-    if !state.check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip)
+        .await
+    {
         tracing::warn!(ip = %client_ip, "OAuth 2FA rate limit exceeded");
         return (
             axum::http::StatusCode::TOO_MANY_REQUESTS,
@@ -727,7 +779,8 @@ pub async fn authorize_2fa_post(
                 "RateLimitExceeded",
                 Some("Too many attempts. Please try again later."),
             )),
-        ).into_response();
+        )
+            .into_response();
     }
     let challenge = match db::get_2fa_challenge(&state.db, &form.request_uri).await {
         Ok(Some(c)) => c,
@@ -735,13 +788,15 @@ pub async fn authorize_2fa_post(
             return Html(templates::error_page(
                 "invalid_request",
                 Some("No 2FA challenge found. Please start over."),
-            )).into_response();
+            ))
+            .into_response();
         }
         Err(_) => {
             return Html(templates::error_page(
                 "server_error",
                 Some("An error occurred. Please try again."),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     if challenge.expires_at < Utc::now() {
@@ -749,16 +804,23 @@ pub async fn authorize_2fa_post(
         return Html(templates::error_page(
             "invalid_request",
             Some("2FA code has expired. Please start over."),
-        )).into_response();
+        ))
+        .into_response();
     }
     if challenge.attempts >= MAX_2FA_ATTEMPTS {
         let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
         return Html(templates::error_page(
             "access_denied",
             Some("Too many failed attempts. Please start over."),
-        )).into_response();
+        ))
+        .into_response();
     }
-    let code_valid: bool = form.code.trim().as_bytes().ct_eq(challenge.code.as_bytes()).into();
+    let code_valid: bool = form
+        .code
+        .trim()
+        .as_bytes()
+        .ct_eq(challenge.code.as_bytes())
+        .into();
     if !code_valid {
         let _ = db::increment_2fa_attempts(&state.db, challenge.id).await;
         let channel = match sqlx::query_scalar!(
@@ -771,26 +833,30 @@ pub async fn authorize_2fa_post(
             Ok(Some(ch)) => channel_display_name(ch).to_string(),
             Ok(None) | Err(_) => "email".to_string(),
         };
-        let _request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+        let _request_data = match db::get_authorization_request(&state.db, &form.request_uri).await
+        {
             Ok(Some(d)) => d,
             Ok(None) => {
                 return Html(templates::error_page(
                     "invalid_request",
                     Some("Authorization request not found. Please start over."),
-                )).into_response();
+                ))
+                .into_response();
             }
             Err(_) => {
                 return Html(templates::error_page(
                     "server_error",
                     Some("An error occurred. Please try again."),
-                )).into_response();
+                ))
+                .into_response();
             }
         };
         return Html(templates::two_factor_page(
             &form.request_uri,
             &channel,
             Some("Invalid verification code. Please try again."),
-        )).into_response();
+        ))
+        .into_response();
     }
     let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
@@ -799,18 +865,20 @@ pub async fn authorize_2fa_post(
             return Html(templates::error_page(
                 "invalid_request",
                 Some("Authorization request not found."),
-            )).into_response();
+            ))
+            .into_response();
         }
         Err(_) => {
             return Html(templates::error_page(
                 "server_error",
                 Some("An error occurred."),
-            )).into_response();
+            ))
+            .into_response();
         }
     };
     let code = Code::generate();
     let device_id = extract_device_cookie(&headers);
-    if let Err(_) = db::update_authorization_request(
+    if db::update_authorization_request(
         &state.db,
         &form.request_uri,
         &challenge.did,
@@ -818,11 +886,13 @@ pub async fn authorize_2fa_post(
         &code.0,
     )
     .await
+    .is_err()
     {
         return Html(templates::error_page(
             "server_error",
             Some("An error occurred. Please try again."),
-        )).into_response();
+        ))
+        .into_response();
     }
     let redirect_url = build_success_redirect(
         &request_data.parameters.redirect_uri,

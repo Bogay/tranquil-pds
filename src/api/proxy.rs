@@ -1,3 +1,4 @@
+use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
 use axum::{
     body::Bytes,
@@ -5,19 +6,15 @@ use axum::{
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
-use crate::api::proxy_client::proxy_client;
 use std::collections::HashMap;
 use tracing::error;
 
 fn resolve_service_did(did_with_fragment: &str) -> Option<(String, String)> {
-    if did_with_fragment.starts_with("did:web:") {
-        let without_prefix = &did_with_fragment[8..];
+    if let Some(without_prefix) = did_with_fragment.strip_prefix("did:web:") {
         let host = without_prefix.split('#').next()?;
         let url = format!("https://{}", host);
         let did_without_fragment = format!("did:web:{}", host);
         Some((url, did_without_fragment))
-    } else if did_with_fragment.starts_with("did:plc:") {
-        None
     } else {
         None
     }
@@ -41,7 +38,8 @@ pub async fn proxy_handler(
                 Some(resolved) => resolved,
                 None => {
                     error!(did = %did_str, "Could not resolve service DID");
-                    return (StatusCode::BAD_GATEWAY, "Could not resolve service DID").into_response();
+                    return (StatusCode::BAD_GATEWAY, "Could not resolve service DID")
+                        .into_response();
                 }
             };
             (url, Some(did_without_fragment))
@@ -50,7 +48,8 @@ pub async fn proxy_handler(
             let url = match std::env::var("APPVIEW_URL") {
                 Ok(url) => url,
                 Err(_) => {
-                    return (StatusCode::BAD_GATEWAY, "No upstream AppView configured").into_response();
+                    return (StatusCode::BAD_GATEWAY, "No upstream AppView configured")
+                        .into_response();
                 }
             };
             let aud = std::env::var("APPVIEW_DID").ok();
@@ -60,26 +59,20 @@ pub async fn proxy_handler(
     let target_url = format!("{}/xrpc/{}", appview_url, method);
     let client = proxy_client();
     let mut request_builder = client.request(method_verb, &target_url).query(&params);
-    let mut auth_header_val = headers.get("Authorization").map(|h| h.clone());
-    if let Some(aud) = &service_aud {
-        if let Some(token) = crate::auth::extract_bearer_token_from_header(
-            headers.get("Authorization").and_then(|h| h.to_str().ok())
-        ) {
-            if let Ok(auth_user) = crate::auth::validate_bearer_token(&state.db, &token).await {
-                if let Some(key_bytes) = auth_user.key_bytes {
-                    if let Ok(new_token) =
+    let mut auth_header_val = headers.get("Authorization").cloned();
+    if let Some(aud) = &service_aud
+        && let Some(token) = crate::auth::extract_bearer_token_from_header(
+            headers.get("Authorization").and_then(|h| h.to_str().ok()),
+        )
+            && let Ok(auth_user) = crate::auth::validate_bearer_token(&state.db, &token).await
+                && let Some(key_bytes) = auth_user.key_bytes
+                    && let Ok(new_token) =
                         crate::auth::create_service_token(&auth_user.did, aud, &method, &key_bytes)
-                    {
-                        if let Ok(val) =
+                        && let Ok(val) =
                             axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))
                         {
                             auth_header_val = Some(val);
                         }
-                    }
-                }
-            }
-        }
-    }
     if let Some(val) = auth_header_val {
         request_builder = request_builder.header("Authorization", val);
     }

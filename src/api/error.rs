@@ -46,7 +46,11 @@ pub enum ApiError {
     UpstreamFailure,
     UpstreamTimeout,
     UpstreamUnavailable(String),
-    UpstreamError { status: u16, error: Option<String>, message: Option<String> },
+    UpstreamError {
+        status: u16,
+        error: Option<String>,
+        message: Option<String>,
+    },
 }
 
 impl ApiError {
@@ -135,16 +139,27 @@ impl ApiError {
             _ => None,
         }
     }
-    pub fn from_upstream_response(
-        status: u16,
-        body: &[u8],
-    ) -> Self {
+    pub fn from_upstream_response(status: u16, body: &[u8]) -> Self {
         if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(body) {
-            let error = parsed.get("error").and_then(|v| v.as_str()).map(String::from);
-            let message = parsed.get("message").and_then(|v| v.as_str()).map(String::from);
-            return Self::UpstreamError { status, error, message };
+            let error = parsed
+                .get("error")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let message = parsed
+                .get("message")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            return Self::UpstreamError {
+                status,
+                error,
+                message,
+            };
         }
-        Self::UpstreamError { status, error: None, message: None }
+        Self::UpstreamError {
+            status,
+            error: None,
+            message: None,
+        }
     }
 }
 

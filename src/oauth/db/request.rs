@@ -1,6 +1,6 @@
-use sqlx::PgPool;
 use super::super::{AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData};
 use super::helpers::{from_json, to_json};
+use sqlx::PgPool;
 
 pub async fn create_authorization_request(
     pool: &PgPool,

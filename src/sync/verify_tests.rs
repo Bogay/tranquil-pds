@@ -64,7 +64,8 @@ mod tests {
         let verifier = CarVerifier::new();
         let empty_node = serde_ipld_dagcbor::to_vec(&serde_json::json!({
             "e": []
-        })).unwrap();
+        }))
+        .unwrap();
         let cid = make_cid(&empty_node);
         let mut blocks = HashMap::new();
         blocks.insert(cid, Bytes::from(empty_node));
@@ -106,9 +107,10 @@ mod tests {
             ("p".to_string(), Ipld::Integer(0)),
             ("t".to_string(), Ipld::Link(missing_subtree_cid)),
         ]));
-        let node = Ipld::Map(std::collections::BTreeMap::from([
-            ("e".to_string(), Ipld::List(vec![entry])),
-        ]));
+        let node = Ipld::Map(std::collections::BTreeMap::from([(
+            "e".to_string(),
+            Ipld::List(vec![entry]),
+        )]));
         let node_bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
         let cid = make_cid(&node_bytes);
         let mut blocks = HashMap::new();
@@ -136,9 +138,10 @@ mod tests {
             ("v".to_string(), Ipld::Link(record_cid)),
             ("p".to_string(), Ipld::Integer(0)),
         ]));
-        let node = Ipld::Map(std::collections::BTreeMap::from([
-            ("e".to_string(), Ipld::List(vec![entry1, entry2])),
-        ]));
+        let node = Ipld::Map(std::collections::BTreeMap::from([(
+            "e".to_string(),
+            Ipld::List(vec![entry1, entry2]),
+        )]));
         let node_bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
         let cid = make_cid(&node_bytes);
         let mut blocks = HashMap::new();
@@ -171,9 +174,10 @@ mod tests {
             ("v".to_string(), Ipld::Link(record_cid)),
             ("p".to_string(), Ipld::Integer(0)),
         ]));
-        let node = Ipld::Map(std::collections::BTreeMap::from([
-            ("e".to_string(), Ipld::List(vec![entry1, entry2, entry3])),
-        ]));
+        let node = Ipld::Map(std::collections::BTreeMap::from([(
+            "e".to_string(),
+            Ipld::List(vec![entry1, entry2, entry3]),
+        )]));
         let node_bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
         let cid = make_cid(&node_bytes);
         let mut blocks = HashMap::new();
@@ -187,9 +191,10 @@ mod tests {
         use ipld_core::ipld::Ipld;
 
         let verifier = CarVerifier::new();
-        let left_node = Ipld::Map(std::collections::BTreeMap::from([
-            ("e".to_string(), Ipld::List(vec![])),
-        ]));
+        let left_node = Ipld::Map(std::collections::BTreeMap::from([(
+            "e".to_string(),
+            Ipld::List(vec![]),
+        )]));
         let left_node_bytes = serde_ipld_dagcbor::to_vec(&left_node).unwrap();
         let left_cid = make_cid(&left_node_bytes);
         let root_node = Ipld::Map(std::collections::BTreeMap::from([
@@ -210,7 +215,8 @@ mod tests {
         let verifier = CarVerifier::new();
         let node = serde_ipld_dagcbor::to_vec(&serde_json::json!({
             "e": []
-        })).unwrap();
+        }))
+        .unwrap();
         let cid = make_cid(&node);
         let mut blocks = HashMap::new();
         blocks.insert(cid, Bytes::from(node));
@@ -235,7 +241,10 @@ mod tests {
         let verifier = CarVerifier::new();
         let record_cid = make_cid(b"record");
         let entry1 = Ipld::Map(std::collections::BTreeMap::from([
-            ("k".to_string(), Ipld::Bytes(b"app.bsky.feed.post/abc".to_vec())),
+            (
+                "k".to_string(),
+                Ipld::Bytes(b"app.bsky.feed.post/abc".to_vec()),
+            ),
             ("v".to_string(), Ipld::Link(record_cid)),
             ("p".to_string(), Ipld::Integer(0)),
         ]));
@@ -249,15 +258,19 @@ mod tests {
             ("v".to_string(), Ipld::Link(record_cid)),
             ("p".to_string(), Ipld::Integer(19)),
         ]));
-        let node = Ipld::Map(std::collections::BTreeMap::from([
-            ("e".to_string(), Ipld::List(vec![entry1, entry2, entry3])),
-        ]));
+        let node = Ipld::Map(std::collections::BTreeMap::from([(
+            "e".to_string(),
+            Ipld::List(vec![entry1, entry2, entry3]),
+        )]));
         let node_bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
         let cid = make_cid(&node_bytes);
         let mut blocks = HashMap::new();
         blocks.insert(cid, Bytes::from(node_bytes));
         let result = verifier.verify_mst_structure(&cid, &blocks);
-        assert!(result.is_ok(), "Prefix-compressed keys should be validated correctly");
+        assert!(
+            result.is_ok(),
+            "Prefix-compressed keys should be validated correctly"
+        );
     }
 
     #[test]
@@ -267,7 +280,10 @@ mod tests {
         let verifier = CarVerifier::new();
         let record_cid = make_cid(b"record");
         let entry1 = Ipld::Map(std::collections::BTreeMap::from([
-            ("k".to_string(), Ipld::Bytes(b"app.bsky.feed.post/xyz".to_vec())),
+            (
+                "k".to_string(),
+                Ipld::Bytes(b"app.bsky.feed.post/xyz".to_vec()),
+            ),
             ("v".to_string(), Ipld::Link(record_cid)),
             ("p".to_string(), Ipld::Integer(0)),
         ]));
@@ -276,15 +292,19 @@ mod tests {
             ("v".to_string(), Ipld::Link(record_cid)),
             ("p".to_string(), Ipld::Integer(19)),
         ]));
-        let node = Ipld::Map(std::collections::BTreeMap::from([
-            ("e".to_string(), Ipld::List(vec![entry1, entry2])),
-        ]));
+        let node = Ipld::Map(std::collections::BTreeMap::from([(
+            "e".to_string(),
+            Ipld::List(vec![entry1, entry2]),
+        )]));
         let node_bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
         let cid = make_cid(&node_bytes);
         let mut blocks = HashMap::new();
         blocks.insert(cid, Bytes::from(node_bytes));
         let result = verifier.verify_mst_structure(&cid, &blocks);
-        assert!(result.is_err(), "Unsorted prefix-compressed keys should fail validation");
+        assert!(
+            result.is_err(),
+            "Unsorted prefix-compressed keys should fail validation"
+        );
         let err = result.unwrap_err();
         assert!(matches!(err, VerifyError::MstValidationFailed(_)));
     }

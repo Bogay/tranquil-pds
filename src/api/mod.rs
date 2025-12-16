@@ -15,4 +15,4 @@ pub mod temp;
 pub mod validation;
 
 pub use error::ApiError;
-pub use proxy_client::{proxy_client, validate_at_uri, validate_did, validate_limit, AtUriParts};
+pub use proxy_client::{AtUriParts, proxy_client, validate_at_uri, validate_did, validate_limit};

@@ -1,6 +1,6 @@
+use super::super::{DeviceData, OAuthError};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-use super::super::{DeviceData, OAuthError};
 
 pub struct DeviceAccountRow {
     pub did: String,
@@ -49,10 +49,7 @@ pub async fn get_device(pool: &PgPool, device_id: &str) -> Result<Option<DeviceD
     }))
 }
 
-pub async fn update_device_last_seen(
-    pool: &PgPool,
-    device_id: &str,
-) -> Result<(), OAuthError> {
+pub async fn update_device_last_seen(pool: &PgPool, device_id: &str) -> Result<(), OAuthError> {
     sqlx::query!(
         r#"
         UPDATE oauth_device

@@ -1,4 +1,7 @@
-use bspds::validation::{RecordValidator, ValidationError, ValidationStatus, validate_record_key, validate_collection_nsid};
+use bspds::validation::{
+    RecordValidator, ValidationError, ValidationStatus, validate_collection_nsid,
+    validate_record_key,
+};
 use serde_json::json;
 
 fn now() -> String {
@@ -128,7 +131,9 @@ fn test_validate_post_tag_too_long() {
         "tags": [long_tag]
     });
     let result = validator.validate(&post, "app.bsky.feed.post");
-    assert!(matches!(result, Err(ValidationError::InvalidField { path, .. }) if path.starts_with("tags/")));
+    assert!(
+        matches!(result, Err(ValidationError::InvalidField { path, .. }) if path.starts_with("tags/"))
+    );
 }
 
 #[test]
@@ -162,7 +167,9 @@ fn test_validate_profile_displayname_too_long() {
         "displayName": long_name
     });
     let result = validator.validate(&profile, "app.bsky.actor.profile");
-    assert!(matches!(result, Err(ValidationError::InvalidField { path, .. }) if path == "displayName"));
+    assert!(
+        matches!(result, Err(ValidationError::InvalidField { path, .. }) if path == "displayName")
+    );
 }
 
 #[test]
@@ -174,7 +181,9 @@ fn test_validate_profile_description_too_long() {
         "description": long_desc
     });
     let result = validator.validate(&profile, "app.bsky.actor.profile");
-    assert!(matches!(result, Err(ValidationError::InvalidField { path, .. }) if path == "description"));
+    assert!(
+        matches!(result, Err(ValidationError::InvalidField { path, .. }) if path == "description")
+    );
 }
 
 #[test]
@@ -229,7 +238,9 @@ fn test_validate_like_invalid_subject_uri() {
         "createdAt": now()
     });
     let result = validator.validate(&like, "app.bsky.feed.like");
-    assert!(matches!(result, Err(ValidationError::InvalidField { path, .. }) if path.contains("uri")));
+    assert!(
+        matches!(result, Err(ValidationError::InvalidField { path, .. }) if path.contains("uri"))
+    );
 }
 
 #[test]
@@ -381,7 +392,9 @@ fn test_validate_feed_generator_displayname_too_long() {
         "createdAt": now()
     });
     let result = validator.validate(&generator, "app.bsky.feed.generator");
-    assert!(matches!(result, Err(ValidationError::InvalidField { path, .. }) if path == "displayName"));
+    assert!(
+        matches!(result, Err(ValidationError::InvalidField { path, .. }) if path == "displayName")
+    );
 }
 
 #[test]
@@ -415,8 +428,10 @@ fn test_validate_type_mismatch() {
         "createdAt": now()
     });
     let result = validator.validate(&record, "app.bsky.feed.post");
-    assert!(matches!(result, Err(ValidationError::TypeMismatch { expected, actual })
-        if expected == "app.bsky.feed.post" && actual == "app.bsky.feed.like"));
+    assert!(
+        matches!(result, Err(ValidationError::TypeMismatch { expected, actual })
+        if expected == "app.bsky.feed.post" && actual == "app.bsky.feed.like")
+    );
 }
 
 #[test]
@@ -470,7 +485,10 @@ fn test_validate_datetime_invalid_format() {
         "createdAt": "2024/01/15"
     });
     let result = validator.validate(&post, "app.bsky.feed.post");
-    assert!(matches!(result, Err(ValidationError::InvalidDatetime { .. })));
+    assert!(matches!(
+        result,
+        Err(ValidationError::InvalidDatetime { .. })
+    ));
 }
 
 #[test]

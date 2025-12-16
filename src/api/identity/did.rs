@@ -47,7 +47,10 @@ pub async fn resolve_handle(
         .await;
     match user {
         Ok(Some(row)) => {
-            let _ = state.cache.set(&cache_key, &row.did, std::time::Duration::from_secs(300)).await;
+            let _ = state
+                .cache
+                .set(&cache_key, &row.did, std::time::Duration::from_secs(300))
+                .await;
             (StatusCode::OK, Json(json!({ "did": row.did }))).into_response()
         }
         Ok(None) => (
@@ -127,22 +130,23 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         )
             .into_response();
     }
-    let key_row = sqlx::query!("SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1", user_id)
-        .fetch_optional(&state.db)
-        .await;
+    let key_row = sqlx::query!(
+        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await;
     let key_bytes: Vec<u8> = match key_row {
-        Ok(Some(row)) => {
-            match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
-                Ok(k) => k,
-                Err(_) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
-                }
+        Ok(Some(row)) => match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+            Ok(k) => k,
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
             }
-        }
+        },
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -283,7 +287,7 @@ pub async fn get_recommended_did_credentials(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
@@ -298,16 +302,24 @@ pub async fn get_recommended_did_credentials(
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
-    let user = match sqlx::query!("SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1", auth_user.did)
-        .fetch_optional(&state.db)
-        .await
+    let user = match sqlx::query!(
+        "SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1",
+        auth_user.did
+    )
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         _ => return ApiError::InternalError.into_response(),
     };
     let key_bytes = match auth_user.key_bytes {
         Some(kb) => kb,
-        None => return ApiError::AuthenticationFailedMsg("OAuth tokens cannot get DID credentials".into()).into_response(),
+        None => {
+            return ApiError::AuthenticationFailedMsg(
+                "OAuth tokens cannot get DID credentials".into(),
+            )
+            .into_response();
+        }
     };
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -352,7 +364,7 @@ pub async fn update_handle(
     Json(input): Json<UpdateHandleInput>,
 ) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
@@ -378,7 +390,9 @@ pub async fn update_handle(
     {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"})),
+            Json(
+                json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"}),
+            ),
         )
             .into_response();
     }
@@ -387,9 +401,13 @@ pub async fn update_handle(
         .await
         .ok()
         .flatten();
-    let existing = sqlx::query!("SELECT id FROM users WHERE handle = $1 AND id != $2", new_handle, user_id)
-        .fetch_optional(&state.db)
-        .await;
+    let existing = sqlx::query!(
+        "SELECT id FROM users WHERE handle = $1 AND id != $2",
+        new_handle,
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await;
     if let Ok(Some(_)) = existing {
         return (
             StatusCode::BAD_REQUEST,
@@ -397,18 +415,26 @@ pub async fn update_handle(
         )
             .into_response();
     }
-    let result = sqlx::query!("UPDATE users SET handle = $1 WHERE id = $2", new_handle, user_id)
-        .execute(&state.db)
-        .await;
+    let result = sqlx::query!(
+        "UPDATE users SET handle = $1 WHERE id = $2",
+        new_handle,
+        user_id
+    )
+    .execute(&state.db)
+    .await;
     match result {
         Ok(_) => {
             if let Some(old) = old_handle {
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
             let _ = state.cache.delete(&format!("handle:{}", new_handle)).await;
-            let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+            let hostname =
+                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let full_handle = format!("{}.{}", new_handle, hostname);
-            if let Err(e) = crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle)).await {
+            if let Err(e) =
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle))
+                    .await
+            {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
             (StatusCode::OK, Json(json!({}))).into_response()
@@ -424,10 +450,7 @@ pub async fn update_handle(
     }
 }
 
-pub async fn well_known_atproto_did(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn well_known_atproto_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let host = match headers.get("host").and_then(|h| h.to_str().ok()) {
         Some(h) => h,
         None => return (StatusCode::BAD_REQUEST, "Missing host header").into_response(),

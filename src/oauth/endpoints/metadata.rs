@@ -1,7 +1,7 @@
+use crate::oauth::jwks::{JwkSet, create_jwk_set};
+use crate::state::AppState;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use crate::state::AppState;
-use crate::oauth::jwks::{JwkSet, create_jwk_set};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProtectedResourceMetadata {

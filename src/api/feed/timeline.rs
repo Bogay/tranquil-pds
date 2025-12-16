@@ -1,18 +1,18 @@
 use crate::api::read_after_write::{
-    extract_repo_rev, format_local_post, format_munged_response, get_local_lag,
-    get_records_since_rev, insert_posts_into_feed, proxy_to_appview, FeedOutput, FeedViewPost,
-    PostView,
+    FeedOutput, FeedViewPost, PostView, extract_repo_rev, format_local_post,
+    format_munged_response, get_local_lag, get_records_since_rev, insert_posts_into_feed,
+    proxy_to_appview,
 };
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use jacquard_repo::storage::BlockStore;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use tracing::warn;
 
@@ -52,7 +52,13 @@ pub async fn get_timeline(
     };
     match std::env::var("APPVIEW_URL") {
         Ok(url) if !url.starts_with("http://127.0.0.1") => {
-            return get_timeline_with_appview(&state, &params, &auth_user.did, auth_user.key_bytes.as_deref()).await;
+            return get_timeline_with_appview(
+                &state,
+                &params,
+                &auth_user.did,
+                auth_user.key_bytes.as_deref(),
+            )
+            .await;
         }
         _ => {}
     }
@@ -75,11 +81,17 @@ async fn get_timeline_with_appview(
     if let Some(cursor) = &params.cursor {
         query_params.insert("cursor".to_string(), cursor.clone());
     }
-    let proxy_result =
-        match proxy_to_appview("app.bsky.feed.getTimeline", &query_params, auth_did, auth_key_bytes).await {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
+    let proxy_result = match proxy_to_appview(
+        "app.bsky.feed.getTimeline",
+        &query_params,
+        auth_did,
+        auth_key_bytes,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
     if !proxy_result.status.is_success() {
         return proxy_result.into_response();
     }
@@ -127,30 +139,28 @@ async fn get_timeline_with_appview(
 }
 
 async fn get_timeline_local_only(state: &AppState, auth_did: &str) -> Response {
-    let user_id: uuid::Uuid = match sqlx::query_scalar!(
-        "SELECT id FROM users WHERE did = $1",
-        auth_did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "User not found"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            warn!("Database error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
-        }
-    };
+    let user_id: uuid::Uuid =
+        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_did)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError", "message": "User not found"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                warn!("Database error fetching user: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError", "message": "Database error"})),
+                )
+                    .into_response();
+            }
+        };
     let follows_query = sqlx::query!(
         "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = 'app.bsky.graph.follow' LIMIT 5000",
         user_id

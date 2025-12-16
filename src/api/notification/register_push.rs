@@ -1,11 +1,11 @@
-use crate::api::proxy_client::{is_ssrf_safe, proxy_client, validate_did};
 use crate::api::ApiError;
+use crate::api::proxy_client::{is_ssrf_safe, proxy_client, validate_did};
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Deserialize;
 use serde_json::json;

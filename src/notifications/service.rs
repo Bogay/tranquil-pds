@@ -80,7 +80,9 @@ impl NotificationService {
 
     pub async fn run(self, mut shutdown: watch::Receiver<bool>) {
         if self.senders.is_empty() {
-            warn!("Notification service starting with no senders configured. Notifications will be queued but not delivered until senders are configured.");
+            warn!(
+                "Notification service starting with no senders configured. Notifications will be queued but not delivered until senders are configured."
+            );
         }
         info!(
             poll_interval_secs = self.poll_interval.as_secs(),
@@ -231,7 +233,10 @@ impl NotificationService {
     }
 }
 
-pub async fn enqueue_notification(db: &PgPool, notification: NewNotification) -> Result<Uuid, sqlx::Error> {
+pub async fn enqueue_notification(
+    db: &PgPool,
+    notification: NewNotification,
+) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar!(
         r#"
         INSERT INTO notification_queue

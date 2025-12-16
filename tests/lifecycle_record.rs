@@ -1,8 +1,8 @@
 mod common;
 mod helpers;
+use chrono::Utc;
 use common::*;
 use helpers::*;
-use chrono::Utc;
 use reqwest::{StatusCode, header};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -307,7 +307,11 @@ async fn test_profile_lifecycle() {
         .send()
         .await
         .expect("Failed to create profile");
-    assert_eq!(create_res.status(), StatusCode::OK, "Failed to create profile");
+    assert_eq!(
+        create_res.status(),
+        StatusCode::OK,
+        "Failed to create profile"
+    );
     let create_body: Value = create_res.json().await.unwrap();
     let initial_cid = create_body["cid"].as_str().unwrap().to_string();
     let get_res = client
@@ -326,7 +330,10 @@ async fn test_profile_lifecycle() {
     assert_eq!(get_res.status(), StatusCode::OK);
     let get_body: Value = get_res.json().await.unwrap();
     assert_eq!(get_body["value"]["displayName"], "Test User");
-    assert_eq!(get_body["value"]["description"], "A test profile for lifecycle testing");
+    assert_eq!(
+        get_body["value"]["description"],
+        "A test profile for lifecycle testing"
+    );
     let update_payload = json!({
         "repo": did,
         "collection": "app.bsky.actor.profile",
@@ -348,7 +355,11 @@ async fn test_profile_lifecycle() {
         .send()
         .await
         .expect("Failed to update profile");
-    assert_eq!(update_res.status(), StatusCode::OK, "Failed to update profile");
+    assert_eq!(
+        update_res.status(),
+        StatusCode::OK,
+        "Failed to update profile"
+    );
     let get_updated_res = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.getRecord",
@@ -371,7 +382,8 @@ async fn test_reply_thread_lifecycle() {
     let client = client();
     let (alice_did, alice_jwt) = setup_new_user("alice-thread").await;
     let (bob_did, bob_jwt) = setup_new_user("bob-thread").await;
-    let (root_uri, root_cid) = create_post(&client, &alice_did, &alice_jwt, "This is the root post").await;
+    let (root_uri, root_cid) =
+        create_post(&client, &alice_did, &alice_jwt, "This is the root post").await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     let reply_collection = "app.bsky.feed.post";
     let reply_rkey = format!("e2e_reply_{}", Utc::now().timestamp_millis());
@@ -459,7 +471,11 @@ async fn test_reply_thread_lifecycle() {
         .send()
         .await
         .expect("Failed to create nested reply");
-    assert_eq!(nested_res.status(), StatusCode::OK, "Failed to create nested reply");
+    assert_eq!(
+        nested_res.status(),
+        StatusCode::OK,
+        "Failed to create nested reply"
+    );
 }
 
 #[tokio::test]
@@ -501,7 +517,11 @@ async fn test_blob_in_record_lifecycle() {
         .send()
         .await
         .expect("Failed to create profile with blob");
-    assert_eq!(create_res.status(), StatusCode::OK, "Failed to create profile with blob");
+    assert_eq!(
+        create_res.status(),
+        StatusCode::OK,
+        "Failed to create profile with blob"
+    );
     let get_res = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.getRecord",
@@ -592,7 +612,11 @@ async fn test_authorization_cannot_delete_other_record() {
         .send()
         .await
         .expect("Failed to verify record exists");
-    assert_eq!(get_res.status(), StatusCode::OK, "Record should still exist");
+    assert_eq!(
+        get_res.status(),
+        StatusCode::OK,
+        "Record should still exist"
+    );
 }
 
 #[tokio::test]
@@ -735,7 +759,10 @@ async fn test_apply_writes_batch_lifecycle() {
         .await
         .expect("Failed to get updated profile");
     let updated_profile: Value = get_updated_profile.json().await.unwrap();
-    assert_eq!(updated_profile["value"]["displayName"], "Updated Batch User");
+    assert_eq!(
+        updated_profile["value"]["displayName"],
+        "Updated Batch User"
+    );
     let get_deleted_post = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.getRecord",
@@ -805,10 +832,7 @@ async fn test_list_records_default_order() {
             "{}/xrpc/com.atproto.repo.listRecords",
             base_url().await
         ))
-        .query(&[
-            ("repo", did.as_str()),
-            ("collection", "app.bsky.feed.post"),
-        ])
+        .query(&[("repo", did.as_str()), ("collection", "app.bsky.feed.post")])
         .send()
         .await
         .expect("Failed to list records");
@@ -820,7 +844,11 @@ async fn test_list_records_default_order() {
         .iter()
         .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
         .collect();
-    assert_eq!(rkeys, vec!["cccc", "bbbb", "aaaa"], "Default order should be DESC (newest first)");
+    assert_eq!(
+        rkeys,
+        vec!["cccc", "bbbb", "aaaa"],
+        "Default order should be DESC (newest first)"
+    );
 }
 
 #[tokio::test]
@@ -852,7 +880,11 @@ async fn test_list_records_reverse_true() {
         .iter()
         .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
         .collect();
-    assert_eq!(rkeys, vec!["aaaa", "bbbb", "cccc"], "reverse=true should give ASC order (oldest first)");
+    assert_eq!(
+        rkeys,
+        vec!["aaaa", "bbbb", "cccc"],
+        "reverse=true should give ASC order (oldest first)"
+    );
 }
 
 #[tokio::test]
@@ -860,7 +892,14 @@ async fn test_list_records_cursor_pagination() {
     let client = client();
     let (did, jwt) = setup_new_user("list-cursor").await;
     for i in 0..5 {
-        create_post_with_rkey(&client, &did, &jwt, &format!("post{:02}", i), &format!("Post {}", i)).await;
+        create_post_with_rkey(
+            &client,
+            &did,
+            &jwt,
+            &format!("post{:02}", i),
+            &format!("Post {}", i),
+        )
+        .await;
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let res = client
@@ -880,7 +919,9 @@ async fn test_list_records_cursor_pagination() {
     let body: Value = res.json().await.unwrap();
     let records = body["records"].as_array().unwrap();
     assert_eq!(records.len(), 2);
-    let cursor = body["cursor"].as_str().expect("Should have cursor with more records");
+    let cursor = body["cursor"]
+        .as_str()
+        .expect("Should have cursor with more records");
     let res2 = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.listRecords",
@@ -905,7 +946,11 @@ async fn test_list_records_cursor_pagination() {
         .map(|r| r["uri"].as_str().unwrap())
         .collect();
     let unique_uris: std::collections::HashSet<&str> = all_uris.iter().copied().collect();
-    assert_eq!(all_uris.len(), unique_uris.len(), "Cursor pagination should not repeat records");
+    assert_eq!(
+        all_uris.len(),
+        unique_uris.len(),
+        "Cursor pagination should not repeat records"
+    );
 }
 
 #[tokio::test]
@@ -1008,9 +1053,16 @@ async fn test_list_records_rkey_range() {
         .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
         .collect();
     for rkey in &rkeys {
-        assert!(*rkey >= "bbbb" && *rkey <= "dddd", "Range should be inclusive, got {}", rkey);
+        assert!(
+            *rkey >= "bbbb" && *rkey <= "dddd",
+            "Range should be inclusive, got {}",
+            rkey
+        );
     }
-    assert!(!rkeys.is_empty(), "Should have at least some records in range");
+    assert!(
+        !rkeys.is_empty(),
+        "Should have at least some records in range"
+    );
 }
 
 #[tokio::test]
@@ -1018,7 +1070,14 @@ async fn test_list_records_limit_clamping_max() {
     let client = client();
     let (did, jwt) = setup_new_user("list-limit-max").await;
     for i in 0..5 {
-        create_post_with_rkey(&client, &did, &jwt, &format!("post{:02}", i), &format!("Post {}", i)).await;
+        create_post_with_rkey(
+            &client,
+            &did,
+            &jwt,
+            &format!("post{:02}", i),
+            &format!("Post {}", i),
+        )
+        .await;
     }
     let res = client
         .get(format!(
@@ -1072,18 +1131,21 @@ async fn test_list_records_empty_collection() {
             "{}/xrpc/com.atproto.repo.listRecords",
             base_url().await
         ))
-        .query(&[
-            ("repo", did.as_str()),
-            ("collection", "app.bsky.feed.post"),
-        ])
+        .query(&[("repo", did.as_str()), ("collection", "app.bsky.feed.post")])
         .send()
         .await
         .expect("Failed to list records");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
     let records = body["records"].as_array().unwrap();
-    assert!(records.is_empty(), "Empty collection should return empty array");
-    assert!(body["cursor"].is_null(), "Empty collection should have no cursor");
+    assert!(
+        records.is_empty(),
+        "Empty collection should return empty array"
+    );
+    assert!(
+        body["cursor"].is_null(),
+        "Empty collection should have no cursor"
+    );
 }
 
 #[tokio::test]
@@ -1091,7 +1153,14 @@ async fn test_list_records_exact_limit() {
     let client = client();
     let (did, jwt) = setup_new_user("list-exact-limit").await;
     for i in 0..10 {
-        create_post_with_rkey(&client, &did, &jwt, &format!("post{:02}", i), &format!("Post {}", i)).await;
+        create_post_with_rkey(
+            &client,
+            &did,
+            &jwt,
+            &format!("post{:02}", i),
+            &format!("Post {}", i),
+        )
+        .await;
     }
     let res = client
         .get(format!(
@@ -1109,7 +1178,11 @@ async fn test_list_records_exact_limit() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
     let records = body["records"].as_array().unwrap();
-    assert_eq!(records.len(), 5, "Should return exactly 5 records when limit=5");
+    assert_eq!(
+        records.len(),
+        5,
+        "Should return exactly 5 records when limit=5"
+    );
 }
 
 #[tokio::test]
@@ -1117,7 +1190,14 @@ async fn test_list_records_cursor_exhaustion() {
     let client = client();
     let (did, jwt) = setup_new_user("list-cursor-exhaust").await;
     for i in 0..3 {
-        create_post_with_rkey(&client, &did, &jwt, &format!("post{:02}", i), &format!("Post {}", i)).await;
+        create_post_with_rkey(
+            &client,
+            &did,
+            &jwt,
+            &format!("post{:02}", i),
+            &format!("Post {}", i),
+        )
+        .await;
     }
     let res = client
         .get(format!(
@@ -1166,10 +1246,7 @@ async fn test_list_records_includes_cid() {
             "{}/xrpc/com.atproto.repo.listRecords",
             base_url().await
         ))
-        .query(&[
-            ("repo", did.as_str()),
-            ("collection", "app.bsky.feed.post"),
-        ])
+        .query(&[("repo", did.as_str()), ("collection", "app.bsky.feed.post")])
         .send()
         .await
         .expect("Failed to list records");
@@ -1190,7 +1267,14 @@ async fn test_list_records_cursor_with_reverse() {
     let client = client();
     let (did, jwt) = setup_new_user("list-cursor-reverse").await;
     for i in 0..5 {
-        create_post_with_rkey(&client, &did, &jwt, &format!("post{:02}", i), &format!("Post {}", i)).await;
+        create_post_with_rkey(
+            &client,
+            &did,
+            &jwt,
+            &format!("post{:02}", i),
+            &format!("Post {}", i),
+        )
+        .await;
     }
     let res = client
         .get(format!(
@@ -1213,7 +1297,11 @@ async fn test_list_records_cursor_with_reverse() {
         .iter()
         .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
         .collect();
-    assert_eq!(first_rkeys, vec!["post00", "post01"], "First page with reverse should start from oldest");
+    assert_eq!(
+        first_rkeys,
+        vec!["post00", "post01"],
+        "First page with reverse should start from oldest"
+    );
     if let Some(cursor) = body["cursor"].as_str() {
         let res2 = client
             .get(format!(
@@ -1236,6 +1324,10 @@ async fn test_list_records_cursor_with_reverse() {
             .iter()
             .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
             .collect();
-        assert_eq!(second_rkeys, vec!["post02", "post03"], "Second page should continue in ASC order");
+        assert_eq!(
+            second_rkeys,
+            vec!["post02", "post03"],
+            "Second page should continue in ASC order"
+        );
     }
 }

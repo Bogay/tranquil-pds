@@ -1,11 +1,11 @@
+use crate::config::AuthConfig;
+use crate::oauth::OAuthError;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use hmac::Mac;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
-use crate::config::AuthConfig;
-use crate::oauth::OAuthError;
 
 const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 3600;
 
@@ -19,9 +19,15 @@ pub fn verify_pkce(code_challenge: &str, code_verifier: &str) -> Result<(), OAut
     let mut hasher = Sha256::new();
     hasher.update(code_verifier.as_bytes());
     let hash = hasher.finalize();
-    let computed_challenge = URL_SAFE_NO_PAD.encode(&hash);
-    if !bool::from(computed_challenge.as_bytes().ct_eq(code_challenge.as_bytes())) {
-        return Err(OAuthError::InvalidGrant("PKCE verification failed".to_string()));
+    let computed_challenge = URL_SAFE_NO_PAD.encode(hash);
+    if !bool::from(
+        computed_challenge
+            .as_bytes()
+            .ct_eq(code_challenge.as_bytes()),
+    ) {
+        return Err(OAuthError::InvalidGrant(
+            "PKCE verification failed".to_string(),
+        ));
     }
     Ok(())
 }
@@ -61,7 +67,7 @@ pub fn create_access_token(
         .map_err(|_| OAuthError::ServerError("HMAC key error".to_string()))?;
     mac.update(signing_input.as_bytes());
     let signature = mac.finalize().into_bytes();
-    let signature_b64 = URL_SAFE_NO_PAD.encode(&signature);
+    let signature_b64 = URL_SAFE_NO_PAD.encode(signature);
     Ok(format!("{}.{}", signing_input, signature_b64))
 }
 
@@ -76,10 +82,14 @@ pub fn extract_token_claims(token: &str) -> Result<TokenClaims, OAuthError> {
     let header: serde_json::Value = serde_json::from_slice(&header_bytes)
         .map_err(|_| OAuthError::InvalidToken("Invalid token header".to_string()))?;
     if header.get("typ").and_then(|t| t.as_str()) != Some("at+jwt") {
-        return Err(OAuthError::InvalidToken("Not an OAuth access token".to_string()));
+        return Err(OAuthError::InvalidToken(
+            "Not an OAuth access token".to_string(),
+        ));
     }
     if header.get("alg").and_then(|a| a.as_str()) != Some("HS256") {
-        return Err(OAuthError::InvalidToken("Unsupported algorithm".to_string()));
+        return Err(OAuthError::InvalidToken(
+            "Unsupported algorithm".to_string(),
+        ));
     }
     let config = AuthConfig::get();
     let secret = config.jwt_secret();
@@ -93,7 +103,9 @@ pub fn extract_token_claims(token: &str) -> Result<TokenClaims, OAuthError> {
     mac.update(signing_input.as_bytes());
     let expected_sig = mac.finalize().into_bytes();
     if !bool::from(expected_sig.ct_eq(&provided_sig)) {
-        return Err(OAuthError::InvalidToken("Invalid token signature".to_string()));
+        return Err(OAuthError::InvalidToken(
+            "Invalid token signature".to_string(),
+        ));
     }
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(parts[1])

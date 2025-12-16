@@ -121,24 +121,39 @@ pub async fn delete_account(
         .execute(&mut *tx)
         .await
     {
-        error!("Failed to delete app passwords for user {}: {:?}", user_id, e);
+        error!(
+            "Failed to delete app passwords for user {}: {:?}",
+            user_id, e
+        );
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError", "message": "Failed to delete app passwords"})),
         )
             .into_response();
     }
-    if let Err(e) = sqlx::query!("DELETE FROM invite_code_uses WHERE used_by_user = $1", user_id)
-        .execute(&mut *tx)
-        .await
+    if let Err(e) = sqlx::query!(
+        "DELETE FROM invite_code_uses WHERE used_by_user = $1",
+        user_id
+    )
+    .execute(&mut *tx)
+    .await
     {
-        error!("Failed to delete invite code uses for user {}: {:?}", user_id, e);
+        error!(
+            "Failed to delete invite code uses for user {}: {:?}",
+            user_id, e
+        );
     }
-    if let Err(e) = sqlx::query!("DELETE FROM invite_codes WHERE created_by_user = $1", user_id)
-        .execute(&mut *tx)
-        .await
+    if let Err(e) = sqlx::query!(
+        "DELETE FROM invite_codes WHERE created_by_user = $1",
+        user_id
+    )
+    .execute(&mut *tx)
+    .await
     {
-        error!("Failed to delete invite codes for user {}: {:?}", user_id, e);
+        error!(
+            "Failed to delete invite codes for user {}: {:?}",
+            user_id, e
+        );
     }
     if let Err(e) = sqlx::query!("DELETE FROM user_keys WHERE user_id = $1", user_id)
         .execute(&mut *tx)
@@ -170,8 +185,13 @@ pub async fn delete_account(
         )
             .into_response();
     }
-    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, did, false, Some("deleted")).await {
-        warn!("Failed to sequence account deletion event for {}: {}", did, e);
+    if let Err(e) =
+        crate::api::repo::record::sequence_account_event(&state, did, false, Some("deleted")).await
+    {
+        warn!(
+            "Failed to sequence account deletion event for {}: {}",
+            did, e
+        );
     }
     let _ = state.cache.delete(&format!("handle:{}", handle)).await;
     (StatusCode::OK, Json(json!({}))).into_response()

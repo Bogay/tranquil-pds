@@ -1,8 +1,8 @@
+use super::super::OAuthError;
 use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
-use super::super::OAuthError;
 
 pub struct TwoFactorChallenge {
     pub id: Uuid,

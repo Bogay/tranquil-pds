@@ -58,14 +58,17 @@ pub async fn get_blob(
         }
         Ok(Some(_)) => {}
     }
-    let blob_result = sqlx::query!("SELECT storage_key, mime_type FROM blobs WHERE cid = $1", cid)
-        .fetch_optional(&state.db)
-        .await;
+    let blob_result = sqlx::query!(
+        "SELECT storage_key, mime_type FROM blobs WHERE cid = $1",
+        cid
+    )
+    .fetch_optional(&state.db)
+    .await;
     match blob_result {
         Ok(Some(row)) => {
             let storage_key = &row.storage_key;
             let mime_type = &row.mime_type;
-            match state.blob_store.get(&storage_key).await {
+            match state.blob_store.get(storage_key).await {
                 Ok(data) => Response::builder()
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, mime_type)
@@ -184,15 +187,8 @@ pub async fn list_blobs(
     match cids_result {
         Ok(cids) => {
             let has_more = cids.len() as i64 > limit;
-            let cids: Vec<String> = cids
-                .into_iter()
-                .take(limit as usize)
-                .collect();
-            let next_cursor = if has_more {
-                cids.last().cloned()
-            } else {
-                None
-            };
+            let cids: Vec<String> = cids.into_iter().take(limit as usize).collect();
+            let next_cursor = if has_more { cids.last().cloned() } else { None };
             (
                 StatusCode::OK,
                 Json(ListBlobsOutput {

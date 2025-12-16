@@ -1,32 +1,39 @@
-use bspds::image::{ImageProcessor, ImageError, OutputFormat, THUMB_SIZE_FEED, THUMB_SIZE_FULL, DEFAULT_MAX_FILE_SIZE};
+use bspds::image::{
+    DEFAULT_MAX_FILE_SIZE, ImageError, ImageProcessor, OutputFormat, THUMB_SIZE_FEED,
+    THUMB_SIZE_FULL,
+};
 use image::{DynamicImage, ImageFormat};
 use std::io::Cursor;
 
 fn create_test_png(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+        .unwrap();
     buf
 }
 
 fn create_test_jpeg(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg)
+        .unwrap();
     buf
 }
 
 fn create_test_gif(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Gif).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Gif)
+        .unwrap();
     buf
 }
 
 fn create_test_webp(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::WebP).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::WebP)
+        .unwrap();
     buf
 }
 
@@ -71,7 +78,9 @@ fn test_thumbnail_feed_size() {
     let processor = ImageProcessor::new();
     let data = create_test_png(800, 600);
     let result = processor.process(&data, "image/png").unwrap();
-    let thumb = result.thumbnail_feed.expect("Should generate feed thumbnail for large image");
+    let thumb = result
+        .thumbnail_feed
+        .expect("Should generate feed thumbnail for large image");
     assert!(thumb.width <= THUMB_SIZE_FEED);
     assert!(thumb.height <= THUMB_SIZE_FEED);
 }
@@ -81,7 +90,9 @@ fn test_thumbnail_full_size() {
     let processor = ImageProcessor::new();
     let data = create_test_png(2000, 1500);
     let result = processor.process(&data, "image/png").unwrap();
-    let thumb = result.thumbnail_full.expect("Should generate full thumbnail for large image");
+    let thumb = result
+        .thumbnail_full
+        .expect("Should generate full thumbnail for large image");
     assert!(thumb.width <= THUMB_SIZE_FULL);
     assert!(thumb.height <= THUMB_SIZE_FULL);
 }
@@ -91,8 +102,14 @@ fn test_no_thumbnail_small_image() {
     let processor = ImageProcessor::new();
     let data = create_test_png(100, 100);
     let result = processor.process(&data, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_none(), "Small image should not get feed thumbnail");
-    assert!(result.thumbnail_full.is_none(), "Small image should not get full thumbnail");
+    assert!(
+        result.thumbnail_feed.is_none(),
+        "Small image should not get feed thumbnail"
+    );
+    assert!(
+        result.thumbnail_full.is_none(),
+        "Small image should not get full thumbnail"
+    );
 }
 
 #[test]
@@ -125,7 +142,12 @@ fn test_max_dimension_enforced() {
     let data = create_test_png(2000, 2000);
     let result = processor.process(&data, "image/png");
     assert!(matches!(result, Err(ImageError::TooLarge { .. })));
-    if let Err(ImageError::TooLarge { width, height, max_dimension }) = result {
+    if let Err(ImageError::TooLarge {
+        width,
+        height,
+        max_dimension,
+    }) = result
+    {
         assert_eq!(width, 2000);
         assert_eq!(height, 2000);
         assert_eq!(max_dimension, 1000);
@@ -173,7 +195,10 @@ fn test_aspect_ratio_preserved_landscape() {
     let thumb = result.thumbnail_full.expect("Should have thumbnail");
     let original_ratio = 1600.0 / 800.0;
     let thumb_ratio = thumb.width as f64 / thumb.height as f64;
-    assert!((original_ratio - thumb_ratio).abs() < 0.1, "Aspect ratio should be preserved");
+    assert!(
+        (original_ratio - thumb_ratio).abs() < 0.1,
+        "Aspect ratio should be preserved"
+    );
 }
 
 #[test]
@@ -184,7 +209,10 @@ fn test_aspect_ratio_preserved_portrait() {
     let thumb = result.thumbnail_full.expect("Should have thumbnail");
     let original_ratio = 800.0 / 1600.0;
     let thumb_ratio = thumb.width as f64 / thumb.height as f64;
-    assert!((original_ratio - thumb_ratio).abs() < 0.1, "Aspect ratio should be preserved");
+    assert!(
+        (original_ratio - thumb_ratio).abs() < 0.1,
+        "Aspect ratio should be preserved"
+    );
 }
 
 #[test]
@@ -224,8 +252,14 @@ fn test_with_thumbnails_disabled() {
     let processor = ImageProcessor::new().with_thumbnails(false);
     let data = create_test_png(2000, 2000);
     let result = processor.process(&data, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_none(), "Thumbnails should be disabled");
-    assert!(result.thumbnail_full.is_none(), "Thumbnails should be disabled");
+    assert!(
+        result.thumbnail_feed.is_none(),
+        "Thumbnails should be disabled"
+    );
+    assert!(
+        result.thumbnail_full.is_none(),
+        "Thumbnails should be disabled"
+    );
 }
 
 #[test]
@@ -256,8 +290,14 @@ fn test_only_feed_thumbnail_for_medium_images() {
     let processor = ImageProcessor::new();
     let data = create_test_png(500, 500);
     let result = processor.process(&data, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_some(), "Should have feed thumbnail");
-    assert!(result.thumbnail_full.is_none(), "Should NOT have full thumbnail for 500px image");
+    assert!(
+        result.thumbnail_feed.is_some(),
+        "Should have feed thumbnail"
+    );
+    assert!(
+        result.thumbnail_full.is_none(),
+        "Should NOT have full thumbnail for 500px image"
+    );
 }
 
 #[test]
@@ -265,8 +305,14 @@ fn test_both_thumbnails_for_large_images() {
     let processor = ImageProcessor::new();
     let data = create_test_png(2000, 2000);
     let result = processor.process(&data, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_some(), "Should have feed thumbnail");
-    assert!(result.thumbnail_full.is_some(), "Should have full thumbnail for 2000px image");
+    assert!(
+        result.thumbnail_feed.is_some(),
+        "Should have feed thumbnail"
+    );
+    assert!(
+        result.thumbnail_full.is_some(),
+        "Should have full thumbnail for 2000px image"
+    );
 }
 
 #[test]
@@ -274,10 +320,16 @@ fn test_exact_threshold_boundary_feed() {
     let processor = ImageProcessor::new();
     let at_threshold = create_test_png(THUMB_SIZE_FEED, THUMB_SIZE_FEED);
     let result = processor.process(&at_threshold, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_none(), "Exact threshold should not generate thumbnail");
+    assert!(
+        result.thumbnail_feed.is_none(),
+        "Exact threshold should not generate thumbnail"
+    );
     let above_threshold = create_test_png(THUMB_SIZE_FEED + 1, THUMB_SIZE_FEED + 1);
     let result = processor.process(&above_threshold, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_some(), "Above threshold should generate thumbnail");
+    assert!(
+        result.thumbnail_feed.is_some(),
+        "Above threshold should generate thumbnail"
+    );
 }
 
 #[test]
@@ -285,8 +337,14 @@ fn test_exact_threshold_boundary_full() {
     let processor = ImageProcessor::new();
     let at_threshold = create_test_png(THUMB_SIZE_FULL, THUMB_SIZE_FULL);
     let result = processor.process(&at_threshold, "image/png").unwrap();
-    assert!(result.thumbnail_full.is_none(), "Exact threshold should not generate thumbnail");
+    assert!(
+        result.thumbnail_full.is_none(),
+        "Exact threshold should not generate thumbnail"
+    );
     let above_threshold = create_test_png(THUMB_SIZE_FULL + 1, THUMB_SIZE_FULL + 1);
     let result = processor.process(&above_threshold, "image/png").unwrap();
-    assert!(result.thumbnail_full.is_some(), "Above threshold should generate thumbnail");
+    assert!(
+        result.thumbnail_full.is_some(),
+        "Above threshold should generate thumbnail"
+    );
 }

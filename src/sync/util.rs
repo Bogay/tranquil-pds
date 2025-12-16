@@ -12,7 +12,9 @@ use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
 
 fn extract_rev_from_commit_bytes(commit_bytes: &[u8]) -> Option<String> {
-    Commit::from_cbor(commit_bytes).ok().map(|c| c.rev().to_string())
+    Commit::from_cbor(commit_bytes)
+        .ok()
+        .map(|c| c.rev().to_string())
 }
 
 async fn write_car_blocks(
@@ -25,17 +27,25 @@ async fn write_car_blocks(
     let mut writer = CarWriter::new(header, &mut buffer);
     for (cid, data) in other_blocks {
         if cid != commit_cid {
-            writer.write(cid, data.as_ref()).await
+            writer
+                .write(cid, data.as_ref())
+                .await
                 .map_err(|e| anyhow::anyhow!("writing block {}: {}", cid, e))?;
         }
     }
     if let Some(data) = commit_bytes {
-        writer.write(commit_cid, data.as_ref()).await
+        writer
+            .write(commit_cid, data.as_ref())
+            .await
             .map_err(|e| anyhow::anyhow!("writing commit block: {}", e))?;
     }
-    writer.finish().await
+    writer
+        .finish()
+        .await
         .map_err(|e| anyhow::anyhow!("finalizing CAR: {}", e))?;
-    buffer.flush().await
+    buffer
+        .flush()
+        .await
         .map_err(|e| anyhow::anyhow!("flushing CAR buffer: {}", e))?;
     Ok(buffer.into_inner())
 }
@@ -83,10 +93,15 @@ async fn format_sync_event(
     state: &AppState,
     event: &SequencedEvent,
 ) -> Result<Vec<u8>, anyhow::Error> {
-    let commit_cid_str = event.commit_cid.as_ref()
+    let commit_cid_str = event
+        .commit_cid
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Sync event missing commit_cid"))?;
     let commit_cid = Cid::from_str(commit_cid_str)?;
-    let commit_bytes = state.block_store.get(&commit_cid).await?
+    let commit_bytes = state
+        .block_store
+        .get(&commit_cid)
+        .await?
         .ok_or_else(|| anyhow::anyhow!("Commit block not found"))?;
     let rev = extract_rev_from_commit_bytes(&commit_bytes)
         .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?;
@@ -121,13 +136,13 @@ pub async fn format_event_for_sending(
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
     let prev_cid_str = event.prev_cid.clone();
     let prev_data_cid_str = event.prev_data_cid.clone();
-    let mut frame: CommitFrame = event.try_into()
+    let mut frame: CommitFrame = event
+        .try_into()
         .map_err(|e| anyhow::anyhow!("Invalid event: {}", e))?;
-    if let Some(ref pdc) = prev_data_cid_str {
-        if let Ok(cid) = Cid::from_str(pdc) {
+    if let Some(ref pdc) = prev_data_cid_str
+        && let Ok(cid) = Cid::from_str(pdc) {
             frame.prev_data = Some(cid);
         }
-    }
     let commit_cid = frame.commit;
     let prev_cid = prev_cid_str.as_ref().and_then(|s| Cid::from_str(s).ok());
     let mut all_cids: Vec<Cid> = block_cids_str
@@ -138,13 +153,11 @@ pub async fn format_event_for_sending(
     if !all_cids.contains(&commit_cid) {
         all_cids.push(commit_cid);
     }
-    if let Some(ref pc) = prev_cid {
-        if let Ok(Some(prev_bytes)) = state.block_store.get(pc).await {
-            if let Some(rev) = extract_rev_from_commit_bytes(&prev_bytes) {
+    if let Some(ref pc) = prev_cid
+        && let Ok(Some(prev_bytes)) = state.block_store.get(pc).await
+            && let Some(rev) = extract_rev_from_commit_bytes(&prev_bytes) {
                 frame.since = Some(rev);
             }
-        }
-    }
     let car_bytes = if !all_cids.is_empty() {
         let fetched = state.block_store.get_many(&all_cids).await?;
         let mut blocks = std::collections::BTreeMap::new();
@@ -182,16 +195,14 @@ pub async fn prefetch_blocks_for_events(
 ) -> Result<HashMap<Cid, Bytes>, anyhow::Error> {
     let mut all_cids: Vec<Cid> = Vec::new();
     for event in events {
-        if let Some(ref commit_cid_str) = event.commit_cid {
-            if let Ok(cid) = Cid::from_str(commit_cid_str) {
+        if let Some(ref commit_cid_str) = event.commit_cid
+            && let Ok(cid) = Cid::from_str(commit_cid_str) {
                 all_cids.push(cid);
             }
-        }
-        if let Some(ref prev_cid_str) = event.prev_cid {
-            if let Ok(cid) = Cid::from_str(prev_cid_str) {
+        if let Some(ref prev_cid_str) = event.prev_cid
+            && let Ok(cid) = Cid::from_str(prev_cid_str) {
                 all_cids.push(cid);
             }
-        }
         if let Some(ref block_cids_str) = event.blocks_cids {
             for s in block_cids_str {
                 if let Ok(cid) = Cid::from_str(s) {
@@ -219,16 +230,21 @@ fn format_sync_event_with_prefetched(
     event: &SequencedEvent,
     prefetched: &HashMap<Cid, Bytes>,
 ) -> Result<Vec<u8>, anyhow::Error> {
-    let commit_cid_str = event.commit_cid.as_ref()
+    let commit_cid_str = event
+        .commit_cid
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Sync event missing commit_cid"))?;
     let commit_cid = Cid::from_str(commit_cid_str)?;
-    let commit_bytes = prefetched.get(&commit_cid)
+    let commit_bytes = prefetched
+        .get(&commit_cid)
         .ok_or_else(|| anyhow::anyhow!("Commit block not found in prefetched"))?;
     let rev = extract_rev_from_commit_bytes(commit_bytes)
         .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?;
-    let car_bytes = futures::executor::block_on(
-        write_car_blocks(commit_cid, Some(commit_bytes.clone()), BTreeMap::new())
-    )?;
+    let car_bytes = futures::executor::block_on(write_car_blocks(
+        commit_cid,
+        Some(commit_bytes.clone()),
+        BTreeMap::new(),
+    ))?;
     let frame = SyncFrame {
         did: event.did.clone(),
         rev,
@@ -259,13 +275,13 @@ pub async fn format_event_with_prefetched_blocks(
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
     let prev_cid_str = event.prev_cid.clone();
     let prev_data_cid_str = event.prev_data_cid.clone();
-    let mut frame: CommitFrame = event.try_into()
+    let mut frame: CommitFrame = event
+        .try_into()
         .map_err(|e| anyhow::anyhow!("Invalid event: {}", e))?;
-    if let Some(ref pdc) = prev_data_cid_str {
-        if let Ok(cid) = Cid::from_str(pdc) {
+    if let Some(ref pdc) = prev_data_cid_str
+        && let Ok(cid) = Cid::from_str(pdc) {
             frame.prev_data = Some(cid);
         }
-    }
     let commit_cid = frame.commit;
     let prev_cid = prev_cid_str.as_ref().and_then(|s| Cid::from_str(s).ok());
     let mut all_cids: Vec<Cid> = block_cids_str
@@ -276,18 +292,15 @@ pub async fn format_event_with_prefetched_blocks(
     if !all_cids.contains(&commit_cid) {
         all_cids.push(commit_cid);
     }
-    if let Some(commit_bytes) = prefetched.get(&commit_cid) {
-        if let Some(rev) = extract_rev_from_commit_bytes(commit_bytes) {
+    if let Some(commit_bytes) = prefetched.get(&commit_cid)
+        && let Some(rev) = extract_rev_from_commit_bytes(commit_bytes) {
             frame.rev = rev;
         }
-    }
-    if let Some(ref pc) = prev_cid {
-        if let Some(prev_bytes) = prefetched.get(pc) {
-            if let Some(rev) = extract_rev_from_commit_bytes(prev_bytes) {
+    if let Some(ref pc) = prev_cid
+        && let Some(prev_bytes) = prefetched.get(pc)
+            && let Some(rev) = extract_rev_from_commit_bytes(prev_bytes) {
                 frame.since = Some(rev);
             }
-        }
-    }
     let car_bytes = if !all_cids.is_empty() {
         let mut blocks = BTreeMap::new();
         let mut commit_bytes_for_car: Option<Bytes> = None;

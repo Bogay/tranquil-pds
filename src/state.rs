@@ -117,7 +117,11 @@ impl AppState {
         let limiter_name = kind.key_prefix();
         let (limit, window_ms) = kind.limit_and_window_ms();
 
-        if !self.distributed_rate_limiter.check_rate_limit(&key, limit, window_ms).await {
+        if !self
+            .distributed_rate_limiter
+            .check_rate_limit(&key, limit, window_ms)
+            .await
+        {
             crate::metrics::record_rate_limit_rejection(limiter_name);
             return false;
         }

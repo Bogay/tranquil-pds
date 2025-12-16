@@ -2,7 +2,7 @@ mod common;
 
 use common::{base_url, client, create_account_and_login};
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[tokio::test]
 async fn test_get_author_feed_returns_appview_data() {
@@ -72,7 +72,10 @@ async fn test_get_post_thread_returns_appview_data() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
-    assert!(body["thread"].is_object(), "Response should have thread object");
+    assert!(
+        body["thread"].is_object(),
+        "Response should have thread object"
+    );
     assert_eq!(
         body["thread"]["$type"].as_str(),
         Some("app.bsky.feed.defs#threadViewPost"),
@@ -117,10 +120,7 @@ async fn test_register_push_proxies_to_appview() {
     let base = base_url().await;
     let (jwt, _did) = create_account_and_login(&client).await;
     let res = client
-        .post(format!(
-            "{}/xrpc/app.bsky.notification.registerPush",
-            base
-        ))
+        .post(format!("{}/xrpc/app.bsky.notification.registerPush", base))
         .header("Authorization", format!("Bearer {}", jwt))
         .json(&json!({
             "serviceDid": "did:web:example.com",

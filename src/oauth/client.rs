@@ -88,18 +88,15 @@ impl ClientMetadataCache {
 
     fn is_loopback_client(client_id: &str) -> bool {
         if let Ok(url) = reqwest::Url::parse(client_id) {
-            url.scheme() == "http"
-                && url.host_str() == Some("localhost")
-                && url.port().is_none()
+            url.scheme() == "http" && url.host_str() == Some("localhost") && url.port().is_none()
         } else {
             false
         }
     }
 
     fn build_loopback_metadata(client_id: &str) -> Result<ClientMetadata, OAuthError> {
-        let url = reqwest::Url::parse(client_id).map_err(|_| {
-            OAuthError::InvalidClient("Invalid loopback client_id URL".to_string())
-        })?;
+        let url = reqwest::Url::parse(client_id)
+            .map_err(|_| OAuthError::InvalidClient("Invalid loopback client_id URL".to_string()))?;
         let mut redirect_uris = Vec::new();
         for (key, value) in url.query_pairs() {
             if key == "redirect_uri" {
@@ -117,7 +114,10 @@ impl ClientMetadataCache {
             client_uri: None,
             logo_uri: None,
             redirect_uris,
-            grant_types: vec!["authorization_code".to_string(), "refresh_token".to_string()],
+            grant_types: vec![
+                "authorization_code".to_string(),
+                "refresh_token".to_string(),
+            ],
             response_types: vec!["code".to_string()],
             scope,
             token_endpoint_auth_method: Some("none".to_string()),
@@ -134,11 +134,10 @@ impl ClientMetadataCache {
         }
         {
             let cache = self.cache.read().await;
-            if let Some(cached) = cache.get(client_id) {
-                if cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs {
+            if let Some(cached) = cache.get(client_id)
+                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs {
                     return Ok(cached.metadata.clone());
                 }
-            }
         }
         let metadata = self.fetch_metadata(client_id).await?;
         {
@@ -154,7 +153,10 @@ impl ClientMetadataCache {
         Ok(metadata)
     }
 
-    pub async fn get_jwks(&self, metadata: &ClientMetadata) -> Result<serde_json::Value, OAuthError> {
+    pub async fn get_jwks(
+        &self,
+        metadata: &ClientMetadata,
+    ) -> Result<serde_json::Value, OAuthError> {
         if let Some(jwks) = &metadata.jwks {
             return Ok(jwks.clone());
         }
@@ -165,11 +167,10 @@ impl ClientMetadataCache {
         })?;
         {
             let cache = self.jwks_cache.read().await;
-            if let Some(cached) = cache.get(jwks_uri) {
-                if cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs {
+            if let Some(cached) = cache.get(jwks_uri)
+                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs {
                     return Ok(cached.jwks.clone());
                 }
-            }
         }
         let jwks = self.fetch_jwks(jwks_uri).await?;
         {
@@ -186,15 +187,14 @@ impl ClientMetadataCache {
     }
 
     async fn fetch_jwks(&self, jwks_uri: &str) -> Result<serde_json::Value, OAuthError> {
-        if !jwks_uri.starts_with("https://") {
-            if !jwks_uri.starts_with("http://")
-                || (!jwks_uri.contains("localhost") && !jwks_uri.contains("127.0.0.1"))
+        if !jwks_uri.starts_with("https://")
+            && (!jwks_uri.starts_with("http://")
+                || (!jwks_uri.contains("localhost") && !jwks_uri.contains("127.0.0.1")))
             {
                 return Err(OAuthError::InvalidClient(
                     "jwks_uri must use https (except for localhost)".to_string(),
                 ));
             }
-        }
         let response = self
             .http_client
             .get(jwks_uri)
@@ -242,17 +242,18 @@ impl ClientMetadataCache {
             .header("Accept", "application/json")
             .send()
             .await
-            .map_err(|e| OAuthError::InvalidClient(format!("Failed to fetch client metadata: {}", e)))?;
+            .map_err(|e| {
+                OAuthError::InvalidClient(format!("Failed to fetch client metadata: {}", e))
+            })?;
         if !response.status().is_success() {
             return Err(OAuthError::InvalidClient(format!(
                 "Failed to fetch client metadata: HTTP {}",
                 response.status()
             )));
         }
-        let mut metadata: ClientMetadata = response
-            .json()
-            .await
-            .map_err(|e| OAuthError::InvalidClient(format!("Invalid client metadata JSON: {}", e)))?;
+        let mut metadata: ClientMetadata = response.json().await.map_err(|e| {
+            OAuthError::InvalidClient(format!("Invalid client metadata JSON: {}", e))
+        })?;
         if metadata.client_id.is_empty() {
             metadata.client_id = client_id.to_string();
         } else if metadata.client_id != client_id {
@@ -274,7 +275,9 @@ impl ClientMetadataCache {
             self.validate_redirect_uri_format(uri)?;
         }
         if !metadata.grant_types.is_empty()
-            && !metadata.grant_types.contains(&"authorization_code".to_string())
+            && !metadata
+                .grant_types
+                .contains(&"authorization_code".to_string())
         {
             return Err(OAuthError::InvalidClient(
                 "authorization_code grant type is required".to_string(),
@@ -298,8 +301,8 @@ impl ClientMetadataCache {
         if metadata.redirect_uris.contains(&redirect_uri.to_string()) {
             return Ok(());
         }
-        if Self::is_loopback_client(&metadata.client_id) {
-            if let Ok(req_url) = reqwest::Url::parse(redirect_uri) {
+        if Self::is_loopback_client(&metadata.client_id)
+            && let Ok(req_url) = reqwest::Url::parse(redirect_uri) {
                 let req_host = req_url.host_str().unwrap_or("");
                 let is_loopback_redirect = req_url.scheme() == "http"
                     && (req_host == "localhost" || req_host == "127.0.0.1" || req_host == "[::1]");
@@ -319,7 +322,6 @@ impl ClientMetadataCache {
                     }
                 }
             }
-        }
         Err(OAuthError::InvalidRequest(
             "redirect_uri not registered for client".to_string(),
         ))
@@ -331,9 +333,8 @@ impl ClientMetadataCache {
                 "redirect_uri must not contain a fragment".to_string(),
             ));
         }
-        let parsed = reqwest::Url::parse(uri).map_err(|_| {
-            OAuthError::InvalidClient(format!("Invalid redirect_uri: {}", uri))
-        })?;
+        let parsed = reqwest::Url::parse(uri)
+            .map_err(|_| OAuthError::InvalidClient(format!("Invalid redirect_uri: {}", uri)))?;
         let scheme = parsed.scheme();
         if scheme == "http" {
             let host = parsed.host_str().unwrap_or("");
@@ -343,8 +344,15 @@ impl ClientMetadataCache {
                 ));
             }
         } else if scheme == "https" {
-        } else if scheme.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '+' || c == '.' || c == '-') {
-            if !scheme.chars().next().map(|c| c.is_ascii_lowercase()).unwrap_or(false) {
+        } else if scheme.chars().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '+' || c == '.' || c == '-'
+        }) {
+            if !scheme
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_lowercase())
+                .unwrap_or(false)
+            {
                 return Err(OAuthError::InvalidClient(format!(
                     "Invalid redirect_uri scheme: {}",
                     scheme
@@ -366,9 +374,7 @@ impl ClientMetadata {
     }
 
     pub fn auth_method(&self) -> &str {
-        self.token_endpoint_auth_method
-            .as_deref()
-            .unwrap_or("none")
+        self.token_endpoint_auth_method.as_deref().unwrap_or("none")
     }
 }
 
@@ -411,10 +417,15 @@ async fn verify_private_key_jwt_async(
     metadata: &ClientMetadata,
     client_assertion: &str,
 ) -> Result<(), OAuthError> {
-    use base64::{Engine as _, engine::general_purpose::{URL_SAFE_NO_PAD, STANDARD}};
+    use base64::{
+        Engine as _,
+        engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    };
     let parts: Vec<&str> = client_assertion.split('.').collect();
     if parts.len() != 3 {
-        return Err(OAuthError::InvalidClient("Invalid client_assertion format".to_string()));
+        return Err(OAuthError::InvalidClient(
+            "Invalid client_assertion format".to_string(),
+        ));
     }
     let header_bytes = URL_SAFE_NO_PAD
         .decode(parts[0])
@@ -422,10 +433,14 @@ async fn verify_private_key_jwt_async(
         .map_err(|_| OAuthError::InvalidClient("Invalid assertion header encoding".to_string()))?;
     let header: serde_json::Value = serde_json::from_slice(&header_bytes)
         .map_err(|_| OAuthError::InvalidClient("Invalid assertion header JSON".to_string()))?;
-    let alg = header.get("alg").and_then(|a| a.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing alg in client_assertion".to_string())
-    })?;
-    if !matches!(alg, "ES256" | "ES384" | "RS256" | "RS384" | "RS512" | "EdDSA") {
+    let alg = header
+        .get("alg")
+        .and_then(|a| a.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing alg in client_assertion".to_string()))?;
+    if !matches!(
+        alg,
+        "ES256" | "ES384" | "RS256" | "RS384" | "RS512" | "EdDSA"
+    ) {
         return Err(OAuthError::InvalidClient(format!(
             "Unsupported client_assertion algorithm: {}",
             alg
@@ -441,17 +456,19 @@ async fn verify_private_key_jwt_async(
         })?;
     let payload: serde_json::Value = serde_json::from_slice(&payload_bytes)
         .map_err(|_| OAuthError::InvalidClient("Invalid assertion payload JSON".to_string()))?;
-    let iss = payload.get("iss").and_then(|i| i.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing iss in client_assertion".to_string())
-    })?;
+    let iss = payload
+        .get("iss")
+        .and_then(|i| i.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing iss in client_assertion".to_string()))?;
     if iss != metadata.client_id {
         return Err(OAuthError::InvalidClient(
             "client_assertion iss does not match client_id".to_string(),
         ));
     }
-    let sub = payload.get("sub").and_then(|s| s.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing sub in client_assertion".to_string())
-    })?;
+    let sub = payload
+        .get("sub")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing sub in client_assertion".to_string()))?;
     if sub != metadata.client_id {
         return Err(OAuthError::InvalidClient(
             "client_assertion sub does not match client_id".to_string(),
@@ -462,30 +479,38 @@ async fn verify_private_key_jwt_async(
     let iat = payload.get("iat").and_then(|i| i.as_i64());
     if let Some(exp) = exp {
         if exp < now {
-            return Err(OAuthError::InvalidClient("client_assertion has expired".to_string()));
+            return Err(OAuthError::InvalidClient(
+                "client_assertion has expired".to_string(),
+            ));
         }
     } else if let Some(iat) = iat {
         let max_age_secs = 300;
         if now - iat > max_age_secs {
-            tracing::warn!(iat = iat, now = now, "client_assertion too old (no exp, using iat)");
-            return Err(OAuthError::InvalidClient("client_assertion is too old".to_string()));
+            tracing::warn!(
+                iat = iat,
+                now = now,
+                "client_assertion too old (no exp, using iat)"
+            );
+            return Err(OAuthError::InvalidClient(
+                "client_assertion is too old".to_string(),
+            ));
         }
     } else {
         return Err(OAuthError::InvalidClient(
             "client_assertion must have exp or iat claim".to_string(),
         ));
     }
-    if let Some(iat) = iat {
-        if iat > now + 60 {
+    if let Some(iat) = iat
+        && iat > now + 60 {
             return Err(OAuthError::InvalidClient(
                 "client_assertion iat is in the future".to_string(),
             ));
         }
-    }
     let jwks = cache.get_jwks(metadata).await?;
-    let keys = jwks.get("keys").and_then(|k| k.as_array()).ok_or_else(|| {
-        OAuthError::InvalidClient("Invalid JWKS: missing keys array".to_string())
-    })?;
+    let keys = jwks
+        .get("keys")
+        .and_then(|k| k.as_array())
+        .ok_or_else(|| OAuthError::InvalidClient("Invalid JWKS: missing keys array".to_string()))?;
     let matching_keys: Vec<&serde_json::Value> = if let Some(kid) = kid {
         keys.iter()
             .filter(|k| k.get("kid").and_then(|v| v.as_str()) == Some(kid))
@@ -532,17 +557,21 @@ fn verify_es256(
     signature: &[u8],
 ) -> Result<(), OAuthError> {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
     use p256::EncodedPoint;
-    let x = key.get("x").and_then(|v| v.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing x coordinate in EC key".to_string())
-    })?;
-    let y = key.get("y").and_then(|v| v.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing y coordinate in EC key".to_string())
-    })?;
-    let x_bytes = URL_SAFE_NO_PAD.decode(x)
+    use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+    let x = key
+        .get("x")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing x coordinate in EC key".to_string()))?;
+    let y = key
+        .get("y")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing y coordinate in EC key".to_string()))?;
+    let x_bytes = URL_SAFE_NO_PAD
+        .decode(x)
         .map_err(|_| OAuthError::InvalidClient("Invalid x coordinate encoding".to_string()))?;
-    let y_bytes = URL_SAFE_NO_PAD.decode(y)
+    let y_bytes = URL_SAFE_NO_PAD
+        .decode(y)
         .map_err(|_| OAuthError::InvalidClient("Invalid y coordinate encoding".to_string()))?;
     let mut point_bytes = vec![0x04];
     point_bytes.extend_from_slice(&x_bytes);
@@ -564,17 +593,21 @@ fn verify_es384(
     signature: &[u8],
 ) -> Result<(), OAuthError> {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    use p384::ecdsa::{Signature, VerifyingKey, signature::Verifier};
     use p384::EncodedPoint;
-    let x = key.get("x").and_then(|v| v.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing x coordinate in EC key".to_string())
-    })?;
-    let y = key.get("y").and_then(|v| v.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing y coordinate in EC key".to_string())
-    })?;
-    let x_bytes = URL_SAFE_NO_PAD.decode(x)
+    use p384::ecdsa::{Signature, VerifyingKey, signature::Verifier};
+    let x = key
+        .get("x")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing x coordinate in EC key".to_string()))?;
+    let y = key
+        .get("y")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing y coordinate in EC key".to_string()))?;
+    let x_bytes = URL_SAFE_NO_PAD
+        .decode(x)
         .map_err(|_| OAuthError::InvalidClient("Invalid x coordinate encoding".to_string()))?;
-    let y_bytes = URL_SAFE_NO_PAD.decode(y)
+    let y_bytes = URL_SAFE_NO_PAD
+        .decode(y)
         .map_err(|_| OAuthError::InvalidClient("Invalid y coordinate encoding".to_string()))?;
     let mut point_bytes = vec![0x04];
     point_bytes.extend_from_slice(&x_bytes);
@@ -615,16 +648,20 @@ fn verify_eddsa(
             crv
         )));
     }
-    let x = key.get("x").and_then(|v| v.as_str()).ok_or_else(|| {
-        OAuthError::InvalidClient("Missing x in OKP key".to_string())
-    })?;
-    let x_bytes = URL_SAFE_NO_PAD.decode(x)
+    let x = key
+        .get("x")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| OAuthError::InvalidClient("Missing x in OKP key".to_string()))?;
+    let x_bytes = URL_SAFE_NO_PAD
+        .decode(x)
         .map_err(|_| OAuthError::InvalidClient("Invalid x encoding".to_string()))?;
-    let key_bytes: [u8; 32] = x_bytes.try_into()
+    let key_bytes: [u8; 32] = x_bytes
+        .try_into()
         .map_err(|_| OAuthError::InvalidClient("Invalid Ed25519 key length".to_string()))?;
     let verifying_key = VerifyingKey::from_bytes(&key_bytes)
         .map_err(|_| OAuthError::InvalidClient("Invalid Ed25519 key".to_string()))?;
-    let sig_bytes: [u8; 64] = signature.try_into()
+    let sig_bytes: [u8; 64] = signature
+        .try_into()
         .map_err(|_| OAuthError::InvalidClient("Invalid EdDSA signature length".to_string()))?;
     let sig = Signature::from_bytes(&sig_bytes);
     verifying_key

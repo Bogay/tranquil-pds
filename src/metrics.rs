@@ -24,10 +24,7 @@ pub fn init_metrics() -> PrometheusHandle {
 }
 
 fn describe_metrics() {
-    metrics::describe_counter!(
-        "bspds_http_requests_total",
-        "Total number of HTTP requests"
-    );
+    metrics::describe_counter!("bspds_http_requests_total", "Total number of HTTP requests");
     metrics::describe_histogram!(
         "bspds_http_request_duration_seconds",
         "HTTP request duration in seconds"
@@ -64,10 +61,7 @@ fn describe_metrics() {
         "bspds_rate_limit_rejections_total",
         "Total number of rate limit rejections"
     );
-    metrics::describe_counter!(
-        "bspds_db_queries_total",
-        "Total number of database queries"
-    );
+    metrics::describe_counter!("bspds_db_queries_total", "Total number of database queries");
     metrics::describe_histogram!(
         "bspds_db_query_duration_seconds",
         "Database query duration in seconds"
@@ -78,7 +72,11 @@ pub async fn metrics_handler() -> impl IntoResponse {
     match PROMETHEUS_HANDLE.get() {
         Some(handle) => {
             let metrics = handle.render();
-            (StatusCode::OK, [("content-type", "text/plain; version=0.0.4")], metrics)
+            (
+                StatusCode::OK,
+                [("content-type", "text/plain; version=0.0.4")],
+                metrics,
+            )
         }
         None => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -117,14 +115,13 @@ pub async fn metrics_middleware(request: Request<Body>, next: Next) -> Response 
 }
 
 fn normalize_path(path: &str) -> String {
-    if path.starts_with("/xrpc/") {
-        if let Some(method) = path.strip_prefix("/xrpc/") {
+    if path.starts_with("/xrpc/")
+        && let Some(method) = path.strip_prefix("/xrpc/") {
             if let Some(q) = method.find('?') {
                 return format!("/xrpc/{}", &method[..q]);
             }
             return path.to_string();
         }
-    }
 
     if path.starts_with("/u/") && path.ends_with("/did.json") {
         return "/u/{handle}/did.json".to_string();

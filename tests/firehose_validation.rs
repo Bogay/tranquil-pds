@@ -1,12 +1,12 @@
 mod common;
 
-use common::*;
 use cid::Cid;
-use futures::{stream::StreamExt, SinkExt};
+use common::*;
+use futures::{SinkExt, stream::StreamExt};
 use iroh_car::CarReader;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::Cursor;
 use tokio_tungstenite::{connect_async, tungstenite};
 
@@ -52,26 +52,48 @@ fn find_cbor_map_end(bytes: &[u8]) -> Result<usize, String> {
         match additional {
             0..=23 => Ok(additional as u64),
             24 => {
-                if *pos >= bytes.len() { return Err("Unexpected end".into()); }
+                if *pos >= bytes.len() {
+                    return Err("Unexpected end".into());
+                }
                 let val = bytes[*pos] as u64;
                 *pos += 1;
                 Ok(val)
             }
             25 => {
-                if *pos + 2 > bytes.len() { return Err("Unexpected end".into()); }
+                if *pos + 2 > bytes.len() {
+                    return Err("Unexpected end".into());
+                }
                 let val = u16::from_be_bytes([bytes[*pos], bytes[*pos + 1]]) as u64;
                 *pos += 2;
                 Ok(val)
             }
             26 => {
-                if *pos + 4 > bytes.len() { return Err("Unexpected end".into()); }
-                let val = u32::from_be_bytes([bytes[*pos], bytes[*pos + 1], bytes[*pos + 2], bytes[*pos + 3]]) as u64;
+                if *pos + 4 > bytes.len() {
+                    return Err("Unexpected end".into());
+                }
+                let val = u32::from_be_bytes([
+                    bytes[*pos],
+                    bytes[*pos + 1],
+                    bytes[*pos + 2],
+                    bytes[*pos + 3],
+                ]) as u64;
                 *pos += 4;
                 Ok(val)
             }
             27 => {
-                if *pos + 8 > bytes.len() { return Err("Unexpected end".into()); }
-                let val = u64::from_be_bytes([bytes[*pos], bytes[*pos + 1], bytes[*pos + 2], bytes[*pos + 3], bytes[*pos + 4], bytes[*pos + 5], bytes[*pos + 6], bytes[*pos + 7]]);
+                if *pos + 8 > bytes.len() {
+                    return Err("Unexpected end".into());
+                }
+                let val = u64::from_be_bytes([
+                    bytes[*pos],
+                    bytes[*pos + 1],
+                    bytes[*pos + 2],
+                    bytes[*pos + 3],
+                    bytes[*pos + 4],
+                    bytes[*pos + 5],
+                    bytes[*pos + 6],
+                    bytes[*pos + 7],
+                ]);
                 *pos += 8;
                 Ok(val)
             }
@@ -80,14 +102,19 @@ fn find_cbor_map_end(bytes: &[u8]) -> Result<usize, String> {
     }
 
     fn skip_value(bytes: &[u8], pos: &mut usize) -> Result<(), String> {
-        if *pos >= bytes.len() { return Err("Unexpected end".into()); }
+        if *pos >= bytes.len() {
+            return Err("Unexpected end".into());
+        }
         let initial = bytes[*pos];
         *pos += 1;
         let major = initial >> 5;
         let additional = initial & 0x1f;
 
         match major {
-            0 | 1 => { read_uint(bytes, pos, additional)?; Ok(()) }
+            0 | 1 => {
+                read_uint(bytes, pos, additional)?;
+                Ok(())
+            }
             2 | 3 => {
                 let len = read_uint(bytes, pos, additional)? as usize;
                 *pos += len;
@@ -95,7 +122,9 @@ fn find_cbor_map_end(bytes: &[u8]) -> Result<usize, String> {
             }
             4 => {
                 let len = read_uint(bytes, pos, additional)?;
-                for _ in 0..len { skip_value(bytes, pos)?; }
+                for _ in 0..len {
+                    skip_value(bytes, pos)?;
+                }
                 Ok(())
             }
             5 => {
@@ -228,18 +257,36 @@ async fn test_firehose_frame_structure() {
     println!("  tooBig: {}", frame.too_big);
     println!("  repo: {}", frame.repo);
     println!("  commit: {}", frame.commit);
-    println!("  rev: {} (valid TID: {})", frame.rev, is_valid_tid(&frame.rev));
+    println!(
+        "  rev: {} (valid TID: {})",
+        frame.rev,
+        is_valid_tid(&frame.rev)
+    );
     println!("  since: {:?}", frame.since);
     println!("  blocks length: {} bytes", frame.blocks.len());
     println!("  ops count: {}", frame.ops.len());
     println!("  blobs count: {}", frame.blobs.len());
-    println!("  time: {} (valid format: {})", frame.time, is_valid_time_format(&frame.time));
-    println!("  prevData: {:?} (IMPORTANT - should have value for updates)", frame.prev_data);
+    println!(
+        "  time: {} (valid format: {})",
+        frame.time,
+        is_valid_time_format(&frame.time)
+    );
+    println!(
+        "  prevData: {:?} (IMPORTANT - should have value for updates)",
+        frame.prev_data
+    );
 
     assert_eq!(frame.repo, did, "Frame repo should match DID");
-    assert!(is_valid_tid(&frame.rev), "Rev should be valid TID format, got: {}", frame.rev);
+    assert!(
+        is_valid_tid(&frame.rev),
+        "Rev should be valid TID format, got: {}",
+        frame.rev
+    );
     assert!(!frame.blocks.is_empty(), "Blocks should not be empty");
-    assert!(is_valid_time_format(&frame.time), "Time should be ISO 8601 with milliseconds and Z suffix");
+    assert!(
+        is_valid_time_format(&frame.time),
+        "Time should be ISO 8601 with milliseconds and Z suffix"
+    );
 
     println!("\nOps validation:");
     for (i, op) in frame.ops.iter().enumerate() {
@@ -247,13 +294,21 @@ async fn test_firehose_frame_structure() {
         println!("    action: {}", op.action);
         println!("    path: {}", op.path);
         println!("    cid: {:?}", op.cid);
-        println!("    prev: {:?} (should be Some for updates/deletes)", op.prev);
+        println!(
+            "    prev: {:?} (should be Some for updates/deletes)",
+            op.prev
+        );
 
         assert!(
             ["create", "update", "delete"].contains(&op.action.as_str()),
-            "Invalid action: {}", op.action
+            "Invalid action: {}",
+            op.action
         );
-        assert!(op.path.contains('/'), "Path should contain collection/rkey: {}", op.path);
+        assert!(
+            op.path.contains('/'),
+            "Path should contain collection/rkey: {}",
+            op.path
+        );
 
         if op.action == "create" {
             assert!(op.cid.is_some(), "Create op should have cid");
@@ -270,7 +325,8 @@ async fn test_firehose_frame_structure() {
         "CAR should have at least one root"
     );
     assert_eq!(
-        car_header.roots()[0], frame.commit,
+        car_header.roots()[0],
+        frame.commit,
         "First CAR root should be commit CID"
     );
 
@@ -292,17 +348,15 @@ async fn test_firehose_frame_structure() {
         if let Some(ref cid) = op.cid {
             assert!(
                 block_cids.contains(cid),
-                "CAR should contain op's record block: {}", cid
+                "CAR should contain op's record block: {}",
+                cid
             );
         }
     }
 
     println!("\n=== Validation Complete ===\n");
 
-    ws_stream
-        .send(tungstenite::Message::Close(None))
-        .await
-        .ok();
+    ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }
 
 #[tokio::test]
@@ -402,8 +456,10 @@ async fn test_firehose_update_has_prev_field() {
     println!("Frame prevData: {:?}", frame.prev_data);
 
     for op in &frame.ops {
-        println!("Op: action={}, path={}, cid={:?}, prev={:?}",
-            op.action, op.path, op.cid, op.prev);
+        println!(
+            "Op: action={}, path={}, cid={:?}, prev={:?}",
+            op.action, op.path, op.cid, op.prev
+        );
 
         if op.action == "update" && op.path.contains("app.bsky.actor.profile") {
             assert!(
@@ -417,10 +473,7 @@ async fn test_firehose_update_has_prev_field() {
 
     println!("\n=== Validation Complete ===\n");
 
-    ws_stream
-        .send(tungstenite::Message::Close(None))
-        .await
-        .ok();
+    ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }
 
 #[tokio::test]
@@ -475,8 +528,14 @@ async fn test_firehose_commit_has_prev_data() {
     let first_frame = first_frame_opt.expect("No first frame found");
 
     println!("\n=== First Commit ===");
-    println!("  prevData: {:?} (first commit may be None)", first_frame.prev_data);
-    println!("  since: {:?} (first commit should be None)", first_frame.since);
+    println!(
+        "  prevData: {:?} (first commit may be None)",
+        first_frame.prev_data
+    );
+    println!(
+        "  since: {:?} (first commit should be None)",
+        first_frame.since
+    );
 
     let post_payload2 = json!({
         "repo": did,
@@ -519,8 +578,14 @@ async fn test_firehose_commit_has_prev_data() {
     let second_frame = second_frame_opt.expect("No second frame found");
 
     println!("\n=== Second Commit ===");
-    println!("  prevData: {:?} (should have value - MST root CID)", second_frame.prev_data);
-    println!("  since: {:?} (should have value - previous rev)", second_frame.since);
+    println!(
+        "  prevData: {:?} (should have value - MST root CID)",
+        second_frame.prev_data
+    );
+    println!(
+        "  since: {:?} (should have value - previous rev)",
+        second_frame.since
+    );
 
     assert!(
         second_frame.since.is_some(),
@@ -529,10 +594,7 @@ async fn test_firehose_commit_has_prev_data() {
 
     println!("\n=== Validation Complete ===\n");
 
-    ws_stream
-        .send(tungstenite::Message::Close(None))
-        .await
-        .ok();
+    ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }
 
 #[tokio::test]
@@ -590,10 +652,17 @@ async fn test_compare_raw_cbor_encoding() {
     println!("Total frame size: {} bytes", raw_bytes.len());
 
     fn bytes_to_hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join("")
+        bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join("")
     }
 
-    println!("First 64 bytes (hex): {}", bytes_to_hex(&raw_bytes[..64.min(raw_bytes.len())]));
+    println!(
+        "First 64 bytes (hex): {}",
+        bytes_to_hex(&raw_bytes[..64.min(raw_bytes.len())])
+    );
 
     let header_end = find_cbor_map_end(&raw_bytes).expect("Failed to find header end");
 
@@ -604,8 +673,5 @@ async fn test_compare_raw_cbor_encoding() {
 
     println!("\n=== Analysis Complete ===\n");
 
-    ws_stream
-        .send(tungstenite::Message::Close(None))
-        .await
-        .ok();
+    ws_stream.send(tungstenite::Message::Close(None)).await.ok();
 }

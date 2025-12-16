@@ -11,5 +11,5 @@ pub use read::{GetRecordInput, ListRecordsInput, ListRecordsOutput, get_record, 
 pub use utils::*;
 pub use write::{
     CreateRecordInput, CreateRecordOutput, PutRecordInput, PutRecordOutput, create_record,
-    put_record, prepare_repo_write,
+    prepare_repo_write, put_record,
 };

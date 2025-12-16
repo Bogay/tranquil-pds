@@ -90,7 +90,11 @@ impl ImageProcessor {
         self
     }
 
-    pub fn process(&self, data: &[u8], mime_type: &str) -> Result<ImageProcessingResult, ImageError> {
+    pub fn process(
+        &self,
+        data: &[u8],
+        mime_type: &str,
+    ) -> Result<ImageProcessingResult, ImageError> {
         if data.len() > self.max_file_size {
             return Err(ImageError::FileTooLarge {
                 size: data.len(),
@@ -107,12 +111,16 @@ impl ImageProcessor {
             });
         }
         let original = self.encode_image(&img)?;
-        let thumbnail_feed = if self.generate_thumbnails && (img.width() > THUMB_SIZE_FEED || img.height() > THUMB_SIZE_FEED) {
+        let thumbnail_feed = if self.generate_thumbnails
+            && (img.width() > THUMB_SIZE_FEED || img.height() > THUMB_SIZE_FEED)
+        {
             Some(self.generate_thumbnail(&img, THUMB_SIZE_FEED)?)
         } else {
             None
         };
-        let thumbnail_full = if self.generate_thumbnails && (img.width() > THUMB_SIZE_FULL || img.height() > THUMB_SIZE_FULL) {
+        let thumbnail_full = if self.generate_thumbnails
+            && (img.width() > THUMB_SIZE_FULL || img.height() > THUMB_SIZE_FULL)
+        {
             Some(self.generate_thumbnail(&img, THUMB_SIZE_FULL)?)
         } else {
             None
@@ -183,7 +191,11 @@ impl ImageProcessor {
         })
     }
 
-    fn generate_thumbnail(&self, img: &DynamicImage, max_size: u32) -> Result<ProcessedImage, ImageError> {
+    fn generate_thumbnail(
+        &self,
+        img: &DynamicImage,
+        max_size: u32,
+    ) -> Result<ProcessedImage, ImageError> {
         let (orig_width, orig_height) = (img.width(), img.height());
         let (new_width, new_height) = if orig_width > orig_height {
             let ratio = max_size as f64 / orig_width as f64;
@@ -204,8 +216,8 @@ impl ImageProcessor {
     }
 
     pub fn strip_exif(data: &[u8]) -> Result<Vec<u8>, ImageError> {
-        let format = image::guess_format(data)
-            .map_err(|e| ImageError::DecodeError(e.to_string()))?;
+        let format =
+            image::guess_format(data).map_err(|e| ImageError::DecodeError(e.to_string()))?;
         let cursor = Cursor::new(data);
         let img = ImageReader::with_format(cursor, format)
             .decode()
@@ -224,7 +236,8 @@ mod tests {
     fn create_test_image(width: u32, height: u32) -> Vec<u8> {
         let img = DynamicImage::new_rgb8(width, height);
         let mut buf = Vec::new();
-        img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png).unwrap();
+        img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+            .unwrap();
         buf
     }
 

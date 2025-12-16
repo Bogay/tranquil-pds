@@ -487,18 +487,23 @@ pub fn account_selector_page(
     )
 }
 
-pub fn two_factor_page(
-    request_uri: &str,
-    channel: &str,
-    error_message: Option<&str>,
-) -> String {
+pub fn two_factor_page(request_uri: &str, channel: &str, error_message: Option<&str>) -> String {
     let error_html = error_message
         .map(|msg| format!(r#"<div class="error-banner">{}</div>"#, html_escape(msg)))
         .unwrap_or_default();
     let (title, subtitle) = match channel {
-        "email" => ("Check your email", "We sent a verification code to your email"),
-        "Discord" => ("Check Discord", "We sent a verification code to your Discord"),
-        "Telegram" => ("Check Telegram", "We sent a verification code to your Telegram"),
+        "email" => (
+            "Check your email",
+            "We sent a verification code to your email",
+        ),
+        "Discord" => (
+            "Check Discord",
+            "We sent a verification code to your Discord",
+        ),
+        "Telegram" => (
+            "Check Telegram",
+            "We sent a verification code to your Telegram",
+        ),
         "Signal" => ("Check Signal", "We sent a verification code to your Signal"),
         _ => ("Check your messages", "We sent you a verification code"),
     };
@@ -546,7 +551,8 @@ pub fn two_factor_page(
 }
 
 pub fn error_page(error: &str, error_description: Option<&str>) -> String {
-    let description = error_description.unwrap_or("An error occurred during the authorization process.");
+    let description =
+        error_description.unwrap_or("An error occurred during the authorization process.");
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -618,7 +624,12 @@ fn get_initials(handle: &str) -> String {
     if clean.is_empty() {
         return "?".to_string();
     }
-    clean.chars().next().unwrap_or('?').to_uppercase().to_string()
+    clean
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string()
 }
 
 pub fn mask_email(email: &str) -> String {

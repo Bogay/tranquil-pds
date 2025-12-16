@@ -43,7 +43,11 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
     .fetch_all(&state.db)
     .await?;
     if !events.is_empty() {
-        info!(count = events.len(), from_seq = catchup_start, "Broadcasting catch-up events");
+        info!(
+            count = events.len(),
+            from_seq = catchup_start,
+            "Broadcasting catch-up events"
+        );
         for event in events {
             let seq = event.seq;
             let _ = state.firehose_tx.send(event);
@@ -57,13 +61,20 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         let seq_id: i64 = match payload.parse() {
             Ok(id) => id,
             Err(e) => {
-                warn!("Received invalid payload in repo_updates: '{}'. Error: {}", payload, e);
+                warn!(
+                    "Received invalid payload in repo_updates: '{}'. Error: {}",
+                    payload, e
+                );
                 continue;
             }
         };
         let last_seq = LAST_BROADCAST_SEQ.load(Ordering::SeqCst);
         if seq_id <= last_seq {
-            debug!(seq = seq_id, last = last_seq, "Skipping already-broadcast event");
+            debug!(
+                seq = seq_id,
+                last = last_seq,
+                "Skipping already-broadcast event"
+            );
             continue;
         }
         if seq_id > last_seq + 1 {
@@ -103,7 +114,11 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         if let Some(event) = event {
             match state.firehose_tx.send(event) {
                 Ok(receiver_count) => {
-                    debug!(seq = seq_id, receivers = receiver_count, "Broadcast event to firehose");
+                    debug!(
+                        seq = seq_id,
+                        receivers = receiver_count,
+                        "Broadcast event to firehose"
+                    );
                 }
                 Err(e) => {
                     warn!(seq = seq_id, error = %e, "Failed to broadcast event (no receivers?)");
@@ -111,7 +126,10 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
             }
             LAST_BROADCAST_SEQ.store(seq_id, Ordering::SeqCst);
         } else {
-            warn!(seq = seq_id, "Received notification but could not find row in repo_seq");
+            warn!(
+                seq = seq_id,
+                "Received notification but could not find row in repo_seq"
+            );
         }
     }
 }

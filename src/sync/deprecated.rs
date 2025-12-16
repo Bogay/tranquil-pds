@@ -51,7 +51,13 @@ pub async fn get_head(
     .fetch_optional(&state.db)
     .await;
     match result {
-        Ok(Some(row)) => (StatusCode::OK, Json(GetHeadOutput { root: row.repo_root_cid })).into_response(),
+        Ok(Some(row)) => (
+            StatusCode::OK,
+            Json(GetHeadOutput {
+                root: row.repo_root_cid,
+            }),
+        )
+            .into_response(),
         Ok(None) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "HeadNotFound", "message": "Could not find root for DID"})),
@@ -157,9 +163,11 @@ pub async fn get_checkout(
             let mut writer = Vec::new();
             crate::sync::car::write_varint(&mut writer, total_len as u64)
                 .expect("Writing to Vec<u8> should never fail");
-            writer.write_all(&cid_bytes)
+            writer
+                .write_all(&cid_bytes)
                 .expect("Writing to Vec<u8> should never fail");
-            writer.write_all(&block)
+            writer
+                .write_all(&block)
                 .expect("Writing to Vec<u8> should never fail");
             car_bytes.extend_from_slice(&writer);
             if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {

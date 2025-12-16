@@ -1,13 +1,16 @@
 use axum::{
-    extract::FromRequestParts,
-    http::{StatusCode, request::Parts, header::AUTHORIZATION},
-    response::{IntoResponse, Response},
     Json,
+    extract::FromRequestParts,
+    http::{StatusCode, header::AUTHORIZATION, request::Parts},
+    response::{IntoResponse, Response},
 };
 use serde_json::json;
 
+use super::{
+    AuthenticatedUser, TokenValidationError, validate_bearer_token_cached,
+    validate_bearer_token_cached_allow_deactivated,
+};
 use crate::state::AppState;
-use super::{AuthenticatedUser, TokenValidationError, validate_bearer_token_cached, validate_bearer_token_cached_allow_deactivated};
 
 pub struct BearerAuth(pub AuthenticatedUser);
 
@@ -108,7 +111,10 @@ pub fn extract_auth_token_from_header(auth_header: Option<&str>) -> Option<Extra
         if token.is_empty() {
             return None;
         }
-        return Some(ExtractedToken { token: token.to_string(), is_dpop: false });
+        return Some(ExtractedToken {
+            token: token.to_string(),
+            is_dpop: false,
+        });
     }
 
     if header.len() >= 5 && header[..5].eq_ignore_ascii_case("dpop ") {
@@ -116,7 +122,10 @@ pub fn extract_auth_token_from_header(auth_header: Option<&str>) -> Option<Extra
         if token.is_empty() {
             return None;
         }
-        return Some(ExtractedToken { token: token.to_string(), is_dpop: true });
+        return Some(ExtractedToken {
+            token: token.to_string(),
+            is_dpop: true,
+        });
     }
 
     None

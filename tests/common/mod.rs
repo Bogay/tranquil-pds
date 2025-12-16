@@ -50,12 +50,18 @@ fn cleanup() {
         return;
     }
     if std::env::var("XDG_RUNTIME_DIR").is_ok() {
-         let _ = std::process::Command::new("podman")
+        let _ = std::process::Command::new("podman")
             .args(&["rm", "-f", "--filter", "label=bspds_test=true"])
             .output();
     }
     let _ = std::process::Command::new("docker")
-        .args(&["container", "prune", "-f", "--filter", "label=bspds_test=true"])
+        .args(&[
+            "container",
+            "prune",
+            "-f",
+            "--filter",
+            "label=bspds_test=true",
+        ])
         .output();
 }
 
@@ -103,15 +109,27 @@ pub async fn base_url() -> &'static str {
 }
 
 async fn setup_with_external_infra() -> String {
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set when using external infra");
-    let s3_endpoint = std::env::var("S3_ENDPOINT")
-        .expect("S3_ENDPOINT must be set when using external infra");
+    let database_url =
+        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
+    let s3_endpoint =
+        std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT must be set when using external infra");
     unsafe {
-        std::env::set_var("S3_BUCKET", std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()));
-        std::env::set_var("AWS_ACCESS_KEY_ID", std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()));
-        std::env::set_var("AWS_SECRET_ACCESS_KEY", std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()));
-        std::env::set_var("AWS_REGION", std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()));
+        std::env::set_var(
+            "S3_BUCKET",
+            std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()),
+        );
+        std::env::set_var(
+            "AWS_ACCESS_KEY_ID",
+            std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()),
+        );
+        std::env::set_var(
+            "AWS_SECRET_ACCESS_KEY",
+            std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+        );
+        std::env::set_var(
+            "AWS_REGION",
+            std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+        );
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
     }
     let mock_server = MockServer::start().await;
@@ -189,7 +207,9 @@ async fn setup_with_testcontainers() -> String {
 
 #[cfg(feature = "external-infra")]
 async fn setup_with_testcontainers() -> String {
-    panic!("Testcontainers disabled with external-infra feature. Set DATABASE_URL and S3_ENDPOINT.");
+    panic!(
+        "Testcontainers disabled with external-infra feature. Set DATABASE_URL and S3_ENDPOINT."
+    );
 }
 
 async fn setup_mock_appview(mock_server: &MockServer) {
@@ -218,7 +238,7 @@ async fn setup_mock_appview(mock_server: &MockServer) {
                 .set_body_json(json!({
                     "feed": [],
                     "cursor": null
-                }))
+                })),
         )
         .mount(mock_server)
         .await;
@@ -364,7 +384,10 @@ pub async fn get_db_connection_string() -> String {
         #[cfg(not(feature = "external-infra"))]
         {
             let container = DB_CONTAINER.get().expect("DB container not initialized");
-            let port = container.get_host_port_ipv4(5432).await.expect("Failed to get port");
+            let port = container
+                .get_host_port_ipv4(5432)
+                .await
+                .expect("Failed to get port");
             format!("postgres://postgres:postgres@127.0.0.1:{}/postgres", port)
         }
         #[cfg(feature = "external-infra")]
@@ -404,7 +427,10 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
         .await
         .expect("confirmSignup request failed");
     assert_eq!(confirm_res.status(), StatusCode::OK, "confirmSignup failed");
-    let confirm_body: Value = confirm_res.json().await.expect("Invalid JSON from confirmSignup");
+    let confirm_body: Value = confirm_res
+        .json()
+        .await
+        .expect("Invalid JSON from confirmSignup");
     confirm_body["accessJwt"]
         .as_str()
         .expect("No accessJwt in confirmSignup response")
@@ -543,7 +569,10 @@ pub async fn create_account_and_login(client: &Client) -> (String, String) {
                 .await
                 .expect("confirmSignup request failed");
             if confirm_res.status() == StatusCode::OK {
-                let confirm_body: Value = confirm_res.json().await.expect("Invalid JSON from confirmSignup");
+                let confirm_body: Value = confirm_res
+                    .json()
+                    .await
+                    .expect("Invalid JSON from confirmSignup");
                 let access_jwt = confirm_body["accessJwt"]
                     .as_str()
                     .expect("No accessJwt in confirmSignup response")

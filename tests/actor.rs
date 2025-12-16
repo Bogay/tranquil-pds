@@ -1,6 +1,6 @@
 mod common;
 use common::{base_url, client, create_account_and_login};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[tokio::test]
 async fn test_get_preferences_empty() {

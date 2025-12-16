@@ -301,7 +301,10 @@ async fn test_get_recommended_did_credentials_success() {
     assert!(!also_known_as.is_empty());
     assert!(also_known_as[0].as_str().unwrap().starts_with("at://"));
     assert!(body["verificationMethods"]["atproto"].is_string());
-    assert_eq!(body["services"]["atprotoPds"]["type"], "AtprotoPersonalDataServer");
+    assert_eq!(
+        body["services"]["atprotoPds"]["type"],
+        "AtprotoPersonalDataServer"
+    );
     assert!(body["services"]["atprotoPds"]["endpoint"].is_string());
 }
 

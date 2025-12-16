@@ -1,6 +1,6 @@
 mod common;
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 
 async fn get_pool() -> PgPool {
@@ -12,9 +12,17 @@ async fn get_pool() -> PgPool {
         .expect("Failed to connect to test database")
 }
 
-async fn create_verified_account(client: &reqwest::Client, base_url: &str, handle: &str, email: &str) -> String {
+async fn create_verified_account(
+    client: &reqwest::Client,
+    base_url: &str,
+    handle: &str,
+    email: &str,
+) -> String {
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url
+        ))
         .json(&json!({
             "handle": handle,
             "email": email,
@@ -39,7 +47,10 @@ async fn test_email_update_flow_success() {
     let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("new_{}@example.com", handle);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestEmailUpdate",
+            base_url
+        ))
         .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
@@ -55,7 +66,10 @@ async fn test_email_update_flow_success() {
     .fetch_one(&pool)
     .await
     .expect("User not found");
-    assert_eq!(user.email_pending_verification.as_deref(), Some(new_email.as_str()));
+    assert_eq!(
+        user.email_pending_verification.as_deref(),
+        Some(new_email.as_str())
+    );
     assert!(user.email_confirmation_code.is_some());
     let code = user.email_confirmation_code.unwrap();
     let res = client
@@ -92,7 +106,10 @@ async fn test_request_email_update_taken_email() {
     let email2 = format!("{}@example.com", handle2);
     let access_jwt2 = create_verified_account(&client, &base_url, &handle2, &email2).await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestEmailUpdate",
+            base_url
+        ))
         .bearer_auth(&access_jwt2)
         .json(&json!({"email": email1}))
         .send()
@@ -112,7 +129,10 @@ async fn test_confirm_email_invalid_token() {
     let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("new_{}@example.com", handle);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestEmailUpdate",
+            base_url
+        ))
         .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
@@ -144,17 +164,23 @@ async fn test_confirm_email_wrong_email() {
     let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("new_{}@example.com", handle);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestEmailUpdate",
+            base_url
+        ))
         .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
         .await
         .expect("Failed to request email update");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!("SELECT email_confirmation_code FROM users WHERE handle = $1", handle)
-        .fetch_one(&pool)
-        .await
-        .expect("User not found");
+    let user = sqlx::query!(
+        "SELECT email_confirmation_code FROM users WHERE handle = $1",
+        handle
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("User not found");
     let code = user.email_confirmation_code.unwrap();
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.confirmEmail", base_url))
@@ -209,7 +235,11 @@ async fn test_update_email_same_email_noop() {
         .send()
         .await
         .expect("Failed to update email");
-    assert_eq!(res.status(), StatusCode::OK, "Updating to same email should succeed as no-op");
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "Updating to same email should succeed as no-op"
+    );
 }
 
 #[tokio::test]
@@ -221,7 +251,10 @@ async fn test_update_email_requires_token_after_pending() {
     let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("pending_{}@example.com", handle);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestEmailUpdate",
+            base_url
+        ))
         .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
@@ -250,7 +283,10 @@ async fn test_update_email_with_valid_token() {
     let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("valid_{}@example.com", handle);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestEmailUpdate",
+            base_url
+        ))
         .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
@@ -276,10 +312,13 @@ async fn test_update_email_with_valid_token() {
         .await
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!("SELECT email, email_pending_verification FROM users WHERE handle = $1", handle)
-        .fetch_one(&pool)
-        .await
-        .expect("User not found");
+    let user = sqlx::query!(
+        "SELECT email, email_pending_verification FROM users WHERE handle = $1",
+        handle
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("User not found");
     assert_eq!(user.email, Some(new_email));
     assert!(user.email_pending_verification.is_none());
 }
@@ -293,7 +332,10 @@ async fn test_update_email_invalid_token() {
     let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("badtok_{}@example.com", handle);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestEmailUpdate", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestEmailUpdate",
+            base_url
+        ))
         .bearer_auth(&access_jwt)
         .json(&json!({"email": new_email}))
         .send()
@@ -334,7 +376,10 @@ async fn test_update_email_already_taken() {
         .expect("Failed to attempt email update");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Invalid JSON");
-    assert!(body["message"].as_str().unwrap().contains("already in use") || body["error"] == "InvalidRequest");
+    assert!(
+        body["message"].as_str().unwrap().contains("already in use")
+            || body["error"] == "InvalidRequest"
+    );
 }
 
 #[tokio::test]

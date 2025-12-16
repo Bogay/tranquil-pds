@@ -24,8 +24,10 @@ pub fn ld_write<W: Write>(mut writer: W, data: &[u8]) -> std::io::Result<()> {
 }
 
 pub fn encode_car_header(root_cid: &Cid) -> Result<Vec<u8>, String> {
-    let header = CarHeader::new_v1(vec![root_cid.clone()]);
-    let header_cbor = header.encode().map_err(|e| format!("Failed to encode CAR header: {:?}", e))?;
+    let header = CarHeader::new_v1(vec![*root_cid]);
+    let header_cbor = header
+        .encode()
+        .map_err(|e| format!("Failed to encode CAR header: {:?}", e))?;
     let mut result = Vec::new();
     write_varint(&mut result, header_cbor.len() as u64)
         .expect("Writing to Vec<u8> should never fail");

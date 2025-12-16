@@ -1,5 +1,5 @@
-use serde::{de::DeserializeOwned, Serialize};
 use super::super::OAuthError;
+use serde::{Serialize, de::DeserializeOwned};
 
 pub fn to_json<T: Serialize>(value: &T) -> Result<serde_json::Value, OAuthError> {
     serde_json::to_value(value).map_err(|e| {

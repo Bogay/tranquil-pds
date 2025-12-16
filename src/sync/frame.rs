@@ -1,7 +1,7 @@
+use crate::sync::firehose::SequencedEvent;
 use cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use crate::sync::firehose::SequencedEvent;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FrameHeader {
@@ -86,19 +86,21 @@ pub struct CommitFrameBuilder {
 
 impl CommitFrameBuilder {
     pub fn build(self) -> Result<CommitFrame, &'static str> {
-        let commit_cid = Cid::from_str(&self.commit_cid_str)
-            .map_err(|_| "Invalid commit CID")?;
-        let json_ops: Vec<JsonRepoOp> = serde_json::from_value(self.ops_json)
-            .unwrap_or_else(|_| vec![]);
-        let ops: Vec<RepoOp> = json_ops.into_iter().map(|op| {
-            RepoOp {
+        let commit_cid = Cid::from_str(&self.commit_cid_str).map_err(|_| "Invalid commit CID")?;
+        let json_ops: Vec<JsonRepoOp> =
+            serde_json::from_value(self.ops_json).unwrap_or_else(|_| vec![]);
+        let ops: Vec<RepoOp> = json_ops
+            .into_iter()
+            .map(|op| RepoOp {
                 action: op.action,
                 path: op.path,
                 cid: op.cid.and_then(|s| Cid::from_str(&s).ok()),
                 prev: op.prev.and_then(|s| Cid::from_str(&s).ok()),
-            }
-        }).collect();
-        let blobs: Vec<Cid> = self.blobs.iter()
+            })
+            .collect();
+        let blobs: Vec<Cid> = self
+            .blobs
+            .iter()
             .filter_map(|s| Cid::from_str(s).ok())
             .collect();
         let rev = placeholder_rev();

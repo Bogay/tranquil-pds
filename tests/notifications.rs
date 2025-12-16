@@ -1,7 +1,7 @@
 mod common;
 use bspds::notifications::{
-    enqueue_notification, enqueue_welcome, NewNotification, NotificationChannel,
-    NotificationStatus, NotificationType,
+    NewNotification, NotificationChannel, NotificationStatus, NotificationType,
+    enqueue_notification, enqueue_welcome,
 };
 use sqlx::PgPool;
 

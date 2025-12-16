@@ -3,7 +3,7 @@ use bytes::Bytes;
 use cid::Cid;
 use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::storage::BlockStore;
-use k256::ecdsa::{signature::Signer, Signature, SigningKey};
+use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -71,9 +71,22 @@ fn create_signed_commit(
 }
 
 pub enum RecordOp {
-    Create { collection: String, rkey: String, cid: Cid },
-    Update { collection: String, rkey: String, cid: Cid, prev: Option<Cid> },
-    Delete { collection: String, rkey: String, prev: Option<Cid> },
+    Create {
+        collection: String,
+        rkey: String,
+        cid: Cid,
+    },
+    Update {
+        collection: String,
+        rkey: String,
+        cid: Cid,
+        prev: Option<Cid>,
+    },
+    Delete {
+        collection: String,
+        rkey: String,
+        prev: Option<Cid>,
+    },
 }
 
 pub struct CommitResult {
@@ -81,16 +94,29 @@ pub struct CommitResult {
     pub rev: String,
 }
 
+pub struct CommitParams<'a> {
+    pub did: &'a str,
+    pub user_id: Uuid,
+    pub current_root_cid: Option<Cid>,
+    pub prev_data_cid: Option<Cid>,
+    pub new_mst_root: Cid,
+    pub ops: Vec<RecordOp>,
+    pub blocks_cids: &'a [String],
+}
+
 pub async fn commit_and_log(
     state: &AppState,
-    did: &str,
-    user_id: Uuid,
-    current_root_cid: Option<Cid>,
-    prev_data_cid: Option<Cid>,
-    new_mst_root: Cid,
-    ops: Vec<RecordOp>,
-    blocks_cids: &[String],
+    params: CommitParams<'_>,
 ) -> Result<CommitResult, String> {
+    let CommitParams {
+        did,
+        user_id,
+        current_root_cid,
+        prev_data_cid,
+        new_mst_root,
+        ops,
+        blocks_cids,
+    } = params;
     let key_row = sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
         user_id
@@ -100,20 +126,21 @@ pub async fn commit_and_log(
     .map_err(|e| format!("Failed to fetch signing key: {}", e))?;
     let key_bytes = crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
         .map_err(|e| format!("Failed to decrypt signing key: {}", e))?;
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .map_err(|e| format!("Invalid signing key: {}", e))?;
+    let signing_key =
+        SigningKey::from_slice(&key_bytes).map_err(|e| format!("Invalid signing key: {}", e))?;
     let rev = Tid::now(LimitedU32::MIN);
     let rev_str = rev.to_string();
-    let (new_commit_bytes, _sig) = create_signed_commit(
-        did,
-        new_mst_root,
-        &rev_str,
-        current_root_cid,
-        &signing_key,
-    )?;
-    let new_root_cid = state.block_store.put(&new_commit_bytes).await
+    let (new_commit_bytes, _sig) =
+        create_signed_commit(did, new_mst_root, &rev_str, current_root_cid, &signing_key)?;
+    let new_root_cid = state
+        .block_store
+        .put(&new_commit_bytes)
+        .await
         .map_err(|e| format!("Failed to save commit block: {:?}", e))?;
-    let mut tx = state.db.begin().await
+    let mut tx = state
+        .db
+        .begin()
+        .await
         .map_err(|e| format!("Failed to begin transaction: {}", e))?;
     let lock_result = sqlx::query!(
         "SELECT repo_root_cid FROM repos WHERE user_id = $1 FOR UPDATE NOWAIT",
@@ -123,28 +150,36 @@ pub async fn commit_and_log(
     .await;
     match lock_result {
         Err(e) => {
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.code().as_deref() == Some("55P03") {
-                    return Err("ConcurrentModification: Another request is modifying this repo".to_string());
+            if let Some(db_err) = e.as_database_error()
+                && db_err.code().as_deref() == Some("55P03") {
+                    return Err(
+                        "ConcurrentModification: Another request is modifying this repo"
+                            .to_string(),
+                    );
                 }
-            }
             return Err(format!("Failed to acquire repo lock: {}", e));
         }
         Ok(Some(row)) => {
-            if let Some(expected_root) = &current_root_cid {
-                if row.repo_root_cid != expected_root.to_string() {
-                    return Err("ConcurrentModification: Repo has been modified since last read".to_string());
+            if let Some(expected_root) = &current_root_cid
+                && row.repo_root_cid != expected_root.to_string() {
+                    return Err(
+                        "ConcurrentModification: Repo has been modified since last read"
+                            .to_string(),
+                    );
                 }
-            }
         }
         Ok(None) => {
             return Err("Repo not found".to_string());
         }
     }
-    sqlx::query!("UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2", new_root_cid.to_string(), user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (repos): {}", e))?;
+    sqlx::query!(
+        "UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2",
+        new_root_cid.to_string(),
+        user_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("DB Error (repos): {}", e))?;
     let mut upsert_collections: Vec<String> = Vec::new();
     let mut upsert_rkeys: Vec<String> = Vec::new();
     let mut upsert_cids: Vec<String> = Vec::new();
@@ -152,12 +187,24 @@ pub async fn commit_and_log(
     let mut delete_rkeys: Vec<String> = Vec::new();
     for op in &ops {
         match op {
-            RecordOp::Create { collection, rkey, cid } | RecordOp::Update { collection, rkey, cid, .. } => {
+            RecordOp::Create {
+                collection,
+                rkey,
+                cid,
+            }
+            | RecordOp::Update {
+                collection,
+                rkey,
+                cid,
+                ..
+            } => {
                 upsert_collections.push(collection.clone());
                 upsert_rkeys.push(rkey.clone());
                 upsert_cids.push(cid.to_string());
             }
-            RecordOp::Delete { collection, rkey, .. } => {
+            RecordOp::Delete {
+                collection, rkey, ..
+            } => {
                 delete_collections.push(collection.clone());
                 delete_rkeys.push(rkey.clone());
             }
@@ -197,14 +244,24 @@ pub async fn commit_and_log(
         .await
         .map_err(|e| format!("DB Error (records batch delete): {}", e))?;
     }
-    let ops_json = ops.iter().map(|op| {
-        match op {
-            RecordOp::Create { collection, rkey, cid } => json!({
+    let ops_json = ops
+        .iter()
+        .map(|op| match op {
+            RecordOp::Create {
+                collection,
+                rkey,
+                cid,
+            } => json!({
                 "action": "create",
                 "path": format!("{}/{}", collection, rkey),
                 "cid": cid.to_string()
             }),
-            RecordOp::Update { collection, rkey, cid, prev } => {
+            RecordOp::Update {
+                collection,
+                rkey,
+                cid,
+                prev,
+            } => {
                 let mut obj = json!({
                     "action": "update",
                     "path": format!("{}/{}", collection, rkey),
@@ -214,8 +271,12 @@ pub async fn commit_and_log(
                     obj["prev"] = json!(prev_cid.to_string());
                 }
                 obj
-            },
-            RecordOp::Delete { collection, rkey, prev } => {
+            }
+            RecordOp::Delete {
+                collection,
+                rkey,
+                prev,
+            } => {
                 let mut obj = json!({
                     "action": "delete",
                     "path": format!("{}/{}", collection, rkey),
@@ -225,9 +286,9 @@ pub async fn commit_and_log(
                     obj["prev"] = json!(prev_cid.to_string());
                 }
                 obj
-            },
-        }
-    }).collect::<Vec<_>>();
+            }
+        })
+        .collect::<Vec<_>>();
     let event_type = "commit";
     let prev_cid_str = current_root_cid.map(|c| c.to_string());
     let prev_data_cid_str = prev_data_cid.map(|c| c.to_string());
@@ -249,13 +310,12 @@ pub async fn commit_and_log(
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (repo_seq): {}", e))?;
-    sqlx::query(
-        &format!("NOTIFY repo_updates, '{}'", seq_row.seq)
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("DB Error (notify): {}", e))?;
-    tx.commit().await
+    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("DB Error (notify): {}", e))?;
+    tx.commit()
+        .await
         .map_err(|e| format!("Failed to commit transaction: {}", e))?;
     let _ = sequence_sync_event(state, did, &new_root_cid.to_string()).await;
     Ok(CommitResult {
@@ -278,16 +338,20 @@ pub async fn create_record_internal(
         .await
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "User not found".to_string())?;
-    let root_cid_str: String =
-        sqlx::query_scalar!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| format!("DB error: {}", e))?
-            .ok_or_else(|| "Repo not found".to_string())?;
-    let current_root_cid = Cid::from_str(&root_cid_str)
-        .map_err(|_| "Invalid repo root CID".to_string())?;
+    let root_cid_str: String = sqlx::query_scalar!(
+        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| format!("DB error: {}", e))?
+    .ok_or_else(|| "Repo not found".to_string())?;
+    let current_root_cid =
+        Cid::from_str(&root_cid_str).map_err(|_| "Invalid repo root CID".to_string())?;
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = tracking_store.get(&current_root_cid).await
+    let commit_bytes = tracking_store
+        .get(&current_root_cid)
+        .await
         .map_err(|e| format!("Failed to fetch commit: {:?}", e))?
         .ok_or_else(|| "Commit block not found".to_string())?;
     let commit = jacquard_repo::commit::Commit::from_cbor(&commit_bytes)
@@ -296,12 +360,18 @@ pub async fn create_record_internal(
     let mut record_bytes = Vec::new();
     serde_ipld_dagcbor::to_writer(&mut record_bytes, record)
         .map_err(|e| format!("Failed to serialize record: {:?}", e))?;
-    let record_cid = tracking_store.put(&record_bytes).await
+    let record_cid = tracking_store
+        .put(&record_bytes)
+        .await
         .map_err(|e| format!("Failed to save record block: {:?}", e))?;
     let key = format!("{}/{}", collection, rkey);
-    let new_mst = mst.add(&key, record_cid).await
+    let new_mst = mst
+        .add(&key, record_cid)
+        .await
         .map_err(|e| format!("Failed to add to MST: {:?}", e))?;
-    let new_mst_root = new_mst.persist().await
+    let new_mst_root = new_mst
+        .persist()
+        .await
         .map_err(|e| format!("Failed to persist MST: {:?}", e))?;
     let op = RecordOp::Create {
         collection: collection.to_string(),
@@ -309,9 +379,12 @@ pub async fn create_record_internal(
         cid: record_cid,
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
-    new_mst.blocks_for_path(&key, &mut relevant_blocks).await
+    new_mst
+        .blocks_for_path(&key, &mut relevant_blocks)
+        .await
         .map_err(|e| format!("Failed to get new MST blocks for path: {:?}", e))?;
-    mst.blocks_for_path(&key, &mut relevant_blocks).await
+    mst.blocks_for_path(&key, &mut relevant_blocks)
+        .await
         .map_err(|e| format!("Failed to get old MST blocks for path: {:?}", e))?;
     relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));
     let mut written_cids = tracking_store.get_all_relevant_cids();
@@ -323,14 +396,17 @@ pub async fn create_record_internal(
     let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
     let result = commit_and_log(
         state,
-        did,
-        user_id,
-        Some(current_root_cid),
-        Some(commit.data),
-        new_mst_root,
-        vec![op],
-        &written_cids_str,
-    ).await?;
+        CommitParams {
+            did,
+            user_id,
+            current_root_cid: Some(current_root_cid),
+            prev_data_cid: Some(commit.data),
+            new_mst_root,
+            ops: vec![op],
+            blocks_cids: &written_cids_str,
+        },
+    )
+    .await?;
     let uri = format!("at://{}/{}/{}", did, collection, rkey);
     Ok((uri, result.commit_cid))
 }

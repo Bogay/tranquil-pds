@@ -75,19 +75,21 @@ pub fn find_blob_refs_ipld(value: &Ipld, depth: usize) -> Vec<BlobRef> {
             .flat_map(|v| find_blob_refs_ipld(v, depth + 1))
             .collect(),
         Ipld::Map(obj) => {
-            if let Some(Ipld::String(type_str)) = obj.get("$type") {
-                if type_str == "blob" {
-                    if let Some(Ipld::Link(link_cid)) = obj.get("ref") {
-                        let mime = obj
-                            .get("mimeType")
-                            .and_then(|v| if let Ipld::String(s) = v { Some(s.clone()) } else { None });
+            if let Some(Ipld::String(type_str)) = obj.get("$type")
+                && type_str == "blob"
+                    && let Some(Ipld::Link(link_cid)) = obj.get("ref") {
+                        let mime = obj.get("mimeType").and_then(|v| {
+                            if let Ipld::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        });
                         return vec![BlobRef {
                             cid: link_cid.to_string(),
                             mime_type: mime,
                         }];
                     }
-                }
-            }
             obj.values()
                 .flat_map(|v| find_blob_refs_ipld(v, depth + 1))
                 .collect()
@@ -106,10 +108,10 @@ pub fn find_blob_refs(value: &JsonValue, depth: usize) -> Vec<BlobRef> {
             .flat_map(|v| find_blob_refs(v, depth + 1))
             .collect(),
         JsonValue::Object(obj) => {
-            if let Some(JsonValue::String(type_str)) = obj.get("$type") {
-                if type_str == "blob" {
-                    if let Some(JsonValue::Object(ref_obj)) = obj.get("ref") {
-                        if let Some(JsonValue::String(link)) = ref_obj.get("$link") {
+            if let Some(JsonValue::String(type_str)) = obj.get("$type")
+                && type_str == "blob"
+                    && let Some(JsonValue::Object(ref_obj)) = obj.get("ref")
+                        && let Some(JsonValue::String(link)) = ref_obj.get("$link") {
                             let mime = obj
                                 .get("mimeType")
                                 .and_then(|v| v.as_str())
@@ -119,9 +121,6 @@ pub fn find_blob_refs(value: &JsonValue, depth: usize) -> Vec<BlobRef> {
                                 mime_type: mime,
                             }];
                         }
-                    }
-                }
-            }
             obj.values()
                 .flat_map(|v| find_blob_refs(v, depth + 1))
                 .collect()
@@ -194,9 +193,9 @@ pub fn walk_mst(
                                 None
                             }
                         });
-                        if let (Some(key), Some(record_cid)) = (key, record_cid) {
-                            if let Some(record_block) = blocks.get(&record_cid) {
-                                if let Ok(record_value) =
+                        if let (Some(key), Some(record_cid)) = (key, record_cid)
+                            && let Some(record_block) = blocks.get(&record_cid)
+                                && let Ok(record_value) =
                                     serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
                                 {
                                     let blob_refs = find_blob_refs_ipld(&record_value, 0);
@@ -212,8 +211,6 @@ pub fn walk_mst(
                                         });
                                     }
                                 }
-                            }
-                        }
                         if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
                             stack.push(*tree_cid);
                         }
@@ -236,11 +233,21 @@ pub struct CommitInfo {
 fn extract_commit_info(commit: &Ipld) -> Result<(Cid, CommitInfo), ImportError> {
     let obj = match commit {
         Ipld::Map(m) => m,
-        _ => return Err(ImportError::InvalidCommit("Commit must be a map".to_string())),
+        _ => {
+            return Err(ImportError::InvalidCommit(
+                "Commit must be a map".to_string(),
+            ));
+        }
     };
     let data_cid = obj
         .get("data")
-        .and_then(|d| if let Ipld::Link(cid) = d { Some(*cid) } else { None })
+        .and_then(|d| {
+            if let Ipld::Link(cid) = d {
+                Some(*cid)
+            } else {
+                None
+            }
+        })
         .ok_or_else(|| ImportError::InvalidCommit("Missing data field".to_string()))?;
     let rev = obj.get("rev").and_then(|r| {
         if let Ipld::String(s) = r {
@@ -292,11 +299,10 @@ pub async fn apply_import(
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| {
-        if let sqlx::Error::Database(ref db_err) = e {
-            if db_err.code().as_deref() == Some("55P03") {
+        if let sqlx::Error::Database(ref db_err) = e
+            && db_err.code().as_deref() == Some("55P03") {
                 return ImportError::ConcurrentModification;
             }
-        }
         ImportError::Database(e)
     })?;
     if repo.is_none() {

@@ -1,9 +1,9 @@
 mod common;
 mod helpers;
-use reqwest::StatusCode;
-use serde_json::{json, Value};
-use sqlx::PgPool;
 use helpers::verify_new_account;
+use reqwest::StatusCode;
+use serde_json::{Value, json};
+use sqlx::PgPool;
 
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
@@ -27,14 +27,20 @@ async fn test_request_password_reset_creates_code() {
         "password": "oldpassword"
     });
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url
+        ))
         .json(&payload)
         .send()
         .await
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestPasswordReset",
+            base_url
+        ))
         .json(&json!({"email": email}))
         .send()
         .await
@@ -59,7 +65,10 @@ async fn test_request_password_reset_unknown_email_returns_ok() {
     let client = common::client();
     let base_url = common::base_url().await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestPasswordReset",
+            base_url
+        ))
         .json(&json!({"email": "nonexistent@example.com"}))
         .send()
         .await
@@ -82,7 +91,10 @@ async fn test_reset_password_with_valid_token() {
         "password": old_password
     });
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url
+        ))
         .json(&payload)
         .send()
         .await
@@ -92,7 +104,10 @@ async fn test_reset_password_with_valid_token() {
     let did = body["did"].as_str().unwrap();
     let _ = verify_new_account(&client, did).await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestPasswordReset",
+            base_url
+        ))
         .json(&json!({"email": email}))
         .send()
         .await
@@ -107,7 +122,10 @@ async fn test_reset_password_with_valid_token() {
     .expect("User not found");
     let token = user.password_reset_code.expect("No reset code");
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.resetPassword", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.resetPassword",
+            base_url
+        ))
         .json(&json!({
             "token": token,
             "password": new_password
@@ -126,7 +144,10 @@ async fn test_reset_password_with_valid_token() {
     assert!(user.password_reset_code.is_none());
     assert!(user.password_reset_code_expires_at.is_none());
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createSession", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createSession",
+            base_url
+        ))
         .json(&json!({
             "identifier": handle,
             "password": new_password
@@ -136,7 +157,10 @@ async fn test_reset_password_with_valid_token() {
         .expect("Failed to login");
     assert_eq!(res.status(), StatusCode::OK);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createSession", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createSession",
+            base_url
+        ))
         .json(&json!({
             "identifier": handle,
             "password": old_password
@@ -152,7 +176,10 @@ async fn test_reset_password_with_invalid_token() {
     let client = common::client();
     let base_url = common::base_url().await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.resetPassword", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.resetPassword",
+            base_url
+        ))
         .json(&json!({
             "token": "invalid-token",
             "password": "newpassword"
@@ -178,14 +205,20 @@ async fn test_reset_password_with_expired_token() {
         "password": "oldpassword"
     });
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url
+        ))
         .json(&payload)
         .send()
         .await
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestPasswordReset",
+            base_url
+        ))
         .json(&json!({"email": email}))
         .send()
         .await
@@ -207,7 +240,10 @@ async fn test_reset_password_with_expired_token() {
     .await
     .expect("Failed to expire token");
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.resetPassword", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.resetPassword",
+            base_url
+        ))
         .json(&json!({
             "token": token,
             "password": "newpassword"
@@ -233,7 +269,10 @@ async fn test_reset_password_invalidates_sessions() {
         "password": "oldpassword"
     });
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url
+        ))
         .json(&payload)
         .send()
         .await
@@ -250,7 +289,10 @@ async fn test_reset_password_invalidates_sessions() {
         .expect("Failed to get session");
     assert_eq!(res.status(), StatusCode::OK);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestPasswordReset",
+            base_url
+        ))
         .json(&json!({"email": email}))
         .send()
         .await
@@ -265,7 +307,10 @@ async fn test_reset_password_invalidates_sessions() {
     .expect("User not found");
     let token = user.password_reset_code.expect("No reset code");
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.resetPassword", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.resetPassword",
+            base_url
+        ))
         .json(&json!({
             "token": token,
             "password": "newpassword123"
@@ -288,7 +333,10 @@ async fn test_request_password_reset_empty_email() {
     let client = common::client();
     let base_url = common::base_url().await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestPasswordReset",
+            base_url
+        ))
         .json(&json!({"email": ""}))
         .send()
         .await
@@ -311,7 +359,10 @@ async fn test_reset_password_creates_notification() {
         "password": "oldpassword"
     });
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url
+        ))
         .json(&payload)
         .send()
         .await
@@ -330,7 +381,10 @@ async fn test_reset_password_creates_notification() {
     .expect("Failed to count")
     .unwrap_or(0);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.requestPasswordReset", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.requestPasswordReset",
+            base_url
+        ))
         .json(&json!({"email": email}))
         .send()
         .await

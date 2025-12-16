@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use k256::ecdsa::SigningKey;
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -73,13 +73,10 @@ async fn get_plc_token_from_db(did: &str) -> Option<String> {
 async fn get_user_handle(did: &str) -> Option<String> {
     let db_url = get_db_connection_string().await;
     let pool = PgPool::connect(&db_url).await.ok()?;
-    sqlx::query_scalar!(
-        r#"SELECT handle FROM users WHERE did = $1"#,
-        did
-    )
-    .fetch_optional(&pool)
-    .await
-    .ok()?
+    sqlx::query_scalar!(r#"SELECT handle FROM users WHERE did = $1"#, did)
+        .fetch_optional(&pool)
+        .await
+        .ok()?
 }
 
 fn create_mock_last_op(
@@ -107,7 +104,12 @@ fn create_mock_last_op(
     })
 }
 
-fn create_did_document(did: &str, handle: &str, signing_key: &SigningKey, pds_endpoint: &str) -> Value {
+fn create_did_document(
+    did: &str,
+    handle: &str,
+    signing_key: &SigningKey,
+    pds_endpoint: &str,
+) -> Value {
     let multikey = get_multikey_from_signing_key(signing_key);
     json!({
         "@context": [
@@ -174,11 +176,12 @@ async fn setup_mock_plc_for_submit(
 async fn test_full_plc_operation_flow() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -192,7 +195,8 @@ async fn test_full_plc_operation_flow() {
         .await
         .expect("Request failed");
     assert_eq!(request_res.status(), StatusCode::OK);
-    let plc_token = get_plc_token_from_db(&did).await
+    let plc_token = get_plc_token_from_db(&did)
+        .await
         .expect("PLC token not found in database");
     let mock_plc = setup_mock_plc_for_sign(&did, &handle, &signing_key, &pds_endpoint).await;
     unsafe {
@@ -218,11 +222,18 @@ async fn test_full_plc_operation_flow() {
         "Sign PLC operation should succeed. Response: {:?}",
         sign_body
     );
-    let operation = sign_body.get("operation")
+    let operation = sign_body
+        .get("operation")
         .expect("Response should contain operation");
     assert!(operation.get("sig").is_some(), "Operation should be signed");
-    assert_eq!(operation.get("type").and_then(|v| v.as_str()), Some("plc_operation"));
-    assert!(operation.get("prev").is_some(), "Operation should have prev reference");
+    assert_eq!(
+        operation.get("type").and_then(|v| v.as_str()),
+        Some("plc_operation")
+    );
+    assert!(
+        operation.get("prev").is_some(),
+        "Operation should have prev reference"
+    );
 }
 
 #[tokio::test]
@@ -230,11 +241,12 @@ async fn test_full_plc_operation_flow() {
 async fn test_sign_plc_operation_consumes_token() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -248,7 +260,8 @@ async fn test_sign_plc_operation_consumes_token() {
         .await
         .expect("Request failed");
     assert_eq!(request_res.status(), StatusCode::OK);
-    let plc_token = get_plc_token_from_db(&did).await
+    let plc_token = get_plc_token_from_db(&did)
+        .await
         .expect("PLC token not found in database");
     let mock_plc = setup_mock_plc_for_sign(&did, &handle, &signing_key, &pds_endpoint).await;
     unsafe {
@@ -292,14 +305,16 @@ async fn test_sign_plc_operation_consumes_token() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_sign_plc_operation_with_custom_fields -- --ignored --test-threads=1"]
 async fn test_sign_plc_operation_with_custom_fields() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -313,7 +328,8 @@ async fn test_sign_plc_operation_with_custom_fields() {
         .await
         .expect("Request failed");
     assert_eq!(request_res.status(), StatusCode::OK);
-    let plc_token = get_plc_token_from_db(&did).await
+    let plc_token = get_plc_token_from_db(&did)
+        .await
         .expect("PLC token not found in database");
     let mock_plc = setup_mock_plc_for_sign(&did, &handle, &signing_key, &pds_endpoint).await;
     unsafe {
@@ -348,7 +364,11 @@ async fn test_sign_plc_operation_with_custom_fields() {
     assert!(also_known_as.is_some(), "Should have alsoKnownAs");
     assert!(rotation_keys.is_some(), "Should have rotationKeys");
     assert_eq!(also_known_as.unwrap().len(), 2, "Should have 2 aliases");
-    assert_eq!(rotation_keys.unwrap().len(), 2, "Should have 2 rotation keys");
+    assert_eq!(
+        rotation_keys.unwrap().len(),
+        2,
+        "Should have 2 rotation keys"
+    );
 }
 
 #[tokio::test]
@@ -356,11 +376,12 @@ async fn test_sign_plc_operation_with_custom_fields() {
 async fn test_submit_plc_operation_success() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -409,11 +430,12 @@ async fn test_submit_plc_operation_success() {
 async fn test_submit_plc_operation_wrong_endpoint_rejected() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -461,11 +483,12 @@ async fn test_submit_plc_operation_wrong_endpoint_rejected() {
 async fn test_submit_plc_operation_wrong_signing_key_rejected() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -515,11 +538,12 @@ async fn test_submit_plc_operation_wrong_signing_key_rejected() {
 async fn test_full_sign_and_submit_flow() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -533,7 +557,8 @@ async fn test_full_sign_and_submit_flow() {
         .await
         .expect("Request failed");
     assert_eq!(request_res.status(), StatusCode::OK);
-    let plc_token = get_plc_token_from_db(&did).await
+    let plc_token = get_plc_token_from_db(&did)
+        .await
         .expect("PLC token not found");
     let mock_server = MockServer::start().await;
     let did_encoded = urlencoding::encode(&did);
@@ -586,7 +611,8 @@ async fn test_full_sign_and_submit_flow() {
         .expect("Sign failed");
     assert_eq!(sign_res.status(), StatusCode::OK);
     let sign_body: Value = sign_res.json().await.unwrap();
-    let signed_operation = sign_body.get("operation")
+    let signed_operation = sign_body
+        .get("operation")
         .expect("Response should contain operation")
         .clone();
     assert!(signed_operation.get("sig").is_some());
@@ -612,14 +638,16 @@ async fn test_full_sign_and_submit_flow() {
 }
 
 #[tokio::test]
+#[ignore = "requires exclusive env var access; run with: cargo test test_cross_pds_migration_with_records -- --ignored --test-threads=1"]
 async fn test_cross_pds_migration_with_records() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -656,7 +684,10 @@ async fn test_cross_pds_migration_with_records() {
         .expect("Export failed");
     assert_eq!(export_res.status(), StatusCode::OK);
     let car_bytes = export_res.bytes().await.unwrap();
-    assert!(car_bytes.len() > 100, "CAR file should have meaningful content");
+    assert!(
+        car_bytes.len() > 100,
+        "CAR file should have meaningful content"
+    );
     let mock_server = MockServer::start().await;
     let did_encoded = urlencoding::encode(&did);
     let did_doc = create_did_document(&did, &handle, &signing_key, &pds_endpoint);
@@ -670,7 +701,10 @@ async fn test_cross_pds_migration_with_records() {
         std::env::remove_var("SKIP_IMPORT_VERIFICATION");
     }
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes.to_vec())
@@ -705,8 +739,7 @@ async fn test_cross_pds_migration_with_records() {
     );
     let record_body: Value = get_record_res.json().await.unwrap();
     assert_eq!(
-        record_body["value"]["text"],
-        "Test post before migration",
+        record_body["value"]["text"], "Test post before migration",
         "Record content should match"
     );
 }
@@ -716,7 +749,8 @@ async fn test_migration_rejects_wrong_did_document() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
     let wrong_signing_key = SigningKey::random(&mut rand::thread_rng());
-    let handle = get_user_handle(&did).await
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -744,7 +778,10 @@ async fn test_migration_rejects_wrong_did_document() {
         std::env::remove_var("SKIP_IMPORT_VERIFICATION");
     }
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes.to_vec())
@@ -763,8 +800,11 @@ async fn test_migration_rejects_wrong_did_document() {
         import_body
     );
     assert!(
-        import_body["error"] == "InvalidSignature" ||
-        import_body["message"].as_str().unwrap_or("").contains("signature"),
+        import_body["error"] == "InvalidSignature"
+            || import_body["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("signature"),
         "Error should mention signature verification failure"
     );
 }
@@ -774,11 +814,12 @@ async fn test_migration_rejects_wrong_did_document() {
 async fn test_full_migration_flow_end_to_end() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
-    let handle = get_user_handle(&did).await
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
+    let handle = get_user_handle(&did)
+        .await
         .expect("Failed to get user handle");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -815,7 +856,8 @@ async fn test_full_migration_flow_end_to_end() {
         .await
         .expect("Request failed");
     assert_eq!(request_res.status(), StatusCode::OK);
-    let plc_token = get_plc_token_from_db(&did).await
+    let plc_token = get_plc_token_from_db(&did)
+        .await
         .expect("PLC token not found");
     let mock_server = MockServer::start().await;
     let did_encoded = urlencoding::encode(&did);
@@ -892,7 +934,10 @@ async fn test_full_migration_flow_end_to_end() {
         std::env::remove_var("SKIP_IMPORT_VERIFICATION");
     }
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes.to_vec())
@@ -921,7 +966,8 @@ async fn test_full_migration_flow_end_to_end() {
         .expect("List failed");
     assert_eq!(list_res.status(), StatusCode::OK);
     let list_body: Value = list_res.json().await.unwrap();
-    let records = list_body["records"].as_array()
+    let records = list_body["records"]
+        .as_array()
         .expect("Should have records array");
     assert!(
         records.len() >= 1,

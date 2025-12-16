@@ -1,10 +1,10 @@
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use cid::Cid;
 use ipld_core::ipld::Ipld;
@@ -51,7 +51,7 @@ pub async fn get_blocks(
         }
     };
     if cids.is_empty() {
-         return (StatusCode::BAD_REQUEST, "No CIDs provided").into_response();
+        return (StatusCode::BAD_REQUEST, "No CIDs provided").into_response();
     }
     let root_cid = cids[0];
     let header = match encode_car_header(&root_cid) {
@@ -70,9 +70,11 @@ pub async fn get_blocks(
             let mut writer = Vec::new();
             crate::sync::car::write_varint(&mut writer, total_len as u64)
                 .expect("Writing to Vec<u8> should never fail");
-            writer.write_all(&cid_bytes)
+            writer
+                .write_all(&cid_bytes)
                 .expect("Writing to Vec<u8> should never fail");
-            writer.write_all(&block)
+            writer
+                .write_all(&block)
                 .expect("Writing to Vec<u8> should never fail");
             car_bytes.extend_from_slice(&writer);
         }
@@ -115,13 +117,13 @@ pub async fn get_repo(
                 .await
                 .unwrap_or(None);
             if user_exists.is_none() {
-                 return (
+                return (
                     StatusCode::NOT_FOUND,
                     Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
                 )
                     .into_response();
             } else {
-                 return (
+                return (
                     StatusCode::NOT_FOUND,
                     Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
                 )
@@ -157,7 +159,9 @@ pub async fn get_repo(
             continue;
         }
         visited.insert(cid);
-        if remaining == 0 { break; }
+        if remaining == 0 {
+            break;
+        }
         remaining -= 1;
         if let Ok(Some(block)) = state.block_store.get(&cid).await {
             let cid_bytes = cid.to_bytes();
@@ -165,9 +169,11 @@ pub async fn get_repo(
             let mut writer = Vec::new();
             crate::sync::car::write_varint(&mut writer, total_len as u64)
                 .expect("Writing to Vec<u8> should never fail");
-            writer.write_all(&cid_bytes)
+            writer
+                .write_all(&cid_bytes)
                 .expect("Writing to Vec<u8> should never fail");
-            writer.write_all(&block)
+            writer
+                .write_all(&block)
                 .expect("Writing to Vec<u8> should never fail");
             car_bytes.extend_from_slice(&writer);
             if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
@@ -300,7 +306,7 @@ pub async fn get_record(
         }
     };
     let mut proof_blocks: BTreeMap<Cid, bytes::Bytes> = BTreeMap::new();
-    if let Err(_) = mst.blocks_for_path(&key, &mut proof_blocks).await {
+    if mst.blocks_for_path(&key, &mut proof_blocks).await.is_err() {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError", "message": "Failed to build proof path"})),
@@ -325,9 +331,11 @@ pub async fn get_record(
         let mut writer = Vec::new();
         crate::sync::car::write_varint(&mut writer, total_len as u64)
             .expect("Writing to Vec<u8> should never fail");
-        writer.write_all(&cid_bytes)
+        writer
+            .write_all(&cid_bytes)
             .expect("Writing to Vec<u8> should never fail");
-        writer.write_all(data)
+        writer
+            .write_all(data)
             .expect("Writing to Vec<u8> should never fail");
         car.extend_from_slice(&writer);
     };

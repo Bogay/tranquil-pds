@@ -71,15 +71,14 @@ pub async fn get_record(
                 .into_response();
         }
     };
-    if let Some(expected_cid) = &input.cid {
-        if &record_cid_str != expected_cid {
+    if let Some(expected_cid) = &input.cid
+        && &record_cid_str != expected_cid {
             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "NotFound", "message": "Record CID mismatch"})),
             )
                 .into_response();
         }
-    }
     let cid = match Cid::from_str(&record_cid_str) {
         Ok(c) => c,
         Err(_) => {
@@ -192,7 +191,11 @@ pub async fn list_records(
             param_idx += 1;
         }
         if input.rkey_end.is_some() {
-            conditions.push(if param_idx == 3 { "rkey < $3" } else { "rkey < $4" });
+            conditions.push(if param_idx == 3 {
+                "rkey < $3"
+            } else {
+                "rkey < $4"
+            });
             param_idx += 1;
         }
         let limit_idx = param_idx;
@@ -246,17 +249,15 @@ pub async fn list_records(
     };
     let mut records = Vec::new();
     for (cid, block_opt) in cids.iter().zip(blocks.into_iter()) {
-        if let Some(block) = block_opt {
-            if let Some((rkey, cid_str)) = cid_to_rkey.get(cid) {
-                if let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block) {
+        if let Some(block) = block_opt
+            && let Some((rkey, cid_str)) = cid_to_rkey.get(cid)
+                && let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block) {
                     records.push(json!({
                         "uri": format!("at://{}/{}/{}", input.repo, input.collection, rkey),
                         "cid": cid_str,
                         "value": value
                     }));
                 }
-            }
-        }
     }
     Json(ListRecordsOutput {
         cursor: last_rkey,

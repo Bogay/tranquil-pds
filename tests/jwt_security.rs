@@ -2,18 +2,18 @@
 mod common;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bspds::auth::{
-    self, create_access_token, create_refresh_token, create_service_token,
-    verify_access_token, verify_refresh_token, verify_token, get_did_from_token, get_jti_from_token,
-    TOKEN_TYPE_ACCESS, TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE,
-    SCOPE_ACCESS, SCOPE_REFRESH, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED,
+    self, SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH,
+    TOKEN_TYPE_ACCESS, TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, create_access_token,
+    create_refresh_token, create_service_token, get_did_from_token, get_jti_from_token,
+    verify_access_token, verify_refresh_token, verify_token,
 };
 use chrono::{Duration, Utc};
 use common::{base_url, client, create_account_and_login, get_db_connection_string};
 use k256::SecretKey;
-use k256::ecdsa::{SigningKey, Signature, signature::Signer};
+use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use rand::rngs::OsRng;
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 fn generate_user_key() -> Vec<u8> {
@@ -48,7 +48,11 @@ fn test_jwt_security_forged_signature_rejected() {
     let result = verify_access_token(&forged_token, &key_bytes);
     assert!(result.is_err(), "Forged signature must be rejected");
     let err_msg = result.err().unwrap().to_string();
-    assert!(err_msg.contains("signature") || err_msg.contains("Signature"), "Error should mention signature: {}", err_msg);
+    assert!(
+        err_msg.contains("signature") || err_msg.contains("Signature"),
+        "Error should mention signature: {}",
+        err_msg
+    );
 }
 
 #[test]
@@ -116,7 +120,10 @@ fn test_jwt_security_algorithm_substitution_hs256_rejected() {
     let signature_b64 = URL_SAFE_NO_PAD.encode(&hmac_sig);
     let malicious_token = format!("{}.{}", message, signature_b64);
     let result = verify_access_token(&malicious_token, &key_bytes);
-    assert!(result.is_err(), "HS256 algorithm substitution must be rejected");
+    assert!(
+        result.is_err(),
+        "HS256 algorithm substitution must be rejected"
+    );
 }
 
 #[test]
@@ -141,7 +148,10 @@ fn test_jwt_security_algorithm_substitution_rs256_rejected() {
     let fake_sig = URL_SAFE_NO_PAD.encode(&[1u8; 256]);
     let malicious_token = format!("{}.{}.{}", header_b64, claims_b64, fake_sig);
     let result = verify_access_token(&malicious_token, &key_bytes);
-    assert!(result.is_err(), "RS256 algorithm substitution must be rejected");
+    assert!(
+        result.is_err(),
+        "RS256 algorithm substitution must be rejected"
+    );
 }
 
 #[test]
@@ -166,7 +176,10 @@ fn test_jwt_security_algorithm_substitution_es256_rejected() {
     let fake_sig = URL_SAFE_NO_PAD.encode(&[1u8; 64]);
     let malicious_token = format!("{}.{}.{}", header_b64, claims_b64, fake_sig);
     let result = verify_access_token(&malicious_token, &key_bytes);
-    assert!(result.is_err(), "ES256 (P-256) algorithm substitution must be rejected (we use ES256K/secp256k1)");
+    assert!(
+        result.is_err(),
+        "ES256 (P-256) algorithm substitution must be rejected (we use ES256K/secp256k1)"
+    );
 }
 
 #[test]
@@ -175,7 +188,10 @@ fn test_jwt_security_token_type_confusion_refresh_as_access() {
     let did = "did:plc:test";
     let refresh_token = create_refresh_token(did, &key_bytes).expect("create refresh token");
     let result = verify_access_token(&refresh_token, &key_bytes);
-    assert!(result.is_err(), "Refresh token must not be accepted as access token");
+    assert!(
+        result.is_err(),
+        "Refresh token must not be accepted as access token"
+    );
     let err_msg = result.err().unwrap().to_string();
     assert!(err_msg.contains("Invalid token type"), "Error: {}", err_msg);
 }
@@ -186,7 +202,10 @@ fn test_jwt_security_token_type_confusion_access_as_refresh() {
     let did = "did:plc:test";
     let access_token = create_access_token(did, &key_bytes).expect("create access token");
     let result = verify_refresh_token(&access_token, &key_bytes);
-    assert!(result.is_err(), "Access token must not be accepted as refresh token");
+    assert!(
+        result.is_err(),
+        "Access token must not be accepted as refresh token"
+    );
     let err_msg = result.err().unwrap().to_string();
     assert!(err_msg.contains("Invalid token type"), "Error: {}", err_msg);
 }
@@ -195,10 +214,14 @@ fn test_jwt_security_token_type_confusion_access_as_refresh() {
 fn test_jwt_security_token_type_confusion_service_as_access() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
-    let service_token = create_service_token(did, "did:web:target", "com.example.method", &key_bytes)
-        .expect("create service token");
+    let service_token =
+        create_service_token(did, "did:web:target", "com.example.method", &key_bytes)
+            .expect("create service token");
     let result = verify_access_token(&service_token, &key_bytes);
-    assert!(result.is_err(), "Service token must not be accepted as access token");
+    assert!(
+        result.is_err(),
+        "Service token must not be accepted as access token"
+    );
 }
 
 #[test]
@@ -222,7 +245,11 @@ fn test_jwt_security_scope_manipulation_attack() {
     let result = verify_access_token(&malicious_token, &key_bytes);
     assert!(result.is_err(), "Invalid scope must be rejected");
     let err_msg = result.err().unwrap().to_string();
-    assert!(err_msg.contains("Invalid token scope"), "Error: {}", err_msg);
+    assert!(
+        err_msg.contains("Invalid token scope"),
+        "Error: {}",
+        err_msg
+    );
 }
 
 #[test]
@@ -244,7 +271,10 @@ fn test_jwt_security_empty_scope_rejected() {
     });
     let token = create_custom_jwt(&header, &claims, &key_bytes);
     let result = verify_access_token(&token, &key_bytes);
-    assert!(result.is_err(), "Empty scope must be rejected for access tokens");
+    assert!(
+        result.is_err(),
+        "Empty scope must be rejected for access tokens"
+    );
 }
 
 #[test]
@@ -265,7 +295,10 @@ fn test_jwt_security_missing_scope_rejected() {
     });
     let token = create_custom_jwt(&header, &claims, &key_bytes);
     let result = verify_access_token(&token, &key_bytes);
-    assert!(result.is_err(), "Missing scope must be rejected for access tokens");
+    assert!(
+        result.is_err(),
+        "Missing scope must be rejected for access tokens"
+    );
 }
 
 #[test]
@@ -311,7 +344,10 @@ fn test_jwt_security_future_iat_accepted() {
     });
     let token = create_custom_jwt(&header, &claims, &key_bytes);
     let result = verify_access_token(&token, &key_bytes);
-    assert!(result.is_ok(), "Slight future iat should be accepted for clock skew tolerance");
+    assert!(
+        result.is_ok(),
+        "Slight future iat should be accepted for clock skew tolerance"
+    );
 }
 
 #[test]
@@ -321,7 +357,10 @@ fn test_jwt_security_cross_user_key_attack() {
     let did = "did:plc:user1";
     let token = create_access_token(did, &key_bytes_user1).expect("create token");
     let result = verify_access_token(&token, &key_bytes_user2);
-    assert!(result.is_err(), "Token signed by user1's key must not verify with user2's key");
+    assert!(
+        result.is_err(),
+        "Token signed by user1's key must not verify with user2's key"
+    );
 }
 
 #[test]
@@ -369,8 +408,15 @@ fn test_jwt_security_malformed_tokens_rejected() {
     ];
     for token in malformed_tokens {
         let result = verify_access_token(token, &key_bytes);
-        assert!(result.is_err(), "Malformed token '{}' must be rejected",
-            if token.len() > 40 { &token[..40] } else { token });
+        assert!(
+            result.is_err(),
+            "Malformed token '{}' must be rejected",
+            if token.len() > 40 {
+                &token[..40]
+            } else {
+                token
+            }
+        );
     }
 }
 
@@ -379,27 +425,36 @@ fn test_jwt_security_missing_required_claims_rejected() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
     let test_cases = vec![
-        (json!({
-            "iss": did,
-            "sub": did,
-            "aud": "did:web:test",
-            "iat": Utc::now().timestamp(),
-            "scope": SCOPE_ACCESS
-        }), "exp"),
-        (json!({
-            "iss": did,
-            "sub": did,
-            "aud": "did:web:test",
-            "exp": Utc::now().timestamp() + 3600,
-            "scope": SCOPE_ACCESS
-        }), "iat"),
-        (json!({
-            "iss": did,
-            "aud": "did:web:test",
-            "iat": Utc::now().timestamp(),
-            "exp": Utc::now().timestamp() + 3600,
-            "scope": SCOPE_ACCESS
-        }), "sub"),
+        (
+            json!({
+                "iss": did,
+                "sub": did,
+                "aud": "did:web:test",
+                "iat": Utc::now().timestamp(),
+                "scope": SCOPE_ACCESS
+            }),
+            "exp",
+        ),
+        (
+            json!({
+                "iss": did,
+                "sub": did,
+                "aud": "did:web:test",
+                "exp": Utc::now().timestamp() + 3600,
+                "scope": SCOPE_ACCESS
+            }),
+            "iat",
+        ),
+        (
+            json!({
+                "iss": did,
+                "aud": "did:web:test",
+                "iat": Utc::now().timestamp(),
+                "exp": Utc::now().timestamp() + 3600,
+                "scope": SCOPE_ACCESS
+            }),
+            "sub",
+        ),
     ];
     for (claims, missing_claim) in test_cases {
         let header = json!({
@@ -408,7 +463,11 @@ fn test_jwt_security_missing_required_claims_rejected() {
         });
         let token = create_custom_jwt(&header, &claims, &key_bytes);
         let result = verify_access_token(&token, &key_bytes);
-        assert!(result.is_err(), "Token missing '{}' claim must be rejected", missing_claim);
+        assert!(
+            result.is_err(),
+            "Token missing '{}' claim must be rejected",
+            missing_claim
+        );
     }
 }
 
@@ -455,7 +514,10 @@ fn test_jwt_security_header_injection_attack() {
     });
     let token = create_custom_jwt(&header, &claims, &key_bytes);
     let result = verify_access_token(&token, &key_bytes);
-    assert!(result.is_ok(), "Extra header fields should not cause issues (we ignore them)");
+    assert!(
+        result.is_ok(),
+        "Extra header fields should not cause issues (we ignore them)"
+    );
 }
 
 #[test]
@@ -499,7 +561,10 @@ fn test_jwt_security_unicode_injection_in_claims() {
     let result = verify_access_token(&token, &key_bytes);
     if result.is_ok() {
         let data = result.unwrap();
-        assert!(!data.claims.sub.contains('\0'), "Null bytes in claims should be sanitized or rejected");
+        assert!(
+            !data.claims.sub.contains('\0'),
+            "Null bytes in claims should be sanitized or rejected"
+        );
     }
 }
 
@@ -517,18 +582,17 @@ fn test_jwt_security_signature_verification_is_constant_time() {
     let completely_invalid_token = format!("{}.{}.{}", parts[0], parts[1], completely_invalid_sig);
     let _result1 = verify_access_token(&almost_valid_token, &key_bytes);
     let _result2 = verify_access_token(&completely_invalid_token, &key_bytes);
-    assert!(true, "Signature verification should use constant-time comparison (timing attack prevention)");
+    assert!(
+        true,
+        "Signature verification should use constant-time comparison (timing attack prevention)"
+    );
 }
 
 #[test]
 fn test_jwt_security_valid_scopes_accepted() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
-    let valid_scopes = vec![
-        SCOPE_ACCESS,
-        SCOPE_APP_PASS,
-        SCOPE_APP_PASS_PRIVILEGED,
-    ];
+    let valid_scopes = vec![SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED];
     for scope in valid_scopes {
         let header = json!({
             "alg": "ES256K",
@@ -568,7 +632,10 @@ fn test_jwt_security_refresh_token_scope_rejected_as_access() {
     });
     let token = create_custom_jwt(&header, &claims, &key_bytes);
     let result = verify_access_token(&token, &key_bytes);
-    assert!(result.is_err(), "Refresh scope with access token type must be rejected");
+    assert!(
+        result.is_err(),
+        "Refresh scope with access token type must be rejected"
+    );
 }
 
 #[test]
@@ -586,7 +653,10 @@ fn test_jwt_security_get_did_extraction_safe() {
     let fake_sig = URL_SAFE_NO_PAD.encode(&[0u8; 64]);
     let unverified_token = format!("{}.{}.{}", header_b64, claims_b64, fake_sig);
     let extracted_unsafe = get_did_from_token(&unverified_token).expect("extract unsafe");
-    assert_eq!(extracted_unsafe, "did:plc:sub", "get_did_from_token extracts sub without verification (by design for lookup)");
+    assert_eq!(
+        extracted_unsafe, "did:plc:sub",
+        "get_did_from_token extracts sub without verification (by design for lookup)"
+    );
 }
 
 #[test]
@@ -602,17 +672,15 @@ fn test_jwt_security_get_jti_extraction_safe() {
     let claims_b64 = URL_SAFE_NO_PAD.encode(r#"{"iss":"did:plc:test"}"#);
     let fake_sig = URL_SAFE_NO_PAD.encode(&[0u8; 64]);
     let no_jti_token = format!("{}.{}.{}", header_b64, claims_b64, fake_sig);
-    assert!(get_jti_from_token(&no_jti_token).is_err(), "Missing jti should error");
+    assert!(
+        get_jti_from_token(&no_jti_token).is_err(),
+        "Missing jti should error"
+    );
 }
 
 #[test]
 fn test_jwt_security_key_from_invalid_bytes_rejected() {
-    let invalid_keys: Vec<&[u8]> = vec![
-        &[],
-        &[0u8; 31],
-        &[0u8; 33],
-        &[0xFFu8; 32],
-    ];
+    let invalid_keys: Vec<&[u8]> = vec![&[], &[0u8; 31], &[0u8; 33], &[0xFFu8; 32]];
     for key in invalid_keys {
         let result = create_access_token("did:plc:test", key);
         if result.is_ok() {
@@ -644,7 +712,10 @@ fn test_jwt_security_boundary_exp_values() {
         "scope": SCOPE_ACCESS
     });
     let token1 = create_custom_jwt(&header, &just_expired, &key_bytes);
-    assert!(verify_access_token(&token1, &key_bytes).is_err(), "Just expired token must be rejected");
+    assert!(
+        verify_access_token(&token1, &key_bytes).is_err(),
+        "Just expired token must be rejected"
+    );
     let expires_exactly_now = json!({
         "iss": did,
         "sub": did,
@@ -656,7 +727,10 @@ fn test_jwt_security_boundary_exp_values() {
     });
     let token2 = create_custom_jwt(&header, &expires_exactly_now, &key_bytes);
     let result2 = verify_access_token(&token2, &key_bytes);
-    assert!(result2.is_err() || result2.is_ok(), "Token expiring exactly now is a boundary case - either behavior is acceptable");
+    assert!(
+        result2.is_err() || result2.is_ok(),
+        "Token expiring exactly now is a boundary case - either behavior is acceptable"
+    );
 }
 
 #[test]
@@ -714,7 +788,11 @@ async fn test_jwt_security_server_rejects_forged_session_token() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Forged session token must be rejected");
+    assert_eq!(
+        res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Forged session token must be rejected"
+    );
 }
 
 #[tokio::test]
@@ -734,7 +812,11 @@ async fn test_jwt_security_server_rejects_expired_token() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "Tampered/expired token must be rejected");
+    assert_eq!(
+        res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Tampered/expired token must be rejected"
+    );
 }
 
 #[tokio::test]
@@ -755,7 +837,11 @@ async fn test_jwt_security_server_rejects_tampered_did() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "DID-tampered token must be rejected");
+    assert_eq!(
+        res.status(),
+        StatusCode::UNAUTHORIZED,
+        "DID-tampered token must be rejected"
+    );
 }
 
 #[tokio::test]
@@ -811,14 +897,22 @@ async fn test_jwt_security_refresh_token_replay_protection() {
         .send()
         .await
         .unwrap();
-    assert_eq!(first_refresh.status(), StatusCode::OK, "First refresh should succeed");
+    assert_eq!(
+        first_refresh.status(),
+        StatusCode::OK,
+        "First refresh should succeed"
+    );
     let replay_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.refreshSession", url))
         .header("Authorization", format!("Bearer {}", refresh_jwt))
         .send()
         .await
         .unwrap();
-    assert_eq!(replay_res.status(), StatusCode::UNAUTHORIZED, "Refresh token replay must be rejected");
+    assert_eq!(
+        replay_res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Refresh token replay must be rejected"
+    );
 }
 
 #[tokio::test]
@@ -832,35 +926,55 @@ async fn test_jwt_security_authorization_header_formats() {
         .send()
         .await
         .unwrap();
-    assert_eq!(valid_res.status(), StatusCode::OK, "Valid Bearer format should work");
+    assert_eq!(
+        valid_res.status(),
+        StatusCode::OK,
+        "Valid Bearer format should work"
+    );
     let lowercase_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .header("Authorization", format!("bearer {}", access_jwt))
         .send()
         .await
         .unwrap();
-    assert_eq!(lowercase_res.status(), StatusCode::OK, "Lowercase 'bearer' should be accepted (RFC 7235 case-insensitivity)");
+    assert_eq!(
+        lowercase_res.status(),
+        StatusCode::OK,
+        "Lowercase 'bearer' should be accepted (RFC 7235 case-insensitivity)"
+    );
     let basic_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .header("Authorization", format!("Basic {}", access_jwt))
         .send()
         .await
         .unwrap();
-    assert_eq!(basic_res.status(), StatusCode::UNAUTHORIZED, "Basic scheme must be rejected");
+    assert_eq!(
+        basic_res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Basic scheme must be rejected"
+    );
     let no_scheme_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .header("Authorization", &access_jwt)
         .send()
         .await
         .unwrap();
-    assert_eq!(no_scheme_res.status(), StatusCode::UNAUTHORIZED, "Missing scheme must be rejected");
+    assert_eq!(
+        no_scheme_res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Missing scheme must be rejected"
+    );
     let empty_token_res = http_client
         .get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .header("Authorization", "Bearer ")
         .send()
         .await
         .unwrap();
-    assert_eq!(empty_token_res.status(), StatusCode::UNAUTHORIZED, "Empty token must be rejected");
+    assert_eq!(
+        empty_token_res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Empty token must be rejected"
+    );
 }
 
 #[tokio::test]
@@ -874,7 +988,11 @@ async fn test_jwt_security_deleted_session_rejected() {
         .send()
         .await
         .unwrap();
-    assert_eq!(get_res.status(), StatusCode::OK, "Token should work before logout");
+    assert_eq!(
+        get_res.status(),
+        StatusCode::OK,
+        "Token should work before logout"
+    );
     let logout_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.deleteSession", url))
         .header("Authorization", format!("Bearer {}", access_jwt))
@@ -888,7 +1006,11 @@ async fn test_jwt_security_deleted_session_rejected() {
         .send()
         .await
         .unwrap();
-    assert_eq!(after_logout_res.status(), StatusCode::UNAUTHORIZED, "Token must be rejected after logout");
+    assert_eq!(
+        after_logout_res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Token must be rejected after logout"
+    );
 }
 
 #[tokio::test]
@@ -910,7 +1032,11 @@ async fn test_jwt_security_deactivated_account_rejected() {
         .send()
         .await
         .unwrap();
-    assert_eq!(get_res.status(), StatusCode::UNAUTHORIZED, "Deactivated account token must be rejected");
+    assert_eq!(
+        get_res.status(),
+        StatusCode::UNAUTHORIZED,
+        "Deactivated account token must be rejected"
+    );
     let body: Value = get_res.json().await.unwrap();
     assert_eq!(body["error"], "AccountDeactivated");
 }

@@ -85,10 +85,7 @@ async fn test_password_reset_rate_limiting() {
 #[ignore = "rate limiting is disabled in test environment"]
 async fn test_account_creation_rate_limiting() {
     let client = client();
-    let url = format!(
-        "{}/xrpc/com.atproto.server.createAccount",
-        base_url().await
-    );
+    let url = format!("{}/xrpc/com.atproto.server.createAccount", base_url().await);
     let mut rate_limited_count = 0;
     let mut other_count = 0;
     for i in 0..15 {

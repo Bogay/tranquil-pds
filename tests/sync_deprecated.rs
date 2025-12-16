@@ -40,7 +40,12 @@ async fn test_get_head_not_found() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "HeadNotFound");
-    assert!(body["message"].as_str().unwrap().contains("Could not find root"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("Could not find root")
+    );
 }
 
 #[tokio::test]
@@ -257,7 +262,10 @@ async fn test_get_head_matches_latest_commit() {
         .expect("Failed to get latest commit");
     let latest_body: Value = latest_res.json().await.unwrap();
     let latest_cid = latest_body["cid"].as_str().unwrap();
-    assert_eq!(head_root, latest_cid, "getHead root should match getLatestCommit cid");
+    assert_eq!(
+        head_root, latest_cid,
+        "getHead root should match getLatestCommit cid"
+    );
 }
 
 #[tokio::test]
@@ -275,5 +283,8 @@ async fn test_get_checkout_car_header_valid() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
     let body = res.bytes().await.expect("Failed to get body");
-    assert!(body.len() >= 2, "CAR file should have at least header length");
+    assert!(
+        body.len() >= 2,
+        "CAR file should have at least header length"
+    );
 }

@@ -1,5 +1,8 @@
+use super::token::{
+    SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH, TOKEN_TYPE_ACCESS,
+    TOKEN_TYPE_REFRESH,
+};
 use super::{Claims, Header, TokenData, UnsafeClaims};
-use super::token::{TOKEN_TYPE_ACCESS, TOKEN_TYPE_REFRESH, SCOPE_ACCESS, SCOPE_REFRESH, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED};
 use anyhow::{Context, Result, anyhow};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -40,7 +43,8 @@ pub fn get_jti_from_token(token: &str) -> Result<String, String> {
     let claims: serde_json::Value =
         serde_json::from_slice(&payload_bytes).map_err(|e| format!("JSON decode failed: {}", e))?;
 
-    claims.get("jti")
+    claims
+        .get("jti")
         .and_then(|j| j.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| "No jti claim in token".to_string())
@@ -108,11 +112,14 @@ fn verify_token_internal(
     let header: Header =
         serde_json::from_slice(&header_bytes).context("JSON decode of header failed")?;
 
-    if let Some(expected) = expected_typ {
-        if header.typ != expected {
-            return Err(anyhow!("Invalid token type: expected {}, got {}", expected, header.typ));
+    if let Some(expected) = expected_typ
+        && header.typ != expected {
+            return Err(anyhow!(
+                "Invalid token type: expected {}, got {}",
+                expected,
+                header.typ
+            ));
         }
-    }
 
     let signature_bytes = URL_SAFE_NO_PAD
         .decode(signature_b64)
@@ -177,11 +184,14 @@ fn verify_token_hs256_internal(
         return Err(anyhow!("Expected HS256 algorithm, got {}", header.alg));
     }
 
-    if let Some(expected) = expected_typ {
-        if header.typ != expected {
-            return Err(anyhow!("Invalid token type: expected {}, got {}", expected, header.typ));
+    if let Some(expected) = expected_typ
+        && header.typ != expected {
+            return Err(anyhow!(
+                "Invalid token type: expected {}, got {}",
+                expected,
+                header.typ
+            ));
         }
-    }
 
     let signature_bytes = URL_SAFE_NO_PAD
         .decode(signature_b64)
@@ -189,8 +199,8 @@ fn verify_token_hs256_internal(
 
     let message = format!("{}.{}", header_b64, claims_b64);
 
-    let mut mac = HmacSha256::new_from_slice(secret)
-        .map_err(|e| anyhow!("Invalid secret: {}", e))?;
+    let mut mac =
+        HmacSha256::new_from_slice(secret).map_err(|e| anyhow!("Invalid secret: {}", e))?;
     mac.update(message.as_bytes());
 
     let expected_signature = mac.finalize().into_bytes();

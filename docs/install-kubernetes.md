@@ -7,7 +7,7 @@ If you're reaching for kubernetes for this app, you're experienced enough to kno
 - s3-compatible object storage (minio operator, or just use a managed service)
 - the app itself (it's just a container with some env vars)
 
-You'll need a wildcard TLS certificate for `*.your-pds-hostname.example.com` — user handles are served as subdomains.
+You'll need a wildcard TLS certificate for `*.your-pds-hostname.example.com`. User handles are served as subdomains.
 
 The container image expects:
 - `DATABASE_URL` - postgres connection string

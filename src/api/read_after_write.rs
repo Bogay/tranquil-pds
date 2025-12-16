@@ -1,12 +1,12 @@
-use crate::api::proxy_client::{
-    is_ssrf_safe, proxy_client, MAX_RESPONSE_SIZE, RESPONSE_HEADERS_TO_FORWARD,
-};
 use crate::api::ApiError;
+use crate::api::proxy_client::{
+    MAX_RESPONSE_SIZE, RESPONSE_HEADERS_TO_FORWARD, is_ssrf_safe, proxy_client,
+};
 use crate::state::AppState;
 use axum::{
+    Json,
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -182,8 +182,8 @@ pub async fn get_records_since_rev(
                     record,
                 });
             }
-        } else if data.collection == "app.bsky.feed.like" {
-            if let Ok(record) = serde_ipld_dagcbor::from_slice::<LikeRecord>(&block_bytes) {
+        } else if data.collection == "app.bsky.feed.like"
+            && let Ok(record) = serde_ipld_dagcbor::from_slice::<LikeRecord>(&block_bytes) {
                 result.likes.push(RecordDescript {
                     uri,
                     cid: data.cid_str,
@@ -191,7 +191,6 @@ pub async fn get_records_since_rev(
                     record,
                 });
             }
-        }
     }
     Ok(result)
 }
@@ -250,18 +249,21 @@ pub async fn proxy_to_appview(
     })?;
     if let Err(e) = is_ssrf_safe(&appview_url) {
         error!("SSRF check failed for appview URL: {}", e);
-        return Err(ApiError::UpstreamUnavailable(format!("Invalid upstream URL: {}", e))
-            .into_response());
+        return Err(
+            ApiError::UpstreamUnavailable(format!("Invalid upstream URL: {}", e)).into_response(),
+        );
     }
     let target_url = format!("{}/xrpc/{}", appview_url, method);
     info!(target = %target_url, "Proxying request to appview");
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(params);
     if let Some(key_bytes) = auth_key_bytes {
-        let appview_did = std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
+        let appview_did =
+            std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
         match crate::auth::create_service_token(auth_did, &appview_did, method, key_bytes) {
             Ok(service_token) => {
-                request_builder = request_builder.header("Authorization", format!("Bearer {}", service_token));
+                request_builder =
+                    request_builder.header("Authorization", format!("Bearer {}", service_token));
             }
             Err(e) => {
                 error!(error = ?e, "Failed to create service token");
@@ -287,9 +289,7 @@ pub async fn proxy_to_appview(
                     Some((name, value))
                 })
                 .collect();
-            let content_length = resp
-                .content_length()
-                .unwrap_or(0);
+            let content_length = resp.content_length().unwrap_or(0);
             if content_length > MAX_RESPONSE_SIZE {
                 error!(
                     content_length,
@@ -321,8 +321,10 @@ pub async fn proxy_to_appview(
             if e.is_timeout() {
                 Err(ApiError::UpstreamTimeout.into_response())
             } else if e.is_connect() {
-                Err(ApiError::UpstreamUnavailable("Failed to connect to upstream".to_string())
-                    .into_response())
+                Err(
+                    ApiError::UpstreamUnavailable("Failed to connect to upstream".to_string())
+                        .into_response(),
+                )
             } else {
                 Err(ApiError::UpstreamFailure.into_response())
             }
@@ -332,13 +334,12 @@ pub async fn proxy_to_appview(
 
 pub fn format_munged_response<T: Serialize>(data: T, lag: Option<i64>) -> Response {
     let mut response = (StatusCode::OK, Json(data)).into_response();
-    if let Some(lag_ms) = lag {
-        if let Ok(header_val) = HeaderValue::from_str(&lag_ms.to_string()) {
+    if let Some(lag_ms) = lag
+        && let Ok(header_val) = HeaderValue::from_str(&lag_ms.to_string()) {
             response
                 .headers_mut()
                 .insert(UPSTREAM_LAG_HEADER, header_val);
         }
-    }
     response
 }
 

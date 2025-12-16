@@ -219,9 +219,15 @@ async fn test_request_plc_operation_creates_token_in_db() {
     .expect("Query failed");
     assert!(row.is_some(), "PLC token should be created in database");
     let row = row.unwrap();
-    assert!(row.token.len() == 11, "Token should be in format xxxxx-xxxxx");
+    assert!(
+        row.token.len() == 11,
+        "Token should be in format xxxxx-xxxxx"
+    );
     assert!(row.token.contains('-'), "Token should contain hyphen");
-    assert!(row.expires_at > chrono::Utc::now(), "Token should not be expired");
+    assert!(
+        row.expires_at > chrono::Utc::now(),
+        "Token should not be expired"
+    );
 }
 
 #[tokio::test]
@@ -294,9 +300,8 @@ async fn test_request_plc_operation_replaces_existing_token() {
 async fn test_submit_plc_operation_wrong_verification_method() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| {
-        format!("127.0.0.1:{}", app_port())
-    });
+    let hostname =
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| format!("127.0.0.1:{}", app_port()));
     let handle = did.split(':').last().unwrap_or("user");
     let res = client
         .post(format!(
@@ -327,8 +332,11 @@ async fn test_submit_plc_operation_wrong_verification_method() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
     assert!(
-        body["message"].as_str().unwrap_or("").contains("signing key") ||
-        body["message"].as_str().unwrap_or("").contains("rotation"),
+        body["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("signing key")
+            || body["message"].as_str().unwrap_or("").contains("rotation"),
         "Error should mention key mismatch: {:?}",
         body
     );
@@ -338,9 +346,8 @@ async fn test_submit_plc_operation_wrong_verification_method() {
 async fn test_submit_plc_operation_wrong_handle() {
     let client = client();
     let (token, _did) = create_account_and_login(&client).await;
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| {
-        format!("127.0.0.1:{}", app_port())
-    });
+    let hostname =
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| format!("127.0.0.1:{}", app_port()));
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.identity.submitPlcOperation",
@@ -375,9 +382,8 @@ async fn test_submit_plc_operation_wrong_handle() {
 async fn test_submit_plc_operation_wrong_service_type() {
     let client = client();
     let (token, _did) = create_account_and_login(&client).await;
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| {
-        format!("127.0.0.1:{}", app_port())
-    });
+    let hostname =
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| format!("127.0.0.1:{}", app_port()));
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.identity.submitPlcOperation",
@@ -439,6 +445,14 @@ async fn test_plc_token_expiry_format() {
     let now = chrono::Utc::now();
     let expires = row.expires_at;
     let diff = expires - now;
-    assert!(diff.num_minutes() >= 9, "Token should expire in ~10 minutes, got {} minutes", diff.num_minutes());
-    assert!(diff.num_minutes() <= 11, "Token should expire in ~10 minutes, got {} minutes", diff.num_minutes());
+    assert!(
+        diff.num_minutes() >= 9,
+        "Token should expire in ~10 minutes, got {} minutes",
+        diff.num_minutes()
+    );
+    assert!(
+        diff.num_minutes() <= 11,
+        "Token should expire in ~10 minutes, got {} minutes",
+        diff.num_minutes()
+    );
 }

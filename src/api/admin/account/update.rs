@@ -96,7 +96,9 @@ pub async fn update_account_handle(
     {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"})),
+            Json(
+                json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"}),
+            ),
         )
             .into_response();
     }
@@ -105,9 +107,13 @@ pub async fn update_account_handle(
         .await
         .ok()
         .flatten();
-    let existing = sqlx::query!("SELECT id FROM users WHERE handle = $1 AND did != $2", handle, did)
-        .fetch_optional(&state.db)
-        .await;
+    let existing = sqlx::query!(
+        "SELECT id FROM users WHERE handle = $1 AND did != $2",
+        handle,
+        did
+    )
+    .fetch_optional(&state.db)
+    .await;
     if let Ok(Some(_)) = existing {
         return (
             StatusCode::BAD_REQUEST,
@@ -183,9 +189,13 @@ pub async fn update_account_password(
                 .into_response();
         }
     };
-    let result = sqlx::query!("UPDATE users SET password_hash = $1 WHERE did = $2", password_hash, did)
-        .execute(&state.db)
-        .await;
+    let result = sqlx::query!(
+        "UPDATE users SET password_hash = $1 WHERE did = $2",
+        password_hash,
+        did
+    )
+    .execute(&state.db)
+    .await;
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {

@@ -1,14 +1,14 @@
+use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use jacquard_repo::storage::BlockStore;
-use crate::api::proxy_client::proxy_client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use tracing::{error, info};
 
@@ -79,9 +79,13 @@ async fn proxy_to_appview(
     let appview_url = match std::env::var("APPVIEW_URL") {
         Ok(url) => url,
         Err(_) => {
-            return Err(
-                (StatusCode::BAD_GATEWAY, Json(json!({"error": "UpstreamError", "message": "No upstream AppView configured"}))).into_response()
-            );
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(
+                    json!({"error": "UpstreamError", "message": "No upstream AppView configured"}),
+                ),
+            )
+                .into_response());
         }
     };
     let target_url = format!("{}/xrpc/{}", appview_url, method);
@@ -89,34 +93,53 @@ async fn proxy_to_appview(
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(params);
     if let Some(key_bytes) = auth_key_bytes {
-        let appview_did = std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
+        let appview_did =
+            std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
         match crate::auth::create_service_token(auth_did, &appview_did, method, key_bytes) {
             Ok(service_token) => {
-                request_builder = request_builder.header("Authorization", format!("Bearer {}", service_token));
+                request_builder =
+                    request_builder.header("Authorization", format!("Bearer {}", service_token));
             }
             Err(e) => {
                 error!("Failed to create service token: {:?}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError"}))).into_response());
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response());
             }
         }
     }
     match request_builder.send().await {
         Ok(resp) => {
-            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             match resp.json::<Value>().await {
                 Ok(body) => Ok((status, body)),
                 Err(e) => {
                     error!("Error parsing proxy response: {:?}", e);
-                    Err((StatusCode::BAD_GATEWAY, Json(json!({"error": "UpstreamError"}))).into_response())
+                    Err((
+                        StatusCode::BAD_GATEWAY,
+                        Json(json!({"error": "UpstreamError"})),
+                    )
+                        .into_response())
                 }
             }
         }
         Err(e) => {
             error!("Error sending proxy request: {:?}", e);
             if e.is_timeout() {
-                Err((StatusCode::GATEWAY_TIMEOUT, Json(json!({"error": "UpstreamTimeout"}))).into_response())
+                Err((
+                    StatusCode::GATEWAY_TIMEOUT,
+                    Json(json!({"error": "UpstreamTimeout"})),
+                )
+                    .into_response())
             } else {
-                Err((StatusCode::BAD_GATEWAY, Json(json!({"error": "UpstreamError"}))).into_response())
+                Err((
+                    StatusCode::BAD_GATEWAY,
+                    Json(json!({"error": "UpstreamError"})),
+                )
+                    .into_response())
             }
         }
     }
@@ -130,7 +153,9 @@ pub async fn get_profile(
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
+            crate::auth::validate_bearer_token(&state.db, &token)
+                .await
+                .ok()
         } else {
             None
         }
@@ -141,7 +166,14 @@ pub async fn get_profile(
     let auth_key_bytes = auth_user.as_ref().and_then(|u| u.key_bytes.clone());
     let mut query_params = HashMap::new();
     query_params.insert("actor".to_string(), params.actor.clone());
-    let (status, body) = match proxy_to_appview("app.bsky.actor.getProfile", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
+    let (status, body) = match proxy_to_appview(
+        "app.bsky.actor.getProfile",
+        &query_params,
+        auth_did.as_deref().unwrap_or(""),
+        auth_key_bytes.as_deref(),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => return e,
     };
@@ -151,16 +183,18 @@ pub async fn get_profile(
     let mut profile: ProfileViewDetailed = match serde_json::from_value(body) {
         Ok(p) => p,
         Err(_) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({"error": "UpstreamError", "message": "Invalid profile response"}))).into_response();
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": "UpstreamError", "message": "Invalid profile response"})),
+            )
+                .into_response();
         }
     };
-    if let Some(ref did) = auth_did {
-        if profile.did == *did {
-            if let Some(local_record) = get_local_profile_record(&state, did).await {
+    if let Some(ref did) = auth_did
+        && profile.did == *did
+            && let Some(local_record) = get_local_profile_record(&state, did).await {
                 munge_profile_with_local(&mut profile, &local_record);
             }
-        }
-    }
     (StatusCode::OK, Json(profile)).into_response()
 }
 
@@ -172,7 +206,9 @@ pub async fn get_profiles(
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
+            crate::auth::validate_bearer_token(&state.db, &token)
+                .await
+                .ok()
         } else {
             None
         }
@@ -183,7 +219,14 @@ pub async fn get_profiles(
     let auth_key_bytes = auth_user.as_ref().and_then(|u| u.key_bytes.clone());
     let mut query_params = HashMap::new();
     query_params.insert("actors".to_string(), params.actors.clone());
-    let (status, body) = match proxy_to_appview("app.bsky.actor.getProfiles", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
+    let (status, body) = match proxy_to_appview(
+        "app.bsky.actor.getProfiles",
+        &query_params,
+        auth_did.as_deref().unwrap_or(""),
+        auth_key_bytes.as_deref(),
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => return e,
     };
@@ -193,7 +236,11 @@ pub async fn get_profiles(
     let mut output: GetProfilesOutput = match serde_json::from_value(body) {
         Ok(p) => p,
         Err(_) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({"error": "UpstreamError", "message": "Invalid profiles response"}))).into_response();
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({"error": "UpstreamError", "message": "Invalid profiles response"})),
+            )
+                .into_response();
         }
     };
     if let Some(ref did) = auth_did {

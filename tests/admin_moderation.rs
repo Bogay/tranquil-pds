@@ -176,7 +176,12 @@ async fn test_update_subject_status_remove_takedown() {
         .await
         .expect("Failed to send request");
     let status_body: Value = status_res.json().await.unwrap();
-    assert!(status_body["takedown"].is_null() || !status_body["takedown"]["applied"].as_bool().unwrap_or(false));
+    assert!(
+        status_body["takedown"].is_null()
+            || !status_body["takedown"]["applied"]
+                .as_bool()
+                .unwrap_or(false)
+    );
 }
 
 #[tokio::test]

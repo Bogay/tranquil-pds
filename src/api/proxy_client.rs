@@ -20,7 +20,9 @@ pub fn proxy_client() -> &'static Client {
             .pool_idle_timeout(Duration::from_secs(90))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .expect("Failed to build HTTP client - this indicates a TLS or system configuration issue")
+            .expect(
+                "Failed to build HTTP client - this indicates a TLS or system configuration issue",
+            )
     })
 }
 
@@ -48,7 +50,9 @@ pub fn is_ssrf_safe(url: &str) -> Result<(), SsrfError> {
         }
         return Ok(());
     }
-    let port = parsed.port().unwrap_or(if scheme == "https" { 443 } else { 80 });
+    let port = parsed
+        .port()
+        .unwrap_or(if scheme == "https" { 443 } else { 80 });
     let socket_addrs: Vec<SocketAddr> = match (host, port).to_socket_addrs() {
         Ok(addrs) => addrs.collect(),
         Err(_) => return Err(SsrfError::DnsResolutionFailed(host.to_string())),
@@ -104,7 +108,9 @@ impl std::fmt::Display for SsrfError {
             SsrfError::InsecureProtocol(p) => write!(f, "Insecure protocol: {}", p),
             SsrfError::NoHost => write!(f, "No host in URL"),
             SsrfError::NonUnicastIp(ip) => write!(f, "Non-unicast IP address: {}", ip),
-            SsrfError::DnsResolutionFailed(host) => write!(f, "DNS resolution failed for: {}", host),
+            SsrfError::DnsResolutionFailed(host) => {
+                write!(f, "DNS resolution failed for: {}", host)
+            }
         }
     }
 }
@@ -158,7 +164,7 @@ pub struct AtUriParts {
 
 pub fn validate_limit(limit: Option<u32>, default: u32, max: u32) -> u32 {
     match limit {
-        Some(l) if l == 0 => default,
+        Some(0) => default,
         Some(l) if l > max => max,
         Some(l) => l,
         None => default,
@@ -190,7 +196,10 @@ mod tests {
     #[test]
     fn test_ssrf_blocks_http_by_default() {
         let result = is_ssrf_safe("http://external.example.com/xrpc/test");
-        assert!(matches!(result, Err(SsrfError::InsecureProtocol(_)) | Err(SsrfError::DnsResolutionFailed(_))));
+        assert!(matches!(
+            result,
+            Err(SsrfError::InsecureProtocol(_)) | Err(SsrfError::DnsResolutionFailed(_))
+        ));
     }
     #[test]
     fn test_ssrf_allows_localhost_http() {

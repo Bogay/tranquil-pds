@@ -244,7 +244,10 @@ async fn test_get_service_auth_success() {
 async fn test_get_service_auth_with_lxm() {
     let client = client();
     let (access_jwt, did) = create_account_and_login(&client).await;
-    let params = [("aud", "did:web:example.com"), ("lxm", "com.atproto.repo.getRecord")];
+    let params = [
+        ("aud", "did:web:example.com"),
+        ("lxm", "com.atproto.repo.getRecord"),
+    ];
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.server.getServiceAuth",

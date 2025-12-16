@@ -1,16 +1,19 @@
 use super::validation::validate_record;
 use super::write::has_verified_notification_channel;
-use crate::api::repo::record::utils::{commit_and_log, RecordOp};
+use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use cid::Cid;
-use jacquard::types::{integer::LimitedU32, string::{Nsid, Tid}};
+use jacquard::types::{
+    integer::LimitedU32,
+    string::{Nsid, Tid},
+};
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -77,7 +80,7 @@ pub async fn apply_writes(
     Json(input): Json<ApplyWritesInput>,
 ) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
@@ -154,20 +157,22 @@ pub async fn apply_writes(
                 .into_response();
         }
     };
-    let root_cid_str: String =
-        match sqlx::query_scalar!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(cid_str)) => cid_str,
-            _ => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": "Repo root not found"})),
-                )
-                    .into_response();
-            }
-        };
+    let root_cid_str: String = match sqlx::query_scalar!(
+        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(cid_str)) => cid_str,
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Repo root not found"})),
+            )
+                .into_response();
+        }
+    };
     let current_root_cid = match Cid::from_str(&root_cid_str) {
         Ok(c) => c,
         Err(_) => {
@@ -178,15 +183,14 @@ pub async fn apply_writes(
                 .into_response();
         }
     };
-    if let Some(swap_commit) = &input.swap_commit {
-        if Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
+    if let Some(swap_commit) = &input.swap_commit
+        && Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
             return (
                 StatusCode::CONFLICT,
                 Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
             )
                 .into_response();
         }
-    }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
@@ -195,7 +199,7 @@ pub async fn apply_writes(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError", "message": "Commit block not found"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     let commit = match Commit::from_cbor(&commit_bytes) {
@@ -205,7 +209,7 @@ pub async fn apply_writes(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError", "message": "Failed to parse commit"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     let original_mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
@@ -220,11 +224,10 @@ pub async fn apply_writes(
                 rkey,
                 value,
             } => {
-                if input.validate.unwrap_or(true) {
-                    if let Err(err_response) = validate_record(value, collection) {
-                        return err_response;
+                if input.validate.unwrap_or(true)
+                    && let Err(err_response) = validate_record(value, collection) {
+                        return *err_response;
                     }
-                }
                 let rkey = rkey
                     .clone()
                     .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
@@ -234,7 +237,13 @@ pub async fn apply_writes(
                 }
                 let record_cid = match tracking_store.put(&record_bytes).await {
                     Ok(c) => c,
-                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to store record"}))).into_response(),
+                    Err(_) => return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(
+                            json!({"error": "InternalError", "message": "Failed to store record"}),
+                        ),
+                    )
+                        .into_response(),
                 };
                 let collection_nsid = match collection.parse::<Nsid>() {
                     Ok(n) => n,
@@ -244,7 +253,11 @@ pub async fn apply_writes(
                 modified_keys.push(key.clone());
                 mst = match mst.add(&key, record_cid).await {
                     Ok(m) => m,
-                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to add to MST"}))).into_response(),
+                    Err(_) => return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError", "message": "Failed to add to MST"})),
+                    )
+                        .into_response(),
                 };
                 let uri = format!("at://{}/{}/{}", did, collection, rkey);
                 results.push(WriteResult::CreateResult {
@@ -262,18 +275,23 @@ pub async fn apply_writes(
                 rkey,
                 value,
             } => {
-                if input.validate.unwrap_or(true) {
-                    if let Err(err_response) = validate_record(value, collection) {
-                        return err_response;
+                if input.validate.unwrap_or(true)
+                    && let Err(err_response) = validate_record(value, collection) {
+                        return *err_response;
                     }
-                }
                 let mut record_bytes = Vec::new();
                 if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();
                 }
                 let record_cid = match tracking_store.put(&record_bytes).await {
                     Ok(c) => c,
-                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to store record"}))).into_response(),
+                    Err(_) => return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(
+                            json!({"error": "InternalError", "message": "Failed to store record"}),
+                        ),
+                    )
+                        .into_response(),
                 };
                 let collection_nsid = match collection.parse::<Nsid>() {
                     Ok(n) => n,
@@ -284,7 +302,11 @@ pub async fn apply_writes(
                 let prev_record_cid = mst.get(&key).await.ok().flatten();
                 mst = match mst.update(&key, record_cid).await {
                     Ok(m) => m,
-                    Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to update MST"}))).into_response(),
+                    Err(_) => return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError", "message": "Failed to update MST"})),
+                    )
+                        .into_response(),
                 };
                 let uri = format!("at://{}/{}/{}", did, collection, rkey);
                 results.push(WriteResult::UpdateResult {
@@ -321,14 +343,24 @@ pub async fn apply_writes(
     }
     let new_mst_root = match mst.persist().await {
         Ok(c) => c,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to persist MST"}))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to persist MST"})),
+            )
+                .into_response();
+        }
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
     for key in &modified_keys {
-        if let Err(_) = mst.blocks_for_path(key, &mut relevant_blocks).await {
+        if mst.blocks_for_path(key, &mut relevant_blocks).await.is_err() {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
         }
-        if let Err(_) = original_mst.blocks_for_path(key, &mut relevant_blocks).await {
+        if original_mst
+            .blocks_for_path(key, &mut relevant_blocks)
+            .await
+            .is_err()
+        {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get old MST blocks for path"}))).into_response();
         }
     }
@@ -344,13 +376,15 @@ pub async fn apply_writes(
         .collect::<Vec<_>>();
     let commit_res = match commit_and_log(
         &state,
-        &did,
-        user_id,
-        Some(current_root_cid),
-        Some(commit.data),
-        new_mst_root,
-        ops,
-        &written_cids_str,
+        CommitParams {
+            did: &did,
+            user_id,
+            current_root_cid: Some(current_root_cid),
+            prev_data_cid: Some(commit.data),
+            new_mst_root,
+            ops,
+            blocks_cids: &written_cids_str,
+        },
     )
     .await
     {

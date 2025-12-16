@@ -53,9 +53,9 @@ impl RecordValidator {
         record: &Value,
         collection: &str,
     ) -> Result<ValidationStatus, ValidationError> {
-        let obj = record
-            .as_object()
-            .ok_or_else(|| ValidationError::InvalidRecord("Record must be an object".to_string()))?;
+        let obj = record.as_object().ok_or_else(|| {
+            ValidationError::InvalidRecord("Record must be an object".to_string())
+        })?;
         let record_type = obj
             .get("$type")
             .and_then(|v| v.as_str())
@@ -103,18 +103,20 @@ impl RecordValidator {
             if grapheme_count > 3000 {
                 return Err(ValidationError::InvalidField {
                     path: "text".to_string(),
-                    message: format!("Text exceeds maximum length of 3000 characters (got {})", grapheme_count),
+                    message: format!(
+                        "Text exceeds maximum length of 3000 characters (got {})",
+                        grapheme_count
+                    ),
                 });
             }
         }
-        if let Some(langs) = obj.get("langs").and_then(|v| v.as_array()) {
-            if langs.len() > 3 {
+        if let Some(langs) = obj.get("langs").and_then(|v| v.as_array())
+            && langs.len() > 3 {
                 return Err(ValidationError::InvalidField {
                     path: "langs".to_string(),
                     message: "Maximum 3 languages allowed".to_string(),
                 });
             }
-        }
         if let Some(tags) = obj.get("tags").and_then(|v| v.as_array()) {
             if tags.len() > 8 {
                 return Err(ValidationError::InvalidField {
@@ -123,26 +125,31 @@ impl RecordValidator {
                 });
             }
             for (i, tag) in tags.iter().enumerate() {
-                if let Some(tag_str) = tag.as_str() {
-                    if tag_str.len() > 640 {
+                if let Some(tag_str) = tag.as_str()
+                    && tag_str.len() > 640 {
                         return Err(ValidationError::InvalidField {
                             path: format!("tags/{}", i),
                             message: "Tag exceeds maximum length of 640 bytes".to_string(),
                         });
                     }
-                }
             }
         }
         Ok(())
     }
 
-    fn validate_profile(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_profile(
+        &self,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<(), ValidationError> {
         if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
             let grapheme_count = display_name.chars().count();
             if grapheme_count > 640 {
                 return Err(ValidationError::InvalidField {
                     path: "displayName".to_string(),
-                    message: format!("Display name exceeds maximum length of 640 characters (got {})", grapheme_count),
+                    message: format!(
+                        "Display name exceeds maximum length of 640 characters (got {})",
+                        grapheme_count
+                    ),
                 });
             }
         }
@@ -151,7 +158,10 @@ impl RecordValidator {
             if grapheme_count > 2560 {
                 return Err(ValidationError::InvalidField {
                     path: "description".to_string(),
-                    message: format!("Description exceeds maximum length of 2560 characters (got {})", grapheme_count),
+                    message: format!(
+                        "Description exceeds maximum length of 2560 characters (got {})",
+                        grapheme_count
+                    ),
                 });
             }
         }
@@ -187,14 +197,13 @@ impl RecordValidator {
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str()) {
-            if !subject.starts_with("did:") {
+        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
+            && !subject.starts_with("did:") {
                 return Err(ValidationError::InvalidField {
                     path: "subject".to_string(),
                     message: "Subject must be a DID".to_string(),
                 });
             }
-        }
         Ok(())
     }
 
@@ -205,14 +214,13 @@ impl RecordValidator {
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str()) {
-            if !subject.starts_with("did:") {
+        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
+            && !subject.starts_with("did:") {
                 return Err(ValidationError::InvalidField {
                     path: "subject".to_string(),
                     message: "Subject must be a DID".to_string(),
                 });
             }
-        }
         Ok(())
     }
 
@@ -226,18 +234,20 @@ impl RecordValidator {
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
-            if name.is_empty() || name.len() > 64 {
+        if let Some(name) = obj.get("name").and_then(|v| v.as_str())
+            && (name.is_empty() || name.len() > 64) {
                 return Err(ValidationError::InvalidField {
                     path: "name".to_string(),
                     message: "Name must be 1-64 characters".to_string(),
                 });
             }
-        }
         Ok(())
     }
 
-    fn validate_list_item(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_list_item(
+        &self,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
         }
@@ -250,7 +260,10 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_feed_generator(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_feed_generator(
+        &self,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<(), ValidationError> {
         if !obj.contains_key("did") {
             return Err(ValidationError::MissingField("did".to_string()));
         }
@@ -260,18 +273,20 @@ impl RecordValidator {
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
-            if display_name.is_empty() || display_name.len() > 240 {
+        if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str())
+            && (display_name.is_empty() || display_name.len() > 240) {
                 return Err(ValidationError::InvalidField {
                     path: "displayName".to_string(),
                     message: "displayName must be 1-240 characters".to_string(),
                 });
             }
-        }
         Ok(())
     }
 
-    fn validate_threadgate(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_threadgate(
+        &self,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<(), ValidationError> {
         if !obj.contains_key("post") {
             return Err(ValidationError::MissingField("post".to_string()));
         }
@@ -281,7 +296,10 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_labeler_service(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_labeler_service(
+        &self,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<(), ValidationError> {
         if !obj.contains_key("policies") {
             return Err(ValidationError::MissingField("policies".to_string()));
         }
@@ -291,27 +309,31 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_strong_ref(&self, value: Option<&Value>, path: &str) -> Result<(), ValidationError> {
-        let obj = value
-            .and_then(|v| v.as_object())
-            .ok_or_else(|| ValidationError::InvalidField {
-                path: path.to_string(),
-                message: "Must be a strong reference object".to_string(),
-            })?;
+    fn validate_strong_ref(
+        &self,
+        value: Option<&Value>,
+        path: &str,
+    ) -> Result<(), ValidationError> {
+        let obj =
+            value
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| ValidationError::InvalidField {
+                    path: path.to_string(),
+                    message: "Must be a strong reference object".to_string(),
+                })?;
         if !obj.contains_key("uri") {
             return Err(ValidationError::MissingField(format!("{}/uri", path)));
         }
         if !obj.contains_key("cid") {
             return Err(ValidationError::MissingField(format!("{}/cid", path)));
         }
-        if let Some(uri) = obj.get("uri").and_then(|v| v.as_str()) {
-            if !uri.starts_with("at://") {
+        if let Some(uri) = obj.get("uri").and_then(|v| v.as_str())
+            && !uri.starts_with("at://") {
                 return Err(ValidationError::InvalidField {
                     path: format!("{}/uri", path),
                     message: "URI must be an at:// URI".to_string(),
                 });
             }
-        }
         Ok(())
     }
 }
@@ -327,20 +349,27 @@ fn validate_datetime(value: &str, path: &str) -> Result<(), ValidationError> {
 
 pub fn validate_record_key(rkey: &str) -> Result<(), ValidationError> {
     if rkey.is_empty() {
-        return Err(ValidationError::InvalidRecord("Record key cannot be empty".to_string()));
+        return Err(ValidationError::InvalidRecord(
+            "Record key cannot be empty".to_string(),
+        ));
     }
     if rkey.len() > 512 {
-        return Err(ValidationError::InvalidRecord("Record key exceeds maximum length of 512".to_string()));
+        return Err(ValidationError::InvalidRecord(
+            "Record key exceeds maximum length of 512".to_string(),
+        ));
     }
     if rkey == "." || rkey == ".." {
-        return Err(ValidationError::InvalidRecord("Record key cannot be '.' or '..'".to_string()));
+        return Err(ValidationError::InvalidRecord(
+            "Record key cannot be '.' or '..'".to_string(),
+        ));
     }
-    let valid_chars = rkey.chars().all(|c| {
-        c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '~'
-    });
+    let valid_chars = rkey
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == '~');
     if !valid_chars {
         return Err(ValidationError::InvalidRecord(
-            "Record key contains invalid characters (must be alphanumeric, '.', '-', '_', or '~')".to_string()
+            "Record key contains invalid characters (must be alphanumeric, '.', '-', '_', or '~')"
+                .to_string(),
         ));
     }
     Ok(())
@@ -348,23 +377,25 @@ pub fn validate_record_key(rkey: &str) -> Result<(), ValidationError> {
 
 pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError> {
     if collection.is_empty() {
-        return Err(ValidationError::InvalidRecord("Collection NSID cannot be empty".to_string()));
+        return Err(ValidationError::InvalidRecord(
+            "Collection NSID cannot be empty".to_string(),
+        ));
     }
     let parts: Vec<&str> = collection.split('.').collect();
     if parts.len() < 3 {
         return Err(ValidationError::InvalidRecord(
-            "Collection NSID must have at least 3 segments".to_string()
+            "Collection NSID must have at least 3 segments".to_string(),
         ));
     }
     for part in &parts {
         if part.is_empty() {
             return Err(ValidationError::InvalidRecord(
-                "Collection NSID segments cannot be empty".to_string()
+                "Collection NSID segments cannot be empty".to_string(),
             ));
         }
         if !part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err(ValidationError::InvalidRecord(
-                "Collection NSID segments must be alphanumeric or hyphens".to_string()
+                "Collection NSID segments must be alphanumeric or hyphens".to_string(),
             ));
         }
     }
@@ -385,7 +416,9 @@ mod tests {
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
         assert_eq!(
-            validator.validate(&valid_post, "app.bsky.feed.post").unwrap(),
+            validator
+                .validate(&valid_post, "app.bsky.feed.post")
+                .unwrap(),
             ValidationStatus::Valid
         );
     }
@@ -397,7 +430,11 @@ mod tests {
             "$type": "app.bsky.feed.post",
             "createdAt": "2024-01-01T00:00:00.000Z"
         });
-        assert!(validator.validate(&invalid_post, "app.bsky.feed.post").is_err());
+        assert!(
+            validator
+                .validate(&invalid_post, "app.bsky.feed.post")
+                .is_err()
+        );
     }
 
     #[test]

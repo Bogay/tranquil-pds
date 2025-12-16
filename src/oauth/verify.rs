@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::FromRequestParts,
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
-    Json,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
@@ -11,11 +11,11 @@ use sha2::Sha256;
 use sqlx::PgPool;
 use subtle::ConstantTimeEq;
 
-use crate::config::AuthConfig;
-use crate::state::AppState;
+use super::OAuthError;
 use super::db;
 use super::dpop::DPoPVerifier;
-use super::OAuthError;
+use crate::config::AuthConfig;
+use crate::state::AppState;
 
 pub struct OAuthTokenInfo {
     pub did: String,
@@ -48,13 +48,13 @@ pub async fn verify_oauth_access_token(
         return Err(OAuthError::InvalidToken("Token has expired".to_string()));
     }
     if let Some(expected_jkt) = &token_data.parameters.dpop_jkt {
-        let proof = dpop_proof.ok_or_else(|| {
-            OAuthError::UseDpopNonce("DPoP proof required".to_string())
-        })?;
+        let proof = dpop_proof
+            .ok_or_else(|| OAuthError::UseDpopNonce("DPoP proof required".to_string()))?;
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
         let access_token_hash = compute_ath(access_token);
-        let result = verifier.verify_proof(proof, http_method, http_uri, Some(&access_token_hash))?;
+        let result =
+            verifier.verify_proof(proof, http_method, http_uri, Some(&access_token_hash))?;
         if !db::check_and_record_dpop_jti(pool, &result.jti).await? {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP proof has already been used".to_string(),
@@ -85,10 +85,14 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
     let header: serde_json::Value = serde_json::from_slice(&header_bytes)
         .map_err(|_| OAuthError::InvalidToken("Invalid token header".to_string()))?;
     if header.get("typ").and_then(|t| t.as_str()) != Some("at+jwt") {
-        return Err(OAuthError::InvalidToken("Not an OAuth access token".to_string()));
+        return Err(OAuthError::InvalidToken(
+            "Not an OAuth access token".to_string(),
+        ));
     }
     if header.get("alg").and_then(|a| a.as_str()) != Some("HS256") {
-        return Err(OAuthError::InvalidToken("Unsupported algorithm".to_string()));
+        return Err(OAuthError::InvalidToken(
+            "Unsupported algorithm".to_string(),
+        ));
     }
     let config = AuthConfig::get();
     let secret = config.jwt_secret();
@@ -102,7 +106,9 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
     mac.update(signing_input.as_bytes());
     let expected_sig = mac.finalize().into_bytes();
     if !bool::from(expected_sig.ct_eq(&provided_sig)) {
-        return Err(OAuthError::InvalidToken("Invalid token signature".to_string()));
+        return Err(OAuthError::InvalidToken(
+            "Invalid token signature".to_string(),
+        ));
     }
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(parts[1])
@@ -127,7 +133,10 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         .and_then(|s| s.as_str())
         .ok_or_else(|| OAuthError::InvalidToken("Missing sub claim".to_string()))?
         .to_string();
-    let scope = payload.get("scope").and_then(|s| s.as_str()).map(|s| s.to_string());
+    let scope = payload
+        .get("scope")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
     let dpop_jkt = payload
         .get("cnf")
         .and_then(|c| c.get("jkt"))
@@ -152,7 +161,7 @@ fn compute_ath(access_token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(access_token.as_bytes());
     let hash = hasher.finalize();
-    URL_SAFE_NO_PAD.encode(&hash)
+    URL_SAFE_NO_PAD.encode(hash)
 }
 
 pub fn generate_dpop_nonce() -> String {
@@ -186,10 +195,9 @@ impl IntoResponse for OAuthAuthError {
         )
             .into_response();
         if let Some(nonce) = self.dpop_nonce {
-            response.headers_mut().insert(
-                "DPoP-Nonce",
-                nonce.parse().unwrap(),
-            );
+            response
+                .headers_mut()
+                .insert("DPoP-Nonce", nonce.parse().unwrap());
         }
         response
     }
@@ -198,7 +206,10 @@ impl IntoResponse for OAuthAuthError {
 impl FromRequestParts<AppState> for OAuthUser {
     type Rejection = OAuthAuthError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let auth_header = parts
             .headers
             .get("Authorization")
@@ -210,9 +221,13 @@ impl FromRequestParts<AppState> for OAuthUser {
                 dpop_nonce: None,
             })?;
         let auth_header_trimmed = auth_header.trim();
-        let (token, is_dpop_token) = if auth_header_trimmed.len() >= 7 && auth_header_trimmed[..7].eq_ignore_ascii_case("bearer ") {
+        let (token, is_dpop_token) = if auth_header_trimmed.len() >= 7
+            && auth_header_trimmed[..7].eq_ignore_ascii_case("bearer ")
+        {
             (auth_header_trimmed[7..].trim(), false)
-        } else if auth_header_trimmed.len() >= 5 && auth_header_trimmed[..5].eq_ignore_ascii_case("dpop ") {
+        } else if auth_header_trimmed.len() >= 5
+            && auth_header_trimmed[..5].eq_ignore_ascii_case("dpop ")
+        {
             (auth_header_trimmed[5..].trim(), true)
         } else {
             return Err(OAuthAuthError {
@@ -222,10 +237,7 @@ impl FromRequestParts<AppState> for OAuthUser {
                 dpop_nonce: None,
             });
         };
-        let dpop_proof = parts
-            .headers
-            .get("DPoP")
-            .and_then(|v| v.to_str().ok());
+        let dpop_proof = parts.headers.get("DPoP").and_then(|v| v.to_str().ok());
         if let Ok(result) = try_legacy_auth(&state.db, token).await {
             return Ok(OAuthUser {
                 did: result.did,
@@ -236,7 +248,8 @@ impl FromRequestParts<AppState> for OAuthUser {
         }
         let http_method = parts.method.as_str();
         let http_uri = parts.uri.to_string();
-        match verify_oauth_access_token(&state.db, token, dpop_proof, http_method, &http_uri).await {
+        match verify_oauth_access_token(&state.db, token, dpop_proof, http_method, &http_uri).await
+        {
             Ok(result) => Ok(OAuthUser {
                 did: result.did,
                 client_id: Some(result.client_id),
@@ -259,7 +272,11 @@ impl FromRequestParts<AppState> for OAuthUser {
                 })
             }
             Err(e) => {
-                let nonce = if is_dpop_token { Some(generate_dpop_nonce()) } else { None };
+                let nonce = if is_dpop_token {
+                    Some(generate_dpop_nonce())
+                } else {
+                    None
+                };
                 Err(OAuthAuthError {
                     status: StatusCode::UNAUTHORIZED,
                     error: "AuthenticationFailed".to_string(),

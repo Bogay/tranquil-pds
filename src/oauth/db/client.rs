@@ -1,6 +1,6 @@
-use sqlx::PgPool;
 use super::super::{AuthorizedClientData, OAuthError};
 use super::helpers::{from_json, to_json};
+use sqlx::PgPool;
 
 pub async fn upsert_authorized_client(
     pool: &PgPool,

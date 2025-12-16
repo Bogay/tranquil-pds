@@ -34,7 +34,10 @@ async fn test_moderation_report_lifecycle() {
     assert_eq!(report_res.status(), StatusCode::OK);
     let report_body: Value = report_res.json().await.unwrap();
     assert!(report_body["id"].is_number(), "Report should have an ID");
-    assert_eq!(report_body["reasonType"], "com.atproto.moderation.defs#reasonSpam");
+    assert_eq!(
+        report_body["reasonType"],
+        "com.atproto.moderation.defs#reasonSpam"
+    );
     assert_eq!(report_body["reportedBy"], alice_did);
     let account_report_payload = json!({
         "reasonType": "com.atproto.moderation.defs#reasonOther",

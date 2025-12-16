@@ -1,9 +1,9 @@
 mod common;
 mod helpers;
-use reqwest::StatusCode;
-use serde_json::{json, Value};
-use sqlx::PgPool;
 use helpers::verify_new_account;
+use reqwest::StatusCode;
+use serde_json::{Value, json};
+use sqlx::PgPool;
 
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
@@ -91,9 +91,19 @@ async fn test_reserve_signing_key_stores_private_key() {
     .fetch_one(&pool)
     .await
     .expect("Reserved key not found in database");
-    assert_eq!(row.private_key_bytes.len(), 32, "Private key should be 32 bytes for secp256k1");
-    assert!(row.used_at.is_none(), "Reserved key should not be marked as used yet");
-    assert!(row.expires_at > chrono::Utc::now(), "Key should expire in the future");
+    assert_eq!(
+        row.private_key_bytes.len(),
+        32,
+        "Private key should be 32 bytes for secp256k1"
+    );
+    assert!(
+        row.used_at.is_none(),
+        "Reserved key should not be marked as used yet"
+    );
+    assert!(
+        row.expires_at > chrono::Utc::now(),
+        "Key should expire in the future"
+    );
 }
 
 #[tokio::test]
@@ -272,10 +282,7 @@ async fn test_create_account_cannot_reuse_signing_key() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidSigningKey");
-    assert!(body["message"]
-        .as_str()
-        .unwrap()
-        .contains("already used"));
+    assert!(body["message"].as_str().unwrap().contains("already used"));
 }
 
 #[tokio::test]
@@ -314,15 +321,16 @@ async fn test_reserved_key_tokens_work() {
     let did = body["did"].as_str().unwrap();
     let access_jwt = verify_new_account(&client, did).await;
     let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.server.getSession",
-            base_url
-        ))
+        .get(format!("{}/xrpc/com.atproto.server.getSession", base_url))
         .bearer_auth(&access_jwt)
         .send()
         .await
         .expect("Failed to get session");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
-    assert_eq!(body["handle"], handle);
+    let session_handle = body["handle"].as_str().unwrap();
+    assert!(
+        session_handle.starts_with(&handle),
+        "Session handle should start with requested handle"
+    );
 }

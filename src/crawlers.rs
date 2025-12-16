@@ -1,8 +1,8 @@
 use crate::circuit_breaker::CircuitBreaker;
 use crate::sync::firehose::SequencedEvent;
 use reqwest::Client;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 use tracing::{debug, error, info, warn};
@@ -78,18 +78,20 @@ impl Crawlers {
             return;
         }
 
-        if let Some(cb) = &self.circuit_breaker {
-            if !cb.can_execute().await {
+        if let Some(cb) = &self.circuit_breaker
+            && !cb.can_execute().await {
                 debug!("Skipping crawler notification due to circuit breaker open");
                 return;
             }
-        }
 
         self.mark_notified();
         let circuit_breaker = self.circuit_breaker.clone();
 
         for crawler_url in &self.crawler_urls {
-            let url = format!("{}/xrpc/com.atproto.sync.requestCrawl", crawler_url.trim_end_matches('/'));
+            let url = format!(
+                "{}/xrpc/com.atproto.sync.requestCrawl",
+                crawler_url.trim_end_matches('/')
+            );
             let hostname = self.hostname.clone();
             let client = self.http_client.clone();
             let cb = circuit_breaker.clone();

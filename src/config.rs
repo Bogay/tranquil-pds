@@ -1,8 +1,5 @@
 #[allow(deprecated)]
-use aes_gcm::{
-    Aes256Gcm, KeyInit, Nonce,
-    aead::Aead,
-};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hkdf::Hkdf;
 use p256::ecdsa::SigningKey;
@@ -62,17 +59,25 @@ impl AuthConfig {
             hasher.update(jwt_secret.as_bytes());
             let seed = hasher.finalize();
 
-            let signing_key = SigningKey::from_slice(&seed)
-                .unwrap_or_else(|e| panic!("Failed to create signing key from seed: {}. This is a bug.", e));
+            let signing_key = SigningKey::from_slice(&seed).unwrap_or_else(|e| {
+                panic!(
+                    "Failed to create signing key from seed: {}. This is a bug.",
+                    e
+                )
+            });
 
             let verifying_key = signing_key.verifying_key();
             let point = verifying_key.to_encoded_point(false);
 
             let signing_key_x = URL_SAFE_NO_PAD.encode(
-                point.x().expect("EC point missing X coordinate - this should never happen")
+                point
+                    .x()
+                    .expect("EC point missing X coordinate - this should never happen"),
             );
             let signing_key_y = URL_SAFE_NO_PAD.encode(
-                point.y().expect("EC point missing Y coordinate - this should never happen")
+                point
+                    .y()
+                    .expect("EC point missing Y coordinate - this should never happen"),
             );
 
             let mut kid_hasher = Sha256::new();
@@ -114,7 +119,9 @@ impl AuthConfig {
     }
 
     pub fn get() -> &'static Self {
-        CONFIG.get().expect("AuthConfig not initialized - call AuthConfig::init() first")
+        CONFIG
+            .get()
+            .expect("AuthConfig not initialized - call AuthConfig::init() first")
     }
 
     pub fn jwt_secret(&self) -> &str {

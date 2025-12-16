@@ -1,9 +1,9 @@
 mod common;
-use common::*;
 use cid::Cid;
+use common::*;
 use ipld_core::ipld::Ipld;
 use jacquard::types::{integer::LimitedU32, string::Tid};
-use k256::ecdsa::{signature::Signer, Signature, SigningKey};
+use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use reqwest::StatusCode;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -60,7 +60,12 @@ fn get_multikey_from_signing_key(signing_key: &SigningKey) -> String {
     multibase::encode(multibase::Base::Base58Btc, buf)
 }
 
-fn create_did_document(did: &str, handle: &str, signing_key: &SigningKey, pds_endpoint: &str) -> serde_json::Value {
+fn create_did_document(
+    did: &str,
+    handle: &str,
+    signing_key: &SigningKey,
+    pds_endpoint: &str,
+) -> serde_json::Value {
     let multikey = get_multikey_from_signing_key(signing_key);
     json!({
         "@context": [
@@ -83,11 +88,7 @@ fn create_did_document(did: &str, handle: &str, signing_key: &SigningKey, pds_en
     })
 }
 
-fn create_signed_commit(
-    did: &str,
-    data_cid: &Cid,
-    signing_key: &SigningKey,
-) -> (Vec<u8>, Cid) {
+fn create_signed_commit(did: &str, data_cid: &Cid, signing_key: &SigningKey) -> (Vec<u8>, Cid) {
     let rev = Tid::now(LimitedU32::MIN).to_string();
     let unsigned = Ipld::Map(BTreeMap::from([
         ("data".to_string(), Ipld::Link(*data_cid)),
@@ -124,9 +125,10 @@ fn create_mst_node(entries: Vec<(String, Cid)>) -> (Vec<u8>, Cid) {
             ]))
         })
         .collect();
-    let node = Ipld::Map(BTreeMap::from([
-        ("e".to_string(), Ipld::List(ipld_entries)),
-    ]));
+    let node = Ipld::Map(BTreeMap::from([(
+        "e".to_string(),
+        Ipld::List(ipld_entries),
+    )]));
     let bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
     let cid = make_cid(&bytes);
     (bytes, cid)
@@ -134,22 +136,27 @@ fn create_mst_node(entries: Vec<(String, Cid)>) -> (Vec<u8>, Cid) {
 
 fn create_record() -> (Vec<u8>, Cid) {
     let record = Ipld::Map(BTreeMap::from([
-        ("$type".to_string(), Ipld::String("app.bsky.feed.post".to_string())),
-        ("text".to_string(), Ipld::String("Test post for verification".to_string())),
-        ("createdAt".to_string(), Ipld::String("2024-01-01T00:00:00Z".to_string())),
+        (
+            "$type".to_string(),
+            Ipld::String("app.bsky.feed.post".to_string()),
+        ),
+        (
+            "text".to_string(),
+            Ipld::String("Test post for verification".to_string()),
+        ),
+        (
+            "createdAt".to_string(),
+            Ipld::String("2024-01-01T00:00:00Z".to_string()),
+        ),
     ]));
     let bytes = serde_ipld_dagcbor::to_vec(&record).unwrap();
     let cid = make_cid(&bytes);
     (bytes, cid)
 }
-fn build_car_with_signature(
-    did: &str,
-    signing_key: &SigningKey,
-) -> (Vec<u8>, Cid) {
+fn build_car_with_signature(did: &str, signing_key: &SigningKey) -> (Vec<u8>, Cid) {
     let (record_bytes, record_cid) = create_record();
-    let (mst_bytes, mst_cid) = create_mst_node(vec![
-        ("app.bsky.feed.post/test123".to_string(), record_cid),
-    ]);
+    let (mst_bytes, mst_cid) =
+        create_mst_node(vec![("app.bsky.feed.post/test123".to_string(), record_cid)]);
     let (commit_bytes, commit_cid) = create_signed_commit(did, &mst_cid, signing_key);
     let header = iroh_car::CarHeader::new_v1(vec![commit_cid]);
     let header_bytes = header.encode().unwrap();
@@ -194,10 +201,10 @@ async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
 async fn test_import_with_valid_signature_and_mock_plc() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
     let handle = did.split(':').last().unwrap_or("user");
@@ -209,7 +216,10 @@ async fn test_import_with_valid_signature_and_mock_plc() {
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &signing_key);
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes)
@@ -234,10 +244,11 @@ async fn test_import_with_wrong_signing_key_fails() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
     let wrong_signing_key = SigningKey::random(&mut rand::thread_rng());
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let correct_signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
+    let correct_signing_key =
+        SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
     let handle = did.split(':').last().unwrap_or("user");
@@ -249,7 +260,10 @@ async fn test_import_with_wrong_signing_key_fails() {
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &wrong_signing_key);
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes)
@@ -268,7 +282,8 @@ async fn test_import_with_wrong_signing_key_fails() {
         body
     );
     assert!(
-        body["error"] == "InvalidSignature" || body["message"].as_str().unwrap_or("").contains("signature"),
+        body["error"] == "InvalidSignature"
+            || body["message"].as_str().unwrap_or("").contains("signature"),
         "Error should mention signature: {:?}",
         body
     );
@@ -278,10 +293,10 @@ async fn test_import_with_wrong_signing_key_fails() {
 async fn test_import_with_did_mismatch_fails() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
     let wrong_did = "did:plc:wrongdidthatdoesnotmatch";
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -294,7 +309,10 @@ async fn test_import_with_did_mismatch_fails() {
     }
     let (car_bytes, _root_cid) = build_car_with_signature(wrong_did, &signing_key);
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes)
@@ -318,10 +336,10 @@ async fn test_import_with_did_mismatch_fails() {
 async fn test_import_with_plc_resolution_failure() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
     let mock_plc = MockServer::start().await;
     let did_encoded = urlencoding::encode(&did);
     let did_path = format!("/{}", did_encoded);
@@ -336,7 +354,10 @@ async fn test_import_with_plc_resolution_failure() {
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &signing_key);
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes)
@@ -360,10 +381,10 @@ async fn test_import_with_plc_resolution_failure() {
 async fn test_import_with_no_signing_key_in_did_doc() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let key_bytes = get_user_signing_key(&did).await
+    let key_bytes = get_user_signing_key(&did)
+        .await
         .expect("Failed to get user signing key");
-    let signing_key = SigningKey::from_slice(&key_bytes)
-        .expect("Failed to create signing key");
+    let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
     let handle = did.split(':').last().unwrap_or("user");
     let did_doc_without_key = json!({
         "@context": ["https://www.w3.org/ns/did/v1"],
@@ -379,7 +400,10 @@ async fn test_import_with_no_signing_key_in_did_doc() {
     }
     let (car_bytes, _root_cid) = build_car_with_signature(&did, &signing_key);
     let import_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.importRepo", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.importRepo",
+            base_url().await
+        ))
         .bearer_auth(&token)
         .header("Content-Type", "application/vnd.ipld.car")
         .body(car_bytes)

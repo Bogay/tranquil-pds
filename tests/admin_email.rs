@@ -1,7 +1,7 @@
 mod common;
 
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 
 async fn get_pool() -> PgPool {
@@ -46,7 +46,11 @@ async fn test_send_email_success() {
     .await
     .expect("Notification not found");
     assert_eq!(notification.subject.as_deref(), Some("Test Admin Email"));
-    assert!(notification.body.contains("Hello, this is a test email from the admin."));
+    assert!(
+        notification
+            .body
+            .contains("Hello, this is a test email from the admin.")
+    );
 }
 
 #[tokio::test]

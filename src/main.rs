@@ -1,5 +1,7 @@
 use bspds::crawlers::{Crawlers, start_crawlers_service};
-use bspds::notifications::{DiscordSender, EmailSender, NotificationService, SignalSender, TelegramSender};
+use bspds::notifications::{
+    DiscordSender, EmailSender, NotificationService, SignalSender, TelegramSender,
+};
 use bspds::state::AppState;
 use std::net::SocketAddr;
 use std::process::ExitCode;
@@ -94,11 +96,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let crawlers_handle = if let Some(crawlers) = Crawlers::from_env() {
         let crawlers = Arc::new(
-            crawlers.with_circuit_breaker(state.circuit_breakers.relay_notification.clone())
+            crawlers.with_circuit_breaker(state.circuit_breakers.relay_notification.clone()),
         );
         let firehose_rx = state.firehose_tx.subscribe();
         info!("Crawlers notification service enabled");
-        Some(tokio::spawn(start_crawlers_service(crawlers, firehose_rx, shutdown_rx)))
+        Some(tokio::spawn(start_crawlers_service(
+            crawlers,
+            firehose_rx,
+            shutdown_rx,
+        )))
     } else {
         warn!("Crawlers notification service disabled (PDS_HOSTNAME or CRAWLERS not set)");
         None

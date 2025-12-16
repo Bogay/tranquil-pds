@@ -31,9 +31,12 @@ pub async fn disable_invite_codes(
     }
     if let Some(codes) = &input.codes {
         for code in codes {
-            let _ = sqlx::query!("UPDATE invite_codes SET disabled = TRUE WHERE code = $1", code)
-                .execute(&state.db)
-                .await;
+            let _ = sqlx::query!(
+                "UPDATE invite_codes SET disabled = TRUE WHERE code = $1",
+                code
+            )
+            .execute(&state.db)
+            .await;
         }
     }
     if let Some(accounts) = &input.accounts {
@@ -106,7 +109,16 @@ pub async fn get_invite_codes(
         _ => "created_at DESC",
     };
     let codes_result = if let Some(cursor) = &params.cursor {
-        sqlx::query_as::<_, (String, i32, Option<bool>, uuid::Uuid, chrono::DateTime<chrono::Utc>)>(&format!(
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                i32,
+                Option<bool>,
+                uuid::Uuid,
+                chrono::DateTime<chrono::Utc>,
+            ),
+        >(&format!(
             r#"
             SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
             FROM invite_codes ic
@@ -121,7 +133,16 @@ pub async fn get_invite_codes(
         .fetch_all(&state.db)
         .await
     } else {
-        sqlx::query_as::<_, (String, i32, Option<bool>, uuid::Uuid, chrono::DateTime<chrono::Utc>)>(&format!(
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                i32,
+                Option<bool>,
+                uuid::Uuid,
+                chrono::DateTime<chrono::Utc>,
+            ),
+        >(&format!(
             r#"
             SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
             FROM invite_codes ic
@@ -147,12 +168,13 @@ pub async fn get_invite_codes(
     };
     let mut codes = Vec::new();
     for (code, available_uses, disabled, created_by_user, created_at) in &codes_rows {
-        let creator_did = sqlx::query_scalar!("SELECT did FROM users WHERE id = $1", created_by_user)
-            .fetch_optional(&state.db)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "unknown".to_string());
+        let creator_did =
+            sqlx::query_scalar!("SELECT did FROM users WHERE id = $1", created_by_user)
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "unknown".to_string());
         let uses_result = sqlx::query!(
             r#"
             SELECT u.did, icu.used_at
@@ -226,9 +248,12 @@ pub async fn disable_account_invites(
         )
             .into_response();
     }
-    let result = sqlx::query!("UPDATE users SET invites_disabled = TRUE WHERE did = $1", account)
-        .execute(&state.db)
-        .await;
+    let result = sqlx::query!(
+        "UPDATE users SET invites_disabled = TRUE WHERE did = $1",
+        account
+    )
+    .execute(&state.db)
+    .await;
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {
@@ -277,9 +302,12 @@ pub async fn enable_account_invites(
         )
             .into_response();
     }
-    let result = sqlx::query!("UPDATE users SET invites_disabled = FALSE WHERE did = $1", account)
-        .execute(&state.db)
-        .await;
+    let result = sqlx::query!(
+        "UPDATE users SET invites_disabled = FALSE WHERE did = $1",
+        account
+    )
+    .execute(&state.db)
+    .await;
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {

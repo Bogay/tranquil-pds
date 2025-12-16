@@ -1,13 +1,13 @@
 use crate::api::read_after_write::{
-    extract_repo_rev, format_munged_response, get_local_lag, get_records_since_rev,
-    proxy_to_appview, FeedOutput, FeedViewPost, LikeRecord, PostView, RecordDescript,
+    FeedOutput, FeedViewPost, LikeRecord, PostView, RecordDescript, extract_repo_rev,
+    format_munged_response, get_local_lag, get_records_since_rev, proxy_to_appview,
 };
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -68,7 +68,9 @@ pub async fn get_actor_likes(
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
+            crate::auth::validate_bearer_token(&state.db, &token)
+                .await
+                .ok()
         } else {
             None
         }
@@ -85,11 +87,17 @@ pub async fn get_actor_likes(
     if let Some(cursor) = &params.cursor {
         query_params.insert("cursor".to_string(), cursor.clone());
     }
-    let proxy_result =
-        match proxy_to_appview("app.bsky.feed.getActorLikes", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
+    let proxy_result = match proxy_to_appview(
+        "app.bsky.feed.getActorLikes",
+        &query_params,
+        auth_did.as_deref().unwrap_or(""),
+        auth_key_bytes.as_deref(),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
     if !proxy_result.status.is_success() {
         return proxy_result.into_response();
     }

@@ -32,14 +32,16 @@ pub async fn check_account_status(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!("https://{}/xrpc/com.atproto.server.checkAccountStatus",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let http_uri = format!(
+        "https://{}/xrpc/com.atproto.server.checkAccountStatus",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+    );
     let did = match crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
@@ -48,7 +50,9 @@ pub async fn check_account_status(
         "GET",
         &http_uri,
         true,
-    ).await {
+    )
+    .await
+    {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -72,24 +76,30 @@ pub async fn check_account_status(
         Ok(Some(row)) => row.deactivated_at,
         _ => None,
     };
-    let repo_result = sqlx::query!("SELECT repo_root_cid FROM repos WHERE user_id = $1", user_id)
-        .fetch_optional(&state.db)
-        .await;
+    let repo_result = sqlx::query!(
+        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await;
     let repo_commit = match repo_result {
         Ok(Some(row)) => row.repo_root_cid,
         _ => String::new(),
     };
-    let record_count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM records WHERE repo_id = $1", user_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(Some(0))
-        .unwrap_or(0);
-    let blob_count: i64 =
-        sqlx::query_scalar!("SELECT COUNT(*) FROM blobs WHERE created_by_user = $1", user_id)
+    let record_count: i64 =
+        sqlx::query_scalar!("SELECT COUNT(*) FROM records WHERE repo_id = $1", user_id)
             .fetch_one(&state.db)
             .await
             .unwrap_or(Some(0))
             .unwrap_or(0);
+    let blob_count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM blobs WHERE created_by_user = $1",
+        user_id
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(Some(0))
+    .unwrap_or(0);
     let valid_did = did.starts_with("did:");
     (
         StatusCode::OK,
@@ -113,14 +123,16 @@ pub async fn activate_account(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!("https://{}/xrpc/com.atproto.server.activateAccount",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let http_uri = format!(
+        "https://{}/xrpc/com.atproto.server.activateAccount",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+    );
     let did = match crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
@@ -129,7 +141,9 @@ pub async fn activate_account(
         "POST",
         &http_uri,
         true,
-    ).await {
+    )
+    .await
+    {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -171,14 +185,16 @@ pub async fn deactivate_account(
     Json(_input): Json<DeactivateAccountInput>,
 ) -> Response {
     let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!("https://{}/xrpc/com.atproto.server.deactivateAccount",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let http_uri = format!(
+        "https://{}/xrpc/com.atproto.server.deactivateAccount",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+    );
     let did = match crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
@@ -187,7 +203,9 @@ pub async fn deactivate_account(
         "POST",
         &http_uri,
         false,
-    ).await {
+    )
+    .await
+    {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -196,9 +214,12 @@ pub async fn deactivate_account(
         .await
         .ok()
         .flatten();
-    let result = sqlx::query!("UPDATE users SET deactivated_at = NOW() WHERE did = $1", did)
-        .execute(&state.db)
-        .await;
+    let result = sqlx::query!(
+        "UPDATE users SET deactivated_at = NOW() WHERE did = $1",
+        did
+    )
+    .execute(&state.db)
+    .await;
     match result {
         Ok(_) => {
             if let Some(h) = handle {
@@ -222,14 +243,16 @@ pub async fn request_account_delete(
     headers: axum::http::HeaderMap,
 ) -> Response {
     let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok())
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!("https://{}/xrpc/com.atproto.server.requestAccountDelete",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()));
+    let http_uri = format!(
+        "https://{}/xrpc/com.atproto.server.requestAccountDelete",
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+    );
     let did = match crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
@@ -238,7 +261,9 @@ pub async fn request_account_delete(
         "POST",
         &http_uri,
         true,
-    ).await {
+    )
+    .await
+    {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -274,8 +299,13 @@ pub async fn request_account_delete(
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) =
-        crate::notifications::enqueue_account_deletion(&state.db, user_id, &confirmation_token, &hostname).await
+    if let Err(e) = crate::notifications::enqueue_account_deletion(
+        &state.db,
+        user_id,
+        &confirmation_token,
+        &hostname,
+    )
+    .await
     {
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }
@@ -395,9 +425,12 @@ pub async fn delete_account(
             .into_response();
     }
     if Utc::now() > expires_at {
-        let _ = sqlx::query!("DELETE FROM account_deletion_requests WHERE token = $1", token)
-            .execute(&state.db)
-            .await;
+        let _ = sqlx::query!(
+            "DELETE FROM account_deletion_requests WHERE token = $1",
+            token
+        )
+        .execute(&state.db)
+        .await;
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),

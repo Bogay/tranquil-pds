@@ -80,7 +80,10 @@ pub async fn create_app_password(
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state.check_rate_limit(RateLimitKind::AppPassword, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::AppPassword, &client_ip)
+        .await
+    {
         warn!(ip = %client_ip, "App password creation rate limit exceeded");
         return (
             axum::http::StatusCode::TOO_MANY_REQUESTS,
@@ -88,7 +91,8 @@ pub async fn create_app_password(
                 "error": "RateLimitExceeded",
                 "message": "Too many requests. Please try again later."
             })),
-        ).into_response();
+        )
+            .into_response();
     }
     let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
         Ok(id) => id,

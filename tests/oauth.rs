@@ -3,11 +3,11 @@ mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use common::{base_url, client, create_account_and_login};
-use reqwest::{redirect, StatusCode};
-use serde_json::{json, Value};
+use reqwest::{StatusCode, redirect};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use wiremock::{Mock, MockServer, ResponseTemplate};
 use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn no_redirect_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -105,7 +105,9 @@ async fn test_oauth_authorization_server_metadata() {
     let code_challenge_methods = body["code_challenge_methods_supported"].as_array().unwrap();
     assert!(code_challenge_methods.contains(&json!("S256")));
     assert_eq!(body["require_pushed_authorization_requests"], json!(true));
-    let dpop_algs = body["dpop_signing_alg_values_supported"].as_array().unwrap();
+    let dpop_algs = body["dpop_signing_alg_values_supported"]
+        .as_array()
+        .unwrap();
     assert!(dpop_algs.contains(&json!("ES256")));
 }
 #[tokio::test]
@@ -143,7 +145,12 @@ async fn test_par_success() {
         .send()
         .await
         .expect("Failed to send PAR request");
-    assert_eq!(res.status(), StatusCode::OK, "PAR should succeed: {:?}", res.text().await);
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "PAR should succeed: {:?}",
+        res.text().await
+    );
     let body: Value = client
         .post(format!("{}/oauth/par", url))
         .form(&[
@@ -211,7 +218,10 @@ async fn test_authorize_rejects_invalid_request_uri() {
     let res = client
         .get(format!("{}/oauth/authorize", url))
         .header("Accept", "application/json")
-        .query(&[("request_uri", "urn:ietf:params:oauth:request_uri:nonexistent")])
+        .query(&[(
+            "request_uri",
+            "urn:ietf:params:oauth:request_uri:nonexistent",
+        )])
         .send()
         .await
         .expect("Request failed");
@@ -273,7 +283,7 @@ async fn test_full_oauth_flow_without_dpop() {
         .expect("PAR failed");
     let par_status = par_res.status();
     let par_text = par_res.text().await.unwrap_or_default();
-    if par_status != StatusCode::OK {
+    if par_status != StatusCode::OK && par_status != StatusCode::CREATED {
         panic!("PAR failed with status {}: {}", par_status, par_text);
     }
     let par_body: Value = serde_json::from_str(&par_text).unwrap();
@@ -296,18 +306,28 @@ async fn test_full_oauth_flow_without_dpop() {
         && auth_status != StatusCode::FOUND
     {
         let auth_text = auth_res.text().await.unwrap_or_default();
-        panic!(
-            "Expected redirect, got {}: {}",
-            auth_status, auth_text
-        );
+        panic!("Expected redirect, got {}: {}", auth_status, auth_text);
     }
-    let location = auth_res.headers().get("location")
+    let location = auth_res
+        .headers()
+        .get("location")
         .expect("No Location header")
         .to_str()
         .unwrap();
-    assert!(location.starts_with(redirect_uri), "Redirect to wrong URI: {}", location);
-    assert!(location.contains("code="), "No code in redirect: {}", location);
-    assert!(location.contains(&format!("state={}", state)), "Wrong state in redirect");
+    assert!(
+        location.starts_with(redirect_uri),
+        "Redirect to wrong URI: {}",
+        location
+    );
+    assert!(
+        location.contains("code="),
+        "No code in redirect: {}",
+        location
+    );
+    assert!(
+        location.contains(&format!("state={}", state)),
+        "Wrong state in redirect"
+    );
     let code = location
         .split("code=")
         .nth(1)
@@ -330,7 +350,10 @@ async fn test_full_oauth_flow_without_dpop() {
     let token_status = token_res.status();
     let token_text = token_res.text().await.unwrap_or_default();
     if token_status != StatusCode::OK {
-        panic!("Token request failed with status {}: {}", token_status, token_text);
+        panic!(
+            "Token request failed with status {}: {}",
+            token_status, token_text
+        );
     }
     let token_body: Value = serde_json::from_str(&token_text).unwrap();
     assert!(token_body["access_token"].is_string());
@@ -389,8 +412,19 @@ async fn test_token_refresh_flow() {
         .send()
         .await
         .unwrap();
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
-    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
     let token_body: Value = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
@@ -424,8 +458,14 @@ async fn test_token_refresh_flow() {
     assert!(refresh_body["refresh_token"].is_string());
     let new_access_token = refresh_body["access_token"].as_str().unwrap();
     let new_refresh_token = refresh_body["refresh_token"].as_str().unwrap();
-    assert_ne!(new_access_token, original_access_token, "Access token should rotate");
-    assert_ne!(new_refresh_token, refresh_token, "Refresh token should rotate");
+    assert_ne!(
+        new_access_token, original_access_token,
+        "Access token should rotate"
+    );
+    assert_ne!(
+        new_refresh_token, refresh_token,
+        "Refresh token should rotate"
+    );
 }
 #[tokio::test]
 async fn test_wrong_credentials_denied() {
@@ -531,8 +571,19 @@ async fn test_token_revocation() {
         .send()
         .await
         .unwrap();
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
-    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
     let token_body: Value = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
@@ -610,7 +661,10 @@ async fn test_expired_authorization_request() {
     let res = http_client
         .get(format!("{}/oauth/authorize", url))
         .header("Accept", "application/json")
-        .query(&[("request_uri", "urn:ietf:params:oauth:request_uri:expired-or-nonexistent")])
+        .query(&[(
+            "request_uri",
+            "urn:ietf:params:oauth:request_uri:expired-or-nonexistent",
+        )])
         .send()
         .await
         .unwrap();
@@ -668,8 +722,19 @@ async fn test_token_introspection() {
         .send()
         .await
         .unwrap();
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
-    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
     let token_body: Value = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
@@ -762,8 +827,19 @@ async fn test_introspect_revoked_token() {
         .send()
         .await
         .unwrap();
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
-    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
     let token_body: Value = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
@@ -853,8 +929,16 @@ async fn test_state_with_special_chars() {
         auth_res.status().is_redirection(),
         "Should redirect even with special chars in state"
     );
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
-    assert!(location.contains("state="), "State should be in redirect URL");
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        location.contains("state="),
+        "State should be in redirect URL"
+    );
     let encoded_state = urlencoding::encode(special_state);
     assert!(
         location.contains(&format!("state={}", encoded_state)),
@@ -931,7 +1015,12 @@ async fn test_2fa_required_when_enabled() {
         "Should redirect to 2FA page, got status: {}",
         auth_res.status()
     );
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(
         location.contains("/oauth/authorize/2fa"),
         "Should redirect to 2FA page, got: {}",
@@ -1007,14 +1096,16 @@ async fn test_2fa_invalid_code_rejected() {
         .await
         .unwrap();
     assert!(auth_res.status().is_redirection());
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(location.contains("/oauth/authorize/2fa"));
     let twofa_res = http_client
         .post(format!("{}/oauth/authorize/2fa", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("code", "000000"),
-        ])
+        .form(&[("request_uri", request_uri), ("code", "000000")])
         .send()
         .await
         .unwrap();
@@ -1090,19 +1181,15 @@ async fn test_2fa_valid_code_completes_auth() {
         .await
         .unwrap();
     assert!(auth_res.status().is_redirection());
-    let twofa_code: String = sqlx::query_scalar(
-        "SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1"
-    )
-    .bind(request_uri)
-    .fetch_one(&pool)
-    .await
-    .expect("Failed to get 2FA code from database");
+    let twofa_code: String =
+        sqlx::query_scalar("SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1")
+            .bind(request_uri)
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to get 2FA code from database");
     let twofa_res = auth_client
         .post(format!("{}/oauth/authorize/2fa", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("code", &twofa_code),
-        ])
+        .form(&[("request_uri", request_uri), ("code", &twofa_code)])
         .send()
         .await
         .unwrap();
@@ -1111,7 +1198,12 @@ async fn test_2fa_valid_code_completes_auth() {
         "Valid 2FA code should redirect to success, got status: {}",
         twofa_res.status()
     );
-    let location = twofa_res.headers().get("location").unwrap().to_str().unwrap();
+    let location = twofa_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(
         location.starts_with(redirect_uri),
         "Should redirect to client callback, got: {}",
@@ -1121,7 +1213,13 @@ async fn test_2fa_valid_code_completes_auth() {
         location.contains("code="),
         "Redirect should include authorization code"
     );
-    let auth_code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let auth_code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
     let token_res = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
@@ -1134,7 +1232,11 @@ async fn test_2fa_valid_code_completes_auth() {
         .send()
         .await
         .unwrap();
-    assert_eq!(token_res.status(), StatusCode::OK, "Token exchange should succeed");
+    assert_eq!(
+        token_res.status(),
+        StatusCode::OK,
+        "Token exchange should succeed"
+    );
     let token_body: Value = token_res.json().await.unwrap();
     assert!(token_body["access_token"].is_string());
     assert_eq!(token_body["sub"], user_did);
@@ -1207,28 +1309,28 @@ async fn test_2fa_lockout_after_max_attempts() {
     for i in 0..5 {
         let res = http_client
             .post(format!("{}/oauth/authorize/2fa", url))
-            .form(&[
-                ("request_uri", request_uri),
-                ("code", "999999"),
-            ])
+            .form(&[("request_uri", request_uri), ("code", "999999")])
             .send()
             .await
             .unwrap();
         if i < 4 {
-            assert_eq!(res.status(), StatusCode::OK, "Attempt {} should show error page", i + 1);
+            assert_eq!(
+                res.status(),
+                StatusCode::OK,
+                "Attempt {} should show error page",
+                i + 1
+            );
             let body = res.text().await.unwrap();
             assert!(
                 body.contains("Invalid verification code"),
-                "Should show invalid code error on attempt {}", i + 1
+                "Should show invalid code error on attempt {}",
+                i + 1
             );
         }
     }
     let lockout_res = http_client
         .post(format!("{}/oauth/authorize/2fa", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("code", "999999"),
-        ])
+        .form(&[("request_uri", request_uri), ("code", "999999")])
         .send()
         .await
         .unwrap();
@@ -1294,14 +1396,26 @@ async fn test_account_selector_with_2fa_requires_verification() {
         .await
         .unwrap();
     assert!(auth_res.status().is_redirection());
-    let device_cookie = auth_res.headers()
+    let device_cookie = auth_res
+        .headers()
         .get("set-cookie")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.split(';').next().unwrap_or("").to_string())
         .expect("Should have received device cookie");
-    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    let location = auth_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(location.contains("code="), "First auth should succeed");
-    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
     let _token_body: Value = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
@@ -1348,10 +1462,7 @@ async fn test_account_selector_with_2fa_requires_verification() {
     let select_res = auth_client
         .post(format!("{}/oauth/authorize/select", url))
         .header("cookie", &device_cookie)
-        .form(&[
-            ("request_uri", request_uri2),
-            ("did", &user_did),
-        ])
+        .form(&[("request_uri", request_uri2), ("did", &user_did)])
         .send()
         .await
         .unwrap();
@@ -1360,37 +1471,49 @@ async fn test_account_selector_with_2fa_requires_verification() {
         "Account selector should redirect, got status: {}",
         select_res.status()
     );
-    let select_location = select_res.headers().get("location").unwrap().to_str().unwrap();
+    let select_location = select_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(
         select_location.contains("/oauth/authorize/2fa"),
         "Account selector with 2FA enabled should redirect to 2FA page, got: {}",
         select_location
     );
-    let twofa_code: String = sqlx::query_scalar(
-        "SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1"
-    )
-    .bind(request_uri2)
-    .fetch_one(&pool)
-    .await
-    .expect("Failed to get 2FA code");
+    let twofa_code: String =
+        sqlx::query_scalar("SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1")
+            .bind(request_uri2)
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to get 2FA code");
     let twofa_res = auth_client
         .post(format!("{}/oauth/authorize/2fa", url))
         .header("cookie", &device_cookie)
-        .form(&[
-            ("request_uri", request_uri2),
-            ("code", &twofa_code),
-        ])
+        .form(&[("request_uri", request_uri2), ("code", &twofa_code)])
         .send()
         .await
         .unwrap();
     assert!(twofa_res.status().is_redirection());
-    let final_location = twofa_res.headers().get("location").unwrap().to_str().unwrap();
+    let final_location = twofa_res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(
         final_location.starts_with(redirect_uri) && final_location.contains("code="),
         "After 2FA, should redirect to client with code, got: {}",
         final_location
     );
-    let final_code = final_location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let final_code = final_location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
     let token_res = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
@@ -1405,5 +1528,8 @@ async fn test_account_selector_with_2fa_requires_verification() {
         .unwrap();
     assert_eq!(token_res.status(), StatusCode::OK);
     let final_token: Value = token_res.json().await.unwrap();
-    assert_eq!(final_token["sub"], user_did, "Token should be for the correct user");
+    assert_eq!(
+        final_token["sub"], user_did,
+        "Token should be for the correct user"
+    );
 }

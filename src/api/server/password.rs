@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use bcrypt::{hash, DEFAULT_COST};
+use bcrypt::{DEFAULT_COST, hash};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use serde_json::json;
@@ -15,18 +15,15 @@ fn generate_reset_code() -> String {
     crate::util::generate_token_code()
 }
 fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for") {
-        if let Ok(value) = forwarded.to_str() {
-            if let Some(first_ip) = value.split(',').next() {
+    if let Some(forwarded) = headers.get("x-forwarded-for")
+        && let Ok(value) = forwarded.to_str()
+            && let Some(first_ip) = value.split(',').next() {
                 return first_ip.trim().to_string();
             }
-        }
-    }
-    if let Some(real_ip) = headers.get("x-real-ip") {
-        if let Ok(value) = real_ip.to_str() {
+    if let Some(real_ip) = headers.get("x-real-ip")
+        && let Ok(value) = real_ip.to_str() {
             return value.trim().to_string();
         }
-    }
     "unknown".to_string()
 }
 
@@ -41,7 +38,10 @@ pub async fn request_password_reset(
     Json(input): Json<RequestPasswordResetInput>,
 ) -> Response {
     let client_ip = extract_client_ip(&headers);
-    if !state.check_rate_limit(RateLimitKind::PasswordReset, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::PasswordReset, &client_ip)
+        .await
+    {
         warn!(ip = %client_ip, "Password reset rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -118,7 +118,10 @@ pub async fn reset_password(
     Json(input): Json<ResetPasswordInput>,
 ) -> Response {
     let client_ip = extract_client_ip(&headers);
-    if !state.check_rate_limit(RateLimitKind::ResetPassword, &client_ip).await {
+    if !state
+        .check_rate_limit(RateLimitKind::ResetPassword, &client_ip)
+        .await
+    {
         warn!(ip = %client_ip, "Reset password rate limit exceeded");
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -126,7 +129,8 @@ pub async fn reset_password(
                 "error": "RateLimitExceeded",
                 "message": "Too many requests. Please try again later."
             })),
-        ).into_response();
+        )
+            .into_response();
     }
     let token = input.token.trim();
     let password = &input.password;
@@ -232,12 +236,9 @@ pub async fn reset_password(
         )
             .into_response();
     }
-    let user_did = match sqlx::query_scalar!(
-        "SELECT did FROM users WHERE id = $1",
-        user_id
-    )
-    .fetch_one(&mut *tx)
-    .await
+    let user_did = match sqlx::query_scalar!("SELECT did FROM users WHERE id = $1", user_id)
+        .fetch_one(&mut *tx)
+        .await
     {
         Ok(did) => did,
         Err(e) => {
@@ -266,7 +267,10 @@ pub async fn reset_password(
         .execute(&mut *tx)
         .await
     {
-        error!("Failed to invalidate sessions after password reset: {:?}", e);
+        error!(
+            "Failed to invalidate sessions after password reset: {:?}",
+            e
+        );
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),
@@ -284,7 +288,10 @@ pub async fn reset_password(
     for jti in session_jtis {
         let cache_key = format!("auth:session:{}:{}", user_did, jti);
         if let Err(e) = state.cache.delete(&cache_key).await {
-            warn!("Failed to invalidate session cache for {}: {:?}", cache_key, e);
+            warn!(
+                "Failed to invalidate session cache for {}: {:?}",
+                cache_key, e
+            );
         }
     }
     info!("Password reset completed for user {}", user_id);

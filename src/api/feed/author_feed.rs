@@ -1,14 +1,14 @@
 use crate::api::read_after_write::{
-    extract_repo_rev, format_local_post, format_munged_response, get_local_lag,
-    get_records_since_rev, insert_posts_into_feed, proxy_to_appview, FeedOutput, FeedViewPost,
-    ProfileRecord, RecordDescript,
+    FeedOutput, FeedViewPost, ProfileRecord, RecordDescript, extract_repo_rev, format_local_post,
+    format_munged_response, get_local_lag, get_records_since_rev, insert_posts_into_feed,
+    proxy_to_appview,
 };
 use crate::state::AppState;
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -30,11 +30,10 @@ fn update_author_profile_in_feed(
     local_profile: &RecordDescript<ProfileRecord>,
 ) {
     for item in feed.iter_mut() {
-        if item.post.author.did == author_did {
-            if let Some(ref display_name) = local_profile.record.display_name {
+        if item.post.author.did == author_did
+            && let Some(ref display_name) = local_profile.record.display_name {
                 item.post.author.display_name = Some(display_name.clone());
             }
-        }
     }
 }
 
@@ -46,7 +45,9 @@ pub async fn get_author_feed(
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let auth_user = if let Some(h) = auth_header {
         if let Some(token) = crate::auth::extract_bearer_token_from_header(Some(h)) {
-            crate::auth::validate_bearer_token(&state.db, &token).await.ok()
+            crate::auth::validate_bearer_token(&state.db, &token)
+                .await
+                .ok()
         } else {
             None
         }
@@ -69,11 +70,17 @@ pub async fn get_author_feed(
     if let Some(include_pins) = params.include_pins {
         query_params.insert("includePins".to_string(), include_pins.to_string());
     }
-    let proxy_result =
-        match proxy_to_appview("app.bsky.feed.getAuthorFeed", &query_params, auth_did.as_deref().unwrap_or(""), auth_key_bytes.as_deref()).await {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
+    let proxy_result = match proxy_to_appview(
+        "app.bsky.feed.getAuthorFeed",
+        &query_params,
+        auth_did.as_deref().unwrap_or(""),
+        auth_key_bytes.as_deref(),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
     if !proxy_result.status.is_success() {
         return proxy_result.into_response();
     }
@@ -144,14 +151,7 @@ pub async fn get_author_feed(
     let local_posts: Vec<_> = local_records
         .posts
         .iter()
-        .map(|p| {
-            format_local_post(
-                p,
-                &requester_did,
-                &handle,
-                local_records.profile.as_ref(),
-            )
-        })
+        .map(|p| format_local_post(p, &requester_did, &handle, local_records.profile.as_ref()))
         .collect();
     insert_posts_into_feed(&mut feed_output.feed, local_posts);
     let lag = get_local_lag(&local_records);

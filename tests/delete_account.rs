@@ -1,7 +1,7 @@
 mod common;
 mod helpers;
-use common::*;
 use chrono::Utc;
+use common::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -15,9 +15,18 @@ async fn get_pool() -> PgPool {
         .expect("Failed to connect to test database")
 }
 
-async fn create_verified_account(client: &reqwest::Client, base_url: &str, handle: &str, email: &str, password: &str) -> (String, String) {
+async fn create_verified_account(
+    client: &reqwest::Client,
+    base_url: &str,
+    handle: &str,
+    email: &str,
+    password: &str,
+) -> (String, String) {
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base_url))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAccount",
+            base_url
+        ))
         .json(&json!({
             "handle": handle,
             "email": email,
@@ -53,10 +62,13 @@ async fn test_delete_account_full_flow() {
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
     let pool = get_pool().await;
-    let row = sqlx::query!("SELECT token FROM account_deletion_requests WHERE did = $1", did)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to query deletion token");
+    let row = sqlx::query!(
+        "SELECT token FROM account_deletion_requests WHERE did = $1",
+        did
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query deletion token");
     let token = row.token;
     let delete_payload = json!({
         "did": did,
@@ -79,10 +91,7 @@ async fn test_delete_account_full_flow() {
         .expect("Failed to query user");
     assert!(user_row.is_none(), "User should be deleted from database");
     let session_res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.server.getSession",
-            base_url
-        ))
+        .get(format!("{}/xrpc/com.atproto.server.getSession", base_url))
         .bearer_auth(&jwt)
         .send()
         .await
@@ -110,10 +119,13 @@ async fn test_delete_account_wrong_password() {
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
     let pool = get_pool().await;
-    let row = sqlx::query!("SELECT token FROM account_deletion_requests WHERE did = $1", did)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to query deletion token");
+    let row = sqlx::query!(
+        "SELECT token FROM account_deletion_requests WHERE did = $1",
+        did
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query deletion token");
     let token = row.token;
     let delete_payload = json!({
         "did": did,
@@ -197,10 +209,13 @@ async fn test_delete_account_expired_token() {
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
     let pool = get_pool().await;
-    let row = sqlx::query!("SELECT token FROM account_deletion_requests WHERE did = $1", did)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to query deletion token");
+    let row = sqlx::query!(
+        "SELECT token FROM account_deletion_requests WHERE did = $1",
+        did
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query deletion token");
     let token = row.token;
     sqlx::query!(
         "UPDATE account_deletion_requests SET expires_at = NOW() - INTERVAL '1 hour' WHERE token = $1",
@@ -236,7 +251,8 @@ async fn test_delete_account_token_mismatch() {
     let handle1 = format!("delete-user1-{}.test", ts);
     let email1 = format!("delete-user1-{}@test.com", ts);
     let password1 = "user1-password";
-    let (did1, jwt1) = create_verified_account(&client, &base_url, &handle1, &email1, password1).await;
+    let (did1, jwt1) =
+        create_verified_account(&client, &base_url, &handle1, &email1, password1).await;
     let handle2 = format!("delete-user2-{}.test", ts);
     let email2 = format!("delete-user2-{}@test.com", ts);
     let password2 = "user2-password";
@@ -252,10 +268,13 @@ async fn test_delete_account_token_mismatch() {
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
     let pool = get_pool().await;
-    let row = sqlx::query!("SELECT token FROM account_deletion_requests WHERE did = $1", did1)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to query deletion token");
+    let row = sqlx::query!(
+        "SELECT token FROM account_deletion_requests WHERE did = $1",
+        did1
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query deletion token");
     let token = row.token;
     let delete_payload = json!({
         "did": did2,
@@ -284,7 +303,8 @@ async fn test_delete_account_with_app_password() {
     let handle = format!("delete-apppw-{}.test", ts);
     let email = format!("delete-apppw-{}@test.com", ts);
     let main_password = "main-password-123";
-    let (did, jwt) = create_verified_account(&client, &base_url, &handle, &email, main_password).await;
+    let (did, jwt) =
+        create_verified_account(&client, &base_url, &handle, &email, main_password).await;
     let app_password_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAppPassword",
@@ -309,10 +329,13 @@ async fn test_delete_account_with_app_password() {
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
     let pool = get_pool().await;
-    let row = sqlx::query!("SELECT token FROM account_deletion_requests WHERE did = $1", did)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to query deletion token");
+    let row = sqlx::query!(
+        "SELECT token FROM account_deletion_requests WHERE did = $1",
+        did
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query deletion token");
     let token = row.token;
     let delete_payload = json!({
         "did": did,

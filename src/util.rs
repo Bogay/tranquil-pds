@@ -58,7 +58,10 @@ pub async fn get_user_by_did(db: &PgPool, did: &str) -> Result<UserInfo, DbLooku
     .ok_or(DbLookupError::NotFound)
 }
 
-pub async fn get_user_by_identifier(db: &PgPool, identifier: &str) -> Result<UserInfo, DbLookupError> {
+pub async fn get_user_by_identifier(
+    db: &PgPool,
+    identifier: &str,
+) -> Result<UserInfo, DbLookupError> {
     sqlx::query_as!(
         UserInfo,
         "SELECT id, did, handle FROM users WHERE did = $1 OR handle = $1",
