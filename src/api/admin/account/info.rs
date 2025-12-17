@@ -2,7 +2,7 @@ use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Query, RawQuery, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -88,17 +88,31 @@ pub async fn get_account_info(
     }
 }
 
-#[derive(Deserialize)]
-pub struct GetAccountInfosParams {
-    pub dids: String,
+fn parse_repeated_param(query: Option<&str>, key: &str) -> Vec<String> {
+    query
+        .map(|q| {
+            q.split('&')
+                .filter_map(|pair| {
+                    let mut parts = pair.splitn(2, '=');
+                    let k = parts.next()?;
+                    let v = parts.next()?;
+                    if k == key {
+                        Some(urlencoding::decode(v).ok()?.into_owned())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub async fn get_account_infos(
     State(state): State<AppState>,
     _auth: BearerAuthAdmin,
-    Query(params): Query<GetAccountInfosParams>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let dids: Vec<&str> = params.dids.split(',').map(|s| s.trim()).collect();
+    let dids = parse_repeated_param(raw_query.as_deref(), "dids");
     if dids.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -107,7 +121,7 @@ pub async fn get_account_infos(
             .into_response();
     }
     let mut infos = Vec::new();
-    for did in dids {
+    for did in &dids {
         if did.is_empty() {
             continue;
         }

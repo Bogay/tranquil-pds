@@ -1,3 +1,4 @@
+use crate::auth::BearerAuth;
 use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
@@ -5,8 +6,9 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use bcrypt::{DEFAULT_COST, hash};
+use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
+use uuid::Uuid;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -295,5 +297,110 @@ pub async fn reset_password(
         }
     }
     info!("Password reset completed for user {}", user_id);
+    (StatusCode::OK, Json(json!({}))).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangePasswordInput {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    auth: BearerAuth,
+    Json(input): Json<ChangePasswordInput>,
+) -> Response {
+    let current_password = &input.current_password;
+    let new_password = &input.new_password;
+    if current_password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "currentPassword is required"})),
+        )
+            .into_response();
+    }
+    if new_password.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "newPassword is required"})),
+        )
+            .into_response();
+    }
+    if new_password.len() < 8 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "Password must be at least 8 characters"})),
+        )
+            .into_response();
+    }
+    let user = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT id, password_hash FROM users WHERE did = $1",
+    )
+    .bind(&auth.0.did)
+    .fetch_optional(&state.db)
+    .await;
+    let (user_id, password_hash) = match user {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in change_password: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+    let valid = match verify(current_password, &password_hash) {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Password verification error: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+    if !valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "InvalidPassword", "message": "Current password is incorrect"})),
+        )
+            .into_response();
+    }
+    let new_hash = match hash(new_password, DEFAULT_COST) {
+        Ok(h) => h,
+        Err(e) => {
+            error!("Failed to hash password: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+    if let Err(e) = sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(&new_hash)
+        .bind(user_id)
+        .execute(&state.db)
+        .await
+    {
+        error!("DB error updating password: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+    info!(did = %auth.0.did, "Password changed successfully");
     (StatusCode::OK, Json(json!({}))).into_response()
 }

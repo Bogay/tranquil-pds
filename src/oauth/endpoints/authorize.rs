@@ -1,6 +1,6 @@
 use crate::notifications::{NotificationChannel, channel_display_name, enqueue_2fa_code};
 use crate::oauth::{
-    Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, db, templates,
+    Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, client::ClientMetadataCache, db, templates,
 };
 use crate::state::{AppState, RateLimitKind};
 use axum::{
@@ -196,10 +196,16 @@ pub async fn authorize_get(
         )
             .into_response();
     }
+    let client_cache = ClientMetadataCache::new(3600);
+    let client_name = client_cache
+        .get(&request_data.parameters.client_id)
+        .await
+        .ok()
+        .and_then(|m| m.client_name);
     if wants_json(&headers) {
         return Json(AuthorizeResponse {
             client_id: request_data.parameters.client_id.clone(),
-            client_name: None,
+            client_name: client_name.clone(),
             scope: request_data.parameters.scope.clone(),
             redirect_uri: request_data.parameters.redirect_uri.clone(),
             state: request_data.parameters.state.clone(),
@@ -223,7 +229,7 @@ pub async fn authorize_get(
                         .collect();
                     return Html(templates::account_selector_page(
                         &request_data.parameters.client_id,
-                        None,
+                        client_name.as_deref(),
                         &request_uri,
                         &device_accounts,
                     ))
@@ -231,7 +237,7 @@ pub async fn authorize_get(
                 }
     Html(templates::login_page(
         &request_data.parameters.client_id,
-        None,
+        client_name.as_deref(),
         request_data.parameters.scope.as_deref(),
         &request_uri,
         None,
@@ -352,6 +358,12 @@ pub async fn authorize_post(
         ))
         .into_response();
     }
+    let client_cache = ClientMetadataCache::new(3600);
+    let client_name = client_cache
+        .get(&request_data.parameters.client_id)
+        .await
+        .ok()
+        .and_then(|m| m.client_name);
     let show_login_error = |error_msg: &str, json: bool| -> Response {
         if json {
             return (
@@ -365,7 +377,7 @@ pub async fn authorize_post(
         }
         Html(templates::login_page(
             &request_data.parameters.client_id,
-            None,
+            client_name.as_deref(),
             request_data.parameters.scope.as_deref(),
             &form.request_uri,
             Some(error_msg),

@@ -47,6 +47,7 @@ export interface Session {
   emailConfirmed?: boolean
   preferredChannel?: string
   preferredChannelVerified?: boolean
+  isAdmin?: boolean
   accessJwt: string
   refreshJwt: string
 }
@@ -267,6 +268,152 @@ export const api = {
       method: 'POST',
       token,
       body: prefs,
+    })
+  },
+
+  async confirmChannelVerification(token: string, channel: string, code: string): Promise<{ success: boolean }> {
+    return xrpc('com.bspds.account.confirmChannelVerification', {
+      method: 'POST',
+      token,
+      body: { channel, code },
+    })
+  },
+
+  async getNotificationHistory(token: string): Promise<{
+    notifications: Array<{
+      createdAt: string
+      channel: string
+      notificationType: string
+      status: string
+      subject: string | null
+      body: string
+    }>
+  }> {
+    return xrpc('com.bspds.account.getNotificationHistory', { token })
+  },
+
+  async getServerStats(token: string): Promise<{
+    userCount: number
+    repoCount: number
+    recordCount: number
+    blobStorageBytes: number
+  }> {
+    return xrpc('com.bspds.admin.getServerStats', { token })
+  },
+
+  async changePassword(token: string, currentPassword: string, newPassword: string): Promise<void> {
+    await xrpc('com.bspds.account.changePassword', {
+      method: 'POST',
+      token,
+      body: { currentPassword, newPassword },
+    })
+  },
+
+  async listSessions(token: string): Promise<{
+    sessions: Array<{
+      id: string
+      createdAt: string
+      expiresAt: string
+      isCurrent: boolean
+    }>
+  }> {
+    return xrpc('com.bspds.account.listSessions', { token })
+  },
+
+  async revokeSession(token: string, sessionId: string): Promise<void> {
+    await xrpc('com.bspds.account.revokeSession', {
+      method: 'POST',
+      token,
+      body: { sessionId },
+    })
+  },
+
+  async searchAccounts(token: string, options?: {
+    handle?: string
+    cursor?: string
+    limit?: number
+  }): Promise<{
+    cursor?: string
+    accounts: Array<{
+      did: string
+      handle: string
+      email?: string
+      indexedAt: string
+      emailConfirmedAt?: string
+      deactivatedAt?: string
+    }>
+  }> {
+    const params: Record<string, string> = {}
+    if (options?.handle) params.handle = options.handle
+    if (options?.cursor) params.cursor = options.cursor
+    if (options?.limit) params.limit = String(options.limit)
+    return xrpc('com.atproto.admin.searchAccounts', { token, params })
+  },
+
+  async getInviteCodes(token: string, options?: {
+    sort?: 'recent' | 'usage'
+    cursor?: string
+    limit?: number
+  }): Promise<{
+    cursor?: string
+    codes: Array<{
+      code: string
+      available: number
+      disabled: boolean
+      forAccount: string
+      createdBy: string
+      createdAt: string
+      uses: Array<{ usedBy: string; usedAt: string }>
+    }>
+  }> {
+    const params: Record<string, string> = {}
+    if (options?.sort) params.sort = options.sort
+    if (options?.cursor) params.cursor = options.cursor
+    if (options?.limit) params.limit = String(options.limit)
+    return xrpc('com.atproto.admin.getInviteCodes', { token, params })
+  },
+
+  async disableInviteCodes(token: string, codes?: string[], accounts?: string[]): Promise<void> {
+    await xrpc('com.atproto.admin.disableInviteCodes', {
+      method: 'POST',
+      token,
+      body: { codes, accounts },
+    })
+  },
+
+  async getAccountInfo(token: string, did: string): Promise<{
+    did: string
+    handle: string
+    email?: string
+    indexedAt: string
+    emailConfirmedAt?: string
+    invitesDisabled?: boolean
+    deactivatedAt?: string
+  }> {
+    return xrpc('com.atproto.admin.getAccountInfo', { token, params: { did } })
+  },
+
+  async disableAccountInvites(token: string, account: string): Promise<void> {
+    await xrpc('com.atproto.admin.disableAccountInvites', {
+      method: 'POST',
+      token,
+      body: { account },
+    })
+  },
+
+  async enableAccountInvites(token: string, account: string): Promise<void> {
+    await xrpc('com.atproto.admin.enableAccountInvites', {
+      method: 'POST',
+      token,
+      body: { account },
+    })
+  },
+
+  async adminDeleteAccount(token: string, did: string): Promise<void> {
+    await xrpc('com.atproto.admin.deleteAccount', {
+      method: 'POST',
+      token,
+      body: { did },
     })
   },
 

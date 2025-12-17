@@ -1,6 +1,6 @@
 use crate::api::read_after_write::{
     FeedOutput, FeedViewPost, LikeRecord, PostView, RecordDescript, extract_repo_rev,
-    format_munged_response, get_local_lag, get_records_since_rev, proxy_to_appview,
+    format_munged_response, get_local_lag, get_records_since_rev, proxy_to_appview_via_registry,
 };
 use crate::state::AppState;
 use axum::{
@@ -87,7 +87,8 @@ pub async fn get_actor_likes(
     if let Some(cursor) = &params.cursor {
         query_params.insert("cursor".to_string(), cursor.clone());
     }
-    let proxy_result = match proxy_to_appview(
+    let proxy_result = match proxy_to_appview_via_registry(
+        &state,
         "app.bsky.feed.getActorLikes",
         &query_params,
         auth_did.as_deref().unwrap_or(""),

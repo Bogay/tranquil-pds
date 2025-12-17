@@ -121,12 +121,15 @@ pub const HEADERS_TO_FORWARD: &[&str] = &[
     "accept-language",
     "atproto-accept-labelers",
     "x-bsky-topics",
+    "content-type",
 ];
 pub const RESPONSE_HEADERS_TO_FORWARD: &[&str] = &[
     "atproto-repo-rev",
     "atproto-content-labelers",
     "retry-after",
     "content-type",
+    "cache-control",
+    "etag",
 ];
 
 pub fn validate_at_uri(uri: &str) -> Result<AtUriParts, &'static str> {

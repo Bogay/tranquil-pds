@@ -1,7 +1,7 @@
 use crate::api::read_after_write::{
     FeedOutput, FeedViewPost, ProfileRecord, RecordDescript, extract_repo_rev, format_local_post,
     format_munged_response, get_local_lag, get_records_since_rev, insert_posts_into_feed,
-    proxy_to_appview,
+    proxy_to_appview_via_registry,
 };
 use crate::state::AppState;
 use axum::{
@@ -70,7 +70,8 @@ pub async fn get_author_feed(
     if let Some(include_pins) = params.include_pins {
         query_params.insert("includePins".to_string(), include_pins.to_string());
     }
-    let proxy_result = match proxy_to_appview(
+    let proxy_result = match proxy_to_appview_via_registry(
+        &state,
         "app.bsky.feed.getAuthorFeed",
         &query_params,
         auth_did.as_deref().unwrap_or(""),

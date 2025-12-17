@@ -1,7 +1,7 @@
 use crate::api::read_after_write::{
     FeedOutput, FeedViewPost, PostView, extract_repo_rev, format_local_post,
     format_munged_response, get_local_lag, get_records_since_rev, insert_posts_into_feed,
-    proxy_to_appview,
+    proxy_to_appview_via_registry,
 };
 use crate::state::AppState;
 use axum::{
@@ -50,17 +50,14 @@ pub async fn get_timeline(
                 .into_response();
         }
     };
-    match std::env::var("APPVIEW_URL") {
-        Ok(url) if !url.starts_with("http://127.0.0.1") => {
-            return get_timeline_with_appview(
-                &state,
-                &params,
-                &auth_user.did,
-                auth_user.key_bytes.as_deref(),
-            )
-            .await;
-        }
-        _ => {}
+    if state.appview_registry.get_appview_for_method("app.bsky.feed.getTimeline").await.is_some() {
+        return get_timeline_with_appview(
+            &state,
+            &params,
+            &auth_user.did,
+            auth_user.key_bytes.as_deref(),
+        )
+        .await;
     }
     get_timeline_local_only(&state, &auth_user.did).await
 }
@@ -81,7 +78,8 @@ async fn get_timeline_with_appview(
     if let Some(cursor) = &params.cursor {
         query_params.insert("cursor".to_string(), cursor.clone());
     }
-    let proxy_result = match proxy_to_appview(
+    let proxy_result = match proxy_to_appview_via_registry(
+        state,
         "app.bsky.feed.getTimeline",
         &query_params,
         auth_did,

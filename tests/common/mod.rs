@@ -137,8 +137,12 @@ async fn setup_with_external_infra() -> String {
     }
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
+    let mock_uri = mock_server.uri();
+    let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
+    let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
+    setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
     unsafe {
-        std::env::set_var("APPVIEW_URL", mock_server.uri());
+        std::env::set_var("APPVIEW_DID_APP_BSKY", &mock_did);
     }
     MOCK_APPVIEW.set(mock_server).ok();
     spawn_app(database_url).await
@@ -186,8 +190,12 @@ async fn setup_with_testcontainers() -> String {
     let _ = s3_client.create_bucket().bucket("test-bucket").send().await;
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
+    let mock_uri = mock_server.uri();
+    let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
+    let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
+    setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
     unsafe {
-        std::env::set_var("APPVIEW_URL", mock_server.uri());
+        std::env::set_var("APPVIEW_DID_APP_BSKY", &mock_did);
     }
     MOCK_APPVIEW.set(mock_server).ok();
     S3_CONTAINER.set(s3_container).ok();
@@ -213,6 +221,21 @@ async fn setup_with_testcontainers() -> String {
     panic!(
         "Testcontainers disabled with external-infra feature. Set DATABASE_URL and S3_ENDPOINT."
     );
+}
+
+async fn setup_mock_did_document(mock_server: &MockServer, did: &str, service_endpoint: &str) {
+    Mock::given(method("GET"))
+        .and(path("/.well-known/did.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": did,
+            "service": [{
+                "id": "#atproto_appview",
+                "type": "AtprotoAppView",
+                "serviceEndpoint": service_endpoint
+            }]
+        })))
+        .mount(mock_server)
+        .await;
 }
 
 async fn setup_mock_appview(mock_server: &MockServer) {

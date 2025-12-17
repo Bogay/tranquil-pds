@@ -127,3 +127,40 @@ pub async fn oauth_jwks(State(_state): State<AppState>) -> Json<JwkSet> {
     };
     Json(create_jwk_set(vec![server_key]))
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FrontendClientMetadata {
+    pub client_id: String,
+    pub client_name: String,
+    pub client_uri: String,
+    pub redirect_uris: Vec<String>,
+    pub grant_types: Vec<String>,
+    pub response_types: Vec<String>,
+    pub scope: String,
+    pub token_endpoint_auth_method: String,
+    pub application_type: String,
+    pub dpop_bound_access_tokens: bool,
+}
+
+pub async fn frontend_client_metadata(
+    State(_state): State<AppState>,
+) -> Json<FrontendClientMetadata> {
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let base_url = format!("https://{}", pds_hostname);
+    let client_id = format!("{}/oauth/client-metadata.json", base_url);
+    Json(FrontendClientMetadata {
+        client_id,
+        client_name: "PDS Account Manager".to_string(),
+        client_uri: base_url.clone(),
+        redirect_uris: vec![format!("{}/", base_url)],
+        grant_types: vec![
+            "authorization_code".to_string(),
+            "refresh_token".to_string(),
+        ],
+        response_types: vec!["code".to_string()],
+        scope: "atproto transition:generic".to_string(),
+        token_endpoint_auth_method: "none".to_string(),
+        application_type: "web".to_string(),
+        dpop_bound_access_tokens: false,
+    })
+}

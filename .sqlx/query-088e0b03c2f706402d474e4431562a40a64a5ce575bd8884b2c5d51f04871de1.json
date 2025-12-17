@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            handle, email, email_confirmed,\n            preferred_notification_channel as \"preferred_channel: crate::notifications::NotificationChannel\",\n            discord_verified, telegram_verified, signal_verified\n        FROM users WHERE did = $1",
+  "query": "SELECT\n            handle, email, email_confirmed, is_admin,\n            preferred_notification_channel as \"preferred_channel: crate::notifications::NotificationChannel\",\n            discord_verified, telegram_verified, signal_verified\n        FROM users WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -20,6 +20,11 @@
       },
       {
         "ordinal": 3,
+        "name": "is_admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
         "name": "preferred_channel: crate::notifications::NotificationChannel",
         "type_info": {
           "Custom": {
@@ -36,17 +41,17 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "discord_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "telegram_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "signal_verified",
         "type_info": "Bool"
       }
@@ -63,8 +68,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "3727afe601beffcb4551c23eb59fa1c25ca59150c90d4866050b3a073bbe7b4b"
+  "hash": "088e0b03c2f706402d474e4431562a40a64a5ce575bd8884b2c5d51f04871de1"
 }

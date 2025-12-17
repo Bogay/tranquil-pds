@@ -1,6 +1,6 @@
 use crate::api::read_after_write::{
     PostRecord, PostView, RecordDescript, extract_repo_rev, format_local_post,
-    format_munged_response, get_local_lag, get_records_since_rev, proxy_to_appview,
+    format_munged_response, get_local_lag, get_records_since_rev, proxy_to_appview_via_registry,
 };
 use crate::state::AppState;
 use axum::{
@@ -153,7 +153,8 @@ pub async fn get_post_thread(
     if let Some(parent_height) = params.parent_height {
         query_params.insert("parentHeight".to_string(), parent_height.to_string());
     }
-    let proxy_result = match proxy_to_appview(
+    let proxy_result = match proxy_to_appview_via_registry(
+        &state,
         "app.bsky.feed.getPostThread",
         &query_params,
         auth_did.as_deref().unwrap_or(""),

@@ -1,17 +1,28 @@
 import { api, type Session, type CreateAccountParams, type CreateAccountResult, ApiError } from './api'
+import { startOAuthLogin, handleOAuthCallback, checkForOAuthCallback, clearOAuthCallbackParams, refreshOAuthToken } from './oauth'
 
 const STORAGE_KEY = 'bspds_session'
+const ACCOUNTS_KEY = 'bspds_accounts'
+
+export interface SavedAccount {
+  did: string
+  handle: string
+  accessJwt: string
+  refreshJwt: string
+}
 
 interface AuthState {
   session: Session | null
   loading: boolean
   error: string | null
+  savedAccounts: SavedAccount[]
 }
 
 let state = $state<AuthState>({
   session: null,
   loading: true,
   error: null,
+  savedAccounts: [],
 })
 
 function saveSession(session: Session | null) {
@@ -34,20 +45,93 @@ function loadSession(): Session | null {
   return null
 }
 
+function loadSavedAccounts(): SavedAccount[] {
+  const stored = localStorage.getItem(ACCOUNTS_KEY)
+  if (stored) {
+    try {
+      return JSON.parse(stored)
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+function saveSavedAccounts(accounts: SavedAccount[]) {
+  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts))
+}
+
+function addOrUpdateSavedAccount(session: Session) {
+  const accounts = loadSavedAccounts()
+  const existing = accounts.findIndex(a => a.did === session.did)
+  const savedAccount: SavedAccount = {
+    did: session.did,
+    handle: session.handle,
+    accessJwt: session.accessJwt,
+    refreshJwt: session.refreshJwt,
+  }
+  if (existing >= 0) {
+    accounts[existing] = savedAccount
+  } else {
+    accounts.push(savedAccount)
+  }
+  saveSavedAccounts(accounts)
+  state.savedAccounts = accounts
+}
+
+function removeSavedAccount(did: string) {
+  const accounts = loadSavedAccounts().filter(a => a.did !== did)
+  saveSavedAccounts(accounts)
+  state.savedAccounts = accounts
+}
+
 export async function initAuth() {
   state.loading = true
   state.error = null
+  state.savedAccounts = loadSavedAccounts()
+
+  const oauthCallback = checkForOAuthCallback()
+  if (oauthCallback) {
+    clearOAuthCallbackParams()
+    try {
+      const tokens = await handleOAuthCallback(oauthCallback.code, oauthCallback.state)
+      const sessionInfo = await api.getSession(tokens.access_token)
+      const session: Session = {
+        ...sessionInfo,
+        accessJwt: tokens.access_token,
+        refreshJwt: tokens.refresh_token || '',
+      }
+      state.session = session
+      saveSession(session)
+      addOrUpdateSavedAccount(session)
+      state.loading = false
+      return
+    } catch (e) {
+      state.error = e instanceof Error ? e.message : 'OAuth login failed'
+      state.loading = false
+      return
+    }
+  }
+
   const stored = loadSession()
   if (stored) {
     try {
       const session = await api.getSession(stored.accessJwt)
       state.session = { ...session, accessJwt: stored.accessJwt, refreshJwt: stored.refreshJwt }
+      addOrUpdateSavedAccount(state.session)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         try {
-          const refreshed = await api.refreshSession(stored.refreshJwt)
-          state.session = refreshed
-          saveSession(refreshed)
+          const tokens = await refreshOAuthToken(stored.refreshJwt)
+          const sessionInfo = await api.getSession(tokens.access_token)
+          const session: Session = {
+            ...sessionInfo,
+            accessJwt: tokens.access_token,
+            refreshJwt: tokens.refresh_token || stored.refreshJwt,
+          }
+          state.session = session
+          saveSession(session)
+          addOrUpdateSavedAccount(session)
         } catch {
           saveSession(null)
           state.session = null
@@ -68,6 +152,7 @@ export async function login(identifier: string, password: string): Promise<void>
     const session = await api.createSession(identifier, password)
     state.session = session
     saveSession(session)
+    addOrUpdateSavedAccount(session)
   } catch (e) {
     if (e instanceof ApiError) {
       state.error = e.message
@@ -77,6 +162,18 @@ export async function login(identifier: string, password: string): Promise<void>
     throw e
   } finally {
     state.loading = false
+  }
+}
+
+export async function loginWithOAuth(): Promise<void> {
+  state.loading = true
+  state.error = null
+  try {
+    await startOAuthLogin()
+  } catch (e) {
+    state.loading = false
+    state.error = e instanceof Error ? e.message : 'Failed to start OAuth login'
+    throw e
   }
 }
 
@@ -111,6 +208,7 @@ export async function confirmSignup(did: string, verificationCode: string): Prom
     }
     state.session = session
     saveSession(session)
+    addOrUpdateSavedAccount(session)
   } catch (e) {
     if (e instanceof ApiError) {
       state.error = e.message
@@ -146,6 +244,49 @@ export async function logout(): Promise<void> {
   saveSession(null)
 }
 
+export async function switchAccount(did: string): Promise<void> {
+  const account = state.savedAccounts.find(a => a.did === did)
+  if (!account) {
+    throw new Error('Account not found')
+  }
+  state.loading = true
+  state.error = null
+  try {
+    const session = await api.getSession(account.accessJwt)
+    state.session = { ...session, accessJwt: account.accessJwt, refreshJwt: account.refreshJwt }
+    saveSession(state.session)
+    addOrUpdateSavedAccount(state.session)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      try {
+        const tokens = await refreshOAuthToken(account.refreshJwt)
+        const sessionInfo = await api.getSession(tokens.access_token)
+        const session: Session = {
+          ...sessionInfo,
+          accessJwt: tokens.access_token,
+          refreshJwt: tokens.refresh_token || account.refreshJwt,
+        }
+        state.session = session
+        saveSession(session)
+        addOrUpdateSavedAccount(session)
+      } catch {
+        removeSavedAccount(did)
+        state.error = 'Session expired. Please log in again.'
+        throw new Error('Session expired')
+      }
+    } else {
+      state.error = 'Failed to switch account'
+      throw e
+    }
+  } finally {
+    state.loading = false
+  }
+}
+
+export function forgetAccount(did: string): void {
+  removeSavedAccount(did)
+}
+
 export function getAuthState() {
   return state
 }
@@ -158,15 +299,18 @@ export function isAuthenticated(): boolean {
   return state.session !== null
 }
 
-export function _testSetState(newState: { session: Session | null; loading: boolean; error: string | null }) {
+export function _testSetState(newState: { session: Session | null; loading: boolean; error: string | null; savedAccounts?: SavedAccount[] }) {
   state.session = newState.session
   state.loading = newState.loading
   state.error = newState.error
+  state.savedAccounts = newState.savedAccounts ?? []
 }
 
 export function _testReset() {
   state.session = null
   state.loading = true
   state.error = null
+  state.savedAccounts = []
   localStorage.removeItem(STORAGE_KEY)
+  localStorage.removeItem(ACCOUNTS_KEY)
 }

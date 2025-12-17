@@ -2,7 +2,7 @@ use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Query, RawQuery, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -15,11 +15,6 @@ use tracing::{error, info};
 #[derive(Deserialize)]
 pub struct GetProfileParams {
     pub actor: String,
-}
-
-#[derive(Deserialize)]
-pub struct GetProfilesParams {
-    pub actors: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -71,14 +66,15 @@ fn munge_profile_with_local(profile: &mut ProfileViewDetailed, local_record: &Va
 }
 
 async fn proxy_to_appview(
+    state: &AppState,
     method: &str,
     params: &HashMap<String, String>,
     auth_did: &str,
     auth_key_bytes: Option<&[u8]>,
 ) -> Result<(StatusCode, Value), Response> {
-    let appview_url = match std::env::var("APPVIEW_URL") {
-        Ok(url) => url,
-        Err(_) => {
+    let resolved = match state.appview_registry.get_appview_for_method(method).await {
+        Some(r) => r,
+        None => {
             return Err((
                 StatusCode::BAD_GATEWAY,
                 Json(
@@ -88,14 +84,51 @@ async fn proxy_to_appview(
                 .into_response());
         }
     };
-    let target_url = format!("{}/xrpc/{}", appview_url, method);
+    let target_url = format!("{}/xrpc/{}", resolved.url, method);
     info!("Proxying GET request to {}", target_url);
     let client = proxy_client();
-    let mut request_builder = client.get(&target_url).query(params);
+    let request_builder = client.get(&target_url).query(params);
+    proxy_request(request_builder, auth_did, auth_key_bytes, method, &resolved.did).await
+}
+
+async fn proxy_to_appview_raw(
+    state: &AppState,
+    method: &str,
+    raw_query: Option<&str>,
+    auth_did: &str,
+    auth_key_bytes: Option<&[u8]>,
+) -> Result<(StatusCode, Value), Response> {
+    let resolved = match state.appview_registry.get_appview_for_method(method).await {
+        Some(r) => r,
+        None => {
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(
+                    json!({"error": "UpstreamError", "message": "No upstream AppView configured"}),
+                ),
+            )
+                .into_response());
+        }
+    };
+    let target_url = match raw_query {
+        Some(q) => format!("{}/xrpc/{}?{}", resolved.url, method, q),
+        None => format!("{}/xrpc/{}", resolved.url, method),
+    };
+    info!("Proxying GET request to {}", target_url);
+    let client = proxy_client();
+    let request_builder = client.get(&target_url);
+    proxy_request(request_builder, auth_did, auth_key_bytes, method, &resolved.did).await
+}
+
+async fn proxy_request(
+    mut request_builder: reqwest::RequestBuilder,
+    auth_did: &str,
+    auth_key_bytes: Option<&[u8]>,
+    method: &str,
+    appview_did: &str,
+) -> Result<(StatusCode, Value), Response> {
     if let Some(key_bytes) = auth_key_bytes {
-        let appview_did =
-            std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
-        match crate::auth::create_service_token(auth_did, &appview_did, method, key_bytes) {
+        match crate::auth::create_service_token(auth_did, appview_did, method, key_bytes) {
             Ok(service_token) => {
                 request_builder =
                     request_builder.header("Authorization", format!("Bearer {}", service_token));
@@ -167,6 +200,7 @@ pub async fn get_profile(
     let mut query_params = HashMap::new();
     query_params.insert("actor".to_string(), params.actor.clone());
     let (status, body) = match proxy_to_appview(
+        &state,
         "app.bsky.actor.getProfile",
         &query_params,
         auth_did.as_deref().unwrap_or(""),
@@ -201,7 +235,7 @@ pub async fn get_profile(
 pub async fn get_profiles(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    Query(params): Query<GetProfilesParams>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     let auth_user = if let Some(h) = auth_header {
@@ -217,11 +251,10 @@ pub async fn get_profiles(
     };
     let auth_did = auth_user.as_ref().map(|u| u.did.clone());
     let auth_key_bytes = auth_user.as_ref().and_then(|u| u.key_bytes.clone());
-    let mut query_params = HashMap::new();
-    query_params.insert("actors".to_string(), params.actors.clone());
-    let (status, body) = match proxy_to_appview(
+    let (status, body) = match proxy_to_appview_raw(
+        &state,
         "app.bsky.actor.getProfiles",
-        &query_params,
+        raw_query.as_deref(),
         auth_did.as_deref().unwrap_or(""),
         auth_key_bytes.as_deref(),
     )

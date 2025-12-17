@@ -1,41 +1,36 @@
 <script lang="ts">
-  import { login, confirmSignup, resendVerification, getAuthState } from '../lib/auth.svelte'
+  import { loginWithOAuth, confirmSignup, resendVerification, getAuthState, switchAccount, forgetAccount } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
-  import { ApiError } from '../lib/api'
-  let identifier = $state('')
-  let password = $state('')
   let submitting = $state(false)
-  let error = $state<string | null>(null)
   let pendingVerification = $state<{ did: string } | null>(null)
   let verificationCode = $state('')
   let resendingCode = $state(false)
   let resendMessage = $state<string | null>(null)
+  let showNewLogin = $state(false)
   const auth = getAuthState()
   $effect(() => {
     if (auth.session) {
       navigate('/dashboard')
     }
   })
-  async function handleSubmit(e: Event) {
-    e.preventDefault()
-    if (!identifier || !password) return
+  async function handleSwitchAccount(did: string) {
     submitting = true
-    error = null
-    pendingVerification = null
     try {
-      await login(identifier, password)
+      await switchAccount(did)
       navigate('/dashboard')
-    } catch (e: any) {
-      if (e instanceof ApiError && e.error === 'AccountNotVerified') {
-        if (e.did) {
-          pendingVerification = { did: e.did }
-        } else {
-          error = 'Account not verified. Please check your verification method for a code.'
-        }
-      } else {
-        error = e.message || 'Login failed'
-      }
-    } finally {
+    } catch {
+      submitting = false
+    }
+  }
+  function handleForgetAccount(did: string, e: Event) {
+    e.stopPropagation()
+    forgetAccount(did)
+  }
+  async function handleOAuthLogin() {
+    submitting = true
+    try {
+      await loginWithOAuth()
+    } catch {
       submitting = false
     }
   }
@@ -43,13 +38,10 @@
     e.preventDefault()
     if (!pendingVerification || !verificationCode.trim()) return
     submitting = true
-    error = null
     try {
       await confirmSignup(pendingVerification.did, verificationCode.trim())
       navigate('/dashboard')
-    } catch (e: any) {
-      error = e.message || 'Verification failed'
-    } finally {
+    } catch {
       submitting = false
     }
   }
@@ -57,12 +49,11 @@
     if (!pendingVerification || resendingCode) return
     resendingCode = true
     resendMessage = null
-    error = null
     try {
       await resendVerification(pendingVerification.did)
       resendMessage = 'Verification code resent!'
-    } catch (e: any) {
-      error = e.message || 'Failed to resend code'
+    } catch {
+      resendMessage = null
     } finally {
       resendingCode = false
     }
@@ -70,13 +61,12 @@
   function backToLogin() {
     pendingVerification = null
     verificationCode = ''
-    error = null
     resendMessage = null
   }
 </script>
 <div class="login-container">
-  {#if error}
-    <div class="error">{error}</div>
+  {#if auth.error}
+    <div class="error">{auth.error}</div>
   {/if}
   {#if pendingVerification}
     <h1>Verify Your Account</h1>
@@ -111,36 +101,54 @@
         Back to Login
       </button>
     </form>
+  {:else if auth.savedAccounts.length > 0 && !showNewLogin}
+    <h1>Sign In</h1>
+    <p class="subtitle">Choose an account</p>
+    <div class="saved-accounts">
+      {#each auth.savedAccounts as account}
+        <div
+          class="account-item"
+          class:disabled={submitting}
+          role="button"
+          tabindex="0"
+          onclick={() => !submitting && handleSwitchAccount(account.did)}
+          onkeydown={(e) => e.key === 'Enter' && !submitting && handleSwitchAccount(account.did)}
+        >
+          <div class="account-info">
+            <span class="account-handle">@{account.handle}</span>
+            <span class="account-did">{account.did}</span>
+          </div>
+          <button
+            type="button"
+            class="forget-btn"
+            onclick={(e) => handleForgetAccount(account.did, e)}
+            title="Remove from saved accounts"
+          >
+            ×
+          </button>
+        </div>
+      {/each}
+    </div>
+    <button type="button" class="secondary add-account" onclick={() => showNewLogin = true}>
+      Sign in to another account
+    </button>
+    <p class="register-link">
+      Don't have an account? <a href="#/register">Create one</a>
+    </p>
   {:else}
     <h1>Sign In</h1>
     <p class="subtitle">Sign in to manage your PDS account</p>
-    <form onsubmit={(e) => { e.preventDefault(); handleSubmit(e); }}>
-      <div class="field">
-        <label for="identifier">Handle or Email</label>
-        <input
-          id="identifier"
-          type="text"
-          bind:value={identifier}
-          placeholder="you.bsky.social or you@example.com"
-          disabled={submitting}
-          required
-        />
-      </div>
-      <div class="field">
-        <label for="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          bind:value={password}
-          placeholder="Password"
-          disabled={submitting}
-          required
-        />
-      </div>
-      <button type="submit" disabled={submitting || !identifier || !password}>
-        {submitting ? 'Signing in...' : 'Sign In'}
+    {#if auth.savedAccounts.length > 0}
+      <button type="button" class="tertiary back-btn" onclick={() => showNewLogin = false}>
+        ← Back to saved accounts
       </button>
-    </form>
+    {/if}
+    <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || auth.loading}>
+      {submitting ? 'Redirecting...' : 'Sign In'}
+    </button>
+    <p class="forgot-link">
+      <a href="#/reset-password">Forgot password?</a>
+    </p>
     <p class="register-link">
       Don't have an account? <a href="#/register">Create one</a>
     </p>
@@ -219,6 +227,12 @@
   button.tertiary:hover:not(:disabled) {
     color: var(--text-primary);
   }
+  .oauth-btn {
+    width: 100%;
+    padding: 1rem;
+    font-size: 1.125rem;
+    font-weight: 500;
+  }
   .error {
     padding: 0.75rem;
     background: var(--error-bg);
@@ -233,12 +247,88 @@
     border-radius: 4px;
     color: var(--success-text);
   }
+  .forgot-link {
+    text-align: center;
+    margin-top: 1rem;
+    margin-bottom: 0;
+    color: var(--text-secondary);
+  }
+  .forgot-link a {
+    color: var(--accent);
+  }
   .register-link {
     text-align: center;
-    margin-top: 1.5rem;
+    margin-top: 0.5rem;
     color: var(--text-secondary);
   }
   .register-link a {
     color: var(--accent);
+  }
+  .saved-accounts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .account-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .account-item:hover:not(.disabled) {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(77, 166, 255, 0.15);
+  }
+  .account-item.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .account-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .account-handle {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .account-did {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
+  }
+  .forget-btn {
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+    border-radius: 4px;
+    margin: 0;
+  }
+  .forget-btn:hover {
+    background: var(--error-bg);
+    color: var(--error-text);
+  }
+  .add-account {
+    width: 100%;
+    margin-bottom: 1rem;
+  }
+  .back-btn {
+    margin-bottom: 1rem;
+    padding: 0;
   }
 </style>

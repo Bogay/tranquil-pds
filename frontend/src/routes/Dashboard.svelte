@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { getAuthState, logout } from '../lib/auth.svelte'
+  import { getAuthState, logout, switchAccount } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   const auth = getAuthState()
+  let dropdownOpen = $state(false)
+  let switching = $state(false)
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -11,18 +13,87 @@
     await logout()
     navigate('/login')
   }
+  async function handleSwitchAccount(did: string) {
+    switching = true
+    dropdownOpen = false
+    try {
+      await switchAccount(did)
+    } catch {
+      navigate('/login')
+    } finally {
+      switching = false
+    }
+  }
+  function toggleDropdown() {
+    dropdownOpen = !dropdownOpen
+  }
+  function closeDropdown(e: MouseEvent) {
+    const target = e.target as HTMLElement
+    if (!target.closest('.account-dropdown')) {
+      dropdownOpen = false
+    }
+  }
+  $effect(() => {
+    if (dropdownOpen) {
+      document.addEventListener('click', closeDropdown)
+      return () => document.removeEventListener('click', closeDropdown)
+    }
+  })
+  let otherAccounts = $derived(
+    auth.savedAccounts.filter(a => a.did !== auth.session?.did)
+  )
 </script>
 {#if auth.session}
   <div class="dashboard">
     <header>
       <h1>Dashboard</h1>
-      <button class="logout" onclick={handleLogout}>Sign Out</button>
+      <div class="account-dropdown">
+        <button class="account-trigger" onclick={toggleDropdown} disabled={switching}>
+          <span class="account-handle">@{auth.session.handle}</span>
+          <span class="dropdown-arrow">{dropdownOpen ? '▲' : '▼'}</span>
+        </button>
+        {#if dropdownOpen}
+          <div class="dropdown-menu">
+            {#if otherAccounts.length > 0}
+              <div class="dropdown-section">
+                <span class="dropdown-label">Switch Account</span>
+                {#each otherAccounts as account}
+                  <button
+                    type="button"
+                    class="dropdown-item"
+                    onclick={() => handleSwitchAccount(account.did)}
+                  >
+                    @{account.handle}
+                  </button>
+                {/each}
+              </div>
+              <div class="dropdown-divider"></div>
+            {/if}
+            <button
+              type="button"
+              class="dropdown-item"
+              onclick={() => { dropdownOpen = false; navigate('/login') }}
+            >
+              Add another account
+            </button>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item logout-item" onclick={handleLogout}>
+              Sign out @{auth.session.handle}
+            </button>
+          </div>
+        {/if}
+      </div>
     </header>
     <section class="account-overview">
       <h2>Account Overview</h2>
       <dl>
         <dt>Handle</dt>
-        <dd>@{auth.session.handle}</dd>
+        <dd>
+          @{auth.session.handle}
+          {#if auth.session.isAdmin}
+            <span class="badge admin">Admin</span>
+          {/if}
+        </dd>
         <dt>DID</dt>
         <dd class="mono">{auth.session.did}</dd>
         {#if auth.session.preferredChannel}
@@ -63,6 +134,10 @@
         <h3>App Passwords</h3>
         <p>Manage passwords for third-party apps</p>
       </a>
+      <a href="#/sessions" class="nav-card">
+        <h3>Active Sessions</h3>
+        <p>View and manage your login sessions</p>
+      </a>
       <a href="#/invite-codes" class="nav-card">
         <h3>Invite Codes</h3>
         <p>View and create invite codes</p>
@@ -79,6 +154,12 @@
         <h3>Repository Explorer</h3>
         <p>Browse and manage raw AT Protocol records</p>
       </a>
+      {#if auth.session.isAdmin}
+        <a href="#/admin" class="nav-card admin-card">
+          <h3>Admin Panel</h3>
+          <p>Server stats and admin operations</p>
+        </a>
+      {/if}
     </nav>
   </div>
 {:else if auth.loading}
@@ -99,7 +180,13 @@
   header h1 {
     margin: 0;
   }
-  .logout {
+  .account-dropdown {
+    position: relative;
+  }
+  .account-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.5rem 1rem;
     background: transparent;
     border: 1px solid var(--border-color-light);
@@ -107,8 +194,65 @@
     cursor: pointer;
     color: var(--text-primary);
   }
-  .logout:hover {
+  .account-trigger:hover:not(:disabled) {
     background: var(--bg-secondary);
+  }
+  .account-trigger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .account-trigger .account-handle {
+    font-weight: 500;
+  }
+  .dropdown-arrow {
+    font-size: 0.625rem;
+    color: var(--text-secondary);
+  }
+  .dropdown-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.25rem;
+    min-width: 200px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+    overflow: hidden;
+  }
+  .dropdown-section {
+    padding: 0.5rem 0;
+  }
+  .dropdown-label {
+    display: block;
+    padding: 0.25rem 1rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+  }
+  .dropdown-item:hover {
+    background: var(--bg-secondary);
+  }
+  .dropdown-item.logout-item {
+    color: var(--error-text);
+  }
+  .dropdown-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 0;
   }
   section {
     background: var(--bg-secondary);
@@ -153,6 +297,10 @@
     background: var(--warning-bg);
     color: var(--warning-text);
   }
+  .badge.admin {
+    background: var(--accent);
+    color: white;
+  }
   .nav-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -180,6 +328,13 @@
     margin: 0;
     color: var(--text-secondary);
     font-size: 0.875rem;
+  }
+  .nav-card.admin-card {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(77, 166, 255, 0.05) 100%);
+  }
+  .nav-card.admin-card:hover {
+    box-shadow: 0 2px 12px rgba(77, 166, 255, 0.25);
   }
   .loading {
     text-align: center;

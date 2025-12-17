@@ -1,3 +1,4 @@
+use crate::appview::AppViewRegistry;
 use crate::cache::{Cache, DistributedRateLimiter, create_cache};
 use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
@@ -19,6 +20,7 @@ pub struct AppState {
     pub circuit_breakers: Arc<CircuitBreakers>,
     pub cache: Arc<dyn Cache>,
     pub distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
+    pub appview_registry: Arc<AppViewRegistry>,
 }
 
 pub enum RateLimitKind {
@@ -85,6 +87,7 @@ impl AppState {
         let rate_limiters = Arc::new(RateLimiters::new());
         let circuit_breakers = Arc::new(CircuitBreakers::new());
         let (cache, distributed_rate_limiter) = create_cache().await;
+        let appview_registry = Arc::new(AppViewRegistry::new());
 
         Self {
             db,
@@ -95,6 +98,7 @@ impl AppState {
             circuit_breakers,
             cache,
             distributed_rate_limiter,
+            appview_registry,
         }
     }
 

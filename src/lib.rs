@@ -1,4 +1,5 @@
 pub mod api;
+pub mod appview;
 pub mod auth;
 pub mod cache;
 pub mod circuit_breaker;
@@ -48,6 +49,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.server.getSession",
             get(api::server::get_session),
+        )
+        .route(
+            "/xrpc/com.bspds.account.listSessions",
+            get(api::server::list_sessions),
+        )
+        .route(
+            "/xrpc/com.bspds.account.revokeSession",
+            post(api::server::revoke_session),
         )
         .route(
             "/xrpc/com.atproto.server.deleteSession",
@@ -161,12 +170,8 @@ pub fn app(state: AppState) -> Router {
             get(api::admin::get_account_infos),
         )
         .route(
-            "/xrpc/com.bspds.admin.createProfile",
-            post(api::admin::create_profile),
-        )
-        .route(
-            "/xrpc/com.bspds.admin.createRecord",
-            post(api::admin::create_record_admin),
+            "/xrpc/com.atproto.admin.searchAccounts",
+            get(api::admin::search_accounts),
         )
         .route(
             "/xrpc/com.atproto.server.activateAccount",
@@ -191,6 +196,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.server.resetPassword",
             post(api::server::reset_password),
+        )
+        .route(
+            "/xrpc/com.bspds.account.changePassword",
+            post(api::server::change_password),
         )
         .route(
             "/xrpc/com.atproto.server.requestEmailUpdate",
@@ -352,6 +361,10 @@ pub fn app(state: AppState) -> Router {
             get(oauth::endpoints::oauth_authorization_server),
         )
         .route("/oauth/jwks", get(oauth::endpoints::oauth_jwks))
+        .route(
+            "/oauth/client-metadata.json",
+            get(oauth::endpoints::frontend_client_metadata),
+        )
         .route(
             "/oauth/par",
             post(oauth::endpoints::pushed_authorization_request),

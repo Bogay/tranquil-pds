@@ -14,6 +14,11 @@
   let deletePassword = $state('')
   let deleteToken = $state('')
   let deleteTokenSent = $state(false)
+  let exportLoading = $state(false)
+  let passwordLoading = $state(false)
+  let currentPassword = $state('')
+  let newPassword = $state('')
+  let confirmNewPassword = $state('')
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -110,6 +115,61 @@
       deleteLoading = false
     }
   }
+  async function handleExportRepo() {
+    if (!auth.session) return
+    exportLoading = true
+    message = null
+    try {
+      const response = await fetch(`/xrpc/com.atproto.sync.getRepo?did=${encodeURIComponent(auth.session.did)}`, {
+        headers: {
+          'Authorization': `Bearer ${auth.session.accessJwt}`
+        }
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ message: 'Export failed' }))
+        throw new Error(err.message || 'Export failed')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${auth.session.handle}-repo.car`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      showMessage('success', 'Repository exported successfully')
+    } catch (e) {
+      showMessage('error', e instanceof Error ? e.message : 'Failed to export repository')
+    } finally {
+      exportLoading = false
+    }
+  }
+  async function handleChangePassword(e: Event) {
+    e.preventDefault()
+    if (!auth.session || !currentPassword || !newPassword || !confirmNewPassword) return
+    if (newPassword !== confirmNewPassword) {
+      showMessage('error', 'Passwords do not match')
+      return
+    }
+    if (newPassword.length < 8) {
+      showMessage('error', 'Password must be at least 8 characters')
+      return
+    }
+    passwordLoading = true
+    message = null
+    try {
+      await api.changePassword(auth.session.accessJwt, currentPassword, newPassword)
+      showMessage('success', 'Password changed successfully')
+      currentPassword = ''
+      newPassword = ''
+      confirmNewPassword = ''
+    } catch (e) {
+      showMessage('error', e instanceof ApiError ? e.message : 'Failed to change password')
+    } finally {
+      passwordLoading = false
+    }
+  }
 </script>
 <div class="page">
   <header>
@@ -186,6 +246,55 @@
         {handleLoading ? 'Updating...' : 'Change Handle'}
       </button>
     </form>
+  </section>
+  <section>
+    <h2>Change Password</h2>
+    <form onsubmit={handleChangePassword}>
+      <div class="field">
+        <label for="current-password">Current Password</label>
+        <input
+          id="current-password"
+          type="password"
+          bind:value={currentPassword}
+          placeholder="Enter current password"
+          disabled={passwordLoading}
+          required
+        />
+      </div>
+      <div class="field">
+        <label for="new-password">New Password</label>
+        <input
+          id="new-password"
+          type="password"
+          bind:value={newPassword}
+          placeholder="At least 8 characters"
+          disabled={passwordLoading}
+          required
+          minlength="8"
+        />
+      </div>
+      <div class="field">
+        <label for="confirm-new-password">Confirm New Password</label>
+        <input
+          id="confirm-new-password"
+          type="password"
+          bind:value={confirmNewPassword}
+          placeholder="Confirm new password"
+          disabled={passwordLoading}
+          required
+        />
+      </div>
+      <button type="submit" disabled={passwordLoading || !currentPassword || !newPassword || !confirmNewPassword}>
+        {passwordLoading ? 'Changing...' : 'Change Password'}
+      </button>
+    </form>
+  </section>
+  <section>
+    <h2>Export Data</h2>
+    <p class="description">Download your entire repository as a CAR (Content Addressable Archive) file. This includes all your posts, likes, follows, and other data.</p>
+    <button onclick={handleExportRepo} disabled={exportLoading}>
+      {exportLoading ? 'Exporting...' : 'Download Repository'}
+    </button>
   </section>
   <section class="danger-zone">
     <h2>Delete Account</h2>
@@ -275,7 +384,7 @@
     margin: 0 0 0.5rem 0;
     font-size: 1.125rem;
   }
-  .current {
+  .current, .description {
     color: var(--text-secondary);
     font-size: 0.875rem;
     margin-bottom: 1rem;

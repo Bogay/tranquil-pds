@@ -3,12 +3,15 @@
   import { initAuth, getAuthState } from './lib/auth.svelte'
   import Login from './routes/Login.svelte'
   import Register from './routes/Register.svelte'
+  import ResetPassword from './routes/ResetPassword.svelte'
   import Dashboard from './routes/Dashboard.svelte'
   import AppPasswords from './routes/AppPasswords.svelte'
   import InviteCodes from './routes/InviteCodes.svelte'
   import Settings from './routes/Settings.svelte'
+  import Sessions from './routes/Sessions.svelte'
   import Notifications from './routes/Notifications.svelte'
   import RepoExplorer from './routes/RepoExplorer.svelte'
+  import Admin from './routes/Admin.svelte'
 
   const auth = getAuthState()
 
@@ -22,6 +25,8 @@
         return Login
       case '/register':
         return Register
+      case '/reset-password':
+        return ResetPassword
       case '/dashboard':
         return Dashboard
       case '/app-passwords':
@@ -30,10 +35,14 @@
         return InviteCodes
       case '/settings':
         return Settings
+      case '/sessions':
+        return Sessions
       case '/notifications':
         return Notifications
       case '/repo':
         return RepoExplorer
+      case '/admin':
+        return Admin
       default:
         return auth.session ? Dashboard : Login
     }

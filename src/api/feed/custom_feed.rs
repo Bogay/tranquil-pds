@@ -37,14 +37,14 @@ pub async fn get_feed(
     if let Err(e) = validate_at_uri(&params.feed) {
         return ApiError::InvalidRequest(format!("Invalid feed URI: {}", e)).into_response();
     }
-    let appview_url = match std::env::var("APPVIEW_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            return ApiError::UpstreamUnavailable("No upstream AppView configured".to_string())
+    let resolved = match state.appview_registry.get_appview_for_method("app.bsky.feed.getFeed").await {
+        Some(r) => r,
+        None => {
+            return ApiError::UpstreamUnavailable("No upstream AppView configured for app.bsky.feed.getFeed".to_string())
                 .into_response();
         }
     };
-    if let Err(e) = is_ssrf_safe(&appview_url) {
+    if let Err(e) = is_ssrf_safe(&resolved.url) {
         error!("SSRF check failed for appview URL: {}", e);
         return ApiError::UpstreamUnavailable(format!("Invalid upstream URL: {}", e))
             .into_response();
@@ -56,16 +56,14 @@ pub async fn get_feed(
     if let Some(cursor) = &params.cursor {
         query_params.insert("cursor".to_string(), cursor.clone());
     }
-    let target_url = format!("{}/xrpc/app.bsky.feed.getFeed", appview_url);
+    let target_url = format!("{}/xrpc/app.bsky.feed.getFeed", resolved.url);
     info!(target = %target_url, feed = %params.feed, "Proxying getFeed request");
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(&query_params);
     if let Some(key_bytes) = auth_user.key_bytes.as_ref() {
-        let appview_did =
-            std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
         match crate::auth::create_service_token(
             &auth_user.did,
-            &appview_did,
+            &resolved.did,
             "app.bsky.feed.getFeed",
             key_bytes,
         ) {

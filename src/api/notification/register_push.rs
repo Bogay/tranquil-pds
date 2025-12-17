@@ -53,14 +53,14 @@ pub async fn register_push(
     if input.app_id.is_empty() || input.app_id.len() > 256 {
         return ApiError::InvalidRequest("Invalid appId".to_string()).into_response();
     }
-    let appview_url = match std::env::var("APPVIEW_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            return ApiError::UpstreamUnavailable("No upstream AppView configured".to_string())
+    let resolved = match state.appview_registry.get_appview_for_method("app.bsky.notification.registerPush").await {
+        Some(r) => r,
+        None => {
+            return ApiError::UpstreamUnavailable("No upstream AppView configured for app.bsky.notification.registerPush".to_string())
                 .into_response();
         }
     };
-    if let Err(e) = is_ssrf_safe(&appview_url) {
+    if let Err(e) = is_ssrf_safe(&resolved.url) {
         error!("SSRF check failed for appview URL: {}", e);
         return ApiError::UpstreamUnavailable(format!("Invalid upstream URL: {}", e))
             .into_response();
@@ -102,7 +102,7 @@ pub async fn register_push(
             return ApiError::InternalError.into_response();
         }
     };
-    let target_url = format!("{}/xrpc/app.bsky.notification.registerPush", appview_url);
+    let target_url = format!("{}/xrpc/app.bsky.notification.registerPush", resolved.url);
     info!(
         target = %target_url,
         service_did = %input.service_did,

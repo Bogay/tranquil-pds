@@ -15,6 +15,21 @@
   let telegramVerified = $state(false)
   let signalNumber = $state('')
   let signalVerified = $state(false)
+  let verifyingChannel = $state<string | null>(null)
+  let verificationCode = $state('')
+  let verificationError = $state<string | null>(null)
+  let verificationSuccess = $state<string | null>(null)
+  let historyLoading = $state(false)
+  let historyError = $state<string | null>(null)
+  let notifications = $state<Array<{
+    createdAt: string
+    channel: string
+    notificationType: string
+    status: string
+    subject: string | null
+    body: string
+  }>>([])
+  let showHistory = $state(false)
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -66,6 +81,37 @@
       saving = false
     }
   }
+  async function handleVerify(channel: string) {
+    if (!auth.session || !verificationCode) return
+    verificationError = null
+    verificationSuccess = null
+    try {
+      await api.confirmChannelVerification(auth.session.accessJwt, channel, verificationCode)
+      verificationSuccess = `${channel} verified successfully`
+      verificationCode = ''
+      verifyingChannel = null
+      await loadPrefs()
+    } catch (e) {
+      verificationError = e instanceof ApiError ? e.message : 'Failed to verify channel'
+    }
+  }
+  async function loadHistory() {
+    if (!auth.session) return
+    historyLoading = true
+    historyError = null
+    try {
+      const result = await api.getNotificationHistory(auth.session.accessJwt)
+      notifications = result.notifications
+      showHistory = true
+    } catch (e) {
+      historyError = e instanceof ApiError ? e.message : 'Failed to load notification history'
+    } finally {
+      historyLoading = false
+    }
+  }
+  function formatDate(dateStr: string): string {
+    return new Date(dateStr).toLocaleString()
+  }
   const channels = [
     { id: 'email', name: 'Email', description: 'Receive notifications via email' },
     { id: 'discord', name: 'Discord', description: 'Receive notifications via Discord DM' },
@@ -77,6 +123,12 @@
     if (channelId === 'discord') return !!discordId
     if (channelId === 'telegram') return !!telegramUsername
     if (channelId === 'signal') return !!signalNumber
+    return false
+  }
+  function needsVerification(channelId: string): boolean {
+    if (channelId === 'discord') return !!discordId && !discordVerified
+    if (channelId === 'telegram') return !!telegramUsername && !telegramVerified
+    if (channelId === 'signal') return !!signalNumber && !signalVerified
     return false
   }
 </script>
@@ -157,10 +209,23 @@
                   <span class="status verified">Verified</span>
                 {:else}
                   <span class="status unverified">Not verified</span>
+                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'discord'}>Verify</button>
                 {/if}
               {/if}
             </div>
             <p class="config-hint">Your Discord user ID (not username). Enable Developer Mode in Discord to copy it.</p>
+            {#if verifyingChannel === 'discord'}
+              <div class="verify-form">
+                <input
+                  type="text"
+                  bind:value={verificationCode}
+                  placeholder="Enter verification code"
+                  maxlength="6"
+                />
+                <button type="button" onclick={() => handleVerify('discord')}>Submit</button>
+                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>Cancel</button>
+              </div>
+            {/if}
           </div>
           <div class="config-item">
             <label for="telegram">Telegram Username</label>
@@ -177,10 +242,23 @@
                   <span class="status verified">Verified</span>
                 {:else}
                   <span class="status unverified">Not verified</span>
+                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'telegram'}>Verify</button>
                 {/if}
               {/if}
             </div>
             <p class="config-hint">Your Telegram username without the @ symbol</p>
+            {#if verifyingChannel === 'telegram'}
+              <div class="verify-form">
+                <input
+                  type="text"
+                  bind:value={verificationCode}
+                  placeholder="Enter verification code"
+                  maxlength="6"
+                />
+                <button type="button" onclick={() => handleVerify('telegram')}>Submit</button>
+                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>Cancel</button>
+              </div>
+            {/if}
           </div>
           <div class="config-item">
             <label for="signal">Signal Phone Number</label>
@@ -197,12 +275,31 @@
                   <span class="status verified">Verified</span>
                 {:else}
                   <span class="status unverified">Not verified</span>
+                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>Verify</button>
                 {/if}
               {/if}
             </div>
             <p class="config-hint">Your Signal phone number with country code</p>
+            {#if verifyingChannel === 'signal'}
+              <div class="verify-form">
+                <input
+                  type="text"
+                  bind:value={verificationCode}
+                  placeholder="Enter verification code"
+                  maxlength="6"
+                />
+                <button type="button" onclick={() => handleVerify('signal')}>Submit</button>
+                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>Cancel</button>
+              </div>
+            {/if}
           </div>
         </div>
+        {#if verificationError}
+          <div class="message error" style="margin-top: 1rem">{verificationError}</div>
+        {/if}
+        {#if verificationSuccess}
+          <div class="message success" style="margin-top: 1rem">{verificationSuccess}</div>
+        {/if}
       </section>
       <div class="actions">
         <button type="submit" disabled={saving}>
@@ -210,6 +307,39 @@
         </button>
       </div>
     </form>
+    <section class="history-section">
+      <h2>Notification History</h2>
+      <p class="section-description">View recent notifications sent to your account.</p>
+      {#if !showHistory}
+        <button class="load-history" onclick={loadHistory} disabled={historyLoading}>
+          {historyLoading ? 'Loading...' : 'Load History'}
+        </button>
+      {:else}
+        <button class="load-history" onclick={() => showHistory = false}>Hide History</button>
+        {#if historyError}
+          <div class="message error">{historyError}</div>
+        {:else if notifications.length === 0}
+          <p class="no-notifications">No notifications found.</p>
+        {:else}
+          <div class="notification-list">
+            {#each notifications as notification}
+              <div class="notification-item">
+                <div class="notification-header">
+                  <span class="notification-type">{notification.notificationType}</span>
+                  <span class="notification-channel">{notification.channel}</span>
+                  <span class="notification-status" class:sent={notification.status === 'sent'} class:failed={notification.status === 'failed'}>{notification.status}</span>
+                </div>
+                {#if notification.subject}
+                  <div class="notification-subject">{notification.subject}</div>
+                {/if}
+                <div class="notification-body">{notification.body}</div>
+                <div class="notification-date">{formatDate(notification.createdAt)}</div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+    </section>
   {/if}
 </div>
 <style>
@@ -388,5 +518,144 @@
   .actions button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+  .verify-btn {
+    padding: 0.25rem 0.5rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .verify-btn:hover {
+    background: var(--accent-hover);
+  }
+  .verify-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    align-items: center;
+  }
+  .verify-form input {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color-light);
+    border-radius: 4px;
+    font-size: 0.875rem;
+    width: 150px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+  }
+  .verify-form button {
+    padding: 0.5rem 0.75rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    cursor: pointer;
+  }
+  .verify-form button:hover {
+    background: var(--accent-hover);
+  }
+  .verify-form button.cancel {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+  }
+  .verify-form button.cancel:hover {
+    background: var(--bg-secondary);
+  }
+  .history-section {
+    background: var(--bg-secondary);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-top: 1.5rem;
+  }
+  .history-section h2 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.125rem;
+  }
+  .load-history {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-primary);
+    margin-top: 0.5rem;
+  }
+  .load-history:hover:not(:disabled) {
+    background: var(--bg-card);
+    border-color: var(--accent);
+  }
+  .load-history:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .no-notifications {
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-top: 1rem;
+  }
+  .notification-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+  .notification-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.75rem;
+  }
+  .notification-header {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .notification-type {
+    font-weight: 500;
+    font-size: 0.875rem;
+  }
+  .notification-channel {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.375rem;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    color: var(--text-secondary);
+  }
+  .notification-status {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    margin-left: auto;
+  }
+  .notification-status.sent {
+    background: var(--success-bg);
+    color: var(--success-text);
+  }
+  .notification-status.failed {
+    background: var(--error-bg);
+    color: var(--error-text);
+  }
+  .notification-subject {
+    font-weight: 500;
+    font-size: 0.875rem;
+    margin-bottom: 0.25rem;
+  }
+  .notification-body {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .notification-date {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
   }
 </style>

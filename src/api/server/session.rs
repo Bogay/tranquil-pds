@@ -185,7 +185,7 @@ pub async fn get_session(
 ) -> Response {
     match sqlx::query!(
         r#"SELECT
-            handle, email, email_confirmed,
+            handle, email, email_confirmed, is_admin,
             preferred_notification_channel as "preferred_channel: crate::notifications::NotificationChannel",
             discord_verified, telegram_verified, signal_verified
         FROM users WHERE did = $1"#,
@@ -210,6 +210,7 @@ pub async fn get_session(
                 "emailConfirmed": row.email_confirmed,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
+                "isAdmin": row.is_admin,
                 "active": true,
                 "didDoc": {}
             })).into_response()
@@ -406,7 +407,7 @@ pub async fn refresh_session(
     }
     match sqlx::query!(
         r#"SELECT
-            handle, email, email_confirmed,
+            handle, email, email_confirmed, is_admin,
             preferred_notification_channel as "preferred_channel: crate::notifications::NotificationChannel",
             discord_verified, telegram_verified, signal_verified
         FROM users WHERE did = $1"#,
@@ -433,6 +434,7 @@ pub async fn refresh_session(
                 "emailConfirmed": u.email_confirmed,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
+                "isAdmin": u.is_admin,
                 "active": true
             })).into_response()
         }
@@ -701,4 +703,130 @@ pub async fn resend_verification(
         warn!("Failed to enqueue verification notification: {:?}", e);
     }
     Json(json!({"success": true})).into_response()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    pub id: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub is_current: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSessionsOutput {
+    pub sessions: Vec<SessionInfo>,
+}
+
+pub async fn list_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    auth: BearerAuth,
+) -> Response {
+    let current_jti = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(|token| crate::auth::get_jti_from_token(token).ok());
+    let result = sqlx::query_as::<_, (i32, String, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>(
+        r#"
+        SELECT id, access_jti, created_at, refresh_expires_at
+        FROM session_tokens
+        WHERE did = $1 AND refresh_expires_at > NOW()
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(&auth.0.did)
+    .fetch_all(&state.db)
+    .await;
+    match result {
+        Ok(rows) => {
+            let sessions: Vec<SessionInfo> = rows
+                .into_iter()
+                .map(|(id, access_jti, created_at, expires_at)| SessionInfo {
+                    id: id.to_string(),
+                    created_at: created_at.to_rfc3339(),
+                    expires_at: expires_at.to_rfc3339(),
+                    is_current: current_jti.as_ref().map_or(false, |j| j == &access_jti),
+                })
+                .collect();
+            (StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response()
+        }
+        Err(e) => {
+            error!("DB error in list_sessions: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeSessionInput {
+    pub session_id: String,
+}
+
+pub async fn revoke_session(
+    State(state): State<AppState>,
+    auth: BearerAuth,
+    Json(input): Json<RevokeSessionInput>,
+) -> Response {
+    let session_id: i32 = match input.session_id.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidRequest", "message": "Invalid session ID"})),
+            )
+                .into_response();
+        }
+    };
+    let session = sqlx::query_as::<_, (String,)>(
+        "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
+    )
+    .bind(session_id)
+    .bind(&auth.0.did)
+    .fetch_optional(&state.db)
+    .await;
+    let access_jti = match session {
+        Ok(Some((jti,))) => jti,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "SessionNotFound", "message": "Session not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error in revoke_session: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+    if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE id = $1")
+        .bind(session_id)
+        .execute(&state.db)
+        .await
+    {
+        error!("DB error deleting session: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+    let cache_key = format!("auth:session:{}:{}", auth.0.did, access_jti);
+    if let Err(e) = state.cache.delete(&cache_key).await {
+        warn!("Failed to invalidate session cache: {:?}", e);
+    }
+    info!(did = %auth.0.did, session_id = %session_id, "Session revoked");
+    (StatusCode::OK, Json(json!({}))).into_response()
 }

@@ -1,0 +1,744 @@
+<script lang="ts">
+  import { getAuthState } from '../lib/auth.svelte'
+  import { navigate } from '../lib/router.svelte'
+  import { api, ApiError } from '../lib/api'
+  const auth = getAuthState()
+  let loading = $state(true)
+  let error = $state<string | null>(null)
+  let stats = $state<{
+    userCount: number
+    repoCount: number
+    recordCount: number
+    blobStorageBytes: number
+  } | null>(null)
+  let usersLoading = $state(false)
+  let usersError = $state<string | null>(null)
+  let users = $state<Array<{
+    did: string
+    handle: string
+    email?: string
+    indexedAt: string
+    emailConfirmedAt?: string
+    deactivatedAt?: string
+  }>>([])
+  let usersCursor = $state<string | undefined>(undefined)
+  let handleSearchQuery = $state('')
+  let showUsers = $state(false)
+  let invitesLoading = $state(false)
+  let invitesError = $state<string | null>(null)
+  let invites = $state<Array<{
+    code: string
+    available: number
+    disabled: boolean
+    forAccount: string
+    createdBy: string
+    createdAt: string
+    uses: Array<{ usedBy: string; usedAt: string }>
+  }>>([])
+  let invitesCursor = $state<string | undefined>(undefined)
+  let showInvites = $state(false)
+  let selectedUser = $state<{
+    did: string
+    handle: string
+    email?: string
+    indexedAt: string
+    emailConfirmedAt?: string
+    invitesDisabled?: boolean
+    deactivatedAt?: string
+  } | null>(null)
+  let userDetailLoading = $state(false)
+  let userActionLoading = $state(false)
+  $effect(() => {
+    if (!auth.loading && !auth.session) {
+      navigate('/login')
+    } else if (!auth.loading && auth.session && !auth.session.isAdmin) {
+      navigate('/dashboard')
+    }
+  })
+  $effect(() => {
+    if (auth.session?.isAdmin) {
+      loadStats()
+    }
+  })
+  async function loadStats() {
+    if (!auth.session) return
+    loading = true
+    error = null
+    try {
+      stats = await api.getServerStats(auth.session.accessJwt)
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : 'Failed to load server stats'
+    } finally {
+      loading = false
+    }
+  }
+  async function loadUsers(reset = false) {
+    if (!auth.session) return
+    usersLoading = true
+    usersError = null
+    if (reset) {
+      users = []
+      usersCursor = undefined
+    }
+    try {
+      const result = await api.searchAccounts(auth.session.accessJwt, {
+        handle: handleSearchQuery || undefined,
+        cursor: reset ? undefined : usersCursor,
+        limit: 25,
+      })
+      users = reset ? result.accounts : [...users, ...result.accounts]
+      usersCursor = result.cursor
+      showUsers = true
+    } catch (e) {
+      usersError = e instanceof ApiError ? e.message : 'Failed to load users'
+    } finally {
+      usersLoading = false
+    }
+  }
+  function handleSearch(e: Event) {
+    e.preventDefault()
+    loadUsers(true)
+  }
+  async function loadInvites(reset = false) {
+    if (!auth.session) return
+    invitesLoading = true
+    invitesError = null
+    if (reset) {
+      invites = []
+      invitesCursor = undefined
+    }
+    try {
+      const result = await api.getInviteCodes(auth.session.accessJwt, {
+        cursor: reset ? undefined : invitesCursor,
+        limit: 25,
+      })
+      invites = reset ? result.codes : [...invites, ...result.codes]
+      invitesCursor = result.cursor
+      showInvites = true
+    } catch (e) {
+      invitesError = e instanceof ApiError ? e.message : 'Failed to load invites'
+    } finally {
+      invitesLoading = false
+    }
+  }
+  async function disableInvite(code: string) {
+    if (!auth.session) return
+    if (!confirm(`Disable invite code ${code}?`)) return
+    try {
+      await api.disableInviteCodes(auth.session.accessJwt, [code])
+      invites = invites.map(inv => inv.code === code ? { ...inv, disabled: true } : inv)
+    } catch (e) {
+      invitesError = e instanceof ApiError ? e.message : 'Failed to disable invite'
+    }
+  }
+  async function selectUser(did: string) {
+    if (!auth.session) return
+    userDetailLoading = true
+    try {
+      selectedUser = await api.getAccountInfo(auth.session.accessJwt, did)
+    } catch (e) {
+      usersError = e instanceof ApiError ? e.message : 'Failed to load user details'
+    } finally {
+      userDetailLoading = false
+    }
+  }
+  function closeUserDetail() {
+    selectedUser = null
+  }
+  async function toggleUserInvites() {
+    if (!auth.session || !selectedUser) return
+    userActionLoading = true
+    try {
+      if (selectedUser.invitesDisabled) {
+        await api.enableAccountInvites(auth.session.accessJwt, selectedUser.did)
+        selectedUser = { ...selectedUser, invitesDisabled: false }
+      } else {
+        await api.disableAccountInvites(auth.session.accessJwt, selectedUser.did)
+        selectedUser = { ...selectedUser, invitesDisabled: true }
+      }
+    } catch (e) {
+      usersError = e instanceof ApiError ? e.message : 'Failed to update user'
+    } finally {
+      userActionLoading = false
+    }
+  }
+  async function deleteUser() {
+    if (!auth.session || !selectedUser) return
+    if (!confirm(`Delete account @${selectedUser.handle}? This cannot be undone.`)) return
+    userActionLoading = true
+    try {
+      await api.adminDeleteAccount(auth.session.accessJwt, selectedUser.did)
+      users = users.filter(u => u.did !== selectedUser!.did)
+      selectedUser = null
+    } catch (e) {
+      usersError = e instanceof ApiError ? e.message : 'Failed to delete user'
+    } finally {
+      userActionLoading = false
+    }
+  }
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
+  }
+  function formatNumber(num: number): string {
+    return num.toLocaleString()
+  }
+</script>
+{#if auth.session?.isAdmin}
+  <div class="page">
+    <header>
+      <a href="#/dashboard" class="back">&larr; Dashboard</a>
+      <h1>Admin Panel</h1>
+    </header>
+    {#if loading}
+      <p class="loading">Loading...</p>
+    {:else}
+      {#if error}
+        <div class="message error">{error}</div>
+      {/if}
+      {#if stats}
+        <section>
+          <h2>Server Statistics</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-value">{formatNumber(stats.userCount)}</div>
+              <div class="stat-label">Users</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">{formatNumber(stats.repoCount)}</div>
+              <div class="stat-label">Repositories</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">{formatNumber(stats.recordCount)}</div>
+              <div class="stat-label">Records</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">{formatBytes(stats.blobStorageBytes)}</div>
+              <div class="stat-label">Blob Storage</div>
+            </div>
+          </div>
+          <button class="refresh-btn" onclick={loadStats}>Refresh Stats</button>
+        </section>
+      {/if}
+      <section>
+        <h2>User Management</h2>
+        <form class="search-form" onsubmit={handleSearch}>
+          <input
+            type="text"
+            bind:value={handleSearchQuery}
+            placeholder="Search by handle (optional)"
+            disabled={usersLoading}
+          />
+          <button type="submit" disabled={usersLoading}>
+            {usersLoading ? 'Loading...' : 'Search Users'}
+          </button>
+        </form>
+        {#if usersError}
+          <div class="message error">{usersError}</div>
+        {/if}
+        {#if showUsers}
+          <div class="user-list">
+            {#if users.length === 0}
+              <p class="no-results">No users found</p>
+            {:else}
+              <table>
+                <thead>
+                  <tr>
+                    <th>Handle</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each users as user}
+                    <tr class="clickable" onclick={() => selectUser(user.did)}>
+                      <td class="handle">@{user.handle}</td>
+                      <td class="email">{user.email || '-'}</td>
+                      <td>
+                        {#if user.deactivatedAt}
+                          <span class="badge deactivated">Deactivated</span>
+                        {:else if user.emailConfirmedAt}
+                          <span class="badge verified">Verified</span>
+                        {:else}
+                          <span class="badge unverified">Unverified</span>
+                        {/if}
+                      </td>
+                      <td class="date">{new Date(user.indexedAt).toLocaleDateString()}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+              {#if usersCursor}
+                <button class="load-more" onclick={() => loadUsers(false)} disabled={usersLoading}>
+                  {usersLoading ? 'Loading...' : 'Load More'}
+                </button>
+              {/if}
+            {/if}
+          </div>
+        {/if}
+      </section>
+      <section>
+        <h2>Invite Codes</h2>
+        <div class="section-actions">
+          <button onclick={() => loadInvites(true)} disabled={invitesLoading}>
+            {invitesLoading ? 'Loading...' : showInvites ? 'Refresh' : 'Load Invite Codes'}
+          </button>
+        </div>
+        {#if invitesError}
+          <div class="message error">{invitesError}</div>
+        {/if}
+        {#if showInvites}
+          <div class="invite-list">
+            {#if invites.length === 0}
+              <p class="no-results">No invite codes found</p>
+            {:else}
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Available</th>
+                    <th>Uses</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each invites as invite}
+                    <tr class:disabled-row={invite.disabled}>
+                      <td class="code">{invite.code}</td>
+                      <td>{invite.available}</td>
+                      <td>{invite.uses.length}</td>
+                      <td>
+                        {#if invite.disabled}
+                          <span class="badge deactivated">Disabled</span>
+                        {:else if invite.available === 0}
+                          <span class="badge unverified">Exhausted</span>
+                        {:else}
+                          <span class="badge verified">Active</span>
+                        {/if}
+                      </td>
+                      <td class="date">{new Date(invite.createdAt).toLocaleDateString()}</td>
+                      <td>
+                        {#if !invite.disabled}
+                          <button class="action-btn danger" onclick={() => disableInvite(invite.code)}>
+                            Disable
+                          </button>
+                        {:else}
+                          <span class="muted">-</span>
+                        {/if}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+              {#if invitesCursor}
+                <button class="load-more" onclick={() => loadInvites(false)} disabled={invitesLoading}>
+                  {invitesLoading ? 'Loading...' : 'Load More'}
+                </button>
+              {/if}
+            {/if}
+          </div>
+        {/if}
+      </section>
+    {/if}
+  </div>
+  {#if selectedUser}
+    <div class="modal-overlay" onclick={closeUserDetail} role="presentation">
+      <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h2>User Details</h2>
+          <button class="close-btn" onclick={closeUserDetail}>&times;</button>
+        </div>
+        {#if userDetailLoading}
+          <p class="loading">Loading...</p>
+        {:else}
+          <div class="modal-body">
+            <dl class="user-details">
+              <dt>Handle</dt>
+              <dd>@{selectedUser.handle}</dd>
+              <dt>DID</dt>
+              <dd class="mono">{selectedUser.did}</dd>
+              <dt>Email</dt>
+              <dd>{selectedUser.email || '-'}</dd>
+              <dt>Status</dt>
+              <dd>
+                {#if selectedUser.deactivatedAt}
+                  <span class="badge deactivated">Deactivated</span>
+                {:else if selectedUser.emailConfirmedAt}
+                  <span class="badge verified">Verified</span>
+                {:else}
+                  <span class="badge unverified">Unverified</span>
+                {/if}
+              </dd>
+              <dt>Created</dt>
+              <dd>{new Date(selectedUser.indexedAt).toLocaleString()}</dd>
+              <dt>Invites</dt>
+              <dd>
+                {#if selectedUser.invitesDisabled}
+                  <span class="badge deactivated">Disabled</span>
+                {:else}
+                  <span class="badge verified">Enabled</span>
+                {/if}
+              </dd>
+            </dl>
+            <div class="modal-actions">
+              <button
+                class="action-btn"
+                onclick={toggleUserInvites}
+                disabled={userActionLoading}
+              >
+                {selectedUser.invitesDisabled ? 'Enable Invites' : 'Disable Invites'}
+              </button>
+              <button
+                class="action-btn danger"
+                onclick={deleteUser}
+                disabled={userActionLoading}
+              >
+                Delete Account
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
+{:else if auth.loading}
+  <div class="loading">Loading...</div>
+{/if}
+<style>
+  .page {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+  header {
+    margin-bottom: 2rem;
+  }
+  .back {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+  }
+  .back:hover {
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0.5rem 0 0 0;
+  }
+  .loading {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 2rem;
+  }
+  .message {
+    padding: 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+  }
+  .message.error {
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    color: var(--error-text);
+  }
+  section {
+    background: var(--bg-secondary);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+  }
+  section h2 {
+    margin: 0 0 1rem 0;
+    font-size: 1.25rem;
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .stat-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+  }
+  .refresh-btn {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-primary);
+  }
+  .refresh-btn:hover {
+    background: var(--bg-card);
+    border-color: var(--accent);
+  }
+  .search-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .search-form input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.875rem;
+    background: var(--bg-input);
+    color: var(--text-primary);
+  }
+  .search-form input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .search-form button {
+    padding: 0.5rem 1rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+  .search-form button:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+  .search-form button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .user-list {
+    margin-top: 1rem;
+  }
+  .no-results {
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 1rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  th, td {
+    padding: 0.75rem 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+  }
+  th {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .handle {
+    font-weight: 500;
+  }
+  .email {
+    color: var(--text-secondary);
+  }
+  .date {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+  }
+  .badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+  }
+  .badge.verified {
+    background: var(--success-bg);
+    color: var(--success-text);
+  }
+  .badge.unverified {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+  }
+  .badge.deactivated {
+    background: var(--error-bg);
+    color: var(--error-text);
+  }
+  .load-more {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    margin-top: 1rem;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+  }
+  .load-more:hover:not(:disabled) {
+    background: var(--bg-card);
+    border-color: var(--accent);
+  }
+  .load-more:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .section-actions {
+    margin-bottom: 1rem;
+  }
+  .section-actions button {
+    padding: 0.5rem 1rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+  .section-actions button:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+  .section-actions button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .invite-list {
+    margin-top: 1rem;
+  }
+  .code {
+    font-family: monospace;
+    font-size: 0.75rem;
+  }
+  .disabled-row {
+    opacity: 0.5;
+  }
+  .action-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .action-btn.danger {
+    background: var(--error-text);
+    color: white;
+  }
+  .action-btn.danger:hover {
+    background: #900;
+  }
+  .muted {
+    color: var(--text-muted);
+  }
+  .clickable {
+    cursor: pointer;
+  }
+  .clickable:hover {
+    background: var(--bg-card);
+  }
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .modal {
+    background: var(--bg-card);
+    border-radius: 8px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+  }
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 0;
+    line-height: 1;
+  }
+  .close-btn:hover {
+    color: var(--text-primary);
+  }
+  .modal-body {
+    padding: 1.5rem;
+  }
+  .user-details {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.5rem 1rem;
+    margin: 0 0 1.5rem 0;
+  }
+  .user-details dt {
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .user-details dd {
+    margin: 0;
+  }
+  .mono {
+    font-family: monospace;
+    font-size: 0.75rem;
+    word-break: break-all;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .modal-actions .action-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+  }
+  .modal-actions .action-btn:hover:not(:disabled) {
+    background: var(--bg-secondary);
+  }
+  .modal-actions .action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .modal-actions .action-btn.danger {
+    border-color: var(--error-text);
+    color: var(--error-text);
+  }
+  .modal-actions .action-btn.danger:hover:not(:disabled) {
+    background: var(--error-bg);
+  }
+</style>

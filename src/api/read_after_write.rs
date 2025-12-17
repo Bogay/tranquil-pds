@@ -238,16 +238,28 @@ impl ProxyResponse {
     }
 }
 
-pub async fn proxy_to_appview(
+pub async fn proxy_to_appview_via_registry(
+    state: &AppState,
     method: &str,
     params: &HashMap<String, String>,
     auth_did: &str,
     auth_key_bytes: Option<&[u8]>,
 ) -> Result<ProxyResponse, Response> {
-    let appview_url = std::env::var("APPVIEW_URL").map_err(|_| {
-        ApiError::UpstreamUnavailable("No upstream AppView configured".to_string()).into_response()
+    let resolved = state.appview_registry.get_appview_for_method(method).await.ok_or_else(|| {
+        ApiError::UpstreamUnavailable(format!("No AppView configured for method: {}", method)).into_response()
     })?;
-    if let Err(e) = is_ssrf_safe(&appview_url) {
+    proxy_to_appview_with_url(method, params, auth_did, auth_key_bytes, &resolved.url, &resolved.did).await
+}
+
+pub async fn proxy_to_appview_with_url(
+    method: &str,
+    params: &HashMap<String, String>,
+    auth_did: &str,
+    auth_key_bytes: Option<&[u8]>,
+    appview_url: &str,
+    appview_did: &str,
+) -> Result<ProxyResponse, Response> {
+    if let Err(e) = is_ssrf_safe(appview_url) {
         error!("SSRF check failed for appview URL: {}", e);
         return Err(
             ApiError::UpstreamUnavailable(format!("Invalid upstream URL: {}", e)).into_response(),
@@ -258,9 +270,7 @@ pub async fn proxy_to_appview(
     let client = proxy_client();
     let mut request_builder = client.get(&target_url).query(params);
     if let Some(key_bytes) = auth_key_bytes {
-        let appview_did =
-            std::env::var("APPVIEW_DID").unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
-        match crate::auth::create_service_token(auth_did, &appview_did, method, key_bytes) {
+        match crate::auth::create_service_token(auth_did, appview_did, method, key_bytes) {
             Ok(service_token) => {
                 request_builder =
                     request_builder.header("Authorization", format!("Bearer {}", service_token));
