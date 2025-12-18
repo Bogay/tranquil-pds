@@ -176,7 +176,7 @@ describe('Settings', () => {
     it('displays current handle', async () => {
       render(Settings)
       await waitFor(() => {
-        expect(screen.getByText(/current: @testuser\.test\.bspds\.dev/i)).toBeInTheDocument()
+        expect(screen.getByText(/current: @testuser\.test\.tranquil\.dev/i)).toBeInTheDocument()
       })
     })
     it('calls updateHandle with new handle', async () => {
@@ -314,7 +314,7 @@ describe('Settings', () => {
       await waitFor(() => {
         expect(capturedBody?.token).toBe('DEL123')
         expect(capturedBody?.password).toBe('mypassword')
-        expect(capturedBody?.did).toBe('did:web:test.bspds.dev:u:testuser')
+        expect(capturedBody?.did).toBe('did:web:test.tranquil.dev:u:testuser')
       })
     })
     it('navigates to login after successful deletion', async () => {

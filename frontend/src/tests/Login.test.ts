@@ -95,7 +95,7 @@ describe('Login', () => {
         json: async () => ({
           error: 'AccountNotVerified',
           message: 'Account not verified',
-          did: 'did:web:test.bspds.dev:u:testuser',
+          did: 'did:web:test.tranquil.dev:u:testuser',
         }),
       }))
       render(Login)
@@ -116,7 +116,7 @@ describe('Login', () => {
         json: async () => ({
           error: 'AccountNotVerified',
           message: 'Account not verified',
-          did: 'did:web:test.bspds.dev:u:testuser',
+          did: 'did:web:test.tranquil.dev:u:testuser',
         }),
       }))
       render(Login)

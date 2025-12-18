@@ -24,46 +24,46 @@ pub fn init_metrics() -> PrometheusHandle {
 }
 
 fn describe_metrics() {
-    metrics::describe_counter!("bspds_http_requests_total", "Total number of HTTP requests");
+    metrics::describe_counter!("tranquil_pds_http_requests_total", "Total number of HTTP requests");
     metrics::describe_histogram!(
-        "bspds_http_request_duration_seconds",
+        "tranquil_pds_http_request_duration_seconds",
         "HTTP request duration in seconds"
     );
     metrics::describe_counter!(
-        "bspds_auth_cache_hits_total",
+        "tranquil_pds_auth_cache_hits_total",
         "Total number of authentication cache hits"
     );
     metrics::describe_counter!(
-        "bspds_auth_cache_misses_total",
+        "tranquil_pds_auth_cache_misses_total",
         "Total number of authentication cache misses"
     );
     metrics::describe_gauge!(
-        "bspds_firehose_subscribers",
+        "tranquil_pds_firehose_subscribers",
         "Number of active firehose WebSocket subscribers"
     );
     metrics::describe_counter!(
-        "bspds_firehose_events_total",
+        "tranquil_pds_firehose_events_total",
         "Total number of firehose events published"
     );
     metrics::describe_counter!(
-        "bspds_block_operations_total",
+        "tranquil_pds_block_operations_total",
         "Total number of block store operations"
     );
     metrics::describe_counter!(
-        "bspds_s3_operations_total",
+        "tranquil_pds_s3_operations_total",
         "Total number of S3/blob storage operations"
     );
     metrics::describe_gauge!(
-        "bspds_comms_queue_size",
+        "tranquil_pds_comms_queue_size",
         "Current size of the comms queue"
     );
     metrics::describe_counter!(
-        "bspds_rate_limit_rejections_total",
+        "tranquil_pds_rate_limit_rejections_total",
         "Total number of rate limit rejections"
     );
-    metrics::describe_counter!("bspds_db_queries_total", "Total number of database queries");
+    metrics::describe_counter!("tranquil_pds_db_queries_total", "Total number of database queries");
     metrics::describe_histogram!(
-        "bspds_db_query_duration_seconds",
+        "tranquil_pds_db_query_duration_seconds",
         "Database query duration in seconds"
     );
 }
@@ -97,7 +97,7 @@ pub async fn metrics_middleware(request: Request<Body>, next: Next) -> Response 
     let status = response.status().as_u16().to_string();
 
     counter!(
-        "bspds_http_requests_total",
+        "tranquil_pds_http_requests_total",
         "method" => method.clone(),
         "path" => path.clone(),
         "status" => status.clone()
@@ -105,7 +105,7 @@ pub async fn metrics_middleware(request: Request<Body>, next: Next) -> Response 
     .increment(1);
 
     histogram!(
-        "bspds_http_request_duration_seconds",
+        "tranquil_pds_http_request_duration_seconds",
         "method" => method,
         "path" => path
     )
@@ -135,32 +135,32 @@ fn normalize_path(path: &str) -> String {
 }
 
 pub fn record_auth_cache_hit(cache_type: &str) {
-    counter!("bspds_auth_cache_hits_total", "cache_type" => cache_type.to_string()).increment(1);
+    counter!("tranquil_pds_auth_cache_hits_total", "cache_type" => cache_type.to_string()).increment(1);
 }
 
 pub fn record_auth_cache_miss(cache_type: &str) {
-    counter!("bspds_auth_cache_misses_total", "cache_type" => cache_type.to_string()).increment(1);
+    counter!("tranquil_pds_auth_cache_misses_total", "cache_type" => cache_type.to_string()).increment(1);
 }
 
 pub fn set_firehose_subscribers(count: usize) {
-    gauge!("bspds_firehose_subscribers").set(count as f64);
+    gauge!("tranquil_pds_firehose_subscribers").set(count as f64);
 }
 
 pub fn increment_firehose_subscribers() {
-    counter!("bspds_firehose_events_total").increment(1);
+    counter!("tranquil_pds_firehose_events_total").increment(1);
 }
 
 pub fn record_firehose_event() {
-    counter!("bspds_firehose_events_total").increment(1);
+    counter!("tranquil_pds_firehose_events_total").increment(1);
 }
 
 pub fn record_block_operation(op_type: &str) {
-    counter!("bspds_block_operations_total", "op_type" => op_type.to_string()).increment(1);
+    counter!("tranquil_pds_block_operations_total", "op_type" => op_type.to_string()).increment(1);
 }
 
 pub fn record_s3_operation(op_type: &str, status: &str) {
     counter!(
-        "bspds_s3_operations_total",
+        "tranquil_pds_s3_operations_total",
         "op_type" => op_type.to_string(),
         "status" => status.to_string()
     )
@@ -168,17 +168,17 @@ pub fn record_s3_operation(op_type: &str, status: &str) {
 }
 
 pub fn set_comms_queue_size(size: usize) {
-    gauge!("bspds_comms_queue_size").set(size as f64);
+    gauge!("tranquil_pds_comms_queue_size").set(size as f64);
 }
 
 pub fn record_rate_limit_rejection(limiter: &str) {
-    counter!("bspds_rate_limit_rejections_total", "limiter" => limiter.to_string()).increment(1);
+    counter!("tranquil_pds_rate_limit_rejections_total", "limiter" => limiter.to_string()).increment(1);
 }
 
 pub fn record_db_query(query_type: &str, duration_seconds: f64) {
-    counter!("bspds_db_queries_total", "query_type" => query_type.to_string()).increment(1);
+    counter!("tranquil_pds_db_queries_total", "query_type" => query_type.to_string()).increment(1);
     histogram!(
-        "bspds_db_query_duration_seconds",
+        "tranquil_pds_db_query_duration_seconds",
         "query_type" => query_type.to_string()
     )
     .record(duration_seconds);

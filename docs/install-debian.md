@@ -1,7 +1,7 @@
-# BSPDS Production Installation on Debian
+# Tranquil PDS Production Installation on Debian
 > **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
 
-This guide covers installing BSPDS on Debian 13 "Trixie" (current stable as of December 2025).
+This guide covers installing Tranquil PDS on Debian 13 "Trixie".
 
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
@@ -19,16 +19,15 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source ~/.cargo/env
 rustup default stable
 ```
-This installs the latest stable Rust (1.92+ as of December 2025).
+This installs the latest stable Rust.
 ## 3. Install postgres
-Debian 13 includes PostgreSQL 17:
 ```bash
 apt install -y postgresql postgresql-contrib
 systemctl enable postgresql
 systemctl start postgresql
-sudo -u postgres psql -c "CREATE USER bspds WITH PASSWORD 'your-secure-password';"
-sudo -u postgres psql -c "CREATE DATABASE pds OWNER bspds;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO bspds;"
+sudo -u postgres psql -c "CREATE USER tranquil_pds WITH PASSWORD 'your-secure-password';"
+sudo -u postgres psql -c "CREATE DATABASE pds OWNER tranquil_pds;"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 ```
 ## 4. Install minio
 ```bash
@@ -71,7 +70,6 @@ mc alias set local http://localhost:9000 minioadmin your-minio-password
 mc mb local/pds-blobs
 ```
 ## 5. Install valkey
-Debian 13 includes Valkey 8:
 ```bash
 apt install -y valkey
 systemctl enable valkey-server
@@ -83,11 +81,11 @@ curl -fsSL https://deno.land/install.sh | sh
 export PATH="$HOME/.deno/bin:$PATH"
 echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.bashrc
 ```
-## 7. Clone and Build BSPDS
+## 7. Clone and Build Tranquil PDS
 ```bash
 cd /opt
-git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
-cd bspds
+git clone https://tangled.org/lewis.moe/bspds-sandbox tranquil-pds
+cd tranquil-pds
 cd frontend
 deno task build
 cd ..
@@ -96,51 +94,50 @@ cargo build --release
 ## 8. Install sqlx-cli and Run Migrations
 ```bash
 cargo install sqlx-cli --no-default-features --features postgres
-export DATABASE_URL="postgres://bspds:your-secure-password@localhost:5432/pds"
+export DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds"
 sqlx migrate run
 ```
-## 9. Configure BSPDS
+## 9. Configure Tranquil PDS
 ```bash
-mkdir -p /etc/bspds
-cp /opt/bspds/.env.example /etc/bspds/bspds.env
-chmod 600 /etc/bspds/bspds.env
+mkdir -p /etc/tranquil-pds
+cp /opt/tranquil-pds/.env.example /etc/tranquil-pds/tranquil-pds.env
+chmod 600 /etc/tranquil-pds/tranquil-pds.env
 ```
-Edit `/etc/bspds/bspds.env` and fill in your values. Generate secrets with:
+Edit `/etc/tranquil-pds/tranquil-pds.env` and fill in your values. Generate secrets with:
 ```bash
 openssl rand -base64 48
 ```
 ## 10. Create Systemd Service
 ```bash
-useradd -r -s /sbin/nologin bspds
-cp /opt/bspds/target/release/bspds /usr/local/bin/
-mkdir -p /var/lib/bspds
-cp -r /opt/bspds/frontend/dist /var/lib/bspds/frontend
-chown -R bspds:bspds /var/lib/bspds
-cat > /etc/systemd/system/bspds.service << 'EOF'
+useradd -r -s /sbin/nologin tranquil-pds
+cp /opt/tranquil-pds/target/release/tranquil-pds /usr/local/bin/
+mkdir -p /var/lib/tranquil-pds
+cp -r /opt/tranquil-pds/frontend/dist /var/lib/tranquil-pds/frontend
+chown -R tranquil-pds:tranquil-pds /var/lib/tranquil-pds
+cat > /etc/systemd/system/tranquil-pds.service << 'EOF'
 [Unit]
-Description=BSPDS - AT Protocol PDS
+Description=Tranquil PDS - AT Protocol PDS
 After=network.target postgresql.service minio.service
 [Service]
 Type=simple
-User=bspds
-Group=bspds
-EnvironmentFile=/etc/bspds/bspds.env
-Environment=FRONTEND_DIR=/var/lib/bspds/frontend
-ExecStart=/usr/local/bin/bspds
+User=tranquil-pds
+Group=tranquil-pds
+EnvironmentFile=/etc/tranquil-pds/tranquil-pds.env
+Environment=FRONTEND_DIR=/var/lib/tranquil-pds/frontend
+ExecStart=/usr/local/bin/tranquil-pds
 Restart=always
 RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable bspds
-systemctl start bspds
+systemctl enable tranquil-pds
+systemctl start tranquil-pds
 ```
 ## 11. Install and Configure nginx
-Debian 13 includes nginx 1.26:
 ```bash
 apt install -y nginx certbot python3-certbot-nginx
-cat > /etc/nginx/sites-available/bspds << 'EOF'
+cat > /etc/nginx/sites-available/tranquil-pds << 'EOF'
 server {
     listen 80;
     listen [::]:80;
@@ -158,7 +155,7 @@ server {
     }
 }
 EOF
-ln -s /etc/nginx/sites-available/bspds /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/tranquil-pds /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
@@ -192,26 +189,26 @@ ufw enable
 ```
 ## 14. Verify Installation
 ```bash
-systemctl status bspds
+systemctl status tranquil-pds
 curl -s https://pds.example.com/xrpc/_health | jq
 curl -s https://pds.example.com/.well-known/atproto-did
 ```
 ## Maintenance
 View logs:
 ```bash
-journalctl -u bspds -f
+journalctl -u tranquil-pds -f
 ```
-Update BSPDS:
+Update Tranquil PDS:
 ```bash
-cd /opt/bspds
+cd /opt/tranquil-pds
 git pull
 cd frontend && deno task build && cd ..
 cargo build --release
-systemctl stop bspds
-cp target/release/bspds /usr/local/bin/
-cp -r frontend/dist /var/lib/bspds/frontend
-DATABASE_URL="postgres://bspds:your-secure-password@localhost:5432/pds" sqlx migrate run
-systemctl start bspds
+systemctl stop tranquil-pds
+cp target/release/tranquil-pds /usr/local/bin/
+cp -r frontend/dist /var/lib/tranquil-pds/frontend
+DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds" sqlx migrate run
+systemctl start tranquil-pds
 ```
 Backup database:
 ```bash

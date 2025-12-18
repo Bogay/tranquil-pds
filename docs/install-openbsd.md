@@ -1,6 +1,6 @@
-# BSPDS Production Installation on OpenBSD
+# Tranquil PDS Production Installation on OpenBSD
 > **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
-This guide covers installing BSPDS on OpenBSD 7.8 (current release as of December 2025).
+This guide covers installing Tranquil PDS on OpenBSD 7.8.
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
 - A domain name pointing to your server's IP
@@ -16,7 +16,7 @@ pkg_add curl git
 ```sh
 pkg_add rust
 ```
-OpenBSD 7.8 ships Rust 1.82+. For the latest stable (1.92+), use rustup:
+OpenBSD ships Rust in ports. For the latest stable, use rustup:
 ```sh
 pkg_add rustup
 rustup-init -y
@@ -24,7 +24,6 @@ source ~/.cargo/env
 rustup default stable
 ```
 ## 3. Install postgres
-OpenBSD 7.8 includes PostgreSQL 17 (PostgreSQL 18 may not yet be in ports):
 ```sh
 pkg_add postgresql-server postgresql-client
 mkdir -p /var/postgresql/data
@@ -32,9 +31,9 @@ chown _postgresql:_postgresql /var/postgresql/data
 su - _postgresql -c "initdb -D /var/postgresql/data -U postgres -A scram-sha-256"
 rcctl enable postgresql
 rcctl start postgresql
-psql -U postgres -c "CREATE USER bspds WITH PASSWORD 'your-secure-password';"
-psql -U postgres -c "CREATE DATABASE pds OWNER bspds;"
-psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE pds TO bspds;"
+psql -U postgres -c "CREATE USER tranquil_pds WITH PASSWORD 'your-secure-password';"
+psql -U postgres -c "CREATE DATABASE pds OWNER tranquil_pds;"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 ```
 ## 4. Install minio
 OpenBSD doesn't have a minio package. Options:
@@ -93,11 +92,11 @@ curl -fsSL https://deno.land/install.sh | sh
 export PATH="$HOME/.deno/bin:$PATH"
 echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.profile
 ```
-## 7. Clone and Build BSPDS
+## 7. Clone and Build Tranquil PDS
 ```sh
 mkdir -p /opt && cd /opt
-git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
-cd bspds
+git clone https://tangled.org/lewis.moe/bspds-sandbox tranquil-pds
+cd tranquil-pds
 cd frontend
 deno task build
 cd ..
@@ -106,46 +105,46 @@ cargo build --release
 ## 8. Install sqlx-cli and Run Migrations
 ```sh
 cargo install sqlx-cli --no-default-features --features postgres
-export DATABASE_URL="postgres://bspds:your-secure-password@localhost:5432/pds"
+export DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds"
 sqlx migrate run
 ```
-## 9. Configure BSPDS
+## 9. Configure Tranquil PDS
 ```sh
-mkdir -p /etc/bspds
-cp /opt/bspds/.env.example /etc/bspds/bspds.conf
-chmod 600 /etc/bspds/bspds.conf
+mkdir -p /etc/tranquil-pds
+cp /opt/tranquil-pds/.env.example /etc/tranquil-pds/tranquil-pds.conf
+chmod 600 /etc/tranquil-pds/tranquil-pds.conf
 ```
-Edit `/etc/bspds/bspds.conf` and fill in your values. Generate secrets with:
+Edit `/etc/tranquil-pds/tranquil-pds.conf` and fill in your values. Generate secrets with:
 ```sh
 openssl rand -base64 48
 ```
 ## 10. Create rc.d Service
 ```sh
-useradd -d /var/empty -s /sbin/nologin _bspds
-cp /opt/bspds/target/release/bspds /usr/local/bin/
-mkdir -p /var/bspds
-cp -r /opt/bspds/frontend/dist /var/bspds/frontend
-chown -R _bspds:_bspds /var/bspds
-cat > /etc/rc.d/bspds << 'EOF'
+useradd -d /var/empty -s /sbin/nologin _tranquil_pds
+cp /opt/tranquil-pds/target/release/tranquil-pds /usr/local/bin/
+mkdir -p /var/tranquil-pds
+cp -r /opt/tranquil-pds/frontend/dist /var/tranquil-pds/frontend
+chown -R _tranquil_pds:_tranquil_pds /var/tranquil-pds
+cat > /etc/rc.d/tranquil_pds << 'EOF'
 #!/bin/ksh
-daemon="/usr/local/bin/bspds"
-daemon_user="_bspds"
+daemon="/usr/local/bin/tranquil-pds"
+daemon_user="_tranquil_pds"
 daemon_logger="daemon.info"
 . /etc/rc.d/rc.subr
 rc_pre() {
-    export FRONTEND_DIR=/var/bspds/frontend
+    export FRONTEND_DIR=/var/tranquil-pds/frontend
     while IFS='=' read -r key value; do
         case "$key" in
             \#*|"") continue ;;
         esac
         export "$key=$value"
-    done < /etc/bspds/bspds.conf
+    done < /etc/tranquil-pds/tranquil-pds.conf
 }
 rc_cmd $1
 EOF
-chmod +x /etc/rc.d/bspds
-rcctl enable bspds
-rcctl start bspds
+chmod +x /etc/rc.d/tranquil_pds
+rcctl enable tranquil_pds
+rcctl start tranquil_pds
 ```
 ## 11. Install and Configure nginx
 ```sh
@@ -227,7 +226,7 @@ pfctl -f /etc/pf.conf
 ```
 ## 14. Verify Installation
 ```sh
-rcctl check bspds
+rcctl check tranquil_pds
 ftp -o - https://pds.example.com/xrpc/_health
 ftp -o - https://pds.example.com/.well-known/atproto-did
 ```
@@ -236,17 +235,17 @@ View logs:
 ```sh
 tail -f /var/log/daemon
 ```
-Update BSPDS:
+Update Tranquil PDS:
 ```sh
-cd /opt/bspds
+cd /opt/tranquil-pds
 git pull
 cd frontend && deno task build && cd ..
 cargo build --release
-rcctl stop bspds
-cp target/release/bspds /usr/local/bin/
-cp -r frontend/dist /var/bspds/frontend
-DATABASE_URL="postgres://bspds:your-secure-password@localhost:5432/pds" sqlx migrate run
-rcctl start bspds
+rcctl stop tranquil_pds
+cp target/release/tranquil-pds /usr/local/bin/
+cp -r frontend/dist /var/tranquil-pds/frontend
+DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds" sqlx migrate run
+rcctl start tranquil_pds
 ```
 Backup database:
 ```sh

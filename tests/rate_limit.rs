@@ -162,7 +162,7 @@ async fn test_distributed_rate_limiter_directly() {
         println!("VALKEY_URL not set, skipping distributed rate limiter test");
         return;
     }
-    use bspds::cache::{DistributedRateLimiter, RedisRateLimiter};
+    use tranquil_pds::cache::{DistributedRateLimiter, RedisRateLimiter};
     let valkey_url = std::env::var("VALKEY_URL").unwrap();
     let client = redis::Client::open(valkey_url.as_str()).expect("Failed to create Redis client");
     let conn = client

@@ -1,8 +1,8 @@
 import { api, type Session, type CreateAccountParams, type CreateAccountResult, ApiError } from './api'
 import { startOAuthLogin, handleOAuthCallback, checkForOAuthCallback, clearOAuthCallbackParams, refreshOAuthToken } from './oauth'
 
-const STORAGE_KEY = 'bspds_session'
-const ACCOUNTS_KEY = 'bspds_accounts'
+const STORAGE_KEY = 'tranquil_pds_session'
+const ACCOUNTS_KEY = 'tranquil_pds_accounts'
 
 export interface SavedAccount {
   did: string

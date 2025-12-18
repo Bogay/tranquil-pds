@@ -25,32 +25,32 @@ impl AuthConfig {
     pub fn init() -> &'static Self {
         CONFIG.get_or_init(|| {
             let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
-                if cfg!(test) || std::env::var("BSPDS_ALLOW_INSECURE_SECRETS").is_ok() {
+                if cfg!(test) || std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_ok() {
                     "test-jwt-secret-not-for-production".to_string()
                 } else {
                     panic!(
                         "JWT_SECRET environment variable must be set in production. \
-                         Set BSPDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
+                         Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
                     );
                 }
             });
 
             let dpop_secret = std::env::var("DPOP_SECRET").unwrap_or_else(|_| {
-                if cfg!(test) || std::env::var("BSPDS_ALLOW_INSECURE_SECRETS").is_ok() {
+                if cfg!(test) || std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_ok() {
                     "test-dpop-secret-not-for-production".to_string()
                 } else {
                     panic!(
                         "DPOP_SECRET environment variable must be set in production. \
-                         Set BSPDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
+                         Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
                     );
                 }
             });
 
-            if jwt_secret.len() < 32 && std::env::var("BSPDS_ALLOW_INSECURE_SECRETS").is_err() {
+            if jwt_secret.len() < 32 && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err() {
                 panic!("JWT_SECRET must be at least 32 characters");
             }
 
-            if dpop_secret.len() < 32 && std::env::var("BSPDS_ALLOW_INSECURE_SECRETS").is_err() {
+            if dpop_secret.len() < 32 && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err() {
                 panic!("DPOP_SECRET must be at least 32 characters");
             }
 
@@ -87,23 +87,23 @@ impl AuthConfig {
             let signing_key_id = URL_SAFE_NO_PAD.encode(&kid_hash[..8]);
 
             let master_key = std::env::var("MASTER_KEY").unwrap_or_else(|_| {
-                if cfg!(test) || std::env::var("BSPDS_ALLOW_INSECURE_SECRETS").is_ok() {
+                if cfg!(test) || std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_ok() {
                     "test-master-key-not-for-production".to_string()
                 } else {
                     panic!(
                         "MASTER_KEY environment variable must be set in production. \
-                         Set BSPDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
+                         Set TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 for development/testing."
                     );
                 }
             });
 
-            if master_key.len() < 32 && std::env::var("BSPDS_ALLOW_INSECURE_SECRETS").is_err() {
+            if master_key.len() < 32 && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err() {
                 panic!("MASTER_KEY must be at least 32 characters");
             }
 
             let hk = Hkdf::<Sha256>::new(None, master_key.as_bytes());
             let mut key_encryption_key = [0u8; 32];
-            hk.expand(b"bspds-user-key-encryption", &mut key_encryption_key)
+            hk.expand(b"tranquil-pds-user-key-encryption", &mut key_encryption_key)
                 .expect("HKDF expansion failed");
 
             AuthConfig {

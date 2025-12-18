@@ -1,5 +1,5 @@
-const OAUTH_STATE_KEY = 'bspds_oauth_state'
-const OAUTH_VERIFIER_KEY = 'bspds_oauth_verifier'
+const OAUTH_STATE_KEY = 'tranquil_pds_oauth_state'
+const OAUTH_VERIFIER_KEY = 'tranquil_pds_oauth_verifier'
 
 interface OAuthState {
   state: string

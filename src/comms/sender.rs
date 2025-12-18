@@ -87,7 +87,7 @@ impl EmailSender {
 
     pub fn from_env() -> Option<Self> {
         let from_address = std::env::var("MAIL_FROM_ADDRESS").ok()?;
-        let from_name = std::env::var("MAIL_FROM_NAME").unwrap_or_else(|_| "BSPDS".to_string());
+        let from_name = std::env::var("MAIL_FROM_NAME").unwrap_or_else(|_| "Tranquil PDS".to_string());
         Some(Self::new(from_address, from_name))
     }
 
@@ -168,7 +168,7 @@ impl CommsSender for DiscordSender {
         let content = format!("**{}**\n\n{}", subject, notification.body);
         let payload = json!({
             "content": content,
-            "username": "BSPDS"
+            "username": "Tranquil PDS"
         });
         let mut last_error = None;
         for attempt in 0..MAX_RETRIES {

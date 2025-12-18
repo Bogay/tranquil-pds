@@ -1,6 +1,6 @@
 mod common;
 use common::{base_url, client, create_account_and_login, get_db_connection_string};
-use bspds::comms::{NewComms, CommsType, enqueue_comms};
+use tranquil_pds::comms::{NewComms, CommsType, enqueue_comms};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
@@ -37,7 +37,7 @@ async fn test_get_notification_history() {
     }
 
     let resp = client
-        .get(format!("{}/xrpc/com.bspds.account.getNotificationHistory", base))
+        .get(format!("{}/xrpc/com.tranquil.account.getNotificationHistory", base))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
@@ -63,7 +63,7 @@ async fn test_verify_channel_discord() {
         "discordId": "123456789"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.bspds.account.updateNotificationPrefs", base))
+        .post(format!("{}/xrpc/com.tranquil.account.updateNotificationPrefs", base))
         .header("Authorization", format!("Bearer {}", token))
         .json(&prefs)
         .send()
@@ -92,7 +92,7 @@ async fn test_verify_channel_discord() {
         "code": code
     });
     let resp = client
-        .post(format!("{}/xrpc/com.bspds.account.confirmChannelVerification", base))
+        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -101,7 +101,7 @@ async fn test_verify_channel_discord() {
     assert_eq!(resp.status(), 200);
 
     let resp = client
-        .get(format!("{}/xrpc/com.bspds.account.getNotificationPrefs", base))
+        .get(format!("{}/xrpc/com.tranquil.account.getNotificationPrefs", base))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
@@ -121,7 +121,7 @@ async fn test_verify_channel_invalid_code() {
         "telegramUsername": "testuser"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.bspds.account.updateNotificationPrefs", base))
+        .post(format!("{}/xrpc/com.tranquil.account.updateNotificationPrefs", base))
         .header("Authorization", format!("Bearer {}", token))
         .json(&prefs)
         .send()
@@ -134,7 +134,7 @@ async fn test_verify_channel_invalid_code() {
         "code": "000000"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.bspds.account.confirmChannelVerification", base))
+        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -154,7 +154,7 @@ async fn test_verify_channel_not_set() {
         "code": "123456"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.bspds.account.confirmChannelVerification", base))
+        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -175,7 +175,7 @@ async fn test_update_email_via_notification_prefs() {
         "email": unique_email
     });
     let resp = client
-        .post(format!("{}/xrpc/com.bspds.account.updateNotificationPrefs", base))
+        .post(format!("{}/xrpc/com.tranquil.account.updateNotificationPrefs", base))
         .header("Authorization", format!("Bearer {}", token))
         .json(&prefs)
         .send()
@@ -203,7 +203,7 @@ async fn test_update_email_via_notification_prefs() {
         "code": code
     });
     let resp = client
-        .post(format!("{}/xrpc/com.bspds.account.confirmChannelVerification", base))
+        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -212,7 +212,7 @@ async fn test_update_email_via_notification_prefs() {
     assert_eq!(resp.status(), 200);
 
     let resp = client
-        .get(format!("{}/xrpc/com.bspds.account.getNotificationPrefs", base))
+        .get(format!("{}/xrpc/com.tranquil.account.getNotificationPrefs", base))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await

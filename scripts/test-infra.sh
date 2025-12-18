@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-INFRA_FILE="${TMPDIR:-/tmp}/bspds_test_infra.env"
-CONTAINER_PREFIX="bspds-test"
+INFRA_FILE="${TMPDIR:-/tmp}/tranquil_pds_test_infra.env"
+CONTAINER_PREFIX="tranquil-pds-test"
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
@@ -40,7 +40,7 @@ start_infra() {
         -e POSTGRES_USER=postgres \
         -e POSTGRES_DB=postgres \
         -P \
-        --label bspds_test=true \
+        --label tranquil_pds_test=true \
         postgres:18-alpine >/dev/null
     echo "Starting MinIO..."
     $CONTAINER_CMD run -d \
@@ -48,13 +48,13 @@ start_infra() {
         -e MINIO_ROOT_USER=minioadmin \
         -e MINIO_ROOT_PASSWORD=minioadmin \
         -P \
-        --label bspds_test=true \
+        --label tranquil_pds_test=true \
         minio/minio:latest server /data >/dev/null
     echo "Starting Valkey..."
     $CONTAINER_CMD run -d \
         --name "${CONTAINER_PREFIX}-valkey" \
         -P \
-        --label bspds_test=true \
+        --label tranquil_pds_test=true \
         valkey/valkey:8-alpine >/dev/null
     echo "Waiting for services to be ready..."
     sleep 2
@@ -95,8 +95,8 @@ export AWS_ACCESS_KEY_ID="minioadmin"
 export AWS_SECRET_ACCESS_KEY="minioadmin"
 export AWS_REGION="us-east-1"
 export VALKEY_URL="redis://127.0.0.1:${VALKEY_PORT}"
-export BSPDS_TEST_INFRA_READY="1"
-export BSPDS_ALLOW_INSECURE_SECRETS="1"
+export TRANQUIL_PDS_TEST_INFRA_READY="1"
+export TRANQUIL_PDS_ALLOW_INSECURE_SECRETS="1"
 export SKIP_IMPORT_VERIFICATION="true"
 export DISABLE_RATE_LIMITING="1"
 EOF
@@ -125,7 +125,7 @@ status_infra() {
     fi
     echo ""
     echo "Containers:"
-    $CONTAINER_CMD ps -a --filter "label=bspds_test=true" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  (none)"
+    $CONTAINER_CMD ps -a --filter "label=tranquil_pds_test=true" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  (none)"
 }
 case "${1:-}" in
     start)

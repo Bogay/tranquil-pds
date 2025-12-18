@@ -11,7 +11,7 @@ async fn test_get_server_stats() {
     let (_, _) = create_admin_account_and_login(&client).await;
 
     let resp = client
-        .get(format!("{}/xrpc/com.bspds.admin.getServerStats", base))
+        .get(format!("{}/xrpc/com.tranquil.admin.getServerStats", base))
         .header("Authorization", format!("Bearer {}", token1))
         .send()
         .await
@@ -33,7 +33,7 @@ async fn test_get_server_stats_no_auth() {
     let client = client();
     let base = base_url().await;
     let resp = client
-        .get(format!("{}/xrpc/com.bspds.admin.getServerStats", base))
+        .get(format!("{}/xrpc/com.tranquil.admin.getServerStats", base))
         .send()
         .await
         .unwrap();

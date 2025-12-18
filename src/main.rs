@@ -1,6 +1,6 @@
-use bspds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
-use bspds::crawlers::{Crawlers, start_crawlers_service};
-use bspds::state::AppState;
+use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
+use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
+use tranquil_pds::state::AppState;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 async fn main() -> ExitCode {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt::init();
-    bspds::metrics::init_metrics();
+    tranquil_pds::metrics::init_metrics();
 
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
@@ -62,7 +62,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Failed to run migrations: {}", e))?;
 
     let state = AppState::new(pool.clone()).await;
-    bspds::sync::listener::start_sequencer_listener(state.clone()).await;
+    tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -108,7 +108,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let app = bspds::app(state);
+    let app = tranquil_pds::app(state);
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     info!("listening on {}", addr);
 

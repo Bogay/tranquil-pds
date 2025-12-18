@@ -50,7 +50,7 @@ async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
     .fetch_optional(&pool)
     .await
     .ok()??;
-    bspds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
+    tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
 }
 
 async fn get_plc_token_from_db(did: &str) -> Option<String> {

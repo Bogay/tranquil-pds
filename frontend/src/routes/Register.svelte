@@ -3,7 +3,7 @@
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError, type VerificationChannel } from '../lib/api'
 
-  const STORAGE_KEY = 'bspds_pending_verification'
+  const STORAGE_KEY = 'tranquil_pds_pending_verification'
 
   let handle = $state('')
   let email = $state('')

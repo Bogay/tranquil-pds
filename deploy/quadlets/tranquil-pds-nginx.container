@@ -1,0 +1,15 @@
+[Unit]
+Description=Tranquil PDS nginx reverse proxy
+After=tranquil-pds-app.service
+[Container]
+ContainerName=tranquil-pds-nginx
+Image=docker.io/library/nginx:1.28-alpine
+Pod=tranquil-pds.pod
+Volume=/srv/tranquil-pds/config/nginx.conf:/etc/nginx/nginx.conf:ro,Z
+Volume=/srv/tranquil-pds/certs:/etc/nginx/certs:ro,Z
+Volume=/srv/tranquil-pds/acme:/var/www/acme:ro,Z
+[Service]
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=default.target

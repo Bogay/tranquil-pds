@@ -1,4 +1,4 @@
-# BSPDS on Kubernetes
+# Tranquil PDS on Kubernetes
 
 If you're reaching for kubernetes for this app, you're experienced enough to know how to spin up:
 

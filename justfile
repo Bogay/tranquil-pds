@@ -25,7 +25,7 @@ test-file file:
     ./scripts/run-tests.sh --test {{file}}
 # Run tests with testcontainers (slower, no shared infra)
 test-standalone:
-    BSPDS_ALLOW_INSECURE_SECRETS=1 cargo test
+    TRANQUIL_PDS_ALLOW_INSECURE_SECRETS=1 cargo test
 # Manually manage test infrastructure (for debugging)
 test-infra-start:
     ./scripts/test-infra.sh start

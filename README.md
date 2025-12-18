@@ -1,4 +1,4 @@
-# BSPDS
+# Tranquil PDS
 
 A production-grade Personal Data Server (PDS) for the AT Protocol. Drop-in replacement for Bluesky's reference PDS, written in rust with postgres and s3-compatible blob storage.
 

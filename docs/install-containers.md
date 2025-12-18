@@ -1,6 +1,6 @@
-# BSPDS Containerized Production Deployment
+# Tranquil PDS Containerized Production Deployment
 > **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
-This guide covers deploying BSPDS using containers with podman.
+This guide covers deploying Tranquil PDS using containers with podman.
 - **Debian 13+**: Uses systemd quadlets (modern, declarative container management)
 - **Alpine 3.23+**: Uses OpenRC service script with podman-compose
 ## Prerequisites
@@ -39,14 +39,14 @@ apt install -y podman
 ## 2. Create Directory Structure
 ```bash
 mkdir -p /etc/containers/systemd
-mkdir -p /srv/bspds/{postgres,minio,valkey,certs,acme,config}
+mkdir -p /srv/tranquil-pds/{postgres,minio,valkey,certs,acme,config}
 ```
 ## 3. Create Environment File
 ```bash
-cp /opt/bspds/.env.example /srv/bspds/config/bspds.env
-chmod 600 /srv/bspds/config/bspds.env
+cp /opt/tranquil-pds/.env.example /srv/tranquil-pds/config/tranquil-pds.env
+chmod 600 /srv/tranquil-pds/config/tranquil-pds.env
 ```
-Edit `/srv/bspds/config/bspds.env` and fill in your values. Generate secrets with:
+Edit `/srv/tranquil-pds/config/tranquil-pds.env` and fill in your values. Generate secrets with:
 ```bash
 openssl rand -base64 48
 ```
@@ -54,37 +54,37 @@ For quadlets, also add `DATABASE_URL` with the full connection string (systemd d
 ## 4. Install Quadlet Definitions
 Copy the quadlet files from the repository:
 ```bash
-cp /opt/bspds/deploy/quadlets/*.pod /etc/containers/systemd/
-cp /opt/bspds/deploy/quadlets/*.container /etc/containers/systemd/
+cp /opt/tranquil-pds/deploy/quadlets/*.pod /etc/containers/systemd/
+cp /opt/tranquil-pds/deploy/quadlets/*.container /etc/containers/systemd/
 ```
 Note: Systemd doesn't support shell-style variable expansion in `Environment=` lines. The quadlet files expect DATABASE_URL to be set in the environment file.
 ## 5. Create nginx Configuration
 ```bash
-cp /opt/bspds/deploy/nginx/nginx-quadlet.conf /srv/bspds/config/nginx.conf
+cp /opt/tranquil-pds/deploy/nginx/nginx-quadlet.conf /srv/tranquil-pds/config/nginx.conf
 ```
-## 6. Build BSPDS Image
+## 6. Build Tranquil PDS Image
 ```bash
 cd /opt
-git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
-cd bspds
-podman build -t bspds:latest .
+git clone https://tangled.org/lewis.moe/bspds-sandbox tranquil-pds
+cd tranquil-pds
+podman build -t tranquil-pds:latest .
 ```
 ## 7. Create Podman Secrets
 ```bash
-source /srv/bspds/config/bspds.env
-echo "$DB_PASSWORD" | podman secret create bspds-db-password -
-echo "$MINIO_ROOT_PASSWORD" | podman secret create bspds-minio-password -
+source /srv/tranquil-pds/config/tranquil-pds.env
+echo "$DB_PASSWORD" | podman secret create tranquil-pds-db-password -
+echo "$MINIO_ROOT_PASSWORD" | podman secret create tranquil-pds-minio-password -
 ```
 ## 8. Start Services and Initialize
 ```bash
 systemctl daemon-reload
-systemctl start bspds-db bspds-minio bspds-valkey
+systemctl start tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey
 sleep 10
 ```
 
 Create the minio bucket:
 ```bash
-podman run --rm --pod bspds \
+podman run --rm --pod tranquil-pds \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=your-minio-password \
   docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
@@ -94,7 +94,7 @@ podman run --rm --pod bspds \
 Run migrations:
 ```bash
 cargo install sqlx-cli --no-default-features --features postgres
-DATABASE_URL="postgres://bspds:your-db-password@localhost:5432/pds" sqlx migrate run --source /opt/bspds/migrations
+DATABASE_URL="postgres://tranquil_pds:your-db-password@localhost:5432/pds" sqlx migrate run --source /opt/tranquil-pds/migrations
 ```
 ## 9. Obtain Wildcard SSL Certificate
 User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
@@ -102,16 +102,16 @@ User handles are served as subdomains (e.g., `alice.pds.example.com`), so you ne
 Create temporary self-signed cert to start services:
 ```bash
 openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
-  -keyout /srv/bspds/certs/privkey.pem \
-  -out /srv/bspds/certs/fullchain.pem \
+  -keyout /srv/tranquil-pds/certs/privkey.pem \
+  -out /srv/tranquil-pds/certs/fullchain.pem \
   -subj "/CN=pds.example.com"
-systemctl start bspds-app bspds-nginx
+systemctl start tranquil-pds-app tranquil-pds-nginx
 ```
 
 Get a wildcard certificate using DNS validation:
 ```bash
 podman run --rm -it \
-  -v /srv/bspds/certs:/etc/letsencrypt:Z \
+  -v /srv/tranquil-pds/certs:/etc/letsencrypt:Z \
   docker.io/certbot/certbot:v5.2.2 certonly \
   --manual --preferred-challenges dns \
   -d pds.example.com -d '*.pds.example.com' \
@@ -123,13 +123,13 @@ For automated renewal, use a DNS provider plugin (e.g., cloudflare, route53).
 
 Link certificates and restart:
 ```bash
-ln -sf /srv/bspds/certs/live/pds.example.com/fullchain.pem /srv/bspds/certs/fullchain.pem
-ln -sf /srv/bspds/certs/live/pds.example.com/privkey.pem /srv/bspds/certs/privkey.pem
-systemctl restart bspds-nginx
+ln -sf /srv/tranquil-pds/certs/live/pds.example.com/fullchain.pem /srv/tranquil-pds/certs/fullchain.pem
+ln -sf /srv/tranquil-pds/certs/live/pds.example.com/privkey.pem /srv/tranquil-pds/certs/privkey.pem
+systemctl restart tranquil-pds-nginx
 ```
 ## 10. Enable All Services
 ```bash
-systemctl enable bspds-db bspds-minio bspds-valkey bspds-app bspds-nginx
+systemctl enable tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey tranquil-pds-app tranquil-pds-nginx
 ```
 ## 11. Configure Firewall
 ```bash
@@ -142,7 +142,7 @@ ufw enable
 ## 12. Certificate Renewal
 Add to root's crontab (`crontab -e`):
 ```
-0 0 * * * podman run --rm -v /srv/bspds/certs:/etc/letsencrypt:Z -v /srv/bspds/acme:/var/www/acme:Z docker.io/certbot/certbot:v5.2.2 renew --quiet && systemctl reload bspds-nginx
+0 0 * * * podman run --rm -v /srv/tranquil-pds/certs:/etc/letsencrypt:Z -v /srv/tranquil-pds/acme:/var/www/acme:Z docker.io/certbot/certbot:v5.2.2 renew --quiet && systemctl reload tranquil-pds-nginx
 ```
 ---
 # Alpine 3.23+ with OpenRC
@@ -161,79 +161,79 @@ rc-service podman start
 ```
 ## 2. Create Directory Structure
 ```sh
-mkdir -p /srv/bspds/{data,config}
-mkdir -p /srv/bspds/data/{postgres,minio,valkey,certs,acme}
+mkdir -p /srv/tranquil-pds/{data,config}
+mkdir -p /srv/tranquil-pds/data/{postgres,minio,valkey,certs,acme}
 ```
 ## 3. Clone Repository and Build
 ```sh
 cd /opt
-git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
-cd bspds
-podman build -t bspds:latest .
+git clone https://tangled.org/lewis.moe/bspds-sandbox tranquil-pds
+cd tranquil-pds
+podman build -t tranquil-pds:latest .
 ```
 ## 4. Create Environment File
 ```sh
-cp /opt/bspds/.env.example /srv/bspds/config/bspds.env
-chmod 600 /srv/bspds/config/bspds.env
+cp /opt/tranquil-pds/.env.example /srv/tranquil-pds/config/tranquil-pds.env
+chmod 600 /srv/tranquil-pds/config/tranquil-pds.env
 ```
-Edit `/srv/bspds/config/bspds.env` and fill in your values. Generate secrets with:
+Edit `/srv/tranquil-pds/config/tranquil-pds.env` and fill in your values. Generate secrets with:
 ```sh
 openssl rand -base64 48
 ```
 ## 5. Set Up Compose and nginx
 Copy the production compose and nginx configs:
 ```sh
-cp /opt/bspds/docker-compose.prod.yml /srv/bspds/docker-compose.yml
-cp /opt/bspds/nginx.prod.conf /srv/bspds/config/nginx.conf
+cp /opt/tranquil-pds/docker-compose.prod.yml /srv/tranquil-pds/docker-compose.yml
+cp /opt/tranquil-pds/nginx.prod.conf /srv/tranquil-pds/config/nginx.conf
 ```
-Edit `/srv/bspds/docker-compose.yml` to adjust paths if needed:
-- Update volume mounts to use `/srv/bspds/data/` paths
-- Update nginx cert paths to match `/srv/bspds/data/certs/`
-Edit `/srv/bspds/config/nginx.conf` to update cert paths:
+Edit `/srv/tranquil-pds/docker-compose.yml` to adjust paths if needed:
+- Update volume mounts to use `/srv/tranquil-pds/data/` paths
+- Update nginx cert paths to match `/srv/tranquil-pds/data/certs/`
+Edit `/srv/tranquil-pds/config/nginx.conf` to update cert paths:
 - Change `/etc/nginx/certs/live/${PDS_HOSTNAME}/` to `/etc/nginx/certs/`
 ## 6. Create OpenRC Service
 ```sh
-cat > /etc/init.d/bspds << 'EOF'
+cat > /etc/init.d/tranquil-pds << 'EOF'
 #!/sbin/openrc-run
-name="bspds"
-description="BSPDS AT Protocol PDS (containerized)"
+name="tranquil-pds"
+description="Tranquil PDS AT Protocol PDS (containerized)"
 command="/usr/bin/podman-compose"
-command_args="-f /srv/bspds/docker-compose.yml up"
+command_args="-f /srv/tranquil-pds/docker-compose.yml up"
 command_background=true
 pidfile="/run/${RC_SVCNAME}.pid"
-directory="/srv/bspds"
+directory="/srv/tranquil-pds"
 depend() {
     need net podman
     after firewall
 }
 start_pre() {
     set -a
-    . /srv/bspds/config/bspds.env
+    . /srv/tranquil-pds/config/tranquil-pds.env
     set +a
 }
 stop() {
     ebegin "Stopping ${name}"
-    cd /srv/bspds
+    cd /srv/tranquil-pds
     set -a
-    . /srv/bspds/config/bspds.env
+    . /srv/tranquil-pds/config/tranquil-pds.env
     set +a
-    podman-compose -f /srv/bspds/docker-compose.yml down
+    podman-compose -f /srv/tranquil-pds/docker-compose.yml down
     eend $?
 }
 EOF
-chmod +x /etc/init.d/bspds
+chmod +x /etc/init.d/tranquil-pds
 ```
 ## 7. Initialize Services
 Start services:
 ```sh
-rc-service bspds start
+rc-service tranquil-pds start
 sleep 15
 ```
 
 Create the minio bucket:
 ```sh
-source /srv/bspds/config/bspds.env
-podman run --rm --network bspds_default \
+source /srv/tranquil-pds/config/tranquil-pds.env
+podman run --rm --network tranquil-pds_default \
   -e MINIO_ROOT_USER="$MINIO_ROOT_USER" \
   -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
   docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
@@ -246,8 +246,8 @@ apk add rustup
 rustup-init -y
 source ~/.cargo/env
 cargo install sqlx-cli --no-default-features --features postgres
-DB_IP=$(podman inspect bspds-db-1 --format '{{.NetworkSettings.Networks.bspds_default.IPAddress}}')
-DATABASE_URL="postgres://bspds:$DB_PASSWORD@$DB_IP:5432/pds" sqlx migrate run --source /opt/bspds/migrations
+DB_IP=$(podman inspect tranquil-pds-db-1 --format '{{.NetworkSettings.Networks.tranquil-pds_default.IPAddress}}')
+DATABASE_URL="postgres://tranquil_pds:$DB_PASSWORD@$DB_IP:5432/pds" sqlx migrate run --source /opt/tranquil-pds/migrations
 ```
 ## 8. Obtain Wildcard SSL Certificate
 User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
@@ -255,16 +255,16 @@ User handles are served as subdomains (e.g., `alice.pds.example.com`), so you ne
 Create temporary self-signed cert to start services:
 ```sh
 openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
-  -keyout /srv/bspds/data/certs/privkey.pem \
-  -out /srv/bspds/data/certs/fullchain.pem \
+  -keyout /srv/tranquil-pds/data/certs/privkey.pem \
+  -out /srv/tranquil-pds/data/certs/fullchain.pem \
   -subj "/CN=pds.example.com"
-rc-service bspds restart
+rc-service tranquil-pds restart
 ```
 
 Get a wildcard certificate using DNS validation:
 ```sh
 podman run --rm -it \
-  -v /srv/bspds/data/certs:/etc/letsencrypt \
+  -v /srv/tranquil-pds/data/certs:/etc/letsencrypt \
   docker.io/certbot/certbot:v5.2.2 certonly \
   --manual --preferred-challenges dns \
   -d pds.example.com -d '*.pds.example.com' \
@@ -274,13 +274,13 @@ Follow the prompts to add TXT records to your DNS. Note: manual mode doesn't aut
 
 Link certificates and restart:
 ```sh
-ln -sf /srv/bspds/data/certs/live/pds.example.com/fullchain.pem /srv/bspds/data/certs/fullchain.pem
-ln -sf /srv/bspds/data/certs/live/pds.example.com/privkey.pem /srv/bspds/data/certs/privkey.pem
-rc-service bspds restart
+ln -sf /srv/tranquil-pds/data/certs/live/pds.example.com/fullchain.pem /srv/tranquil-pds/data/certs/fullchain.pem
+ln -sf /srv/tranquil-pds/data/certs/live/pds.example.com/privkey.pem /srv/tranquil-pds/data/certs/privkey.pem
+rc-service tranquil-pds restart
 ```
 ## 9. Enable Service at Boot
 ```sh
-rc-update add bspds
+rc-update add tranquil-pds
 ```
 ## 10. Configure Firewall
 ```sh
@@ -305,7 +305,7 @@ rc-update add ip6tables
 ## 11. Certificate Renewal
 Add to root's crontab (`crontab -e`):
 ```
-0 0 * * * podman run --rm -v /srv/bspds/data/certs:/etc/letsencrypt -v /srv/bspds/data/acme:/var/www/acme docker.io/certbot/certbot:v5.2.2 renew --quiet && rc-service bspds restart
+0 0 * * * podman run --rm -v /srv/tranquil-pds/data/certs:/etc/letsencrypt -v /srv/tranquil-pds/data/acme:/var/www/acme docker.io/certbot/certbot:v5.2.2 renew --quiet && rc-service tranquil-pds restart
 ```
 ---
 # Verification and Maintenance
@@ -317,36 +317,36 @@ curl -s https://pds.example.com/.well-known/atproto-did
 ## View Logs
 **Debian:**
 ```bash
-journalctl -u bspds-app -f
-podman logs -f bspds-app
+journalctl -u tranquil-pds-app -f
+podman logs -f tranquil-pds-app
 ```
 **Alpine:**
 ```sh
-podman-compose -f /srv/bspds/docker-compose.yml logs -f
-podman logs -f bspds-bspds-1
+podman-compose -f /srv/tranquil-pds/docker-compose.yml logs -f
+podman logs -f tranquil-pds-tranquil-pds-1
 ```
-## Update BSPDS
+## Update Tranquil PDS
 ```sh
-cd /opt/bspds
+cd /opt/tranquil-pds
 git pull
-podman build -t bspds:latest .
+podman build -t tranquil-pds:latest .
 ```
 
 Debian:
 ```bash
-systemctl restart bspds-app
+systemctl restart tranquil-pds-app
 ```
 
 Alpine:
 ```sh
-rc-service bspds restart
+rc-service tranquil-pds restart
 ```
 ## Backup Database
 **Debian:**
 ```bash
-podman exec bspds-db pg_dump -U bspds pds > /var/backups/pds-$(date +%Y%m%d).sql
+podman exec tranquil-pds-db pg_dump -U tranquil_pds pds > /var/backups/pds-$(date +%Y%m%d).sql
 ```
 **Alpine:**
 ```sh
-podman exec bspds-db-1 pg_dump -U bspds pds > /var/backups/pds-$(date +%Y%m%d).sql
+podman exec tranquil-pds-db-1 pg_dump -U tranquil_pds pds > /var/backups/pds-$(date +%Y%m%d).sql
 ```

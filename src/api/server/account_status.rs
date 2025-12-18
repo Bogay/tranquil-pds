@@ -157,8 +157,19 @@ pub async fn activate_account(
         .await;
     match result {
         Ok(_) => {
-            if let Some(h) = handle {
+            if let Some(ref h) = handle {
                 let _ = state.cache.delete(&format!("handle:{}", h)).await;
+            }
+            if let Err(e) =
+                crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+            {
+                warn!("Failed to sequence account activation event: {}", e);
+            }
+            if let Err(e) =
+                crate::api::repo::record::sequence_identity_event(&state, &did, handle.as_deref())
+                    .await
+            {
+                warn!("Failed to sequence identity event for activation: {}", e);
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }
@@ -222,8 +233,13 @@ pub async fn deactivate_account(
     .await;
     match result {
         Ok(_) => {
-            if let Some(h) = handle {
+            if let Some(ref h) = handle {
                 let _ = state.cache.delete(&format!("handle:{}", h)).await;
+            }
+            if let Err(e) =
+                crate::api::repo::record::sequence_account_event(&state, &did, false, Some("deactivated")).await
+            {
+                warn!("Failed to sequence account deactivation event: {}", e);
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }

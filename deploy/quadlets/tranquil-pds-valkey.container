@@ -1,10 +1,10 @@
 [Unit]
-Description=BSPDS valkey cache
+Description=Tranquil PDS valkey cache
 [Container]
-ContainerName=bspds-valkey
+ContainerName=tranquil-pds-valkey
 Image=docker.io/valkey/valkey:9-alpine
-Pod=bspds.pod
-Volume=/srv/bspds/valkey:/data:Z
+Pod=tranquil-pds.pod
+Volume=/srv/tranquil-pds/valkey:/data:Z
 Exec=valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 HealthCmd=valkey-cli ping
 HealthInterval=10s

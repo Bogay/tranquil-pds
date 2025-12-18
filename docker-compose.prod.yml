@@ -1,9 +1,9 @@
 services:
-  bspds:
+  tranquil-pds:
     build:
       context: .
       dockerfile: Dockerfile
-    image: bspds:latest
+    image: tranquil-pds:latest
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
@@ -11,7 +11,7 @@ services:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "3000"
       PDS_HOSTNAME: "${PDS_HOSTNAME:?PDS_HOSTNAME is required}"
-      DATABASE_URL: "postgres://bspds:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/pds"
+      DATABASE_URL: "postgres://tranquil_pds:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/pds"
       S3_ENDPOINT: "http://minio:9000"
       AWS_REGION: "us-east-1"
       S3_BUCKET: "pds-blobs"
@@ -46,13 +46,13 @@ services:
     image: postgres:18-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: bspds
+      POSTGRES_USER: tranquil_pds
       POSTGRES_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD is required}"
       POSTGRES_DB: pds
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bspds -d pds"]
+      test: ["CMD-SHELL", "pg_isready -U tranquil_pds -d pds"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -128,7 +128,7 @@ services:
       - ./certs:/etc/nginx/certs:ro
       - acme_challenge:/var/www/acme:ro
     depends_on:
-      - bspds
+      - tranquil-pds
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s

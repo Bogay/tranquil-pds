@@ -11,7 +11,7 @@ async fn test_list_sessions_returns_current_session() {
     let (did, jwt) = setup_new_user("list-sessions").await;
     let res = client
         .get(format!(
-            "{}/xrpc/com.bspds.account.listSessions",
+            "{}/xrpc/com.tranquil.account.listSessions",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -74,7 +74,7 @@ async fn test_list_sessions_multiple_sessions() {
     let jwt2 = login_body["accessJwt"].as_str().unwrap();
     let list_res = client
         .get(format!(
-            "{}/xrpc/com.bspds.account.listSessions",
+            "{}/xrpc/com.tranquil.account.listSessions",
             base_url().await
         ))
         .bearer_auth(jwt2)
@@ -93,7 +93,7 @@ async fn test_list_sessions_requires_auth() {
     let client = client();
     let res = client
         .get(format!(
-            "{}/xrpc/com.bspds.account.listSessions",
+            "{}/xrpc/com.tranquil.account.listSessions",
             base_url().await
         ))
         .send()
@@ -145,7 +145,7 @@ async fn test_revoke_session_success() {
     let jwt2 = login_body["accessJwt"].as_str().unwrap();
     let list_res = client
         .get(format!(
-            "{}/xrpc/com.bspds.account.listSessions",
+            "{}/xrpc/com.tranquil.account.listSessions",
             base_url().await
         ))
         .bearer_auth(jwt2)
@@ -159,7 +159,7 @@ async fn test_revoke_session_success() {
     let session_id = other_session.unwrap()["id"].as_str().unwrap();
     let revoke_res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.revokeSession",
+            "{}/xrpc/com.tranquil.account.revokeSession",
             base_url().await
         ))
         .bearer_auth(jwt2)
@@ -170,7 +170,7 @@ async fn test_revoke_session_success() {
     assert_eq!(revoke_res.status(), StatusCode::OK);
     let list_after_res = client
         .get(format!(
-            "{}/xrpc/com.bspds.account.listSessions",
+            "{}/xrpc/com.tranquil.account.listSessions",
             base_url().await
         ))
         .bearer_auth(jwt2)
@@ -190,7 +190,7 @@ async fn test_revoke_session_invalid_id() {
     let (_, jwt) = setup_new_user("revoke-invalid").await;
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.revokeSession",
+            "{}/xrpc/com.tranquil.account.revokeSession",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -207,7 +207,7 @@ async fn test_revoke_session_not_found() {
     let (_, jwt) = setup_new_user("revoke-notfound").await;
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.revokeSession",
+            "{}/xrpc/com.tranquil.account.revokeSession",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -223,7 +223,7 @@ async fn test_revoke_session_requires_auth() {
     let client = client();
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.revokeSession",
+            "{}/xrpc/com.tranquil.account.revokeSession",
             base_url().await
         ))
         .json(&json!({"sessionId": "1"}))

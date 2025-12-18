@@ -1,5 +1,5 @@
 mod common;
-use bspds::comms::{
+use tranquil_pds::comms::{
     CommsChannel, CommsStatus, CommsType, NewComms, enqueue_comms, enqueue_welcome,
 };
 use sqlx::PgPool;

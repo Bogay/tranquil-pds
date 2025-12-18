@@ -1,7 +1,7 @@
-# BSPDS Production Installation on Alpine Linux
+# Tranquil PDS Production Installation on Alpine Linux
 > **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
 
-This guide covers installing BSPDS on Alpine Linux 3.23 (current stable as of December 2025).
+This guide covers installing Tranquil PDS on Alpine Linux 3.23.
 
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
@@ -20,17 +20,16 @@ rustup-init -y
 source ~/.cargo/env
 rustup default stable
 ```
-This installs the latest stable Rust (1.92+ as of December 2025). Alpine 3.23 also ships Rust 1.91 via `apk add rust cargo` if you prefer system packages.
+This installs the latest stable Rust. Alpine also ships Rust via `apk add rust cargo` if you prefer system packages.
 ## 3. Install postgres
-Alpine 3.23 includes PostgreSQL 18:
 ```sh
 apk add postgresql postgresql-contrib
 rc-update add postgresql
 /etc/init.d/postgresql setup
 rc-service postgresql start
-psql -U postgres -c "CREATE USER bspds WITH PASSWORD 'your-secure-password';"
-psql -U postgres -c "CREATE DATABASE pds OWNER bspds;"
-psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE pds TO bspds;"
+psql -U postgres -c "CREATE USER tranquil_pds WITH PASSWORD 'your-secure-password';"
+psql -U postgres -c "CREATE DATABASE pds OWNER tranquil_pds;"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 ```
 ## 4. Install minio
 ```sh
@@ -78,7 +77,6 @@ mc alias set local http://localhost:9000 minioadmin your-minio-password
 mc mb local/pds-blobs
 ```
 ## 5. Install valkey
-Alpine 3.23 includes Valkey 9:
 ```sh
 apk add valkey
 rc-update add valkey
@@ -90,11 +88,11 @@ curl -fsSL https://deno.land/install.sh | sh
 export PATH="$HOME/.deno/bin:$PATH"
 echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.profile
 ```
-## 7. Clone and Build BSPDS
+## 7. Clone and Build Tranquil PDS
 ```sh
 mkdir -p /opt && cd /opt
-git clone https://tangled.org/lewis.moe/bspds-sandbox bspds
-cd bspds
+git clone https://tangled.org/lewis.moe/bspds-sandbox tranquil-pds
+cd tranquil-pds
 cd frontend
 deno task build
 cd ..
@@ -103,56 +101,55 @@ cargo build --release
 ## 8. Install sqlx-cli and Run Migrations
 ```sh
 cargo install sqlx-cli --no-default-features --features postgres
-export DATABASE_URL="postgres://bspds:your-secure-password@localhost:5432/pds"
+export DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds"
 sqlx migrate run
 ```
-## 9. Configure BSPDS
+## 9. Configure Tranquil PDS
 ```sh
-mkdir -p /etc/bspds
-cp /opt/bspds/.env.example /etc/bspds/bspds.env
-chmod 600 /etc/bspds/bspds.env
+mkdir -p /etc/tranquil-pds
+cp /opt/tranquil-pds/.env.example /etc/tranquil-pds/tranquil-pds.env
+chmod 600 /etc/tranquil-pds/tranquil-pds.env
 ```
-Edit `/etc/bspds/bspds.env` and fill in your values. Generate secrets with:
+Edit `/etc/tranquil-pds/tranquil-pds.env` and fill in your values. Generate secrets with:
 ```sh
 openssl rand -base64 48
 ```
 ## 10. Create OpenRC Service
 ```sh
-adduser -D -H -s /sbin/nologin bspds
-cp /opt/bspds/target/release/bspds /usr/local/bin/
-mkdir -p /var/lib/bspds
-cp -r /opt/bspds/frontend/dist /var/lib/bspds/frontend
-chown -R bspds:bspds /var/lib/bspds
-cat > /etc/init.d/bspds << 'EOF'
+adduser -D -H -s /sbin/nologin tranquil-pds
+cp /opt/tranquil-pds/target/release/tranquil-pds /usr/local/bin/
+mkdir -p /var/lib/tranquil-pds
+cp -r /opt/tranquil-pds/frontend/dist /var/lib/tranquil-pds/frontend
+chown -R tranquil-pds:tranquil-pds /var/lib/tranquil-pds
+cat > /etc/init.d/tranquil-pds << 'EOF'
 #!/sbin/openrc-run
-name="bspds"
-description="BSPDS - AT Protocol PDS"
-command="/usr/local/bin/bspds"
-command_user="bspds"
+name="tranquil-pds"
+description="Tranquil PDS - AT Protocol PDS"
+command="/usr/local/bin/tranquil-pds"
+command_user="tranquil-pds"
 command_background=true
 pidfile="/run/${RC_SVCNAME}.pid"
-output_log="/var/log/bspds.log"
-error_log="/var/log/bspds.log"
+output_log="/var/log/tranquil-pds.log"
+error_log="/var/log/tranquil-pds.log"
 depend() {
     need net postgresql minio
 }
 start_pre() {
-    export FRONTEND_DIR=/var/lib/bspds/frontend
-    . /etc/bspds/bspds.env
+    export FRONTEND_DIR=/var/lib/tranquil-pds/frontend
+    . /etc/tranquil-pds/tranquil-pds.env
     export SERVER_HOST SERVER_PORT PDS_HOSTNAME DATABASE_URL
     export S3_ENDPOINT AWS_REGION S3_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
     export VALKEY_URL JWT_SECRET DPOP_SECRET MASTER_KEY CRAWLERS
 }
 EOF
-chmod +x /etc/init.d/bspds
-rc-update add bspds
-rc-service bspds start
+chmod +x /etc/init.d/tranquil-pds
+rc-update add tranquil-pds
+rc-service tranquil-pds start
 ```
 ## 11. Install and Configure nginx
-Alpine 3.23 includes nginx 1.28:
 ```sh
 apk add nginx certbot certbot-nginx
-cat > /etc/nginx/http.d/bspds.conf << 'EOF'
+cat > /etc/nginx/http.d/tranquil-pds.conf << 'EOF'
 server {
     listen 80;
     listen [::]:80;
@@ -217,26 +214,26 @@ rc-update add ip6tables
 ```
 ## 14. Verify Installation
 ```sh
-rc-service bspds status
+rc-service tranquil-pds status
 curl -s https://pds.example.com/xrpc/_health
 curl -s https://pds.example.com/.well-known/atproto-did
 ```
 ## Maintenance
 View logs:
 ```sh
-tail -f /var/log/bspds.log
+tail -f /var/log/tranquil-pds.log
 ```
-Update BSPDS:
+Update Tranquil PDS:
 ```sh
-cd /opt/bspds
+cd /opt/tranquil-pds
 git pull
 cd frontend && deno task build && cd ..
 cargo build --release
-rc-service bspds stop
-cp target/release/bspds /usr/local/bin/
-cp -r frontend/dist /var/lib/bspds/frontend
-DATABASE_URL="postgres://bspds:your-secure-password@localhost:5432/pds" sqlx migrate run
-rc-service bspds start
+rc-service tranquil-pds stop
+cp target/release/tranquil-pds /usr/local/bin/
+cp -r frontend/dist /var/lib/tranquil-pds/frontend
+DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds" sqlx migrate run
+rc-service tranquil-pds start
 ```
 Backup database:
 ```sh

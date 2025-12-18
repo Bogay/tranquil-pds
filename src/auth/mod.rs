@@ -59,14 +59,14 @@ pub async fn validate_bearer_token(
     db: &PgPool,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, None, token, false).await
+    validate_bearer_token_with_options_internal(db, None, token, false, false).await
 }
 
 pub async fn validate_bearer_token_allow_deactivated(
     db: &PgPool,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, None, token, true).await
+    validate_bearer_token_with_options_internal(db, None, token, true, false).await
 }
 
 pub async fn validate_bearer_token_cached(
@@ -74,7 +74,7 @@ pub async fn validate_bearer_token_cached(
     cache: &Arc<dyn Cache>,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, Some(cache), token, false).await
+    validate_bearer_token_with_options_internal(db, Some(cache), token, false, false).await
 }
 
 pub async fn validate_bearer_token_cached_allow_deactivated(
@@ -82,7 +82,14 @@ pub async fn validate_bearer_token_cached_allow_deactivated(
     cache: &Arc<dyn Cache>,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, Some(cache), token, true).await
+    validate_bearer_token_with_options_internal(db, Some(cache), token, true, false).await
+}
+
+pub async fn validate_bearer_token_for_service_auth(
+    db: &PgPool,
+    token: &str,
+) -> Result<AuthenticatedUser, TokenValidationError> {
+    validate_bearer_token_with_options_internal(db, None, token, true, true).await
 }
 
 async fn validate_bearer_token_with_options_internal(
@@ -90,6 +97,7 @@ async fn validate_bearer_token_with_options_internal(
     cache: Option<&Arc<dyn Cache>>,
     token: &str,
     allow_deactivated: bool,
+    allow_takendown: bool,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
     let did_from_token = get_did_from_token(token).ok();
 
@@ -155,7 +163,7 @@ async fn validate_bearer_token_with_options_internal(
                 return Err(TokenValidationError::AccountDeactivated);
             }
 
-            if takedown_ref.is_some() {
+            if !allow_takendown && takedown_ref.is_some() {
                 return Err(TokenValidationError::AccountTakedown);
             }
 

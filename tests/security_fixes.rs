@@ -1,7 +1,7 @@
 mod common;
-use bspds::image::{ImageError, ImageProcessor};
-use bspds::comms::{SendError, is_valid_phone_number, sanitize_header_value};
-use bspds::oauth::templates::{error_page, login_page, success_page};
+use tranquil_pds::image::{ImageError, ImageProcessor};
+use tranquil_pds::comms::{SendError, is_valid_phone_number, sanitize_header_value};
+use tranquil_pds::oauth::templates::{error_page, login_page, success_page};
 
 #[test]
 fn test_header_injection_sanitization() {

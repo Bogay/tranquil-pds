@@ -33,7 +33,7 @@ async fn test_change_password_success() {
     let jwt = verify_new_account(&client, did).await;
     let change_res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.changePassword",
+            "{}/xrpc/com.tranquil.account.changePassword",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -79,7 +79,7 @@ async fn test_change_password_wrong_current() {
     let (_, jwt) = setup_new_user("change-pw-wrong").await;
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.changePassword",
+            "{}/xrpc/com.tranquil.account.changePassword",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -122,7 +122,7 @@ async fn test_change_password_too_short() {
     let jwt = verify_new_account(&client, did).await;
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.changePassword",
+            "{}/xrpc/com.tranquil.account.changePassword",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -144,7 +144,7 @@ async fn test_change_password_empty_current() {
     let (_, jwt) = setup_new_user("change-pw-empty").await;
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.changePassword",
+            "{}/xrpc/com.tranquil.account.changePassword",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -164,7 +164,7 @@ async fn test_change_password_empty_new() {
     let (_, jwt) = setup_new_user("change-pw-emptynew").await;
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.changePassword",
+            "{}/xrpc/com.tranquil.account.changePassword",
             base_url().await
         ))
         .bearer_auth(&jwt)
@@ -183,7 +183,7 @@ async fn test_change_password_requires_auth() {
     let client = client();
     let res = client
         .post(format!(
-            "{}/xrpc/com.bspds.account.changePassword",
+            "{}/xrpc/com.tranquil.account.changePassword",
             base_url().await
         ))
         .json(&json!({

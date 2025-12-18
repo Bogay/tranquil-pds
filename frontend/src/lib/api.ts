@@ -255,7 +255,7 @@ export const api = {
     signalNumber: string | null
     signalVerified: boolean
   }> {
-    return xrpc('com.bspds.account.getNotificationPrefs', { token })
+    return xrpc('com.tranquil.account.getNotificationPrefs', { token })
   },
 
   async updateNotificationPrefs(token: string, prefs: {
@@ -264,7 +264,7 @@ export const api = {
     telegramUsername?: string
     signalNumber?: string
   }): Promise<{ success: boolean }> {
-    return xrpc('com.bspds.account.updateNotificationPrefs', {
+    return xrpc('com.tranquil.account.updateNotificationPrefs', {
       method: 'POST',
       token,
       body: prefs,
@@ -272,7 +272,7 @@ export const api = {
   },
 
   async confirmChannelVerification(token: string, channel: string, code: string): Promise<{ success: boolean }> {
-    return xrpc('com.bspds.account.confirmChannelVerification', {
+    return xrpc('com.tranquil.account.confirmChannelVerification', {
       method: 'POST',
       token,
       body: { channel, code },
@@ -289,7 +289,7 @@ export const api = {
       body: string
     }>
   }> {
-    return xrpc('com.bspds.account.getNotificationHistory', { token })
+    return xrpc('com.tranquil.account.getNotificationHistory', { token })
   },
 
   async getServerStats(token: string): Promise<{
@@ -298,11 +298,11 @@ export const api = {
     recordCount: number
     blobStorageBytes: number
   }> {
-    return xrpc('com.bspds.admin.getServerStats', { token })
+    return xrpc('com.tranquil.admin.getServerStats', { token })
   },
 
   async changePassword(token: string, currentPassword: string, newPassword: string): Promise<void> {
-    await xrpc('com.bspds.account.changePassword', {
+    await xrpc('com.tranquil.account.changePassword', {
       method: 'POST',
       token,
       body: { currentPassword, newPassword },
@@ -317,11 +317,11 @@ export const api = {
       isCurrent: boolean
     }>
   }> {
-    return xrpc('com.bspds.account.listSessions', { token })
+    return xrpc('com.tranquil.account.listSessions', { token })
   },
 
   async revokeSession(token: string, sessionId: string): Promise<void> {
-    await xrpc('com.bspds.account.revokeSession', {
+    await xrpc('com.tranquil.account.revokeSession', {
       method: 'POST',
       token,
       body: { sessionId },

@@ -1,4 +1,4 @@
-use bspds::plc::{
+use tranquil_pds::plc::{
     PlcError, PlcOperation, PlcService, PlcValidationContext, cid_for_cbor, sign_operation,
     signing_key_to_did_key, validate_plc_operation, validate_plc_operation_for_submission,
     verify_operation_signature,

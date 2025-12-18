@@ -24,25 +24,25 @@ fi
 nuke_installation() {
     log_warn "NUKING EXISTING INSTALLATION"
     log_info "Stopping services..."
-    systemctl stop bspds 2>/dev/null || true
-    systemctl disable bspds 2>/dev/null || true
+    systemctl stop tranquil-pds 2>/dev/null || true
+    systemctl disable tranquil-pds 2>/dev/null || true
 
-    log_info "Removing BSPDS files..."
-    rm -rf /opt/bspds
-    rm -rf /var/lib/bspds
-    rm -f /usr/local/bin/bspds
-    rm -f /usr/local/bin/bspds-sendmail
-    rm -f /usr/local/bin/bspds-mailq
-    rm -rf /var/spool/bspds-mail
-    rm -f /etc/systemd/system/bspds.service
+    log_info "Removing Tranquil PDS files..."
+    rm -rf /opt/tranquil-pds
+    rm -rf /var/lib/tranquil-pds
+    rm -f /usr/local/bin/tranquil-pds
+    rm -f /usr/local/bin/tranquil-pds-sendmail
+    rm -f /usr/local/bin/tranquil-pds-mailq
+    rm -rf /var/spool/tranquil-pds-mail
+    rm -f /etc/systemd/system/tranquil-pds.service
     systemctl daemon-reload
 
-    log_info "Removing BSPDS configuration..."
-    rm -rf /etc/bspds
+    log_info "Removing Tranquil PDS configuration..."
+    rm -rf /etc/tranquil-pds
 
     log_info "Dropping postgres database and user..."
     sudo -u postgres psql -c "DROP DATABASE IF EXISTS pds;" 2>/dev/null || true
-    sudo -u postgres psql -c "DROP USER IF EXISTS bspds;" 2>/dev/null || true
+    sudo -u postgres psql -c "DROP USER IF EXISTS tranquil_pds;" 2>/dev/null || true
 
     log_info "Removing minio bucket..."
     if command -v mc &>/dev/null; then
@@ -54,14 +54,14 @@ nuke_installation() {
     rm -f /etc/default/minio 2>/dev/null || true
 
     log_info "Removing nginx config..."
-    rm -f /etc/nginx/sites-enabled/bspds
-    rm -f /etc/nginx/sites-available/bspds
+    rm -f /etc/nginx/sites-enabled/tranquil-pds
+    rm -f /etc/nginx/sites-available/tranquil-pds
     systemctl reload nginx 2>/dev/null || true
 
     log_success "Previous installation nuked"
 }
 
-if [[ -f /etc/bspds/bspds.env ]] || [[ -d /opt/bspds ]] || [[ -f /usr/local/bin/bspds ]]; then
+if [[ -f /etc/tranquil-pds/tranquil-pds.env ]] || [[ -d /opt/tranquil-pds ]] || [[ -f /usr/local/bin/tranquil-pds ]]; then
     log_warn "Existing installation detected"
     echo ""
     echo "Options:"
@@ -76,8 +76,8 @@ if [[ -f /etc/bspds/bspds.env ]] || [[ -d /opt/bspds ]] || [[ -f /usr/local/bin/
             echo ""
             log_warn "This will DELETE:"
             echo "  - PostgreSQL database 'pds' and all data"
-            echo "  - All BSPDS configuration and credentials"
-            echo "  - All source code in /opt/bspds"
+            echo "  - All Tranquil PDS configuration and credentials"
+            echo "  - All source code in /opt/tranquil-pds"
             echo "  - MinIO bucket 'pds-blobs' and all blobs"
             echo ""
             read -p "Type 'NUKE' to confirm: " CONFIRM_NUKE
@@ -102,7 +102,7 @@ if [[ -f /etc/bspds/bspds.env ]] || [[ -d /opt/bspds ]] || [[ -f /usr/local/bin/
 fi
 
 echo ""
-log_info "BSPDS Installation Script for Debian"
+log_info "Tranquil PDS Installation Script for Debian"
 echo ""
 
 get_public_ips() {
@@ -142,7 +142,7 @@ if [[ ! "$DNS_CONFIRMED" =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-CREDENTIALS_FILE="/etc/bspds/.credentials"
+CREDENTIALS_FILE="/etc/tranquil-pds/.credentials"
 if [[ -f "$CREDENTIALS_FILE" ]]; then
     log_info "Loading existing credentials..."
     source "$CREDENTIALS_FILE"
@@ -154,7 +154,7 @@ else
     DB_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)
     MINIO_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)
 
-    mkdir -p /etc/bspds
+    mkdir -p /etc/tranquil-pds
     cat > "$CREDENTIALS_FILE" << EOF
 JWT_SECRET="$JWT_SECRET"
 DPOP_SECRET="$DPOP_SECRET"
@@ -196,10 +196,10 @@ log_info "Installing postgres..."
 apt install -y postgresql postgresql-contrib
 systemctl enable postgresql
 systemctl start postgresql
-sudo -u postgres psql -c "CREATE USER bspds WITH PASSWORD '${DB_PASSWORD}';" 2>/dev/null || \
-    sudo -u postgres psql -c "ALTER USER bspds WITH PASSWORD '${DB_PASSWORD}';"
-sudo -u postgres psql -c "CREATE DATABASE pds OWNER bspds;" 2>/dev/null || true
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO bspds;"
+sudo -u postgres psql -c "CREATE USER tranquil_pds WITH PASSWORD '${DB_PASSWORD}';" 2>/dev/null || \
+    sudo -u postgres psql -c "ALTER USER tranquil_pds WITH PASSWORD '${DB_PASSWORD}';"
+sudo -u postgres psql -c "CREATE DATABASE pds OWNER tranquil_pds;" 2>/dev/null || true
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 log_success "postgres configured"
 
 log_info "Installing valkey..."
@@ -292,19 +292,19 @@ if ! command -v deno &>/dev/null && [[ ! -f "$HOME/.deno/bin/deno" ]]; then
     grep -q 'deno/bin' ~/.bashrc 2>/dev/null || echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.bashrc
 fi
 
-log_info "Cloning BSPDS..."
-if [[ ! -d /opt/bspds ]]; then
-    git clone https://tangled.org/lewis.moe/bspds-sandbox /opt/bspds
+log_info "Cloning Tranquil PDS..."
+if [[ ! -d /opt/tranquil-pds ]]; then
+    git clone https://tangled.org/lewis.moe/bspds-sandbox /opt/tranquil-pds
 else
-    cd /opt/bspds && git pull
+    cd /opt/tranquil-pds && git pull
 fi
-cd /opt/bspds
+cd /opt/tranquil-pds
 
 log_info "Building frontend..."
 "$HOME/.deno/bin/deno" task build --filter=frontend
 log_success "Frontend built"
 
-log_info "Building BSPDS (this takes a while)..."
+log_info "Building Tranquil PDS (this takes a while)..."
 source "$HOME/.cargo/env"
 if [[ $TOTAL_MEM_KB -lt 4000000 ]]; then
     log_info "Low memory - limiting parallel jobs"
@@ -312,39 +312,39 @@ if [[ $TOTAL_MEM_KB -lt 4000000 ]]; then
 else
     cargo build --release
 fi
-log_success "BSPDS built"
+log_success "Tranquil PDS built"
 
 log_info "Running migrations..."
 cargo install sqlx-cli --no-default-features --features postgres
-export DATABASE_URL="postgres://bspds:${DB_PASSWORD}@localhost:5432/pds"
+export DATABASE_URL="postgres://tranquil_pds:${DB_PASSWORD}@localhost:5432/pds"
 "$HOME/.cargo/bin/sqlx" migrate run
 log_success "Migrations complete"
 
 log_info "Setting up mail trap..."
-mkdir -p /var/spool/bspds-mail
-chmod 1777 /var/spool/bspds-mail
+mkdir -p /var/spool/tranquil-pds-mail
+chmod 1777 /var/spool/tranquil-pds-mail
 
-cat > /usr/local/bin/bspds-sendmail << 'SENDMAIL_EOF'
+cat > /usr/local/bin/tranquil-pds-sendmail << 'SENDMAIL_EOF'
 #!/bin/bash
-MAIL_DIR="/var/spool/bspds-mail"
+MAIL_DIR="/var/spool/tranquil-pds-mail"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 RANDOM_ID=$(head -c 4 /dev/urandom | xxd -p)
 MAIL_FILE="${MAIL_DIR}/${TIMESTAMP}-${RANDOM_ID}.eml"
 mkdir -p "$MAIL_DIR"
 {
-    echo "X-BSPDS-Received: $(date -Iseconds)"
-    echo "X-BSPDS-Args: $*"
+    echo "X-Tranquil-PDS-Received: $(date -Iseconds)"
+    echo "X-Tranquil-PDS-Args: $*"
     echo ""
     cat
 } > "$MAIL_FILE"
 chmod 644 "$MAIL_FILE"
 exit 0
 SENDMAIL_EOF
-chmod +x /usr/local/bin/bspds-sendmail
+chmod +x /usr/local/bin/tranquil-pds-sendmail
 
-cat > /usr/local/bin/bspds-mailq << 'MAILQ_EOF'
+cat > /usr/local/bin/tranquil-pds-mailq << 'MAILQ_EOF'
 #!/bin/bash
-MAIL_DIR="/var/spool/bspds-mail"
+MAIL_DIR="/var/spool/tranquil-pds-mail"
 case "${1:-list}" in
     list)
         ls -lt "$MAIL_DIR"/*.eml 2>/dev/null | head -20 || echo "No emails"
@@ -365,18 +365,18 @@ case "${1:-list}" in
         [[ -f "$f" ]] && cat "$f" || echo "Not found"
         ;;
     *)
-        [[ -f "$MAIL_DIR/$1" ]] && cat "$MAIL_DIR/$1" || echo "Usage: bspds-mailq [list|latest|clear|count|N]"
+        [[ -f "$MAIL_DIR/$1" ]] && cat "$MAIL_DIR/$1" || echo "Usage: tranquil-pds-mailq [list|latest|clear|count|N]"
         ;;
 esac
 MAILQ_EOF
-chmod +x /usr/local/bin/bspds-mailq
+chmod +x /usr/local/bin/tranquil-pds-mailq
 
-log_info "Creating BSPDS configuration..."
-cat > /etc/bspds/bspds.env << EOF
+log_info "Creating Tranquil PDS configuration..."
+cat > /etc/tranquil-pds/tranquil-pds.env << EOF
 SERVER_HOST=127.0.0.1
 SERVER_PORT=3000
 PDS_HOSTNAME=${PDS_DOMAIN}
-DATABASE_URL=postgres://bspds:${DB_PASSWORD}@localhost:5432/pds
+DATABASE_URL=postgres://tranquil_pds:${DB_PASSWORD}@localhost:5432/pds
 DATABASE_MAX_CONNECTIONS=100
 DATABASE_MIN_CONNECTIONS=10
 S3_ENDPOINT=http://localhost:9000
@@ -392,30 +392,30 @@ PLC_DIRECTORY_URL=https://plc.directory
 CRAWLERS=https://bsky.network
 AVAILABLE_USER_DOMAINS=${PDS_DOMAIN}
 MAIL_FROM_ADDRESS=noreply@${PDS_DOMAIN}
-MAIL_FROM_NAME=BSPDS
-SENDMAIL_PATH=/usr/local/bin/bspds-sendmail
+MAIL_FROM_NAME=Tranquil PDS
+SENDMAIL_PATH=/usr/local/bin/tranquil-pds-sendmail
 EOF
-chmod 600 /etc/bspds/bspds.env
+chmod 600 /etc/tranquil-pds/tranquil-pds.env
 
-log_info "Installing BSPDS..."
-id -u bspds &>/dev/null || useradd -r -s /sbin/nologin bspds
-cp /opt/bspds/target/release/bspds /usr/local/bin/
-mkdir -p /var/lib/bspds
-cp -r /opt/bspds/frontend/dist /var/lib/bspds/frontend
-chown -R bspds:bspds /var/lib/bspds
+log_info "Installing Tranquil PDS..."
+id -u tranquil-pds &>/dev/null || useradd -r -s /sbin/nologin tranquil-pds
+cp /opt/tranquil-pds/target/release/tranquil-pds /usr/local/bin/
+mkdir -p /var/lib/tranquil-pds
+cp -r /opt/tranquil-pds/frontend/dist /var/lib/tranquil-pds/frontend
+chown -R tranquil-pds:tranquil-pds /var/lib/tranquil-pds
 
-cat > /etc/systemd/system/bspds.service << 'EOF'
+cat > /etc/systemd/system/tranquil-pds.service << 'EOF'
 [Unit]
-Description=BSPDS - AT Protocol PDS
+Description=Tranquil PDS - AT Protocol PDS
 After=network.target postgresql.service minio.service
 
 [Service]
 Type=simple
-User=bspds
-Group=bspds
-EnvironmentFile=/etc/bspds/bspds.env
-Environment=FRONTEND_DIR=/var/lib/bspds/frontend
-ExecStart=/usr/local/bin/bspds
+User=tranquil-pds
+Group=tranquil-pds
+EnvironmentFile=/etc/tranquil-pds/tranquil-pds.env
+Environment=FRONTEND_DIR=/var/lib/tranquil-pds/frontend
+ExecStart=/usr/local/bin/tranquil-pds
 Restart=always
 RestartSec=5
 
@@ -424,13 +424,13 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable bspds
-systemctl start bspds
-log_success "BSPDS service started"
+systemctl enable tranquil-pds
+systemctl start tranquil-pds
+log_success "Tranquil PDS service started"
 
 log_info "Installing nginx..."
 apt install -y nginx
-cat > /etc/nginx/sites-available/bspds << EOF
+cat > /etc/nginx/sites-available/tranquil-pds << EOF
 server {
     listen 80;
     listen [::]:80;
@@ -456,7 +456,7 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/bspds /etc/nginx/sites-enabled/
+ln -sf /etc/nginx/sites-available/tranquil-pds /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
@@ -496,7 +496,7 @@ if [[ "$CERT_READY" =~ ^[Yy]$ ]]; then
         -d "${PDS_DOMAIN}" -d "*.${PDS_DOMAIN}" \
         --email "${CERTBOT_EMAIL}" --agree-tos; then
 
-        cat > /etc/nginx/sites-available/bspds << EOF
+        cat > /etc/nginx/sites-available/tranquil-pds << EOF
 server {
     listen 80;
     listen [::]:80;
@@ -564,9 +564,9 @@ fi
 log_info "Verifying installation..."
 sleep 3
 if curl -s "http://localhost:3000/xrpc/_health" | grep -q "version"; then
-    log_success "BSPDS is responding"
+    log_success "Tranquil PDS is responding"
 else
-    log_warn "BSPDS may still be starting. Check: journalctl -u bspds -f"
+    log_warn "Tranquil PDS may still be starting. Check: journalctl -u tranquil-pds -f"
 fi
 
 echo ""
@@ -574,12 +574,12 @@ log_success "Installation complete"
 echo ""
 echo "PDS: https://${PDS_DOMAIN}"
 echo ""
-echo "Credentials (also in /etc/bspds/.credentials):"
+echo "Credentials (also in /etc/tranquil-pds/.credentials):"
 echo "  DB password:    ${DB_PASSWORD}"
 echo "  MinIO password: ${MINIO_PASSWORD}"
 echo ""
 echo "Commands:"
-echo "  journalctl -u bspds -f    # logs"
-echo "  systemctl restart bspds   # restart"
-echo "  bspds-mailq               # view trapped emails"
+echo "  journalctl -u tranquil-pds -f    # logs"
+echo "  systemctl restart tranquil-pds   # restart"
+echo "  tranquil-pds-mailq               # view trapped emails"
 echo ""

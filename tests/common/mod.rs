@@ -1,7 +1,7 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::config::Credentials;
-use bspds::state::AppState;
+use tranquil_pds::state::AppState;
 use chrono::Utc;
 use reqwest::{Client, StatusCode, header};
 use serde_json::{Value, json};
@@ -40,7 +40,7 @@ pub const AUTH_DID: &str = "did:plc:fake";
 pub const TARGET_DID: &str = "did:plc:target";
 
 fn has_external_infra() -> bool {
-    std::env::var("BSPDS_TEST_INFRA_READY").is_ok()
+    std::env::var("TRANQUIL_PDS_TEST_INFRA_READY").is_ok()
         || (std::env::var("DATABASE_URL").is_ok() && std::env::var("S3_ENDPOINT").is_ok())
 }
 #[cfg(test)]
@@ -51,7 +51,7 @@ fn cleanup() {
     }
     if std::env::var("XDG_RUNTIME_DIR").is_ok() {
         let _ = std::process::Command::new("podman")
-            .args(&["rm", "-f", "--filter", "label=bspds_test=true"])
+            .args(&["rm", "-f", "--filter", "label=tranquil_pds_test=true"])
             .output();
     }
     let _ = std::process::Command::new("docker")
@@ -60,7 +60,7 @@ fn cleanup() {
             "prune",
             "-f",
             "--filter",
-            "label=bspds_test=true",
+            "label=tranquil_pds_test=true",
         ])
         .output();
 }
@@ -80,7 +80,7 @@ pub async fn base_url() -> &'static str {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             unsafe {
-                std::env::set_var("BSPDS_ALLOW_INSECURE_SECRETS", "1");
+                std::env::set_var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS", "1");
             }
             if std::env::var("DOCKER_HOST").is_err() {
                 if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
@@ -152,7 +152,7 @@ async fn setup_with_testcontainers() -> String {
         .with_env_var("MINIO_ROOT_USER", "minioadmin")
         .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")
         .with_cmd(vec!["server".to_string(), "/data".to_string()])
-        .with_label("bspds_test", "true")
+        .with_label("tranquil_pds_test", "true")
         .start()
         .await
         .expect("Failed to start MinIO");
@@ -195,7 +195,7 @@ async fn setup_with_testcontainers() -> String {
     S3_CONTAINER.set(s3_container).ok();
     let container = Postgres::default()
         .with_tag("18-alpine")
-        .with_label("bspds_test", "true")
+        .with_label("tranquil_pds_test", "true")
         .start()
         .await
         .expect("Failed to start Postgres");
@@ -236,7 +236,7 @@ async fn setup_mock_appview(_mock_server: &MockServer) {
 }
 
 async fn spawn_app(database_url: String) -> String {
-    use bspds::rate_limit::RateLimiters;
+    use tranquil_pds::rate_limit::RateLimiters;
     let pool = PgPoolOptions::new()
         .max_connections(50)
         .connect(&database_url)
@@ -260,8 +260,8 @@ async fn spawn_app(database_url: String) -> String {
         .with_oauth_authorize_limit(10000)
         .with_oauth_token_limit(10000);
     let state = AppState::new(pool).await.with_rate_limiters(rate_limiters);
-    bspds::sync::listener::start_sequencer_listener(state.clone()).await;
-    let app = bspds::app(state);
+    tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
+    let app = tranquil_pds::app(state);
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });

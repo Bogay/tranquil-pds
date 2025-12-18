@@ -194,7 +194,7 @@ async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
     .fetch_optional(&pool)
     .await
     .ok()??;
-    bspds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
+    tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
 }
 #[tokio::test]
 #[ignore = "requires exclusive env var access; run with: cargo test test_import_with_valid_signature_and_mock_plc -- --ignored --test-threads=1"]

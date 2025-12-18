@@ -2,7 +2,7 @@
 mod common;
 mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bspds::oauth::dpop::{DPoPJwk, DPoPVerifier, compute_jwk_thumbprint};
+use tranquil_pds::oauth::dpop::{DPoPJwk, DPoPVerifier, compute_jwk_thumbprint};
 use chrono::Utc;
 use common::{base_url, client};
 use helpers::verify_new_account;

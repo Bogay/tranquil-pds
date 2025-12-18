@@ -2,7 +2,7 @@
   import { confirmSignup, resendVerification, getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
 
-  const STORAGE_KEY = 'bspds_pending_verification'
+  const STORAGE_KEY = 'tranquil_pds_pending_verification'
 
   interface PendingVerification {
     did: string

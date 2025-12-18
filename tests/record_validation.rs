@@ -1,4 +1,4 @@
-use bspds::validation::{
+use tranquil_pds::validation::{
     RecordValidator, ValidationError, ValidationStatus, validate_collection_nsid,
     validate_record_key,
 };

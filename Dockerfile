@@ -16,7 +16,7 @@ COPY .sqlx ./.sqlx
 RUN touch src/main.rs && cargo build --release
 # Stage 3: Final image
 FROM alpine:3.23
-COPY --from=builder /app/target/release/bspds /usr/local/bin/bspds
+COPY --from=builder /app/target/release/tranquil-pds /usr/local/bin/tranquil-pds
 COPY --from=builder /app/migrations /app/migrations
 COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 WORKDIR /app
@@ -24,4 +24,4 @@ ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=3000
 ENV FRONTEND_DIR=/app/frontend/dist
 EXPOSE 3000
-CMD ["bspds"]
+CMD ["tranquil-pds"]

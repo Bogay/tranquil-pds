@@ -1,0 +1,20 @@
+[Unit]
+Description=Tranquil PDS postgres database
+[Container]
+ContainerName=tranquil-pds-db
+Image=docker.io/library/postgres:18-alpine
+Pod=tranquil-pds.pod
+Environment=POSTGRES_USER=tranquil_pds
+Environment=POSTGRES_DB=pds
+Secret=tranquil-pds-db-password,type=env,target=POSTGRES_PASSWORD
+Volume=/srv/tranquil-pds/postgres:/var/lib/postgresql/data:Z
+HealthCmd=pg_isready -U tranquil_pds -d pds
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=10s
+[Service]
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=default.target

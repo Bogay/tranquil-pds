@@ -10,7 +10,7 @@ import {
   setupAuthenticatedUser,
   setupUnauthenticatedUser,
 } from './mocks'
-const STORAGE_KEY = 'bspds_session'
+const STORAGE_KEY = 'tranquil_pds_session'
 describe('Dashboard', () => {
   beforeEach(() => {
     clearMocks()
@@ -38,8 +38,8 @@ describe('Dashboard', () => {
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /dashboard/i })).toBeInTheDocument()
         expect(screen.getByRole('heading', { name: /account overview/i })).toBeInTheDocument()
-        expect(screen.getByText(/@testuser\.test\.bspds\.dev/)).toBeInTheDocument()
-        expect(screen.getByText(/did:web:test\.bspds\.dev:u:testuser/)).toBeInTheDocument()
+        expect(screen.getByText(/@testuser\.test\.tranquil\.dev/)).toBeInTheDocument()
+        expect(screen.getByText(/did:web:test\.tranquil\.dev:u:testuser/)).toBeInTheDocument()
         expect(screen.getByText('test@example.com')).toBeInTheDocument()
         expect(screen.getByText('Verified')).toBeInTheDocument()
         expect(screen.getByText('Verified')).toHaveClass('badge', 'success')

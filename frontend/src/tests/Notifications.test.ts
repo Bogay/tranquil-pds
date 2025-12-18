@@ -28,7 +28,7 @@ describe('Notifications', () => {
   describe('page structure', () => {
     beforeEach(() => {
       setupAuthenticatedUser()
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
     })
@@ -48,7 +48,7 @@ describe('Notifications', () => {
       setupAuthenticatedUser()
     })
     it('shows loading text while fetching preferences', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', async () => {
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', async () => {
         await new Promise(resolve => setTimeout(resolve, 100))
         return jsonResponse(mockData.notificationPrefs())
       })
@@ -61,7 +61,7 @@ describe('Notifications', () => {
       setupAuthenticatedUser()
     })
     it('displays all four channel options', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
       render(Notifications)
@@ -73,7 +73,7 @@ describe('Notifications', () => {
       })
     })
     it('email channel is always selectable', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
       render(Notifications)
@@ -83,7 +83,7 @@ describe('Notifications', () => {
       })
     })
     it('discord channel is disabled when not configured', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({ discordId: null }))
       )
       render(Notifications)
@@ -93,7 +93,7 @@ describe('Notifications', () => {
       })
     })
     it('discord channel is enabled when configured', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({ discordId: '123456789' }))
       )
       render(Notifications)
@@ -103,7 +103,7 @@ describe('Notifications', () => {
       })
     })
     it('shows hint for disabled channels', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
       render(Notifications)
@@ -112,7 +112,7 @@ describe('Notifications', () => {
       })
     })
     it('selects current preferred channel', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({ preferredChannel: 'email' }))
       )
       render(Notifications)
@@ -127,7 +127,7 @@ describe('Notifications', () => {
       setupAuthenticatedUser()
     })
     it('displays email as readonly with current value', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
       render(Notifications)
@@ -138,7 +138,7 @@ describe('Notifications', () => {
       })
     })
     it('displays all channel inputs with current values', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({
           discordId: '123456789',
           telegramUsername: 'testuser',
@@ -158,7 +158,7 @@ describe('Notifications', () => {
       setupAuthenticatedUser()
     })
     it('shows Primary badge for email', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
       render(Notifications)
@@ -167,7 +167,7 @@ describe('Notifications', () => {
       })
     })
     it('shows Verified badge for verified discord', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({
           discordId: '123456789',
           discordVerified: true,
@@ -180,7 +180,7 @@ describe('Notifications', () => {
       })
     })
     it('shows Not verified badge for unverified discord', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({
           discordId: '123456789',
           discordVerified: false,
@@ -192,7 +192,7 @@ describe('Notifications', () => {
       })
     })
     it('does not show badge when channel not configured', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
       render(Notifications)
@@ -208,10 +208,10 @@ describe('Notifications', () => {
     })
     it('calls updateNotificationPrefs with correct data', async () => {
       let capturedBody: Record<string, unknown> | null = null
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      mockEndpoint('com.bspds.account.updateNotificationPrefs', (_url, options) => {
+      mockEndpoint('com.tranquil.account.updateNotificationPrefs', (_url, options) => {
         capturedBody = JSON.parse((options?.body as string) || '{}')
         return jsonResponse({ success: true })
       })
@@ -228,10 +228,10 @@ describe('Notifications', () => {
       })
     })
     it('shows loading state while saving', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      mockEndpoint('com.bspds.account.updateNotificationPrefs', async () => {
+      mockEndpoint('com.tranquil.account.updateNotificationPrefs', async () => {
         await new Promise(resolve => setTimeout(resolve, 100))
         return jsonResponse({ success: true })
       })
@@ -244,10 +244,10 @@ describe('Notifications', () => {
       expect(screen.getByRole('button', { name: /saving/i })).toBeDisabled()
     })
     it('shows success message after saving', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      mockEndpoint('com.bspds.account.updateNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.updateNotificationPrefs', () =>
         jsonResponse({ success: true })
       )
       render(Notifications)
@@ -260,10 +260,10 @@ describe('Notifications', () => {
       })
     })
     it('shows error when save fails', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      mockEndpoint('com.bspds.account.updateNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.updateNotificationPrefs', () =>
         errorResponse('InvalidRequest', 'Invalid channel configuration', 400)
       )
       render(Notifications)
@@ -278,11 +278,11 @@ describe('Notifications', () => {
     })
     it('reloads preferences after successful save', async () => {
       let loadCount = 0
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () => {
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () => {
         loadCount++
         return jsonResponse(mockData.notificationPrefs())
       })
-      mockEndpoint('com.bspds.account.updateNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.updateNotificationPrefs', () =>
         jsonResponse({ success: true })
       )
       render(Notifications)
@@ -301,7 +301,7 @@ describe('Notifications', () => {
       setupAuthenticatedUser()
     })
     it('enables discord channel after entering discord ID', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
       render(Notifications)
@@ -314,7 +314,7 @@ describe('Notifications', () => {
       })
     })
     it('allows selecting a configured channel', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({
           discordId: '123456789',
           discordVerified: true,
@@ -334,7 +334,7 @@ describe('Notifications', () => {
       setupAuthenticatedUser()
     })
     it('shows error when loading preferences fails', async () => {
-      mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+      mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         errorResponse('InternalError', 'Database connection failed', 500)
       )
       render(Notifications)

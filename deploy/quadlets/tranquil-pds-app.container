@@ -1,11 +1,11 @@
 [Unit]
-Description=BSPDS AT Protocol PDS
-After=bspds-db.service bspds-minio.service bspds-valkey.service
+Description=Tranquil PDS AT Protocol PDS
+After=tranquil-pds-db.service tranquil-pds-minio.service tranquil-pds-valkey.service
 [Container]
-ContainerName=bspds-app
-Image=localhost/bspds:latest
-Pod=bspds.pod
-EnvironmentFile=/srv/bspds/config/bspds.env
+ContainerName=tranquil-pds-app
+Image=localhost/tranquil-pds:latest
+Pod=tranquil-pds.pod
+EnvironmentFile=/srv/tranquil-pds/config/tranquil-pds.env
 Environment=SERVER_HOST=0.0.0.0
 Environment=SERVER_PORT=3000
 Environment=S3_ENDPOINT=http://localhost:9000

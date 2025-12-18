@@ -52,11 +52,11 @@ pub fn app(state: AppState) -> Router {
             get(api::server::get_session),
         )
         .route(
-            "/xrpc/com.bspds.account.listSessions",
+            "/xrpc/com.tranquil.account.listSessions",
             get(api::server::list_sessions),
         )
         .route(
-            "/xrpc/com.bspds.account.revokeSession",
+            "/xrpc/com.tranquil.account.revokeSession",
             post(api::server::revoke_session),
         )
         .route(
@@ -199,7 +199,7 @@ pub fn app(state: AppState) -> Router {
             post(api::server::reset_password),
         )
         .route(
-            "/xrpc/com.bspds.account.changePassword",
+            "/xrpc/com.tranquil.account.changePassword",
             post(api::server::change_password),
         )
         .route(
@@ -283,7 +283,7 @@ pub fn app(state: AppState) -> Router {
             get(api::admin::get_invite_codes),
         )
         .route(
-            "/xrpc/com.bspds.admin.getServerStats",
+            "/xrpc/com.tranquil.admin.getServerStats",
             get(api::admin::get_server_stats),
         )
         .route(
@@ -370,19 +370,19 @@ pub fn app(state: AppState) -> Router {
             get(api::temp::check_signup_queue),
         )
         .route(
-            "/xrpc/com.bspds.account.getNotificationPrefs",
+            "/xrpc/com.tranquil.account.getNotificationPrefs",
             get(api::notification_prefs::get_notification_prefs),
         )
         .route(
-            "/xrpc/com.bspds.account.updateNotificationPrefs",
+            "/xrpc/com.tranquil.account.updateNotificationPrefs",
             post(api::notification_prefs::update_notification_prefs),
         )
         .route(
-            "/xrpc/com.bspds.account.getNotificationHistory",
+            "/xrpc/com.tranquil.account.getNotificationHistory",
             get(api::notification_prefs::get_notification_history),
         )
         .route(
-            "/xrpc/com.bspds.account.confirmChannelVerification",
+            "/xrpc/com.tranquil.account.confirmChannelVerification",
             post(api::verification::confirm_channel_verification),
         )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))

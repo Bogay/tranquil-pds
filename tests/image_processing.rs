@@ -1,4 +1,4 @@
-use bspds::image::{
+use tranquil_pds::image::{
     DEFAULT_MAX_FILE_SIZE, ImageError, ImageProcessor, OutputFormat, THUMB_SIZE_FEED,
     THUMB_SIZE_FULL,
 };

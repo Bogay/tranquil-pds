@@ -10,7 +10,7 @@ cleanup() {
 }
 trap cleanup EXIT
 "$INFRA_SCRIPT" start
-source "${TMPDIR:-/tmp}/bspds_test_infra.env"
+source "${TMPDIR:-/tmp}/tranquil_pds_test_infra.env"
 echo ""
 echo "Running database migrations..."
 sqlx database create 2>/dev/null || true

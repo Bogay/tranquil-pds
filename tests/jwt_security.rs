@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 mod common;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bspds::auth::{
+use tranquil_pds::auth::{
     self, SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH,
     TOKEN_TYPE_ACCESS, TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, create_access_token,
     create_refresh_token, create_service_token, get_did_from_token, get_jti_from_token,
@@ -409,7 +409,7 @@ async fn test_session_lifecycle_security() {
 }
 
 #[tokio::test]
-async fn test_deactivated_account_rejected() {
+async fn test_deactivated_account_behavior() {
     let url = base_url().await;
     let http_client = client();
     let (access_jwt, _did) = create_account_and_login(&http_client).await;
@@ -423,9 +423,25 @@ async fn test_deactivated_account_rejected() {
     let res = http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
         .header("Authorization", format!("Bearer {}", access_jwt))
         .send().await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
-    assert_eq!(body["error"], "AccountDeactivated");
+    assert_eq!(body["active"], false);
+
+    let post_res = http_client.post(format!("{}/xrpc/com.atproto.repo.createRecord", url))
+        .header("Authorization", format!("Bearer {}", access_jwt))
+        .json(&json!({
+            "repo": _did,
+            "collection": "app.bsky.feed.post",
+            "record": {
+                "$type": "app.bsky.feed.post",
+                "text": "test",
+                "createdAt": "2024-01-01T00:00:00Z"
+            }
+        }))
+        .send().await.unwrap();
+    assert_eq!(post_res.status(), StatusCode::UNAUTHORIZED);
+    let post_body: Value = post_res.json().await.unwrap();
+    assert_eq!(post_body["error"], "AccountDeactivated");
 }
 
 #[tokio::test]

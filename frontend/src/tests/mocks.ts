@@ -85,8 +85,8 @@ export function errorResponse(error: string, message: string, status = 400): Moc
 }
 export const mockData = {
   session: (overrides?: Partial<Session>): Session => ({
-    did: 'did:web:test.bspds.dev:u:testuser',
-    handle: 'testuser.test.bspds.dev',
+    did: 'did:web:test.tranquil.dev:u:testuser',
+    handle: 'testuser.test.tranquil.dev',
     email: 'test@example.com',
     emailConfirmed: true,
     accessJwt: 'mock-access-jwt-token',
@@ -102,8 +102,8 @@ export const mockData = {
     code: 'test-invite-123',
     available: 1,
     disabled: false,
-    forAccount: 'did:web:test.bspds.dev:u:testuser',
-    createdBy: 'did:web:test.bspds.dev:u:testuser',
+    forAccount: 'did:web:test.tranquil.dev:u:testuser',
+    createdBy: 'did:web:test.tranquil.dev:u:testuser',
     createdAt: new Date().toISOString(),
     uses: [],
     ...overrides,
@@ -120,7 +120,7 @@ export const mockData = {
     ...overrides,
   }),
   describeServer: () => ({
-    availableUserDomains: ['test.bspds.dev'],
+    availableUserDomains: ['test.tranquil.dev'],
     inviteCodeRequired: false,
     links: {
       privacyPolicy: 'https://example.com/privacy',
@@ -128,7 +128,7 @@ export const mockData = {
     },
   }),
   describeRepo: (did: string) => ({
-    handle: 'testuser.test.bspds.dev',
+    handle: 'testuser.test.tranquil.dev',
     did,
     didDoc: {},
     collections: ['app.bsky.feed.post', 'app.bsky.feed.like', 'app.bsky.graph.follow'],
@@ -173,10 +173,10 @@ export function setupDefaultMocks(): void {
   mockEndpoint('com.atproto.server.createInviteCode', () =>
     jsonResponse({ code: 'new-invite-' + Date.now() })
   )
-  mockEndpoint('com.bspds.account.getNotificationPrefs', () =>
+  mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
     jsonResponse(mockData.notificationPrefs())
   )
-  mockEndpoint('com.bspds.account.updateNotificationPrefs', () =>
+  mockEndpoint('com.tranquil.account.updateNotificationPrefs', () =>
     jsonResponse({ success: true })
   )
   mockEndpoint('com.atproto.server.requestEmailUpdate', () =>
