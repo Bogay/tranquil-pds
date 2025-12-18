@@ -21,7 +21,6 @@ services:
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}"
       DPOP_SECRET: "${DPOP_SECRET:?DPOP_SECRET is required (min 32 chars)}"
       MASTER_KEY: "${MASTER_KEY:?MASTER_KEY is required (min 32 chars)}"
-      APPVIEW_URL: "${APPVIEW_URL:-https://api.bsky.app}"
       CRAWLERS: "${CRAWLERS:-https://bsky.network}"
       FRONTEND_DIR: "/app/frontend/dist"
     depends_on:

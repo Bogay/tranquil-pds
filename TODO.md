@@ -53,19 +53,6 @@ Modern passwordless authentication using WebAuthn/FIDO2, plus TOTP for defense i
 - [ ] Rate limit 2FA attempts
 - [ ] Re-auth for sensitive actions (email change, adding new auth methods)
 
-### Private/encrypted data
-Records that only authorized parties can see and decrypt. Requires key federation between PDSes.
-
-- [ ] Survey current ATProto discourse on private data
-- [ ] Document Bluesky team's likely approach
-- [ ] Design key management strategy
-- [ ] Per-user encryption keys (separate from signing keys)
-- [ ] Key derivation for per-record or per-collection encryption
-- [ ] Encrypted record storage format
-- [ ] Transparent encryption/decryption in repo operations
-- [ ] Protocol for sharing decryption keys between PDSes
-- [ ] Handle key rotation and revocation
-
 ### Plugin system
 Extensible architecture allowing third-party plugins to add functionality, like minecraft mods or browser extensions.
 
@@ -81,6 +68,19 @@ Extensible architecture allowing third-party plugins to add functionality, like 
 - [ ] Plugin SDK crate with traits and helpers
 - [ ] Example plugins: custom feed algorithm, content filter, S3 backup
 - [ ] Plugin registry with signature verification and version compatibility
+
+### Plugin: Private/encrypted data
+Records that only authorized parties can see and decrypt. Requires key federation between PDSes. Implemented as a plugin using the plugin system above.
+
+- [ ] Survey current ATProto discourse on private data
+- [ ] Document Bluesky team's likely approach
+- [ ] Design key management strategy
+- [ ] Per-user encryption keys (separate from signing keys)
+- [ ] Key derivation for per-record or per-collection encryption
+- [ ] Encrypted record storage format
+- [ ] Transparent encryption/decryption in repo operations
+- [ ] Protocol for sharing decryption keys between PDSes
+- [ ] Handle key rotation and revocation
 
 ---
 

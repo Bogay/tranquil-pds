@@ -1,8 +1,9 @@
+use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use cid::Cid;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::str::FromStr;
-use tracing::error;
+use tracing::{error, info};
 
 #[derive(Deserialize)]
 pub struct GetRecordInput {
@@ -23,6 +24,7 @@ pub struct GetRecordInput {
 
 pub async fn get_record(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(input): Query<GetRecordInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -46,6 +48,63 @@ pub async fn get_record(
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
         Ok(None) => {
+            if let Some(proxy_header) = headers
+                .get("atproto-proxy")
+                .and_then(|h| h.to_str().ok())
+            {
+                let did = proxy_header.split('#').next().unwrap_or(proxy_header);
+                if let Some(resolved) = state.did_resolver.resolve_did(did).await {
+                    let mut url = format!(
+                        "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection={}&rkey={}",
+                        resolved.url.trim_end_matches('/'),
+                        urlencoding::encode(&input.repo),
+                        urlencoding::encode(&input.collection),
+                        urlencoding::encode(&input.rkey)
+                    );
+                    if let Some(cid) = &input.cid {
+                        url.push_str(&format!("&cid={}", urlencoding::encode(cid)));
+                    }
+                    info!("Proxying getRecord to {}: {}", did, url);
+                    match proxy_client().get(&url).send().await {
+                        Ok(resp) => {
+                            let status = resp.status();
+                            let body = match resp.bytes().await {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    error!("Error reading proxy response: {:?}", e);
+                                    return (
+                                        StatusCode::BAD_GATEWAY,
+                                        Json(json!({"error": "UpstreamFailure", "message": "Error reading upstream response"})),
+                                    )
+                                        .into_response();
+                                }
+                            };
+                            return Response::builder()
+                                .status(status)
+                                .header("content-type", "application/json")
+                                .body(axum::body::Body::from(body))
+                                .unwrap_or_else(|_| {
+                                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+                                });
+                        }
+                        Err(e) => {
+                            error!("Error proxying request: {:?}", e);
+                            return (
+                                StatusCode::BAD_GATEWAY,
+                                Json(json!({"error": "UpstreamFailure", "message": "Failed to reach upstream service"})),
+                            )
+                                .into_response();
+                        }
+                    }
+                } else {
+                    error!("Could not resolve DID from atproto-proxy header: {}", did);
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(json!({"error": "UpstreamFailure", "message": "Could not resolve proxy DID"})),
+                    )
+                        .into_response();
+                }
+            }
             return (
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),

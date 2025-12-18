@@ -15,7 +15,6 @@ The container image expects:
 - `VALKEY_URL` - redis:// connection string
 - `PDS_HOSTNAME` - your PDS hostname (without protocol)
 - `JWT_SECRET`, `DPOP_SECRET`, `MASTER_KEY` - generate with `openssl rand -base64 48`
-- `APPVIEW_URL` - typically `https://api.bsky.app`
 - `CRAWLERS` - typically `https://bsky.network`
 and more, check the .env.example.
 
