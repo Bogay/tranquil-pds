@@ -192,7 +192,7 @@ async fn test_import_repo_size_limit() {
 }
 
 #[tokio::test]
-async fn test_import_deactivated_account_rejected() {
+async fn test_import_deactivated_account_allowed_for_migration() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
     let export_res = client
@@ -229,9 +229,8 @@ async fn test_import_deactivated_account_rejected() {
         .await
         .expect("Import failed");
     assert!(
-        import_res.status() == StatusCode::FORBIDDEN
-            || import_res.status() == StatusCode::UNAUTHORIZED,
-        "Expected FORBIDDEN (403) or UNAUTHORIZED (401), got {}",
+        import_res.status().is_success(),
+        "Deactivated accounts should allow import for migration, got {}",
         import_res.status()
     );
 }

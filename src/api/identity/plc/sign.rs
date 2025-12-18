@@ -50,7 +50,7 @@ pub async fn sign_plc_operation(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &bearer).await {
+    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };

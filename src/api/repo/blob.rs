@@ -1,3 +1,4 @@
+use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::state::AppState;
 use axum::body::Bytes;
 use axum::{
@@ -13,22 +14,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
-use tracing::error;
+use tracing::{debug, error};
 
 const MAX_BLOB_SIZE: usize = 1_000_000;
+const MAX_VIDEO_BLOB_SIZE: usize = 100_000_000;
 
 pub async fn upload_blob(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> Response {
-    if body.len() > MAX_BLOB_SIZE {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(json!({"error": "BlobTooLarge", "message": format!("Blob size {} exceeds maximum of {} bytes", body.len(), MAX_BLOB_SIZE)})),
-        )
-            .into_response();
-    }
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
@@ -41,17 +36,66 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
-        Ok(user) => user,
-        Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
-            )
-                .into_response();
+
+    let is_service_auth = is_service_token(&token);
+
+    let (did, is_migration) = if is_service_auth {
+        debug!("Verifying service token for blob upload");
+        let verifier = ServiceTokenVerifier::new();
+        match verifier
+            .verify_service_token(&token, Some("com.atproto.repo.uploadBlob"))
+            .await
+        {
+            Ok(claims) => {
+                debug!("Service token verified for DID: {}", claims.iss);
+                (claims.iss, false)
+            }
+            Err(e) => {
+                error!("Service token verification failed: {:?}", e);
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed", "message": format!("Service token verification failed: {}", e)})),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => {
+                let deactivated = sqlx::query_scalar!(
+                    "SELECT deactivated_at FROM users WHERE did = $1",
+                    user.did
+                )
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten();
+                (user.did, deactivated.is_some())
+            }
+            Err(_) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
+                )
+                    .into_response();
+            }
         }
     };
-    let did = auth_user.did;
+
+    let max_size = if is_service_auth || is_migration {
+        MAX_VIDEO_BLOB_SIZE
+    } else {
+        MAX_BLOB_SIZE
+    };
+
+    if body.len() > max_size {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({"error": "BlobTooLarge", "message": format!("Blob size {} exceeds maximum of {} bytes", body.len(), max_size)})),
+        )
+            .into_response();
+    }
     let mime_type = headers
         .get("content-type")
         .and_then(|h| h.to_str().ok())

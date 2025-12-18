@@ -7,6 +7,7 @@ use std::time::Duration;
 use crate::cache::Cache;
 
 pub mod extractor;
+pub mod service;
 pub mod token;
 pub mod verify;
 
@@ -23,6 +24,7 @@ pub use token::{
 pub use verify::{
     get_did_from_token, get_jti_from_token, verify_access_token, verify_refresh_token, verify_token,
 };
+pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 
 const KEY_CACHE_TTL_SECS: u64 = 300;
 const SESSION_CACHE_TTL_SECS: u64 = 60;

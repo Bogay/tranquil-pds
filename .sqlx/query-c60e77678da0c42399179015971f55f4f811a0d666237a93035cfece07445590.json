@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            u.id, u.did, u.handle, u.password_hash,\n            u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,\n            k.key_bytes, k.encryption_version\n        FROM users u\n        JOIN user_keys k ON u.id = k.user_id\n        WHERE u.handle = $1 OR u.email = $1",
+  "query": "SELECT\n            u.id, u.did, u.handle, u.password_hash,\n            u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,\n            k.key_bytes, k.encryption_version\n        FROM users u\n        JOIN user_keys k ON u.id = k.user_id\n        WHERE u.handle = $1 OR u.email = $1 OR u.did = $1",
   "describe": {
     "columns": [
       {
@@ -72,5 +72,5 @@
       true
     ]
   },
-  "hash": "d61c982dac3a508393b31a30bad50c0088ce6e117fe63c5a1062a97000dedf89"
+  "hash": "c60e77678da0c42399179015971f55f4f811a0d666237a93035cfece07445590"
 }

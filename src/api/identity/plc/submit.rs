@@ -29,7 +29,7 @@ pub async fn submit_plc_operation(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &bearer).await {
+    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -40,7 +40,7 @@ pub async fn submit_plc_operation(
     let op = &input.operation;
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let public_url = format!("https://{}", hostname);
-    let user = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
+    let user = match sqlx::query!("SELECT id, handle, deactivated_at FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
     {
@@ -53,6 +53,7 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     };
+    let is_migration = user.deactivated_at.is_some();
     let key_row = match sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
         user.id
@@ -93,21 +94,23 @@ pub async fn submit_plc_operation(
         }
     };
     let user_did_key = signing_key_to_did_key(&signing_key);
-    if let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array()) {
-        let server_rotation_key =
-            std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
-        let has_server_key = rotation_keys
-            .iter()
-            .any(|k| k.as_str() == Some(&server_rotation_key));
-        if !has_server_key {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Rotation keys do not include server's rotation key"
-                })),
-            )
-                .into_response();
+    if !is_migration {
+        if let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array()) {
+            let server_rotation_key =
+                std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
+            let has_server_key = rotation_keys
+                .iter()
+                .any(|k| k.as_str() == Some(&server_rotation_key));
+            if !has_server_key {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "InvalidRequest",
+                        "message": "Rotation keys do not include server's rotation key"
+                    })),
+                )
+                    .into_response();
+            }
         }
     }
     if let Some(services) = op.get("services").and_then(|v| v.as_object())
@@ -135,30 +138,32 @@ pub async fn submit_plc_operation(
                     .into_response();
             }
         }
-    if let Some(verification_methods) = op.get("verificationMethods").and_then(|v| v.as_object())
-        && let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
-            && atproto_key != user_did_key {
+    if !is_migration {
+        if let Some(verification_methods) = op.get("verificationMethods").and_then(|v| v.as_object())
+            && let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
+                && atproto_key != user_did_key {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "InvalidRequest",
+                            "message": "Incorrect signing key in verificationMethods"
+                        })),
+                    )
+                        .into_response();
+                }
+        if let Some(also_known_as) = op.get("alsoKnownAs").and_then(|v| v.as_array()) {
+            let expected_handle = format!("at://{}", user.handle);
+            let first_aka = also_known_as.first().and_then(|v| v.as_str());
+            if first_aka != Some(&expected_handle) {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({
                         "error": "InvalidRequest",
-                        "message": "Incorrect signing key in verificationMethods"
+                        "message": "Incorrect handle in alsoKnownAs"
                     })),
                 )
                     .into_response();
             }
-    if let Some(also_known_as) = op.get("alsoKnownAs").and_then(|v| v.as_array()) {
-        let expected_handle = format!("at://{}", user.handle);
-        let first_aka = also_known_as.first().and_then(|v| v.as_str());
-        if first_aka != Some(&expected_handle) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Incorrect handle in alsoKnownAs"
-                })),
-            )
-                .into_response();
         }
     }
     let plc_client = PlcClient::new(None);

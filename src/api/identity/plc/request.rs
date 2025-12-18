@@ -24,7 +24,7 @@ pub async fn request_plc_operation_signature(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };

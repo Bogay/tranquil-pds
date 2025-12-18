@@ -1,4 +1,5 @@
 use super::did::verify_did_web;
+use crate::auth::{ServiceTokenVerifier, extract_bearer_token_from_header, is_service_token};
 use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
@@ -15,7 +16,7 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
@@ -50,6 +51,10 @@ pub struct CreateAccountInput {
 pub struct CreateAccountOutput {
     pub handle: String,
     pub did: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_jwt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_jwt: Option<String>,
     pub verification_required: bool,
     pub verification_channel: String,
 }
@@ -75,6 +80,58 @@ pub async fn create_account(
         )
             .into_response();
     }
+
+    let migration_auth = if let Some(token) =
+        extract_bearer_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
+    {
+        if is_service_token(&token) {
+            let verifier = ServiceTokenVerifier::new();
+            match verifier
+                .verify_service_token(&token, Some("com.atproto.server.createAccount"))
+                .await
+            {
+                Ok(claims) => {
+                    debug!("Service token verified for migration: iss={}", claims.iss);
+                    Some(claims.iss)
+                }
+                Err(e) => {
+                    error!("Service token verification failed: {:?}", e);
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "error": "AuthenticationFailed",
+                            "message": format!("Service token verification failed: {}", e)
+                        })),
+                    )
+                        .into_response();
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let is_migration = migration_auth.is_some()
+        && input.did.as_ref().map(|d| d.starts_with("did:plc:")).unwrap_or(false);
+
+    if is_migration {
+        let migration_did = input.did.as_ref().unwrap();
+        let auth_did = migration_auth.as_ref().unwrap();
+        if migration_did != auth_did {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "AuthorizationError",
+                    "message": format!("Service token issuer {} does not match DID {}", auth_did, migration_did)
+                })),
+            )
+                .into_response();
+        }
+        info!(did = %migration_did, "Processing account migration");
+    }
+
     if input.handle.contains('!') || input.handle.contains('@') {
         return (
             StatusCode::BAD_REQUEST,
@@ -99,46 +156,50 @@ pub async fn create_account(
         }
     let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
     let valid_channels = ["email", "discord", "telegram", "signal"];
-    if !valid_channels.contains(&verification_channel) {
+    if !valid_channels.contains(&verification_channel) && !is_migration {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel. Must be one of: email, discord, telegram, signal"})),
         )
             .into_response();
     }
-    let verification_recipient = match verification_channel {
-        "email" => match &input.email {
-            Some(email) if !email.trim().is_empty() => email.trim().to_string(),
+    let verification_recipient = if is_migration {
+        None
+    } else {
+        Some(match verification_channel {
+            "email" => match &input.email {
+                Some(email) if !email.trim().is_empty() => email.trim().to_string(),
+                _ => return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "MissingEmail", "message": "Email is required when using email verification"})),
+                ).into_response(),
+            },
+            "discord" => match &input.discord_id {
+                Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+                _ => return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "MissingDiscordId", "message": "Discord ID is required when using Discord verification"})),
+                ).into_response(),
+            },
+            "telegram" => match &input.telegram_username {
+                Some(username) if !username.trim().is_empty() => username.trim().to_string(),
+                _ => return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "MissingTelegramUsername", "message": "Telegram username is required when using Telegram verification"})),
+                ).into_response(),
+            },
+            "signal" => match &input.signal_number {
+                Some(number) if !number.trim().is_empty() => number.trim().to_string(),
+                _ => return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "MissingSignalNumber", "message": "Signal phone number is required when using Signal verification"})),
+                ).into_response(),
+            },
             _ => return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingEmail", "message": "Email is required when using email verification"})),
+                Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
             ).into_response(),
-        },
-        "discord" => match &input.discord_id {
-            Some(id) if !id.trim().is_empty() => id.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingDiscordId", "message": "Discord ID is required when using Discord verification"})),
-            ).into_response(),
-        },
-        "telegram" => match &input.telegram_username {
-            Some(username) if !username.trim().is_empty() => username.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingTelegramUsername", "message": "Telegram username is required when using Telegram verification"})),
-            ).into_response(),
-        },
-        "signal" => match &input.signal_number {
-            Some(number) if !number.trim().is_empty() => number.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingSignalNumber", "message": "Signal phone number is required when using Signal verification"})),
-            ).into_response(),
-        },
-        _ => return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
-        ).into_response(),
+        })
     };
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
@@ -246,10 +307,12 @@ pub async fn create_account(
                     .into_response();
             }
             d.clone()
+        } else if d.starts_with("did:plc:") && is_migration {
+            d.clone()
         } else {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidDid", "message": "Only did:web DIDs can be provided; leave empty for did:plc"})),
+                Json(json!({"error": "InvalidDid", "message": "Only did:web DIDs can be provided; leave empty for did:plc. For migration with existing did:plc, provide service auth."})),
             )
                 .into_response();
         }
@@ -396,13 +459,18 @@ pub async fn create_account(
         .await
         .map(|c| c.unwrap_or(0) == 0)
         .unwrap_or(false);
+    let deactivated_at: Option<chrono::DateTime<chrono::Utc>> = if is_migration {
+        Some(chrono::Utc::now())
+    } else {
+        None
+    };
     let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
         r#"INSERT INTO users (
             handle, email, did, password_hash,
             preferred_comms_channel,
             discord_id, telegram_username, signal_number,
-            is_admin
-        ) VALUES ($1, $2, $3, $4, $5::comms_channel, $6, $7, $8, $9) RETURNING id"#,
+            is_admin, deactivated_at, email_verified
+        ) VALUES ($1, $2, $3, $4, $5::comms_channel, $6, $7, $8, $9, $10, $11) RETURNING id"#,
     )
     .bind(short_handle)
     .bind(&email)
@@ -431,6 +499,8 @@ pub async fn create_account(
             .filter(|s| !s.is_empty()),
     )
     .bind(is_first_user)
+    .bind(deactivated_at)
+    .bind(is_migration)
     .fetch_one(&mut *tx)
     .await;
     let user_id = match user_insert {
@@ -477,21 +547,23 @@ pub async fn create_account(
         }
     };
 
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, 'email', $2, $3, $4)",
-        user_id,
-        verification_code,
-        email,
-        code_expires_at
-    )
-    .execute(&mut *tx)
-    .await {
-        error!("Error inserting verification code: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
+    if !is_migration {
+        if let Err(e) = sqlx::query!(
+            "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, 'email', $2, $3, $4)",
+            user_id,
+            verification_code,
+            email,
+            code_expires_at
         )
-            .into_response();
+        .execute(&mut *tx)
+        .await {
+            error!("Error inserting verification code: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
     }
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(enc) => enc,
@@ -636,50 +708,105 @@ pub async fn create_account(
         )
             .into_response();
     }
-    if let Err(e) =
-        crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle)).await
-    {
-        warn!("Failed to sequence identity event for {}: {}", did, e);
+    if !is_migration {
+        if let Err(e) =
+            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle)).await
+        {
+            warn!("Failed to sequence identity event for {}: {}", did, e);
+        }
+        if let Err(e) = crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+        {
+            warn!("Failed to sequence account event for {}: {}", did, e);
+        }
+        let profile_record = json!({
+            "$type": "app.bsky.actor.profile",
+            "displayName": input.handle
+        });
+        if let Err(e) = crate::api::repo::record::create_record_internal(
+            &state,
+            &did,
+            "app.bsky.actor.profile",
+            "self",
+            &profile_record,
+        )
+        .await
+        {
+            warn!("Failed to create default profile for {}: {}", did, e);
+        }
+        if let Some(ref recipient) = verification_recipient {
+            if let Err(e) = crate::comms::enqueue_signup_verification(
+                &state.db,
+                user_id,
+                verification_channel,
+                recipient,
+                &verification_code,
+            )
+            .await
+            {
+                warn!(
+                    "Failed to enqueue signup verification notification: {:?}",
+                    e
+                );
+            }
+        }
     }
-    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
-    {
-        warn!("Failed to sequence account event for {}: {}", did, e);
-    }
-    let profile_record = json!({
-        "$type": "app.bsky.actor.profile",
-        "displayName": input.handle
-    });
-    if let Err(e) = crate::api::repo::record::create_record_internal(
-        &state,
-        &did,
-        "app.bsky.actor.profile",
-        "self",
-        &profile_record,
-    )
-    .await
-    {
-        warn!("Failed to create default profile for {}: {}", did, e);
-    }
-    if let Err(e) = crate::comms::enqueue_signup_verification(
-        &state.db,
-        user_id,
-        verification_channel,
-        &verification_recipient,
-        &verification_code,
-    )
-    .await
-    {
-        warn!(
-            "Failed to enqueue signup verification notification: {:?}",
-            e
-        );
-    }
+
+    let (access_jwt, refresh_jwt) = if is_migration {
+        let access_meta =
+            match crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Error creating access token for migration: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+        let refresh_meta =
+            match crate::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes) {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Error creating refresh token for migration: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+        if let Err(e) = sqlx::query!(
+            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+            did,
+            access_meta.jti,
+            refresh_meta.jti,
+            access_meta.expires_at,
+            refresh_meta.expires_at
+        )
+        .execute(&state.db)
+        .await
+        {
+            error!("Error creating session for migration: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+        (Some(access_meta.token), Some(refresh_meta.token))
+    } else {
+        (None, None)
+    };
+
     (
         StatusCode::OK,
         Json(CreateAccountOutput {
-            handle: short_handle.to_string(),
+            handle: full_handle.clone(),
             did,
-            verification_required: true,
+            access_jwt,
+            refresh_jwt,
+            verification_required: !is_migration,
             verification_channel: verification_channel.to_string(),
         }),
     )

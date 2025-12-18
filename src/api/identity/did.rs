@@ -1,4 +1,5 @@
 use crate::api::ApiError;
+use crate::plc::signing_key_to_did_key;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -309,7 +310,7 @@ pub async fn get_recommended_did_credentials(
                 .into_response();
         }
     };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -334,24 +335,21 @@ pub async fn get_recommended_did_credentials(
     };
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
-    let secret_key = match k256::SecretKey::from_slice(&key_bytes) {
+    let full_handle = if user.handle.contains('.') {
+        user.handle.clone()
+    } else {
+        format!("{}.{}", user.handle, hostname)
+    };
+    let signing_key = match k256::ecdsa::SigningKey::from_slice(&key_bytes) {
         Ok(k) => k,
         Err(_) => return ApiError::InternalError.into_response(),
     };
-    let public_key = secret_key.public_key();
-    let encoded = public_key.to_encoded_point(true);
-    let did_key = format!(
-        "did:key:zQ3sh{}",
-        multibase::encode(multibase::Base::Base58Btc, encoded.as_bytes())
-            .chars()
-            .skip(1)
-            .collect::<String>()
-    );
+    let did_key = signing_key_to_did_key(&signing_key);
     (
         StatusCode::OK,
         Json(GetRecommendedDidCredentialsOutput {
             rotation_keys: vec![did_key.clone()],
-            also_known_as: vec![format!("at://{}", user.handle)],
+            also_known_as: vec![format!("at://{}", full_handle)],
             verification_methods: VerificationMethods { atproto: did_key },
             services: Services {
                 atproto_pds: AtprotoPds {
@@ -380,7 +378,7 @@ pub async fn update_handle(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let did = match crate::auth::validate_bearer_token(&state.db, &token).await {
+    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };

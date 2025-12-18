@@ -53,7 +53,7 @@ pub async fn import_repo(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
@@ -82,16 +82,6 @@ pub async fn import_repo(
                 .into_response();
         }
     };
-    if user.deactivated_at.is_some() {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "AccountDeactivated",
-                "message": "Account is deactivated"
-            })),
-        )
-            .into_response();
-    }
     if user.takedown_ref.is_some() {
         return (
             StatusCode::FORBIDDEN,
@@ -185,7 +175,58 @@ pub async fn import_repo(
     let skip_verification = std::env::var("SKIP_IMPORT_VERIFICATION")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
-    if !skip_verification {
+    let is_migration = user.deactivated_at.is_some();
+    if skip_verification {
+        warn!("Skipping all CAR verification for import (SKIP_IMPORT_VERIFICATION=true)");
+    } else if is_migration {
+        debug!("Verifying CAR file structure for migration (skipping signature verification)");
+        let verifier = CarVerifier::new();
+        match verifier.verify_car_structure_only(did, &root, &blocks) {
+            Ok(verified) => {
+                debug!(
+                    "CAR structure verification successful: rev={}, data_cid={}",
+                    verified.rev, verified.data_cid
+                );
+            }
+            Err(crate::sync::verify::VerifyError::DidMismatch {
+                commit_did,
+                expected_did,
+            }) => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "InvalidRequest",
+                        "message": format!(
+                            "CAR file is for DID {} but you are authenticated as {}",
+                            commit_did, expected_did
+                        )
+                    })),
+                )
+                    .into_response();
+            }
+            Err(crate::sync::verify::VerifyError::MstValidationFailed(msg)) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "InvalidRequest",
+                        "message": format!("MST validation failed: {}", msg)
+                    })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                error!("CAR structure verification error: {:?}", e);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "InvalidRequest",
+                        "message": format!("CAR verification failed: {}", e)
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    } else {
         debug!("Verifying CAR file signature and structure for DID {}", did);
         let verifier = CarVerifier::new();
         match verifier.verify_car(did, &root, &blocks).await {
@@ -264,8 +305,6 @@ pub async fn import_repo(
                     .into_response();
             }
         }
-    } else {
-        warn!("Skipping CAR signature verification for import (SKIP_IMPORT_VERIFICATION=true)");
     }
     let max_blocks: usize = std::env::var("MAX_IMPORT_BLOCKS")
         .ok()

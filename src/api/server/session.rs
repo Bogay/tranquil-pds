@@ -1,5 +1,5 @@
 use crate::api::ApiError;
-use crate::auth::BearerAuth;
+use crate::auth::{BearerAuth, BearerAuthAllowDeactivated};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
@@ -88,7 +88,7 @@ pub async fn create_session(
             k.key_bytes, k.encryption_version
         FROM users u
         JOIN user_keys k ON u.id = k.user_id
-        WHERE u.handle = $1 OR u.email = $1"#,
+        WHERE u.handle = $1 OR u.email = $1 OR u.did = $1"#,
         normalized_identifier
     )
     .fetch_optional(&state.db)
@@ -189,11 +189,11 @@ pub async fn create_session(
 
 pub async fn get_session(
     State(state): State<AppState>,
-    BearerAuth(auth_user): BearerAuth,
+    BearerAuthAllowDeactivated(auth_user): BearerAuthAllowDeactivated,
 ) -> Response {
     match sqlx::query!(
         r#"SELECT
-            handle, email, email_verified, is_admin,
+            handle, email, email_verified, is_admin, deactivated_at,
             preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
             discord_verified, telegram_verified, signal_verified
         FROM users WHERE did = $1"#,
@@ -211,6 +211,7 @@ pub async fn get_session(
             };
             let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&row.handle, &pds_hostname);
+            let is_active = row.deactivated_at.is_none();
             Json(json!({
                 "handle": handle,
                 "did": auth_user.did,
@@ -219,7 +220,8 @@ pub async fn get_session(
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "isAdmin": row.is_admin,
-                "active": true,
+                "active": is_active,
+                "status": if is_active { "active" } else { "deactivated" },
                 "didDoc": {}
             })).into_response()
         }
