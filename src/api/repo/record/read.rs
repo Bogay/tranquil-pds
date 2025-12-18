@@ -1,8 +1,7 @@
-use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
 use axum::{
     Json,
-    extract::{Query, RawQuery, State},
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -12,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::str::FromStr;
-use tracing::{error, info};
+use tracing::error;
 
 #[derive(Deserialize)]
 pub struct GetRecordInput {
@@ -22,69 +21,9 @@ pub struct GetRecordInput {
     pub cid: Option<String>,
 }
 
-async fn proxy_get_record_to_appview(state: &AppState, raw_query: Option<&str>) -> Response {
-    let resolved = match state.appview_registry.get_appview_for_method("com.atproto.repo.getRecord").await {
-        Some(r) => r,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "NotFound", "message": "Repo not found"})),
-            )
-                .into_response();
-        }
-    };
-    let target_url = match raw_query {
-        Some(q) => format!("{}/xrpc/com.atproto.repo.getRecord?{}", resolved.url, q),
-        None => format!("{}/xrpc/com.atproto.repo.getRecord", resolved.url),
-    };
-    info!("Proxying getRecord to AppView: {}", target_url);
-    let client = proxy_client();
-    match client.get(&target_url).send().await {
-        Ok(resp) => {
-            let status =
-                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let content_type = resp
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            match resp.bytes().await {
-                Ok(body) => {
-                    let mut builder = Response::builder().status(status);
-                    if let Some(ct) = content_type {
-                        builder = builder.header("content-type", ct);
-                    }
-                    builder
-                        .body(axum::body::Body::from(body))
-                        .unwrap_or_else(|_| {
-                            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
-                        })
-                }
-                Err(e) => {
-                    error!("Error reading AppView response: {:?}", e);
-                    (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({"error": "UpstreamError"})),
-                    )
-                        .into_response()
-                }
-            }
-        }
-        Err(e) => {
-            error!("Error proxying to AppView: {:?}", e);
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({"error": "UpstreamError"})),
-            )
-                .into_response()
-        }
-    }
-}
-
 pub async fn get_record(
     State(state): State<AppState>,
     Query(input): Query<GetRecordInput>,
-    RawQuery(raw_query): RawQuery,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let user_id_opt = if input.repo.starts_with("did:") {
@@ -106,8 +45,19 @@ pub async fn get_record(
     };
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
-        _ => {
-            return proxy_get_record_to_appview(&state, raw_query.as_deref()).await;
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
         }
     };
     let record_row = sqlx::query!(
@@ -192,61 +142,9 @@ pub struct ListRecordsOutput {
     pub records: Vec<serde_json::Value>,
 }
 
-async fn proxy_list_records_to_appview(state: &AppState, raw_query: Option<&str>) -> Response {
-    let resolved = match state.appview_registry.get_appview_for_method("com.atproto.repo.listRecords").await {
-        Some(r) => r,
-        None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "NotFound", "message": "Repo not found"})),
-            )
-                .into_response();
-        }
-    };
-    let target_url = match raw_query {
-        Some(q) => format!("{}/xrpc/com.atproto.repo.listRecords?{}", resolved.url, q),
-        None => format!("{}/xrpc/com.atproto.repo.listRecords", resolved.url),
-    };
-    info!("Proxying listRecords to AppView: {}", target_url);
-    let client = proxy_client();
-    match client.get(&target_url).send().await {
-        Ok(resp) => {
-            let status =
-                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            let content_type = resp
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            match resp.bytes().await {
-                Ok(body) => {
-                    let mut builder = Response::builder().status(status);
-                    if let Some(ct) = content_type {
-                        builder = builder.header("content-type", ct);
-                    }
-                    builder
-                        .body(axum::body::Body::from(body))
-                        .unwrap_or_else(|_| {
-                            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
-                        })
-                }
-                Err(e) => {
-                    error!("Error reading AppView response: {:?}", e);
-                    (StatusCode::BAD_GATEWAY, Json(json!({"error": "UpstreamError"}))).into_response()
-                }
-            }
-        }
-        Err(e) => {
-            error!("Error proxying to AppView: {:?}", e);
-            (StatusCode::BAD_GATEWAY, Json(json!({"error": "UpstreamError"}))).into_response()
-        }
-    }
-}
-
 pub async fn list_records(
     State(state): State<AppState>,
     Query(input): Query<ListRecordsInput>,
-    RawQuery(raw_query): RawQuery,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let user_id_opt = if input.repo.starts_with("did:") {
@@ -268,8 +166,19 @@ pub async fn list_records(
     };
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
-        _ => {
-            return proxy_list_records_to_appview(&state, raw_query.as_deref()).await;
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
         }
     };
     let limit = input.limit.unwrap_or(50).clamp(1, 100);

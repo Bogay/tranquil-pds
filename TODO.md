@@ -38,19 +38,20 @@ Accounts controlled by other accounts rather than having their own password. Whe
 - [ ] Log all actions with both actor DID and controller DID
 - [ ] Audit log view for delegated account owners
 
-### Passkey support
-Modern passwordless authentication using WebAuthn/FIDO2, alongside or instead of passwords.
+### Passkeys and 2FA
+Modern passwordless authentication using WebAuthn/FIDO2, plus TOTP for defense in depth.
 
 - [ ] passkeys table (id, did, credential_id, public_key, sign_count, created_at, last_used, friendly_name)
-- [ ] Generate WebAuthn registration challenge
-- [ ] Verify attestation response and store credential
-- [ ] UI for registering new passkey from settings
-- [ ] Detect if account has passkeys during OAuth authorize
-- [ ] Offer passkey option alongside password
-- [ ] Generate authentication challenge and verify assertion
-- [ ] Update sign count (replay protection)
-- [ ] Allow creating account with passkey instead of password
-- [ ] List/rename/remove passkeys in settings
+- [ ] user_totp table (did, secret_encrypted, verified, created_at, last_used)
+- [ ] WebAuthn registration challenge generation and attestation verification
+- [ ] TOTP secret generation with QR code setup flow
+- [ ] Backup codes (hashed, one-time use) with recovery flow
+- [ ] OAuth authorize flow: password → 2FA (if enabled) → passkey (as alternative)
+- [ ] Passkey-only account creation (no password)
+- [ ] Settings UI for managing passkeys, TOTP, backup codes
+- [ ] Trusted devices option (remember this browser)
+- [ ] Rate limit 2FA attempts
+- [ ] Re-auth for sensitive actions (email change, adding new auth methods)
 
 ### Private/encrypted data
 Records that only authorized parties can see and decrypt. Requires key federation between PDSes.
@@ -64,6 +65,22 @@ Records that only authorized parties can see and decrypt. Requires key federatio
 - [ ] Transparent encryption/decryption in repo operations
 - [ ] Protocol for sharing decryption keys between PDSes
 - [ ] Handle key rotation and revocation
+
+### Plugin system
+Extensible architecture allowing third-party plugins to add functionality, like minecraft mods or browser extensions.
+
+- [ ] Research: survey Fabric/Forge, VS Code, Grafana, Caddy plugin architectures
+- [ ] Evaluate rust approaches: WASM, dynamic linking, subprocess IPC, embedded scripting (Lua/Rhai)
+- [ ] Define security model (sandboxing, permissions, resource limits)
+- [ ] Plugin manifest format (name, version, deps, permissions, hooks)
+- [ ] Plugin discovery, loading, lifecycle (enable/disable/hot reload)
+- [ ] Error isolation (bad plugin shouldn't crash PDS)
+- [ ] Extension points: request middleware, record lifecycle hooks, custom XRPC endpoints
+- [ ] Extension points: custom lexicons, storage backends, auth providers, notification channels
+- [ ] Extension points: firehose consumers (react to repo events)
+- [ ] Plugin SDK crate with traits and helpers
+- [ ] Example plugins: custom feed algorithm, content filter, S3 backup
+- [ ] Plugin registry with signature verification and version compatibility
 
 ---
 

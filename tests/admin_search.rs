@@ -12,7 +12,7 @@ async fn test_search_accounts_as_admin() {
     let (user_did, _) = setup_new_user("search-target").await;
     let res = client
         .get(format!(
-            "{}/xrpc/com.atproto.admin.searchAccounts",
+            "{}/xrpc/com.atproto.admin.searchAccounts?limit=1000",
             base_url().await
         ))
         .bearer_auth(&admin_jwt)
@@ -24,7 +24,7 @@ async fn test_search_accounts_as_admin() {
     let accounts = body["accounts"].as_array().expect("accounts should be array");
     assert!(!accounts.is_empty(), "Should return some accounts");
     let found = accounts.iter().any(|a| a["did"].as_str() == Some(&user_did));
-    assert!(found, "Should find the created user in results");
+    assert!(found, "Should find the created user in results (DID: {})", user_did);
 }
 
 #[tokio::test]
@@ -111,6 +111,7 @@ async fn test_search_accounts_pagination() {
 #[tokio::test]
 async fn test_search_accounts_requires_admin() {
     let client = client();
+    let _ = create_account_and_login(&client).await;
     let (_, user_jwt) = setup_new_user("search-nonadmin").await;
     let res = client
         .get(format!(

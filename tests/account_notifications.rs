@@ -170,8 +170,9 @@ async fn test_update_email_via_notification_prefs() {
     let pool = get_pool().await;
     let (token, did) = create_account_and_login(&client).await;
 
+    let unique_email = format!("newemail_{}@example.com", uuid::Uuid::new_v4());
     let prefs = json!({
-        "email": "newemail@example.com"
+        "email": unique_email
     });
     let resp = client
         .post(format!("{}/xrpc/com.bspds.account.updateNotificationPrefs", base))
@@ -217,5 +218,5 @@ async fn test_update_email_via_notification_prefs() {
         .await
         .unwrap();
     let body: Value = resp.json().await.unwrap();
-    assert_eq!(body["email"], "newemail@example.com");
+    assert_eq!(body["email"], unique_email);
 }

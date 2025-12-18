@@ -141,9 +141,6 @@ async fn setup_with_external_infra() -> String {
     let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
     let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
     setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
-    unsafe {
-        std::env::set_var("APPVIEW_DID_APP_BSKY", &mock_did);
-    }
     MOCK_APPVIEW.set(mock_server).ok();
     spawn_app(database_url).await
 }
@@ -194,9 +191,6 @@ async fn setup_with_testcontainers() -> String {
     let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
     let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
     setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
-    unsafe {
-        std::env::set_var("APPVIEW_DID_APP_BSKY", &mock_did);
-    }
     MOCK_APPVIEW.set(mock_server).ok();
     S3_CONTAINER.set(s3_container).ok();
     let container = Postgres::default()
@@ -238,134 +232,7 @@ async fn setup_mock_did_document(mock_server: &MockServer, did: &str, service_en
         .await;
 }
 
-async fn setup_mock_appview(mock_server: &MockServer) {
-    Mock::given(method("GET"))
-        .and(path("/xrpc/app.bsky.actor.getProfile"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "handle": "mock.handle",
-            "did": "did:plc:mock",
-            "displayName": "Mock User"
-        })))
-        .mount(mock_server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/xrpc/app.bsky.actor.searchActors"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "actors": [],
-            "cursor": null
-        })))
-        .mount(mock_server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/xrpc/app.bsky.feed.getTimeline"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("atproto-repo-rev", "0")
-                .set_body_json(json!({
-                    "feed": [],
-                    "cursor": null
-                })),
-        )
-        .mount(mock_server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("atproto-repo-rev", "0")
-                .set_body_json(json!({
-                    "feed": [{
-                        "post": {
-                            "uri": "at://did:plc:mock-author/app.bsky.feed.post/from-appview-author",
-                            "cid": "bafyappview123",
-                            "author": {"did": "did:plc:mock-author", "handle": "mock.author"},
-                            "record": {
-                                "$type": "app.bsky.feed.post",
-                                "text": "Author feed post from appview",
-                                "createdAt": "2025-01-01T00:00:00Z"
-                            },
-                            "indexedAt": "2025-01-01T00:00:00Z"
-                        }
-                    }],
-                    "cursor": "author-cursor"
-                })),
-        )
-        .mount(mock_server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/xrpc/app.bsky.feed.getActorLikes"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("atproto-repo-rev", "0")
-                .set_body_json(json!({
-                    "feed": [{
-                        "post": {
-                            "uri": "at://did:plc:mock-likes/app.bsky.feed.post/liked-post",
-                            "cid": "bafyliked123",
-                            "author": {"did": "did:plc:mock-likes", "handle": "mock.likes"},
-                            "record": {
-                                "$type": "app.bsky.feed.post",
-                                "text": "Liked post from appview",
-                                "createdAt": "2025-01-01T00:00:00Z"
-                            },
-                            "indexedAt": "2025-01-01T00:00:00Z"
-                        }
-                    }],
-                    "cursor": null
-                })),
-        )
-        .mount(mock_server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/xrpc/app.bsky.feed.getPostThread"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("atproto-repo-rev", "0")
-                .set_body_json(json!({
-                    "thread": {
-                        "$type": "app.bsky.feed.defs#threadViewPost",
-                        "post": {
-                            "uri": "at://did:plc:mock/app.bsky.feed.post/thread-post",
-                            "cid": "bafythread123",
-                            "author": {"did": "did:plc:mock", "handle": "mock.handle"},
-                            "record": {
-                                "$type": "app.bsky.feed.post",
-                                "text": "Thread post from appview",
-                                "createdAt": "2025-01-01T00:00:00Z"
-                            },
-                            "indexedAt": "2025-01-01T00:00:00Z"
-                        },
-                        "replies": []
-                    }
-                })),
-        )
-        .mount(mock_server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/xrpc/app.bsky.feed.getFeed"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "feed": [{
-                "post": {
-                    "uri": "at://did:plc:mock-feed/app.bsky.feed.post/custom-feed-post",
-                    "cid": "bafyfeed123",
-                    "author": {"did": "did:plc:mock-feed", "handle": "mock.feed"},
-                    "record": {
-                        "$type": "app.bsky.feed.post",
-                        "text": "Custom feed post from appview",
-                        "createdAt": "2025-01-01T00:00:00Z"
-                    },
-                    "indexedAt": "2025-01-01T00:00:00Z"
-                }
-            }],
-            "cursor": null
-        })))
-        .mount(mock_server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/xrpc/app.bsky.notification.registerPush"))
-        .respond_with(ResponseTemplate::new(200))
-        .mount(mock_server)
-        .await;
+async fn setup_mock_appview(_mock_server: &MockServer) {
 }
 
 async fn spawn_app(database_url: String) -> String {

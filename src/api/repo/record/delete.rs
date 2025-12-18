@@ -31,10 +31,11 @@ pub struct DeleteRecordInput {
 pub async fn delete_record(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<DeleteRecordInput>,
 ) -> Response {
     let (did, user_id, current_root_cid) =
-        match prepare_repo_write(&state, &headers, &input.repo).await {
+        match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
             Ok(res) => res,
             Err(err_res) => return err_res,
         };

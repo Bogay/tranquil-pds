@@ -1,6 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -22,24 +23,28 @@ pub struct DidService {
 }
 
 #[derive(Clone)]
-struct CachedAppView {
+struct CachedDid {
     url: String,
     did: String,
     resolved_at: Instant,
 }
 
-pub struct AppViewRegistry {
-    namespace_to_did: HashMap<String, String>,
-    did_cache: RwLock<HashMap<String, CachedAppView>>,
+#[derive(Debug, Clone)]
+pub struct ResolvedService {
+    pub url: String,
+    pub did: String,
+}
+
+pub struct DidResolver {
+    did_cache: RwLock<HashMap<String, CachedDid>>,
     client: Client,
     cache_ttl: Duration,
     plc_directory_url: String,
 }
 
-impl Clone for AppViewRegistry {
+impl Clone for DidResolver {
     fn clone(&self) -> Self {
         Self {
-            namespace_to_did: self.namespace_to_did.clone(),
             did_cache: RwLock::new(HashMap::new()),
             client: self.client.clone(),
             cache_ttl: self.cache_ttl,
@@ -48,31 +53,9 @@ impl Clone for AppViewRegistry {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ResolvedAppView {
-    pub url: String,
-    pub did: String,
-}
-
-impl AppViewRegistry {
+impl DidResolver {
     pub fn new() -> Self {
-        let mut namespace_to_did = HashMap::new();
-
-        let bsky_did = std::env::var("APPVIEW_DID_BSKY")
-            .unwrap_or_else(|_| "did:web:api.bsky.app".to_string());
-        namespace_to_did.insert("app.bsky".to_string(), bsky_did.clone());
-        namespace_to_did.insert("com.atproto".to_string(), bsky_did);
-
-        for (key, value) in std::env::vars() {
-            if let Some(namespace) = key.strip_prefix("APPVIEW_DID_") {
-                let namespace = namespace.to_lowercase().replace('_', ".");
-                if namespace != "bsky" {
-                    namespace_to_did.insert(namespace, value);
-                }
-            }
-        }
-
-        let cache_ttl_secs: u64 = std::env::var("APPVIEW_CACHE_TTL_SECS")
+        let cache_ttl_secs: u64 = std::env::var("DID_CACHE_TTL_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(300);
@@ -87,16 +70,9 @@ impl AppViewRegistry {
             .build()
             .unwrap_or_else(|_| Client::new());
 
-        info!(
-            "AppView registry initialized with {} namespace mappings",
-            namespace_to_did.len()
-        );
-        for (ns, did) in &namespace_to_did {
-            debug!("  {} -> {}", ns, did);
-        }
+        info!("DID resolver initialized");
 
         Self {
-            namespace_to_did,
             did_cache: RwLock::new(HashMap::new()),
             client,
             cache_ttl: Duration::from_secs(cache_ttl_secs),
@@ -104,45 +80,12 @@ impl AppViewRegistry {
         }
     }
 
-    pub fn register_namespace(&mut self, namespace: &str, did: &str) {
-        info!("Registering AppView: {} -> {}", namespace, did);
-        self.namespace_to_did
-            .insert(namespace.to_string(), did.to_string());
-    }
-
-    pub async fn get_appview_for_method(&self, method: &str) -> Option<ResolvedAppView> {
-        let namespace = self.extract_namespace(method)?;
-        self.get_appview_for_namespace(&namespace).await
-    }
-
-    pub async fn get_appview_for_namespace(&self, namespace: &str) -> Option<ResolvedAppView> {
-        let did = self.get_did_for_namespace(namespace)?;
-        self.resolve_appview_did(&did).await
-    }
-
-    pub fn get_did_for_namespace(&self, namespace: &str) -> Option<String> {
-        if let Some(did) = self.namespace_to_did.get(namespace) {
-            return Some(did.clone());
-        }
-
-        let mut parts: Vec<&str> = namespace.split('.').collect();
-        while !parts.is_empty() {
-            let prefix = parts.join(".");
-            if let Some(did) = self.namespace_to_did.get(&prefix) {
-                return Some(did.clone());
-            }
-            parts.pop();
-        }
-
-        None
-    }
-
-    pub async fn resolve_appview_did(&self, did: &str) -> Option<ResolvedAppView> {
+    pub async fn resolve_did(&self, did: &str) -> Option<ResolvedService> {
         {
             let cache = self.did_cache.read().await;
             if let Some(cached) = cache.get(did) {
                 if cached.resolved_at.elapsed() < self.cache_ttl {
-                    return Some(ResolvedAppView {
+                    return Some(ResolvedService {
                         url: cached.url.clone(),
                         did: cached.did.clone(),
                     });
@@ -156,7 +99,7 @@ impl AppViewRegistry {
             let mut cache = self.did_cache.write().await;
             cache.insert(
                 did.to_string(),
-                CachedAppView {
+                CachedDid {
                     url: resolved.url.clone(),
                     did: resolved.did.clone(),
                     resolved_at: Instant::now(),
@@ -167,7 +110,7 @@ impl AppViewRegistry {
         Some(resolved)
     }
 
-    async fn resolve_did_internal(&self, did: &str) -> Option<ResolvedAppView> {
+    async fn resolve_did_internal(&self, did: &str) -> Option<ResolvedService> {
         let did_doc = if did.starts_with("did:web:") {
             self.resolve_did_web(did).await
         } else if did.starts_with("did:plc:") {
@@ -185,7 +128,7 @@ impl AppViewRegistry {
             }
         };
 
-        self.extract_appview_endpoint(&doc)
+        self.extract_service_endpoint(&doc)
     }
 
     async fn resolve_did_web(&self, did: &str) -> Result<DidDocument, String> {
@@ -275,13 +218,13 @@ impl AppViewRegistry {
             .map_err(|e| format!("Failed to parse DID document: {}", e))
     }
 
-    fn extract_appview_endpoint(&self, doc: &DidDocument) -> Option<ResolvedAppView> {
+    fn extract_service_endpoint(&self, doc: &DidDocument) -> Option<ResolvedService> {
         for service in &doc.service {
             if service.service_type == "AtprotoAppView"
                 || service.id.contains("atproto_appview")
                 || service.id.ends_with("#bsky_appview")
             {
-                return Some(ResolvedAppView {
+                return Some(ResolvedService {
                     url: service.service_endpoint.clone(),
                     did: doc.id.clone(),
                 });
@@ -290,7 +233,7 @@ impl AppViewRegistry {
 
         for service in &doc.service {
             if service.service_type.contains("AppView") || service.id.contains("appview") {
-                return Some(ResolvedAppView {
+                return Some(ResolvedService {
                     url: service.service_endpoint.clone(),
                     did: doc.id.clone(),
                 });
@@ -303,7 +246,7 @@ impl AppViewRegistry {
                     "No explicit AppView service found for {}, using first service: {}",
                     doc.id, service.service_endpoint
                 );
-                return Some(ResolvedAppView {
+                return Some(ResolvedService {
                     url: service.service_endpoint.clone(),
                     did: doc.id.clone(),
                 });
@@ -326,7 +269,7 @@ impl AppViewRegistry {
                 "No service found for {}, deriving URL from DID: {}://{}",
                 doc.id, scheme, base_host
             );
-            return Some(ResolvedAppView {
+            return Some(ResolvedService {
                 url: format!("{}://{}", scheme, base_host),
                 did: doc.id.clone(),
             });
@@ -335,79 +278,18 @@ impl AppViewRegistry {
         None
     }
 
-    fn extract_namespace(&self, method: &str) -> Option<String> {
-        let parts: Vec<&str> = method.split('.').collect();
-        if parts.len() >= 2 {
-            Some(format!("{}.{}", parts[0], parts[1]))
-        } else {
-            None
-        }
-    }
-
-    pub fn list_namespaces(&self) -> Vec<(String, String)> {
-        self.namespace_to_did
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
-    }
-
     pub async fn invalidate_cache(&self, did: &str) {
         let mut cache = self.did_cache.write().await;
         cache.remove(did);
     }
-
-    pub async fn invalidate_all_cache(&self) {
-        let mut cache = self.did_cache.write().await;
-        cache.clear();
-    }
 }
 
-impl Default for AppViewRegistry {
+impl Default for DidResolver {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub async fn get_appview_url_for_method(registry: &AppViewRegistry, method: &str) -> Option<String> {
-    registry.get_appview_for_method(method).await.map(|r| r.url)
-}
-
-pub async fn get_appview_did_for_method(registry: &AppViewRegistry, method: &str) -> Option<String> {
-    registry.get_appview_for_method(method).await.map(|r| r.did)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_namespace() {
-        let registry = AppViewRegistry::new();
-        assert_eq!(
-            registry.extract_namespace("app.bsky.actor.getProfile"),
-            Some("app.bsky".to_string())
-        );
-        assert_eq!(
-            registry.extract_namespace("com.atproto.repo.createRecord"),
-            Some("com.atproto".to_string())
-        );
-        assert_eq!(
-            registry.extract_namespace("com.whtwnd.blog.getPost"),
-            Some("com.whtwnd".to_string())
-        );
-        assert_eq!(registry.extract_namespace("invalid"), None);
-    }
-
-    #[test]
-    fn test_get_did_for_namespace() {
-        let mut registry = AppViewRegistry::new();
-        registry.register_namespace("com.whtwnd", "did:web:whtwnd.com");
-
-        assert!(registry.get_did_for_namespace("app.bsky").is_some());
-        assert_eq!(
-            registry.get_did_for_namespace("com.whtwnd"),
-            Some("did:web:whtwnd.com".to_string())
-        );
-        assert!(registry.get_did_for_namespace("unknown.namespace").is_none());
-    }
+pub fn create_did_resolver() -> Arc<DidResolver> {
+    Arc::new(DidResolver::new())
 }

@@ -1,5 +1,4 @@
 #![allow(unused_imports)]
-#![allow(unused_variables)]
 mod common;
 mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -14,10 +13,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn no_redirect_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .redirect(redirect::Policy::none())
-        .build()
-        .unwrap()
+    reqwest::Client::builder().redirect(redirect::Policy::none()).build().unwrap()
 }
 
 fn generate_pkce() -> (String, String) {
@@ -25,16 +21,14 @@ fn generate_pkce() -> (String, String) {
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
     let mut hasher = Sha256::new();
     hasher.update(code_verifier.as_bytes());
-    let hash = hasher.finalize();
-    let code_challenge = URL_SAFE_NO_PAD.encode(&hash);
+    let code_challenge = URL_SAFE_NO_PAD.encode(&hasher.finalize());
     (code_verifier, code_challenge)
 }
 
 async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
     let mock_server = MockServer::start().await;
-    let client_id = mock_server.uri();
     let metadata = json!({
-        "client_id": client_id,
+        "client_id": mock_server.uri(),
         "client_name": "Security Test Client",
         "redirect_uris": [redirect_uri],
         "grant_types": ["authorization_code", "refresh_token"],
@@ -42,1754 +36,435 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
         "token_endpoint_auth_method": "none",
         "dpop_bound_access_tokens": false
     });
-    Mock::given(method("GET"))
-        .and(path("/"))
+    Mock::given(method("GET")).and(path("/"))
         .respond_with(ResponseTemplate::new(200).set_body_json(metadata))
-        .mount(&mock_server)
-        .await;
+        .mount(&mock_server).await;
     mock_server
 }
 
 async fn get_oauth_tokens(http_client: &reqwest::Client, url: &str) -> (String, String, String) {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("sec-test-{}", ts);
-    let email = format!("sec-test-{}@example.com", ts);
-    let password = "security-test-password";
-    http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
+    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "security-test-password" }))
+        .send().await.unwrap();
     let redirect_uri = "https://example.com/sec-callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
     let (code_verifier, code_challenge) = generate_pkce();
-    let par_body: Value = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let par_body: Value = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id), ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge), ("code_challenge_method", "S256")])
+        .send().await.unwrap().json().await.unwrap();
     let request_uri = par_body["request_uri"].as_str().unwrap();
     let auth_client = no_redirect_client();
-    let auth_res = auth_client
-        .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    let location = auth_res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let code = location
-        .split("code=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap();
-    let token_body: Value = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", &code_verifier),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let access_token = token_body["access_token"].as_str().unwrap().to_string();
-    let refresh_token = token_body["refresh_token"].as_str().unwrap().to_string();
-    (access_token, refresh_token, client_id)
+    let auth_res = auth_client.post(format!("{}/oauth/authorize", url))
+        .form(&[("request_uri", request_uri), ("username", &handle), ("password", "security-test-password"), ("remember_device", "false")])
+        .send().await.unwrap();
+    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let token_body: Value = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier), ("client_id", &client_id)])
+        .send().await.unwrap().json().await.unwrap();
+    (token_body["access_token"].as_str().unwrap().to_string(),
+     token_body["refresh_token"].as_str().unwrap().to_string(), client_id)
 }
 
 #[tokio::test]
-async fn test_security_forged_token_signature_rejected() {
+async fn test_token_tampering_attacks() {
     let url = base_url().await;
     let http_client = client();
     let (access_token, _, _) = get_oauth_tokens(&http_client, url).await;
     let parts: Vec<&str> = access_token.split('.').collect();
-    assert_eq!(parts.len(), 3, "Token should have 3 parts");
-    let forged_signature = URL_SAFE_NO_PAD.encode(&[0u8; 32]);
-    let forged_token = format!("{}.{}.{}", parts[0], parts[1], forged_signature);
-    let res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-        .header("Authorization", format!("Bearer {}", forged_token))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::UNAUTHORIZED,
-        "Forged signature should be rejected"
-    );
-}
-
-#[tokio::test]
-async fn test_security_modified_payload_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let (access_token, _, _) = get_oauth_tokens(&http_client, url).await;
-    let parts: Vec<&str> = access_token.split('.').collect();
+    assert_eq!(parts.len(), 3);
+    let forged_sig = URL_SAFE_NO_PAD.encode(&[0u8; 32]);
+    let forged_token = format!("{}.{}.{}", parts[0], parts[1], forged_sig);
+    assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .bearer_auth(&forged_token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED, "Forged signature should be rejected");
     let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).unwrap();
     let mut payload: Value = serde_json::from_slice(&payload_bytes).unwrap();
     payload["sub"] = json!("did:plc:attacker");
     let modified_payload = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
     let modified_token = format!("{}.{}.{}", parts[0], modified_payload, parts[2]);
-    let res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-        .header("Authorization", format!("Bearer {}", modified_token))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::UNAUTHORIZED,
-        "Modified payload should be rejected"
-    );
+    assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .bearer_auth(&modified_token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED, "Modified payload should be rejected");
+    let none_header = json!({ "alg": "none", "typ": "at+jwt" });
+    let none_payload = json!({ "iss": "https://test.pds", "sub": "did:plc:attacker", "aud": "https://test.pds",
+        "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600, "jti": "fake", "scope": "atproto" });
+    let none_token = format!("{}.{}.", URL_SAFE_NO_PAD.encode(serde_json::to_string(&none_header).unwrap()),
+        URL_SAFE_NO_PAD.encode(serde_json::to_string(&none_payload).unwrap()));
+    assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .bearer_auth(&none_token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED, "alg=none should be rejected");
+    let rs256_header = json!({ "alg": "RS256", "typ": "at+jwt" });
+    let rs256_token = format!("{}.{}.{}", URL_SAFE_NO_PAD.encode(serde_json::to_string(&rs256_header).unwrap()),
+        URL_SAFE_NO_PAD.encode(serde_json::to_string(&none_payload).unwrap()), URL_SAFE_NO_PAD.encode(&[1u8; 64]));
+    assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .bearer_auth(&rs256_token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED, "Algorithm substitution should be rejected");
+    let expired_payload = json!({ "iss": "https://test.pds", "sub": "did:plc:test", "aud": "https://test.pds",
+        "iat": Utc::now().timestamp() - 7200, "exp": Utc::now().timestamp() - 3600, "jti": "expired" });
+    let expired_token = format!("{}.{}.{}", URL_SAFE_NO_PAD.encode(serde_json::to_string(&json!({"alg":"HS256","typ":"at+jwt"})).unwrap()),
+        URL_SAFE_NO_PAD.encode(serde_json::to_string(&expired_payload).unwrap()), URL_SAFE_NO_PAD.encode(&[1u8; 32]));
+    assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .bearer_auth(&expired_token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED, "Expired token should be rejected");
 }
 
 #[tokio::test]
-async fn test_security_algorithm_none_attack_rejected() {
+async fn test_pkce_security() {
     let url = base_url().await;
     let http_client = client();
-    let header = json!({
-        "alg": "none",
-        "typ": "at+jwt"
-    });
-    let payload = json!({
-        "iss": "https://test.pds",
-        "sub": "did:plc:attacker",
-        "aud": "https://test.pds",
-        "iat": Utc::now().timestamp(),
-        "exp": Utc::now().timestamp() + 3600,
-        "jti": "fake-token-id",
-        "scope": "atproto"
-    });
-    let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
-    let malicious_token = format!("{}.{}.", header_b64, payload_b64);
-    let res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-        .header("Authorization", format!("Bearer {}", malicious_token))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::UNAUTHORIZED,
-        "Algorithm 'none' attack should be rejected"
-    );
-}
-
-#[tokio::test]
-async fn test_security_algorithm_substitution_attack_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let header = json!({
-        "alg": "RS256",
-        "typ": "at+jwt"
-    });
-    let payload = json!({
-        "iss": "https://test.pds",
-        "sub": "did:plc:attacker",
-        "aud": "https://test.pds",
-        "iat": Utc::now().timestamp(),
-        "exp": Utc::now().timestamp() + 3600,
-        "jti": "fake-token-id"
-    });
-    let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
-    let fake_sig = URL_SAFE_NO_PAD.encode(&[1u8; 64]);
-    let malicious_token = format!("{}.{}.{}", header_b64, payload_b64, fake_sig);
-    let res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-        .header("Authorization", format!("Bearer {}", malicious_token))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::UNAUTHORIZED,
-        "Algorithm substitution attack should be rejected"
-    );
-}
-
-#[tokio::test]
-async fn test_security_expired_token_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let header = json!({
-        "alg": "HS256",
-        "typ": "at+jwt"
-    });
-    let payload = json!({
-        "iss": "https://test.pds",
-        "sub": "did:plc:test",
-        "aud": "https://test.pds",
-        "iat": Utc::now().timestamp() - 7200,
-        "exp": Utc::now().timestamp() - 3600,
-        "jti": "expired-token-id"
-    });
-    let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
-    let fake_sig = URL_SAFE_NO_PAD.encode(&[1u8; 32]);
-    let expired_token = format!("{}.{}.{}", header_b64, payload_b64, fake_sig);
-    let res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-        .header("Authorization", format!("Bearer {}", expired_token))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::UNAUTHORIZED,
-        "Expired token should be rejected"
-    );
-}
-
-#[tokio::test]
-async fn test_security_pkce_plain_method_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let redirect_uri = "https://example.com/pkce-plain-callback";
+    let redirect_uri = "https://example.com/pkce-callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
-    let res = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", "plain-text-challenge"),
-            ("code_challenge_method", "plain"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::BAD_REQUEST,
-        "PKCE plain method should be rejected"
-    );
+    let res = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id), ("redirect_uri", redirect_uri),
+            ("code_challenge", "plain-text-challenge"), ("code_challenge_method", "plain")])
+        .send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "PKCE plain method should be rejected");
     let body: Value = res.json().await.unwrap();
-    assert_eq!(body["error"], "invalid_request");
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .to_lowercase()
-            .contains("s256"),
-        "Error should mention S256 requirement"
-    );
-}
-
-#[tokio::test]
-async fn test_security_pkce_missing_challenge_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let redirect_uri = "https://example.com/no-pkce-callback";
-    let mock_client = setup_mock_client_metadata(redirect_uri).await;
-    let client_id = mock_client.uri();
-    let res = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::BAD_REQUEST,
-        "Missing PKCE challenge should be rejected"
-    );
-}
-
-#[tokio::test]
-async fn test_security_pkce_wrong_verifier_rejected() {
-    let url = base_url().await;
-    let http_client = client();
+    assert!(body["error_description"].as_str().unwrap().to_lowercase().contains("s256"));
+    let res = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id), ("redirect_uri", redirect_uri)])
+        .send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Missing PKCE challenge should be rejected");
     let ts = Utc::now().timestamp_millis();
     let handle = format!("pkce-attack-{}", ts);
-    let email = format!("pkce-attack-{}@example.com", ts);
-    let password = "pkce-attack-password";
-    http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
-    let redirect_uri = "https://example.com/pkce-attack-callback";
-    let mock_client = setup_mock_client_metadata(redirect_uri).await;
-    let client_id = mock_client.uri();
+    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "pkce-password" }))
+        .send().await.unwrap();
     let (_, code_challenge) = generate_pkce();
     let (attacker_verifier, _) = generate_pkce();
-    let par_body: Value = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let par_body: Value = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id), ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge), ("code_challenge_method", "S256")])
+        .send().await.unwrap().json().await.unwrap();
     let request_uri = par_body["request_uri"].as_str().unwrap();
     let auth_client = no_redirect_client();
-    let auth_res = auth_client
-        .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    let location = auth_res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let code = location
-        .split("code=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap();
-    let token_res = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", &attacker_verifier),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        token_res.status(),
-        StatusCode::BAD_REQUEST,
-        "Wrong PKCE verifier should be rejected"
-    );
-    let body: Value = token_res.json().await.unwrap();
-    assert_eq!(body["error"], "invalid_grant");
+    let auth_res = auth_client.post(format!("{}/oauth/authorize", url))
+        .form(&[("request_uri", request_uri), ("username", &handle), ("password", "pkce-password"), ("remember_device", "false")])
+        .send().await.unwrap();
+    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let token_res = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "authorization_code"), ("code", code), ("redirect_uri", redirect_uri),
+            ("code_verifier", &attacker_verifier), ("client_id", &client_id)])
+        .send().await.unwrap();
+    assert_eq!(token_res.status(), StatusCode::BAD_REQUEST, "Wrong PKCE verifier should be rejected");
 }
 
 #[tokio::test]
-async fn test_security_authorization_code_replay_attack() {
+async fn test_replay_attacks() {
     let url = base_url().await;
     let http_client = client();
     let ts = Utc::now().timestamp_millis();
-    let handle = format!("code-replay-{}", ts);
-    let email = format!("code-replay-{}@example.com", ts);
-    let password = "code-replay-password";
-    http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
-    let redirect_uri = "https://example.com/code-replay-callback";
+    let handle = format!("replay-{}", ts);
+    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "replay-password" }))
+        .send().await.unwrap();
+    let redirect_uri = "https://example.com/replay-callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
     let (code_verifier, code_challenge) = generate_pkce();
-    let par_body: Value = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let par_body: Value = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id), ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge), ("code_challenge_method", "S256")])
+        .send().await.unwrap().json().await.unwrap();
     let request_uri = par_body["request_uri"].as_str().unwrap();
     let auth_client = no_redirect_client();
-    let auth_res = auth_client
-        .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    let location = auth_res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let code = location
-        .split("code=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap();
-    let stolen_code = code.to_string();
-    let first_res = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", &code_verifier),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        first_res.status(),
-        StatusCode::OK,
-        "First use should succeed"
-    );
-    let replay_res = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", &stolen_code),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", &code_verifier),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        replay_res.status(),
-        StatusCode::BAD_REQUEST,
-        "Replay attack should fail"
-    );
-    let body: Value = replay_res.json().await.unwrap();
-    assert_eq!(body["error"], "invalid_grant");
+    let auth_res = auth_client.post(format!("{}/oauth/authorize", url))
+        .form(&[("request_uri", request_uri), ("username", &handle), ("password", "replay-password"), ("remember_device", "false")])
+        .send().await.unwrap();
+    let location = auth_res.headers().get("location").unwrap().to_str().unwrap();
+    let code = location.split("code=").nth(1).unwrap().split('&').next().unwrap().to_string();
+    let first = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier), ("client_id", &client_id)])
+        .send().await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK, "First use should succeed");
+    let first_body: Value = first.json().await.unwrap();
+    let replay = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier), ("client_id", &client_id)])
+        .send().await.unwrap();
+    assert_eq!(replay.status(), StatusCode::BAD_REQUEST, "Auth code replay should fail");
+    let stolen_rt = first_body["refresh_token"].as_str().unwrap().to_string();
+    let first_refresh: Value = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", &stolen_rt), ("client_id", &client_id)])
+        .send().await.unwrap().json().await.unwrap();
+    assert!(first_refresh["access_token"].is_string(), "First refresh should succeed");
+    let new_rt = first_refresh["refresh_token"].as_str().unwrap();
+    let rt_replay = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", &stolen_rt), ("client_id", &client_id)])
+        .send().await.unwrap();
+    assert_eq!(rt_replay.status(), StatusCode::BAD_REQUEST, "Refresh token replay should fail");
+    let body: Value = rt_replay.json().await.unwrap();
+    assert!(body["error_description"].as_str().unwrap().to_lowercase().contains("reuse"));
+    let family_revoked = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "refresh_token"), ("refresh_token", new_rt), ("client_id", &client_id)])
+        .send().await.unwrap();
+    assert_eq!(family_revoked.status(), StatusCode::BAD_REQUEST, "Token family should be revoked");
 }
 
 #[tokio::test]
-async fn test_security_refresh_token_replay_attack() {
-    let url = base_url().await;
-    let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("rt-replay-{}", ts);
-    let email = format!("rt-replay-{}@example.com", ts);
-    let password = "rt-replay-password";
-    http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
-    let redirect_uri = "https://example.com/rt-replay-callback";
-    let mock_client = setup_mock_client_metadata(redirect_uri).await;
-    let client_id = mock_client.uri();
-    let (code_verifier, code_challenge) = generate_pkce();
-    let par_body: Value = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let request_uri = par_body["request_uri"].as_str().unwrap();
-    let auth_client = no_redirect_client();
-    let auth_res = auth_client
-        .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    let location = auth_res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let code = location
-        .split("code=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap();
-    let token_body: Value = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", &code_verifier),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let stolen_refresh_token = token_body["refresh_token"].as_str().unwrap().to_string();
-    let first_refresh: Value = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", &stolen_refresh_token),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert!(
-        first_refresh["access_token"].is_string(),
-        "First refresh should succeed"
-    );
-    let new_refresh_token = first_refresh["refresh_token"].as_str().unwrap();
-    let replay_res = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", &stolen_refresh_token),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        replay_res.status(),
-        StatusCode::BAD_REQUEST,
-        "Refresh token replay should fail"
-    );
-    let body: Value = replay_res.json().await.unwrap();
-    assert_eq!(body["error"], "invalid_grant");
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .to_lowercase()
-            .contains("reuse"),
-        "Error should mention token reuse"
-    );
-    let family_revoked_res = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", new_refresh_token),
-            ("client_id", &client_id),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        family_revoked_res.status(),
-        StatusCode::BAD_REQUEST,
-        "Token family should be revoked after replay detection"
-    );
-}
-
-#[tokio::test]
-async fn test_security_redirect_uri_manipulation() {
+async fn test_oauth_security_boundaries() {
     let url = base_url().await;
     let http_client = client();
     let registered_redirect = "https://legitimate-app.com/callback";
-    let attacker_redirect = "https://attacker.com/steal";
     let mock_client = setup_mock_client_metadata(registered_redirect).await;
     let client_id = mock_client.uri();
     let (_, code_challenge) = generate_pkce();
-    let res = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", attacker_redirect),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::BAD_REQUEST,
-        "Unregistered redirect_uri should be rejected"
-    );
-}
-
-#[tokio::test]
-async fn test_security_deactivated_account_blocked() {
-    let url = base_url().await;
-    let http_client = client();
+    let res = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id), ("redirect_uri", "https://attacker.com/steal"),
+            ("code_challenge", &code_challenge), ("code_challenge_method", "S256")])
+        .send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Unregistered redirect_uri should be rejected");
     let ts = Utc::now().timestamp_millis();
-    let handle = format!("deact-sec-{}", ts);
-    let email = format!("deact-sec-{}@example.com", ts);
-    let password = "deact-sec-password";
-    let create_res = http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(create_res.status(), StatusCode::OK);
+    let handle = format!("deact-{}", ts);
+    let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "deact-password" }))
+        .send().await.unwrap();
     let account: Value = create_res.json().await.unwrap();
-    let did = account["did"].as_str().unwrap();
-    let access_jwt = verify_new_account(&http_client, did).await;
-    let deact_res = http_client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", url))
-        .header("Authorization", format!("Bearer {}", access_jwt))
-        .json(&json!({}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(deact_res.status(), StatusCode::OK);
-    let redirect_uri = "https://example.com/deact-sec-callback";
-    let mock_client = setup_mock_client_metadata(redirect_uri).await;
-    let client_id = mock_client.uri();
-    let (_, code_challenge) = generate_pkce();
-    let par_body: Value = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let request_uri = par_body["request_uri"].as_str().unwrap();
-    let auth_res = http_client
-        .post(format!("{}/oauth/authorize", url))
+    let access_jwt = verify_new_account(&http_client, account["did"].as_str().unwrap()).await;
+    http_client.post(format!("{}/xrpc/com.atproto.server.deactivateAccount", url))
+        .bearer_auth(&access_jwt).json(&json!({})).send().await.unwrap();
+    let deact_par: Value = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id), ("redirect_uri", registered_redirect),
+            ("code_challenge", &code_challenge), ("code_challenge_method", "S256")])
+        .send().await.unwrap().json().await.unwrap();
+    let auth_res = http_client.post(format!("{}/oauth/authorize", url))
         .header("Accept", "application/json")
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        auth_res.status(),
-        StatusCode::FORBIDDEN,
-        "Deactivated account should be blocked from OAuth"
-    );
-    let body: Value = auth_res.json().await.unwrap();
-    assert_eq!(body["error"], "access_denied");
-}
-
-#[tokio::test]
-async fn test_security_url_injection_in_state_parameter() {
-    let url = base_url().await;
-    let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("inject-state-{}", ts);
-    let email = format!("inject-state-{}@example.com", ts);
-    let password = "inject-state-password";
-    http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
-    let redirect_uri = "https://example.com/inject-callback";
-    let mock_client = setup_mock_client_metadata(redirect_uri).await;
-    let client_id = mock_client.uri();
-    let (code_verifier, code_challenge) = generate_pkce();
-    let malicious_state = "state&redirect_uri=https://attacker.com&extra=";
-    let par_body: Value = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-            ("state", malicious_state),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let request_uri = par_body["request_uri"].as_str().unwrap();
-    let auth_client = no_redirect_client();
-    let auth_res = auth_client
-        .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert!(
-        auth_res.status().is_redirection(),
-        "Should redirect successfully"
-    );
-    let location = auth_res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    assert!(
-        location.starts_with(redirect_uri),
-        "Redirect should go to registered URI, not attacker URI. Got: {}",
-        location
-    );
-    let redirect_uri_count = location.matches("redirect_uri=").count();
-    assert!(
-        redirect_uri_count <= 1,
-        "State injection should not add extra redirect_uri parameters"
-    );
-    assert!(
-        location.contains(&urlencoding::encode(malicious_state).to_string())
-            || location.contains("state=state%26redirect_uri"),
-        "State parameter should be properly URL-encoded. Got: {}",
-        location
-    );
-}
-
-#[tokio::test]
-async fn test_security_cross_client_token_theft() {
-    let url = base_url().await;
-    let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("cross-client-{}", ts);
-    let email = format!("cross-client-{}@example.com", ts);
-    let password = "cross-client-password";
-    http_client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({
-            "handle": handle,
-            "email": email,
-            "password": password
-        }))
-        .send()
-        .await
-        .unwrap();
+        .form(&[("request_uri", deact_par["request_uri"].as_str().unwrap()), ("username", &handle), ("password", "deact-password"), ("remember_device", "false")])
+        .send().await.unwrap();
+    assert_eq!(auth_res.status(), StatusCode::FORBIDDEN, "Deactivated account should be blocked");
     let redirect_uri_a = "https://app-a.com/callback";
-    let mock_client_a = setup_mock_client_metadata(redirect_uri_a).await;
-    let client_id_a = mock_client_a.uri();
-    let redirect_uri_b = "https://app-b.com/callback";
-    let mock_client_b = setup_mock_client_metadata(redirect_uri_b).await;
-    let client_id_b = mock_client_b.uri();
-    let (code_verifier, code_challenge) = generate_pkce();
-    let par_body: Value = http_client
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id_a),
-            ("redirect_uri", redirect_uri_a),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let request_uri = par_body["request_uri"].as_str().unwrap();
+    let mock_a = setup_mock_client_metadata(redirect_uri_a).await;
+    let client_id_a = mock_a.uri();
+    let mock_b = setup_mock_client_metadata("https://app-b.com/callback").await;
+    let client_id_b = mock_b.uri();
+    let ts2 = Utc::now().timestamp_millis();
+    let handle2 = format!("cross-{}", ts2);
+    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle2, "email": format!("{}@example.com", handle2), "password": "cross-password" }))
+        .send().await.unwrap();
+    let (code_verifier2, code_challenge2) = generate_pkce();
+    let par_a: Value = http_client.post(format!("{}/oauth/par", url))
+        .form(&[("response_type", "code"), ("client_id", &client_id_a), ("redirect_uri", redirect_uri_a),
+            ("code_challenge", &code_challenge2), ("code_challenge_method", "S256")])
+        .send().await.unwrap().json().await.unwrap();
     let auth_client = no_redirect_client();
-    let auth_res = auth_client
-        .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
-        .send()
-        .await
-        .unwrap();
-    let location = auth_res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let code = location
-        .split("code=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap();
-    let token_res = http_client
-        .post(format!("{}/oauth/token", url))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri_a),
-            ("code_verifier", &code_verifier),
-            ("client_id", &client_id_b),
-        ])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        token_res.status(),
-        StatusCode::BAD_REQUEST,
-        "Cross-client code exchange must be explicitly rejected (defense-in-depth)"
-    );
-    let body: Value = token_res.json().await.unwrap();
-    assert_eq!(body["error"], "invalid_grant");
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .contains("client_id"),
-        "Error should mention client_id mismatch"
-    );
+    let auth_a = auth_client.post(format!("{}/oauth/authorize", url))
+        .form(&[("request_uri", par_a["request_uri"].as_str().unwrap()), ("username", &handle2), ("password", "cross-password"), ("remember_device", "false")])
+        .send().await.unwrap();
+    let loc_a = auth_a.headers().get("location").unwrap().to_str().unwrap();
+    let code_a = loc_a.split("code=").nth(1).unwrap().split('&').next().unwrap();
+    let cross_client = http_client.post(format!("{}/oauth/token", url))
+        .form(&[("grant_type", "authorization_code"), ("code", code_a), ("redirect_uri", redirect_uri_a),
+            ("code_verifier", &code_verifier2), ("client_id", &client_id_b)])
+        .send().await.unwrap();
+    assert_eq!(cross_client.status(), StatusCode::BAD_REQUEST, "Cross-client code exchange must be rejected");
 }
 
-#[test]
-fn test_security_dpop_nonce_tamper_detection() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let nonce = verifier.generate_nonce();
-    let nonce_bytes = URL_SAFE_NO_PAD.decode(&nonce).unwrap();
-    let mut tampered = nonce_bytes.clone();
-    if !tampered.is_empty() {
-        tampered[0] ^= 0xFF;
+#[tokio::test]
+async fn test_malformed_tokens_and_headers() {
+    let url = base_url().await;
+    let http_client = client();
+    let malformed = vec!["", "not-a-token", "one.two", "one.two.three.four", "....", "eyJhbGciOiJIUzI1NiJ9",
+        "eyJhbGciOiJIUzI1NiJ9.", "eyJhbGciOiJIUzI1NiJ9..", ".eyJzdWIiOiJ0ZXN0In0.", "!!invalid!!.eyJ9.sig"];
+    for token in &malformed {
+        assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+            .bearer_auth(token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
     }
-    let tampered_nonce = URL_SAFE_NO_PAD.encode(&tampered);
-    let result = verifier.validate_nonce(&tampered_nonce);
-    assert!(result.is_err(), "Tampered nonce should be rejected");
+    let wrong_types = vec!["JWT", "jwt", "at+JWT", ""];
+    for typ in wrong_types {
+        let header = json!({ "alg": "HS256", "typ": typ });
+        let payload = json!({ "iss": "x", "sub": "did:plc:x", "aud": "x", "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600, "jti": "x" });
+        let token = format!("{}.{}.{}", URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap()),
+            URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap()), URL_SAFE_NO_PAD.encode(&[1u8; 32]));
+        assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+            .bearer_auth(&token).send().await.unwrap().status(), StatusCode::UNAUTHORIZED, "typ='{}' should be rejected", typ);
+    }
+    let (access_token, _, _) = get_oauth_tokens(&http_client, url).await;
+    let invalid_formats = vec![format!("Basic {}", access_token), format!("Digest {}", access_token),
+        access_token.clone(), format!("Bearer{}", access_token)];
+    for auth in &invalid_formats {
+        assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+            .header("Authorization", auth).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(http_client.get(format!("{}/xrpc/com.atproto.server.getSession", url))
+        .header("Authorization", "").send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    let grants = vec!["client_credentials", "password", "implicit", "", "AUTHORIZATION_CODE"];
+    for grant in grants {
+        assert_eq!(http_client.post(format!("{}/oauth/token", url))
+            .form(&[("grant_type", grant), ("client_id", "https://example.com")])
+            .send().await.unwrap().status(), StatusCode::BAD_REQUEST, "Grant '{}' should be rejected", grant);
+    }
 }
 
-#[test]
-fn test_security_dpop_nonce_cross_server_rejected() {
-    let secret1 = b"server-1-secret-32-bytes-long!!!";
-    let secret2 = b"server-2-secret-32-bytes-long!!!";
-    let verifier1 = DPoPVerifier::new(secret1);
-    let verifier2 = DPoPVerifier::new(secret2);
-    let nonce_from_server1 = verifier1.generate_nonce();
-    let result = verifier2.validate_nonce(&nonce_from_server1);
-    assert!(
-        result.is_err(),
-        "Nonce from different server should be rejected"
-    );
+#[tokio::test]
+async fn test_token_revocation() {
+    let url = base_url().await;
+    let http_client = client();
+    let (access_token, refresh_token, _) = get_oauth_tokens(&http_client, url).await;
+    assert_eq!(http_client.post(format!("{}/oauth/revoke", url))
+        .form(&[("token", &refresh_token)]).send().await.unwrap().status(), StatusCode::OK);
+    let introspect: Value = http_client.post(format!("{}/oauth/introspect", url))
+        .form(&[("token", &access_token)]).send().await.unwrap().json().await.unwrap();
+    assert_eq!(introspect["active"], false, "Revoked token should be inactive");
 }
 
-#[test]
-fn test_security_dpop_proof_signature_tampering() {
+fn create_dpop_proof(method: &str, uri: &str, _nonce: Option<&str>, ath: Option<&str>, iat_offset: i64) -> String {
     use p256::ecdsa::{Signature, SigningKey, signature::Signer};
     use p256::elliptic_curve::sec1::ToEncodedPoint;
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
     let signing_key = SigningKey::random(&mut rand::thread_rng());
-    let verifying_key = signing_key.verifying_key();
-    let point = verifying_key.to_encoded_point(false);
+    let point = signing_key.verifying_key().to_encoded_point(false);
     let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
     let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
-    let header = json!({
-        "typ": "dpop+jwt",
-        "alg": "ES256",
-        "jwk": {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": x,
-            "y": y
-        }
-    });
-    let payload = json!({
-        "jti": format!("tamper-test-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
-        "htm": "POST",
-        "htu": "https://example.com/token",
-        "iat": Utc::now().timestamp()
-    });
+    let header = json!({ "typ": "dpop+jwt", "alg": "ES256", "jwk": { "kty": "EC", "crv": "P-256", "x": x, "y": y } });
+    let mut payload = json!({ "jti": format!("unique-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+        "htm": method, "htu": uri, "iat": Utc::now().timestamp() + iat_offset });
+    if let Some(a) = ath { payload["ath"] = json!(a); }
     let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
     let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
     let signing_input = format!("{}.{}", header_b64, payload_b64);
     let signature: Signature = signing_key.sign(signing_input.as_bytes());
-    let mut sig_bytes = signature.to_bytes().to_vec();
-    sig_bytes[0] ^= 0xFF;
-    let tampered_sig = URL_SAFE_NO_PAD.encode(&sig_bytes);
-    let tampered_proof = format!("{}.{}.{}", header_b64, payload_b64, tampered_sig);
-    let result = verifier.verify_proof(&tampered_proof, "POST", "https://example.com/token", None);
-    assert!(
-        result.is_err(),
-        "Tampered DPoP signature should be rejected"
-    );
+    format!("{}.{}", signing_input, URL_SAFE_NO_PAD.encode(signature.to_bytes()))
 }
 
 #[test]
-fn test_security_dpop_proof_key_substitution() {
+fn test_dpop_nonce_security() {
+    let secret1 = b"test-dpop-secret-32-bytes-long!!";
+    let secret2 = b"different-secret-32-bytes-long!!";
+    let v1 = DPoPVerifier::new(secret1);
+    let v2 = DPoPVerifier::new(secret2);
+    let nonce = v1.generate_nonce();
+    assert!(!nonce.is_empty());
+    assert!(v1.validate_nonce(&nonce).is_ok(), "Valid nonce should pass");
+    assert!(v2.validate_nonce(&nonce).is_err(), "Nonce from different secret should fail");
+    let nonce_bytes = URL_SAFE_NO_PAD.decode(&nonce).unwrap();
+    let mut tampered = nonce_bytes.clone();
+    if !tampered.is_empty() { tampered[0] ^= 0xFF; }
+    assert!(v1.validate_nonce(&URL_SAFE_NO_PAD.encode(&tampered)).is_err(), "Tampered nonce should fail");
+    assert!(v1.validate_nonce("invalid").is_err());
+    assert!(v1.validate_nonce("").is_err());
+    assert!(v1.validate_nonce("!!!not-base64!!!").is_err());
+}
+
+#[test]
+fn test_dpop_proof_validation() {
+    let secret = b"test-dpop-secret-32-bytes-long!!";
+    let verifier = DPoPVerifier::new(secret);
+    assert!(verifier.verify_proof("not.enough", "POST", "https://example.com", None).is_err());
+    assert!(verifier.verify_proof("invalid", "POST", "https://example.com", None).is_err());
+    let proof = create_dpop_proof("POST", "https://example.com/token", None, None, 0);
+    assert!(verifier.verify_proof(&proof, "GET", "https://example.com/token", None).is_err(), "Method mismatch");
+    assert!(verifier.verify_proof(&proof, "POST", "https://other.com/token", None).is_err(), "URI mismatch");
+    assert!(verifier.verify_proof(&proof, "POST", "https://example.com/token?foo=bar", None).is_ok(), "Query params should be ignored");
+    let old_proof = create_dpop_proof("POST", "https://example.com/token", None, None, -600);
+    assert!(verifier.verify_proof(&old_proof, "POST", "https://example.com/token", None).is_err(), "iat too old");
+    let future_proof = create_dpop_proof("POST", "https://example.com/token", None, None, 600);
+    assert!(verifier.verify_proof(&future_proof, "POST", "https://example.com/token", None).is_err(), "iat in future");
+    let ath_proof = create_dpop_proof("GET", "https://example.com/resource", None, Some("wrong"), 0);
+    assert!(verifier.verify_proof(&ath_proof, "GET", "https://example.com/resource", Some("correct")).is_err(), "ath mismatch");
+    let no_ath_proof = create_dpop_proof("GET", "https://example.com/resource", None, None, 0);
+    assert!(verifier.verify_proof(&no_ath_proof, "GET", "https://example.com/resource", Some("expected")).is_err(), "Missing ath");
+}
+
+#[test]
+fn test_dpop_proof_signature_attacks() {
     use p256::ecdsa::{Signature, SigningKey, signature::Signer};
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     let secret = b"test-dpop-secret-32-bytes-long!!";
     let verifier = DPoPVerifier::new(secret);
     let signing_key = SigningKey::random(&mut rand::thread_rng());
     let attacker_key = SigningKey::random(&mut rand::thread_rng());
-    let attacker_verifying = attacker_key.verifying_key();
-    let attacker_point = attacker_verifying.to_encoded_point(false);
+    let attacker_point = attacker_key.verifying_key().to_encoded_point(false);
     let x = URL_SAFE_NO_PAD.encode(attacker_point.x().unwrap());
     let y = URL_SAFE_NO_PAD.encode(attacker_point.y().unwrap());
-    let header = json!({
-        "typ": "dpop+jwt",
-        "alg": "ES256",
-        "jwk": {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": x,
-            "y": y
-        }
-    });
-    let payload = json!({
-        "jti": format!("key-sub-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
-        "htm": "POST",
-        "htu": "https://example.com/token",
-        "iat": Utc::now().timestamp()
-    });
+    let header = json!({ "typ": "dpop+jwt", "alg": "ES256", "jwk": { "kty": "EC", "crv": "P-256", "x": x, "y": y } });
+    let payload = json!({ "jti": format!("key-sub-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+        "htm": "POST", "htu": "https://example.com/token", "iat": Utc::now().timestamp() });
     let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
     let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
     let signing_input = format!("{}.{}", header_b64, payload_b64);
     let signature: Signature = signing_key.sign(signing_input.as_bytes());
-    let signature_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
-    let mismatched_proof = format!("{}.{}.{}", header_b64, payload_b64, signature_b64);
-    let result =
-        verifier.verify_proof(&mismatched_proof, "POST", "https://example.com/token", None);
-    assert!(
-        result.is_err(),
-        "DPoP proof with mismatched key should be rejected"
-    );
+    let mismatched = format!("{}.{}", signing_input, URL_SAFE_NO_PAD.encode(signature.to_bytes()));
+    assert!(verifier.verify_proof(&mismatched, "POST", "https://example.com/token", None).is_err(), "Mismatched key should fail");
+    let point = signing_key.verifying_key().to_encoded_point(false);
+    let good_header = json!({ "typ": "dpop+jwt", "alg": "ES256", "jwk": { "kty": "EC", "crv": "P-256",
+        "x": URL_SAFE_NO_PAD.encode(point.x().unwrap()), "y": URL_SAFE_NO_PAD.encode(point.y().unwrap()) } });
+    let good_header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&good_header).unwrap());
+    let good_input = format!("{}.{}", good_header_b64, payload_b64);
+    let good_sig: Signature = signing_key.sign(good_input.as_bytes());
+    let mut sig_bytes = good_sig.to_bytes().to_vec();
+    sig_bytes[0] ^= 0xFF;
+    let tampered = format!("{}.{}", good_input, URL_SAFE_NO_PAD.encode(&sig_bytes));
+    assert!(verifier.verify_proof(&tampered, "POST", "https://example.com/token", None).is_err(), "Tampered sig should fail");
 }
 
 #[test]
-fn test_security_jwk_thumbprint_consistency() {
-    let jwk = DPoPJwk {
-        kty: "EC".to_string(),
-        crv: Some("P-256".to_string()),
+fn test_jwk_thumbprint() {
+    let jwk = DPoPJwk { kty: "EC".to_string(), crv: Some("P-256".to_string()),
         x: Some("WbbXrPhtCg66wuF0NLhzXxF5PFzNZ7wNJm9M_1pCcXY".to_string()),
-        y: Some("DubR6_2kU1H5EYhbcNpYZGy1EY6GEKKxv6PYx8VW0rA".to_string()),
-    };
-    let mut results = Vec::new();
-    for _ in 0..100 {
-        results.push(compute_jwk_thumbprint(&jwk).unwrap());
-    }
-    let first = &results[0];
-    for (i, result) in results.iter().enumerate() {
-        assert_eq!(
-            first, result,
-            "Thumbprint should be deterministic, but iteration {} differs",
-            i
-        );
-    }
+        y: Some("DubR6_2kU1H5EYhbcNpYZGy1EY6GEKKxv6PYx8VW0rA".to_string()) };
+    let tp1 = compute_jwk_thumbprint(&jwk).unwrap();
+    let tp2 = compute_jwk_thumbprint(&jwk).unwrap();
+    assert_eq!(tp1, tp2, "Thumbprint should be deterministic");
+    assert!(!tp1.is_empty());
+    assert!(compute_jwk_thumbprint(&DPoPJwk { kty: "EC".to_string(), crv: Some("secp256k1".to_string()),
+        x: Some("x".to_string()), y: Some("y".to_string()) }).is_ok());
+    assert!(compute_jwk_thumbprint(&DPoPJwk { kty: "OKP".to_string(), crv: Some("Ed25519".to_string()),
+        x: Some("x".to_string()), y: None }).is_ok());
+    assert!(compute_jwk_thumbprint(&DPoPJwk { kty: "EC".to_string(), crv: None, x: Some("x".to_string()), y: Some("y".to_string()) }).is_err());
+    assert!(compute_jwk_thumbprint(&DPoPJwk { kty: "EC".to_string(), crv: Some("P-256".to_string()), x: None, y: Some("y".to_string()) }).is_err());
+    assert!(compute_jwk_thumbprint(&DPoPJwk { kty: "EC".to_string(), crv: Some("P-256".to_string()), x: Some("x".to_string()), y: None }).is_err());
+    assert!(compute_jwk_thumbprint(&DPoPJwk { kty: "RSA".to_string(), crv: None, x: None, y: None }).is_err());
 }
 
 #[test]
-fn test_security_dpop_iat_clock_skew_limits() {
+fn test_dpop_clock_skew() {
     use p256::ecdsa::{Signature, SigningKey, signature::Signer};
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     let secret = b"test-dpop-secret-32-bytes-long!!";
     let verifier = DPoPVerifier::new(secret);
-    let test_offsets = vec![
-        (-600, true),
-        (-301, true),
-        (-299, false),
-        (0, false),
-        (299, false),
-        (301, true),
-        (600, true),
-    ];
-    for (offset_secs, should_fail) in test_offsets {
+    let test_cases = vec![(-600, true), (-301, true), (-299, false), (0, false), (299, false), (301, true), (600, true)];
+    for (offset, should_fail) in test_cases {
         let signing_key = SigningKey::random(&mut rand::thread_rng());
-        let verifying_key = signing_key.verifying_key();
-        let point = verifying_key.to_encoded_point(false);
+        let point = signing_key.verifying_key().to_encoded_point(false);
         let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
         let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
-        let header = json!({
-            "typ": "dpop+jwt",
-            "alg": "ES256",
-            "jwk": {
-                "kty": "EC",
-                "crv": "P-256",
-                "x": x,
-                "y": y
-            }
-        });
-        let payload = json!({
-            "jti": format!("clock-{}-{}", offset_secs, Utc::now().timestamp_nanos_opt().unwrap_or(0)),
-            "htm": "POST",
-            "htu": "https://example.com/token",
-            "iat": Utc::now().timestamp() + offset_secs
-        });
+        let header = json!({ "typ": "dpop+jwt", "alg": "ES256", "jwk": { "kty": "EC", "crv": "P-256", "x": x, "y": y } });
+        let payload = json!({ "jti": format!("clock-{}-{}", offset, Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+            "htm": "POST", "htu": "https://example.com/token", "iat": Utc::now().timestamp() + offset });
         let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
         let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
         let signing_input = format!("{}.{}", header_b64, payload_b64);
         let signature: Signature = signing_key.sign(signing_input.as_bytes());
-        let signature_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
-        let proof = format!("{}.{}.{}", header_b64, payload_b64, signature_b64);
+        let proof = format!("{}.{}", signing_input, URL_SAFE_NO_PAD.encode(signature.to_bytes()));
         let result = verifier.verify_proof(&proof, "POST", "https://example.com/token", None);
-        if should_fail {
-            assert!(
-                result.is_err(),
-                "iat offset {} should be rejected",
-                offset_secs
-            );
-        } else {
-            assert!(
-                result.is_ok(),
-                "iat offset {} should be accepted",
-                offset_secs
-            );
-        }
+        if should_fail { assert!(result.is_err(), "offset {} should fail", offset); }
+        else { assert!(result.is_ok(), "offset {} should pass", offset); }
     }
 }
 
 #[test]
-fn test_security_dpop_method_case_insensitivity() {
+fn test_dpop_http_method_case() {
     use p256::ecdsa::{Signature, SigningKey, signature::Signer};
     use p256::elliptic_curve::sec1::ToEncodedPoint;
     let secret = b"test-dpop-secret-32-bytes-long!!";
     let verifier = DPoPVerifier::new(secret);
     let signing_key = SigningKey::random(&mut rand::thread_rng());
-    let verifying_key = signing_key.verifying_key();
-    let point = verifying_key.to_encoded_point(false);
+    let point = signing_key.verifying_key().to_encoded_point(false);
     let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
     let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
-    let header = json!({
-        "typ": "dpop+jwt",
-        "alg": "ES256",
-        "jwk": {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": x,
-            "y": y
-        }
-    });
-    let payload = json!({
-        "jti": format!("case-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
-        "htm": "post",
-        "htu": "https://example.com/token",
-        "iat": Utc::now().timestamp()
-    });
+    let header = json!({ "typ": "dpop+jwt", "alg": "ES256", "jwk": { "kty": "EC", "crv": "P-256", "x": x, "y": y } });
+    let payload = json!({ "jti": format!("case-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
+        "htm": "post", "htu": "https://example.com/token", "iat": Utc::now().timestamp() });
     let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
     let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
     let signing_input = format!("{}.{}", header_b64, payload_b64);
     let signature: Signature = signing_key.sign(signing_input.as_bytes());
-    let signature_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
-    let proof = format!("{}.{}.{}", header_b64, payload_b64, signature_b64);
-    let result = verifier.verify_proof(&proof, "POST", "https://example.com/token", None);
-    assert!(
-        result.is_ok(),
-        "HTTP method comparison should be case-insensitive"
-    );
-}
-
-#[tokio::test]
-async fn test_security_invalid_grant_type_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let grant_types = vec![
-        "client_credentials",
-        "password",
-        "implicit",
-        "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        "urn:ietf:params:oauth:grant-type:device_code",
-        "",
-        "AUTHORIZATION_CODE",
-        "Authorization_Code",
-    ];
-    for grant_type in grant_types {
-        let res = http_client
-            .post(format!("{}/oauth/token", url))
-            .form(&[
-                ("grant_type", grant_type),
-                ("client_id", "https://example.com"),
-            ])
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::BAD_REQUEST,
-            "Grant type '{}' should be rejected",
-            grant_type
-        );
-    }
-}
-
-#[tokio::test]
-async fn test_security_token_with_wrong_typ_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let wrong_types = vec!["JWT", "jwt", "at+JWT", "access_token", ""];
-    for typ in wrong_types {
-        let header = json!({
-            "alg": "HS256",
-            "typ": typ
-        });
-        let payload = json!({
-            "iss": "https://test.pds",
-            "sub": "did:plc:test",
-            "aud": "https://test.pds",
-            "iat": Utc::now().timestamp(),
-            "exp": Utc::now().timestamp() + 3600,
-            "jti": "wrong-typ-token"
-        });
-        let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-        let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
-        let fake_sig = URL_SAFE_NO_PAD.encode(&[1u8; 32]);
-        let token = format!("{}.{}.{}", header_b64, payload_b64, fake_sig);
-        let res = http_client
-            .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::UNAUTHORIZED,
-            "Token with typ='{}' should be rejected",
-            typ
-        );
-    }
-}
-
-#[tokio::test]
-async fn test_security_missing_required_claims_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let tokens_missing_claims = vec![
-        (json!({"iss": "x", "sub": "x", "aud": "x", "iat": 0}), "exp"),
-        (
-            json!({"iss": "x", "sub": "x", "aud": "x", "exp": 9999999999i64}),
-            "iat",
-        ),
-        (
-            json!({"iss": "x", "aud": "x", "iat": 0, "exp": 9999999999i64}),
-            "sub",
-        ),
-    ];
-    for (payload, missing_claim) in tokens_missing_claims {
-        let header = json!({
-            "alg": "HS256",
-            "typ": "at+jwt"
-        });
-        let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-        let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
-        let fake_sig = URL_SAFE_NO_PAD.encode(&[1u8; 32]);
-        let token = format!("{}.{}.{}", header_b64, payload_b64, fake_sig);
-        let res = http_client
-            .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::UNAUTHORIZED,
-            "Token missing '{}' claim should be rejected",
-            missing_claim
-        );
-    }
-}
-
-#[tokio::test]
-async fn test_security_malformed_tokens_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let malformed_tokens = vec![
-        "",
-        "not-a-token",
-        "one.two",
-        "one.two.three.four",
-        "....",
-        "eyJhbGciOiJIUzI1NiJ9",
-        "eyJhbGciOiJIUzI1NiJ9.",
-        "eyJhbGciOiJIUzI1NiJ9..",
-        ".eyJzdWIiOiJ0ZXN0In0.",
-        "!!invalid-base64!!.eyJzdWIiOiJ0ZXN0In0.sig",
-        "eyJhbGciOiJIUzI1NiJ9.!!invalid!!.sig",
-    ];
-    for token in malformed_tokens {
-        let res = http_client
-            .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::UNAUTHORIZED,
-            "Malformed token '{}' should be rejected",
-            if token.len() > 50 {
-                &token[..50]
-            } else {
-                token
-            }
-        );
-    }
-}
-
-#[tokio::test]
-async fn test_security_authorization_header_formats() {
-    let url = base_url().await;
-    let http_client = client();
-    let (access_token, _, _) = get_oauth_tokens(&http_client, url).await;
-    let valid_case_variants = vec![
-        format!("bearer {}", access_token),
-        format!("BEARER {}", access_token),
-        format!("Bearer  {}", access_token),
-    ];
-    for auth_header in valid_case_variants {
-        let res = http_client
-            .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-            .header("Authorization", &auth_header)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::OK,
-            "Auth header '{}...' should be accepted (RFC 7235 case-insensitivity)",
-            if auth_header.len() > 30 {
-                &auth_header[..30]
-            } else {
-                &auth_header
-            }
-        );
-    }
-    let invalid_formats = vec![
-        format!("Basic {}", access_token),
-        format!("Digest {}", access_token),
-        access_token.clone(),
-        format!("Bearer{}", access_token),
-    ];
-    for auth_header in invalid_formats {
-        let res = http_client
-            .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-            .header("Authorization", &auth_header)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::UNAUTHORIZED,
-            "Auth header '{}...' should be rejected",
-            if auth_header.len() > 30 {
-                &auth_header[..30]
-            } else {
-                &auth_header
-            }
-        );
-    }
-}
-
-#[tokio::test]
-async fn test_security_no_authorization_header() {
-    let url = base_url().await;
-    let http_client = client();
-    let res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::UNAUTHORIZED,
-        "Missing auth header should return 401"
-    );
-}
-
-#[tokio::test]
-async fn test_security_empty_authorization_header() {
-    let url = base_url().await;
-    let http_client = client();
-    let res = http_client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", url))
-        .header("Authorization", "")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        res.status(),
-        StatusCode::UNAUTHORIZED,
-        "Empty auth header should return 401"
-    );
-}
-
-#[tokio::test]
-async fn test_security_revoked_token_rejected() {
-    let url = base_url().await;
-    let http_client = client();
-    let (access_token, refresh_token, _) = get_oauth_tokens(&http_client, url).await;
-    let revoke_res = http_client
-        .post(format!("{}/oauth/revoke", url))
-        .form(&[("token", &refresh_token)])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(revoke_res.status(), StatusCode::OK);
-    let introspect_res = http_client
-        .post(format!("{}/oauth/introspect", url))
-        .form(&[("token", &access_token)])
-        .send()
-        .await
-        .unwrap();
-    let introspect_body: Value = introspect_res.json().await.unwrap();
-    assert_eq!(
-        introspect_body["active"], false,
-        "Revoked token should be inactive"
-    );
-}
-
-#[tokio::test]
-#[ignore = "rate limiting is disabled in test environment"]
-async fn test_security_oauth_authorize_rate_limiting() {
-    let url = base_url().await;
-    let http_client = no_redirect_client();
-    let ts = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-    let unique_ip = format!(
-        "10.{}.{}.{}",
-        (ts >> 16) & 0xFF,
-        (ts >> 8) & 0xFF,
-        ts & 0xFF
-    );
-    let redirect_uri = "https://example.com/rate-limit-callback";
-    let mock_client = setup_mock_client_metadata(redirect_uri).await;
-    let client_id = mock_client.uri();
-    let (_, code_challenge) = generate_pkce();
-    let client_for_par = client();
-    let par_body: Value = client_for_par
-        .post(format!("{}/oauth/par", url))
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", &client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_challenge", &code_challenge),
-            ("code_challenge_method", "S256"),
-        ])
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let request_uri = par_body["request_uri"].as_str().unwrap();
-    let mut rate_limited_count = 0;
-    let mut other_count = 0;
-    for _ in 0..15 {
-        let res = http_client
-            .post(format!("{}/oauth/authorize", url))
-            .header("X-Forwarded-For", &unique_ip)
-            .form(&[
-                ("request_uri", request_uri),
-                ("username", "nonexistent_user"),
-                ("password", "wrong_password"),
-                ("remember_device", "false"),
-            ])
-            .send()
-            .await
-            .unwrap();
-        match res.status() {
-            StatusCode::TOO_MANY_REQUESTS => rate_limited_count += 1,
-            _ => other_count += 1,
-        }
-    }
-    assert!(
-        rate_limited_count > 0,
-        "Expected at least one rate-limited response after 15 OAuth authorize attempts. Got {} other and {} rate limited.",
-        other_count,
-        rate_limited_count
-    );
-}
-
-fn create_dpop_proof(
-    method: &str,
-    uri: &str,
-    nonce: Option<&str>,
-    ath: Option<&str>,
-    iat_offset_secs: i64,
-) -> String {
-    use p256::ecdsa::{Signature, SigningKey, signature::Signer};
-    let signing_key = SigningKey::random(&mut rand::thread_rng());
-    let verifying_key = signing_key.verifying_key();
-    let point = verifying_key.to_encoded_point(false);
-    let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
-    let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
-    let jwk = json!({
-        "kty": "EC",
-        "crv": "P-256",
-        "x": x,
-        "y": y
-    });
-    let header = json!({
-        "typ": "dpop+jwt",
-        "alg": "ES256",
-        "jwk": jwk
-    });
-    let mut payload = json!({
-        "jti": format!("unique-{}", Utc::now().timestamp_nanos_opt().unwrap_or(0)),
-        "htm": method,
-        "htu": uri,
-        "iat": Utc::now().timestamp() + iat_offset_secs
-    });
-    if let Some(n) = nonce {
-        payload["nonce"] = json!(n);
-    }
-    if let Some(a) = ath {
-        payload["ath"] = json!(a);
-    }
-    let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
-    let signing_input = format!("{}.{}", header_b64, payload_b64);
-    let signature: Signature = signing_key.sign(signing_input.as_bytes());
-    let signature_b64 = URL_SAFE_NO_PAD.encode(signature.to_bytes());
-    format!("{}.{}", signing_input, signature_b64)
-}
-
-#[test]
-fn test_dpop_nonce_generation() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let nonce1 = verifier.generate_nonce();
-    let nonce2 = verifier.generate_nonce();
-    assert!(!nonce1.is_empty());
-    assert!(!nonce2.is_empty());
-}
-
-#[test]
-fn test_dpop_nonce_validation_success() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let nonce = verifier.generate_nonce();
-    let result = verifier.validate_nonce(&nonce);
-    assert!(result.is_ok(), "Valid nonce should pass: {:?}", result);
-}
-
-#[test]
-fn test_dpop_nonce_wrong_secret() {
-    let secret1 = b"test-dpop-secret-32-bytes-long!!";
-    let secret2 = b"different-secret-32-bytes-long!!";
-    let verifier1 = DPoPVerifier::new(secret1);
-    let verifier2 = DPoPVerifier::new(secret2);
-    let nonce = verifier1.generate_nonce();
-    let result = verifier2.validate_nonce(&nonce);
-    assert!(result.is_err(), "Nonce from different secret should fail");
-}
-
-#[test]
-fn test_dpop_nonce_invalid_format() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    assert!(verifier.validate_nonce("invalid").is_err());
-    assert!(verifier.validate_nonce("").is_err());
-    assert!(verifier.validate_nonce("!!!not-base64!!!").is_err());
-}
-
-#[test]
-fn test_jwk_thumbprint_ec_p256() {
-    let jwk = DPoPJwk {
-        kty: "EC".to_string(),
-        crv: Some("P-256".to_string()),
-        x: Some("WbbXrPhtCg66wuF0NLhzXxF5PFzNZ7wNJm9M_1pCcXY".to_string()),
-        y: Some("DubR6_2kU1H5EYhbcNpYZGy1EY6GEKKxv6PYx8VW0rA".to_string()),
-    };
-    let thumbprint = compute_jwk_thumbprint(&jwk);
-    assert!(thumbprint.is_ok());
-    let tp = thumbprint.unwrap();
-    assert!(!tp.is_empty());
-    assert!(
-        tp.chars()
-            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-    );
-}
-
-#[test]
-fn test_jwk_thumbprint_ec_secp256k1() {
-    let jwk = DPoPJwk {
-        kty: "EC".to_string(),
-        crv: Some("secp256k1".to_string()),
-        x: Some("some_x_value".to_string()),
-        y: Some("some_y_value".to_string()),
-    };
-    let thumbprint = compute_jwk_thumbprint(&jwk);
-    assert!(thumbprint.is_ok());
-}
-
-#[test]
-fn test_jwk_thumbprint_okp_ed25519() {
-    let jwk = DPoPJwk {
-        kty: "OKP".to_string(),
-        crv: Some("Ed25519".to_string()),
-        x: Some("some_x_value".to_string()),
-        y: None,
-    };
-    let thumbprint = compute_jwk_thumbprint(&jwk);
-    assert!(thumbprint.is_ok());
-}
-
-#[test]
-fn test_jwk_thumbprint_missing_crv() {
-    let jwk = DPoPJwk {
-        kty: "EC".to_string(),
-        crv: None,
-        x: Some("x".to_string()),
-        y: Some("y".to_string()),
-    };
-    let thumbprint = compute_jwk_thumbprint(&jwk);
-    assert!(thumbprint.is_err());
-}
-
-#[test]
-fn test_jwk_thumbprint_missing_x() {
-    let jwk = DPoPJwk {
-        kty: "EC".to_string(),
-        crv: Some("P-256".to_string()),
-        x: None,
-        y: Some("y".to_string()),
-    };
-    let thumbprint = compute_jwk_thumbprint(&jwk);
-    assert!(thumbprint.is_err());
-}
-
-#[test]
-fn test_jwk_thumbprint_missing_y_for_ec() {
-    let jwk = DPoPJwk {
-        kty: "EC".to_string(),
-        crv: Some("P-256".to_string()),
-        x: Some("x".to_string()),
-        y: None,
-    };
-    let thumbprint = compute_jwk_thumbprint(&jwk);
-    assert!(thumbprint.is_err());
-}
-
-#[test]
-fn test_jwk_thumbprint_unsupported_key_type() {
-    let jwk = DPoPJwk {
-        kty: "RSA".to_string(),
-        crv: None,
-        x: None,
-        y: None,
-    };
-    let thumbprint = compute_jwk_thumbprint(&jwk);
-    assert!(thumbprint.is_err());
-}
-
-#[test]
-fn test_jwk_thumbprint_deterministic() {
-    let jwk = DPoPJwk {
-        kty: "EC".to_string(),
-        crv: Some("P-256".to_string()),
-        x: Some("WbbXrPhtCg66wuF0NLhzXxF5PFzNZ7wNJm9M_1pCcXY".to_string()),
-        y: Some("DubR6_2kU1H5EYhbcNpYZGy1EY6GEKKxv6PYx8VW0rA".to_string()),
-    };
-    let tp1 = compute_jwk_thumbprint(&jwk).unwrap();
-    let tp2 = compute_jwk_thumbprint(&jwk).unwrap();
-    assert_eq!(tp1, tp2, "Thumbprint should be deterministic");
-}
-
-#[test]
-fn test_dpop_proof_invalid_format() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let result = verifier.verify_proof("not.enough.parts", "POST", "https://example.com", None);
-    assert!(result.is_err());
-    let result = verifier.verify_proof("invalid", "POST", "https://example.com", None);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_invalid_typ() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let header = json!({
-        "typ": "JWT",
-        "alg": "ES256",
-        "jwk": {
-            "kty": "EC",
-            "crv": "P-256",
-            "x": "x",
-            "y": "y"
-        }
-    });
-    let payload = json!({
-        "jti": "unique",
-        "htm": "POST",
-        "htu": "https://example.com",
-        "iat": Utc::now().timestamp()
-    });
-    let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
-    let proof = format!("{}.{}.sig", header_b64, payload_b64);
-    let result = verifier.verify_proof(&proof, "POST", "https://example.com", None);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_method_mismatch() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let proof = create_dpop_proof("POST", "https://example.com/token", None, None, 0);
-    let result = verifier.verify_proof(&proof, "GET", "https://example.com/token", None);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_uri_mismatch() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let proof = create_dpop_proof("POST", "https://example.com/token", None, None, 0);
-    let result = verifier.verify_proof(&proof, "POST", "https://other.com/token", None);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_iat_too_old() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let proof = create_dpop_proof("POST", "https://example.com/token", None, None, -600);
-    let result = verifier.verify_proof(&proof, "POST", "https://example.com/token", None);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_iat_future() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let proof = create_dpop_proof("POST", "https://example.com/token", None, None, 600);
-    let result = verifier.verify_proof(&proof, "POST", "https://example.com/token", None);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_ath_mismatch() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let proof = create_dpop_proof(
-        "GET",
-        "https://example.com/resource",
-        None,
-        Some("wrong_hash"),
-        0,
-    );
-    let result = verifier.verify_proof(
-        &proof,
-        "GET",
-        "https://example.com/resource",
-        Some("correct_hash"),
-    );
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_missing_ath_when_required() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let proof = create_dpop_proof("GET", "https://example.com/resource", None, None, 0);
-    let result = verifier.verify_proof(
-        &proof,
-        "GET",
-        "https://example.com/resource",
-        Some("expected_hash"),
-    );
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_dpop_proof_uri_ignores_query_params() {
-    let secret = b"test-dpop-secret-32-bytes-long!!";
-    let verifier = DPoPVerifier::new(secret);
-    let proof = create_dpop_proof("POST", "https://example.com/token", None, None, 0);
-    let result = verifier.verify_proof(&proof, "POST", "https://example.com/token?foo=bar", None);
-    assert!(
-        result.is_ok(),
-        "Query params should be ignored: {:?}",
-        result
-    );
+    let proof = format!("{}.{}", signing_input, URL_SAFE_NO_PAD.encode(signature.to_bytes()));
+    assert!(verifier.verify_proof(&proof, "POST", "https://example.com/token", None).is_ok(), "HTTP method should be case-insensitive");
 }

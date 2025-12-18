@@ -1,14 +1,11 @@
 pub mod actor;
 pub mod admin;
 pub mod error;
-pub mod feed;
 pub mod identity;
 pub mod moderation;
-pub mod notification;
 pub mod notification_prefs;
 pub mod proxy;
 pub mod proxy_client;
-pub mod read_after_write;
 pub mod repo;
 pub mod server;
 pub mod temp;

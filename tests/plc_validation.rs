@@ -13,9 +13,7 @@ fn create_valid_operation() -> serde_json::Value {
     let op = json!({
         "type": "plc_operation",
         "rotationKeys": [did_key.clone()],
-        "verificationMethods": {
-            "atproto": did_key.clone()
-        },
+        "verificationMethods": { "atproto": did_key.clone() },
         "alsoKnownAs": ["at://test.handle"],
         "services": {
             "atproto_pds": {
@@ -29,444 +27,161 @@ fn create_valid_operation() -> serde_json::Value {
 }
 
 #[test]
-fn test_validate_plc_operation_valid() {
+fn test_plc_operation_basic_validation() {
     let op = create_valid_operation();
-    let result = validate_plc_operation(&op);
-    assert!(result.is_ok());
+    assert!(validate_plc_operation(&op).is_ok());
+
+    let missing_type = json!({ "rotationKeys": [], "verificationMethods": {}, "alsoKnownAs": [], "services": {}, "sig": "test" });
+    assert!(matches!(validate_plc_operation(&missing_type), Err(PlcError::InvalidResponse(msg)) if msg.contains("Missing type")));
+
+    let invalid_type = json!({ "type": "invalid_type", "sig": "test" });
+    assert!(matches!(validate_plc_operation(&invalid_type), Err(PlcError::InvalidResponse(msg)) if msg.contains("Invalid type")));
+
+    let missing_sig = json!({ "type": "plc_operation", "rotationKeys": [], "verificationMethods": {}, "alsoKnownAs": [], "services": {} });
+    assert!(matches!(validate_plc_operation(&missing_sig), Err(PlcError::InvalidResponse(msg)) if msg.contains("Missing sig")));
+
+    let missing_rotation = json!({ "type": "plc_operation", "verificationMethods": {}, "alsoKnownAs": [], "services": {}, "sig": "test" });
+    assert!(matches!(validate_plc_operation(&missing_rotation), Err(PlcError::InvalidResponse(msg)) if msg.contains("rotationKeys")));
+
+    let missing_verification = json!({ "type": "plc_operation", "rotationKeys": [], "alsoKnownAs": [], "services": {}, "sig": "test" });
+    assert!(matches!(validate_plc_operation(&missing_verification), Err(PlcError::InvalidResponse(msg)) if msg.contains("verificationMethods")));
+
+    let missing_aka = json!({ "type": "plc_operation", "rotationKeys": [], "verificationMethods": {}, "services": {}, "sig": "test" });
+    assert!(matches!(validate_plc_operation(&missing_aka), Err(PlcError::InvalidResponse(msg)) if msg.contains("alsoKnownAs")));
+
+    let missing_services = json!({ "type": "plc_operation", "rotationKeys": [], "verificationMethods": {}, "alsoKnownAs": [], "sig": "test" });
+    assert!(matches!(validate_plc_operation(&missing_services), Err(PlcError::InvalidResponse(msg)) if msg.contains("services")));
+
+    assert!(matches!(validate_plc_operation(&json!("not an object")), Err(PlcError::InvalidResponse(_))));
 }
 
 #[test]
-fn test_validate_plc_operation_missing_type() {
-    let op = json!({
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {},
-        "sig": "test"
-    });
-    let result = validate_plc_operation(&op);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("Missing type")));
-}
-
-#[test]
-fn test_validate_plc_operation_invalid_type() {
-    let op = json!({
-        "type": "invalid_type",
-        "sig": "test"
-    });
-    let result = validate_plc_operation(&op);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("Invalid type")));
-}
-
-#[test]
-fn test_validate_plc_operation_missing_sig() {
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {}
-    });
-    let result = validate_plc_operation(&op);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("Missing sig")));
-}
-
-#[test]
-fn test_validate_plc_operation_missing_rotation_keys() {
-    let op = json!({
-        "type": "plc_operation",
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {},
-        "sig": "test"
-    });
-    let result = validate_plc_operation(&op);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("rotationKeys")));
-}
-
-#[test]
-fn test_validate_plc_operation_missing_verification_methods() {
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "alsoKnownAs": [],
-        "services": {},
-        "sig": "test"
-    });
-    let result = validate_plc_operation(&op);
-    assert!(
-        matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("verificationMethods"))
-    );
-}
-
-#[test]
-fn test_validate_plc_operation_missing_also_known_as() {
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "services": {},
-        "sig": "test"
-    });
-    let result = validate_plc_operation(&op);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("alsoKnownAs")));
-}
-
-#[test]
-fn test_validate_plc_operation_missing_services() {
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "sig": "test"
-    });
-    let result = validate_plc_operation(&op);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("services")));
-}
-
-#[test]
-fn test_validate_rotation_key_required() {
+fn test_plc_submission_validation() {
     let key = SigningKey::random(&mut rand::thread_rng());
     let did_key = signing_key_to_did_key(&key);
     let server_key = "did:key:zServer123";
-    let op = json!({
+
+    let base_op = |rotation_key: &str, signing_key: &str, handle: &str, service_type: &str, endpoint: &str| json!({
         "type": "plc_operation",
-        "rotationKeys": [did_key.clone()],
-        "verificationMethods": {"atproto": did_key.clone()},
-        "alsoKnownAs": ["at://test.handle"],
-        "services": {
-            "atproto_pds": {
-                "type": "AtprotoPersonalDataServer",
-                "endpoint": "https://pds.example.com"
-            }
-        },
+        "rotationKeys": [rotation_key],
+        "verificationMethods": {"atproto": signing_key},
+        "alsoKnownAs": [format!("at://{}", handle)],
+        "services": { "atproto_pds": { "type": service_type, "endpoint": endpoint } },
         "sig": "test"
     });
+
     let ctx = PlcValidationContext {
         server_rotation_key: server_key.to_string(),
         expected_signing_key: did_key.clone(),
         expected_handle: "test.handle".to_string(),
         expected_pds_endpoint: "https://pds.example.com".to_string(),
     };
-    let result = validate_plc_operation_for_submission(&op, &ctx);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("rotation key")));
-}
 
-#[test]
-fn test_validate_signing_key_match() {
-    let key = SigningKey::random(&mut rand::thread_rng());
-    let did_key = signing_key_to_did_key(&key);
-    let wrong_key = "did:key:zWrongKey456";
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [did_key.clone()],
-        "verificationMethods": {"atproto": wrong_key},
-        "alsoKnownAs": ["at://test.handle"],
-        "services": {
-            "atproto_pds": {
-                "type": "AtprotoPersonalDataServer",
-                "endpoint": "https://pds.example.com"
-            }
-        },
-        "sig": "test"
-    });
-    let ctx = PlcValidationContext {
+    let op = base_op(&did_key, &did_key, "test.handle", "AtprotoPersonalDataServer", "https://pds.example.com");
+    assert!(matches!(validate_plc_operation_for_submission(&op, &ctx), Err(PlcError::InvalidResponse(msg)) if msg.contains("rotation key")));
+
+    let ctx_with_user_key = PlcValidationContext {
         server_rotation_key: did_key.clone(),
         expected_signing_key: did_key.clone(),
         expected_handle: "test.handle".to_string(),
         expected_pds_endpoint: "https://pds.example.com".to_string(),
     };
-    let result = validate_plc_operation_for_submission(&op, &ctx);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("signing key")));
+
+    let wrong_signing = base_op(&did_key, "did:key:zWrongKey", "test.handle", "AtprotoPersonalDataServer", "https://pds.example.com");
+    assert!(matches!(validate_plc_operation_for_submission(&wrong_signing, &ctx_with_user_key), Err(PlcError::InvalidResponse(msg)) if msg.contains("signing key")));
+
+    let wrong_handle = base_op(&did_key, &did_key, "wrong.handle", "AtprotoPersonalDataServer", "https://pds.example.com");
+    assert!(matches!(validate_plc_operation_for_submission(&wrong_handle, &ctx_with_user_key), Err(PlcError::InvalidResponse(msg)) if msg.contains("handle")));
+
+    let wrong_service_type = base_op(&did_key, &did_key, "test.handle", "WrongServiceType", "https://pds.example.com");
+    assert!(matches!(validate_plc_operation_for_submission(&wrong_service_type, &ctx_with_user_key), Err(PlcError::InvalidResponse(msg)) if msg.contains("type")));
+
+    let wrong_endpoint = base_op(&did_key, &did_key, "test.handle", "AtprotoPersonalDataServer", "https://wrong.endpoint.com");
+    assert!(matches!(validate_plc_operation_for_submission(&wrong_endpoint, &ctx_with_user_key), Err(PlcError::InvalidResponse(msg)) if msg.contains("endpoint")));
 }
 
 #[test]
-fn test_validate_handle_match() {
+fn test_signature_verification() {
     let key = SigningKey::random(&mut rand::thread_rng());
     let did_key = signing_key_to_did_key(&key);
     let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [did_key.clone()],
-        "verificationMethods": {"atproto": did_key.clone()},
-        "alsoKnownAs": ["at://wrong.handle"],
-        "services": {
-            "atproto_pds": {
-                "type": "AtprotoPersonalDataServer",
-                "endpoint": "https://pds.example.com"
-            }
-        },
-        "sig": "test"
-    });
-    let ctx = PlcValidationContext {
-        server_rotation_key: did_key.clone(),
-        expected_signing_key: did_key.clone(),
-        expected_handle: "test.handle".to_string(),
-        expected_pds_endpoint: "https://pds.example.com".to_string(),
-    };
-    let result = validate_plc_operation_for_submission(&op, &ctx);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("handle")));
-}
-
-#[test]
-fn test_validate_pds_service_type() {
-    let key = SigningKey::random(&mut rand::thread_rng());
-    let did_key = signing_key_to_did_key(&key);
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [did_key.clone()],
-        "verificationMethods": {"atproto": did_key.clone()},
-        "alsoKnownAs": ["at://test.handle"],
-        "services": {
-            "atproto_pds": {
-                "type": "WrongServiceType",
-                "endpoint": "https://pds.example.com"
-            }
-        },
-        "sig": "test"
-    });
-    let ctx = PlcValidationContext {
-        server_rotation_key: did_key.clone(),
-        expected_signing_key: did_key.clone(),
-        expected_handle: "test.handle".to_string(),
-        expected_pds_endpoint: "https://pds.example.com".to_string(),
-    };
-    let result = validate_plc_operation_for_submission(&op, &ctx);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("type")));
-}
-
-#[test]
-fn test_validate_pds_endpoint_match() {
-    let key = SigningKey::random(&mut rand::thread_rng());
-    let did_key = signing_key_to_did_key(&key);
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [did_key.clone()],
-        "verificationMethods": {"atproto": did_key.clone()},
-        "alsoKnownAs": ["at://test.handle"],
-        "services": {
-            "atproto_pds": {
-                "type": "AtprotoPersonalDataServer",
-                "endpoint": "https://wrong.endpoint.com"
-            }
-        },
-        "sig": "test"
-    });
-    let ctx = PlcValidationContext {
-        server_rotation_key: did_key.clone(),
-        expected_signing_key: did_key.clone(),
-        expected_handle: "test.handle".to_string(),
-        expected_pds_endpoint: "https://pds.example.com".to_string(),
-    };
-    let result = validate_plc_operation_for_submission(&op, &ctx);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("endpoint")));
-}
-
-#[test]
-fn test_verify_signature_secp256k1() {
-    let key = SigningKey::random(&mut rand::thread_rng());
-    let did_key = signing_key_to_did_key(&key);
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [did_key.clone()],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {},
-        "prev": null
+        "type": "plc_operation", "rotationKeys": [did_key.clone()],
+        "verificationMethods": {}, "alsoKnownAs": [], "services": {}, "prev": null
     });
     let signed = sign_operation(&op, &key).unwrap();
-    let rotation_keys = vec![did_key];
-    let result = verify_operation_signature(&signed, &rotation_keys);
-    assert!(result.is_ok());
-    assert!(result.unwrap());
-}
+    let result = verify_operation_signature(&signed, &[did_key.clone()]);
+    assert!(result.is_ok() && result.unwrap());
 
-#[test]
-fn test_verify_signature_wrong_key() {
-    let key = SigningKey::random(&mut rand::thread_rng());
     let other_key = SigningKey::random(&mut rand::thread_rng());
-    let other_did_key = signing_key_to_did_key(&other_key);
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {},
-        "prev": null
+    let other_did = signing_key_to_did_key(&other_key);
+    let result = verify_operation_signature(&signed, &[other_did]);
+    assert!(result.is_ok() && !result.unwrap());
+
+    let result = verify_operation_signature(&signed, &["not-a-did-key".to_string()]);
+    assert!(result.is_ok() && !result.unwrap());
+
+    let missing_sig = json!({ "type": "plc_operation", "rotationKeys": [], "verificationMethods": {}, "alsoKnownAs": [], "services": {} });
+    assert!(matches!(verify_operation_signature(&missing_sig, &[]), Err(PlcError::InvalidResponse(msg)) if msg.contains("sig")));
+
+    let invalid_base64 = json!({
+        "type": "plc_operation", "rotationKeys": [], "verificationMethods": {},
+        "alsoKnownAs": [], "services": {}, "sig": "not-valid-base64!!!"
     });
-    let signed = sign_operation(&op, &key).unwrap();
-    let wrong_rotation_keys = vec![other_did_key];
-    let result = verify_operation_signature(&signed, &wrong_rotation_keys);
-    assert!(result.is_ok());
-    assert!(!result.unwrap());
+    assert!(matches!(verify_operation_signature(&invalid_base64, &[]), Err(PlcError::InvalidResponse(_))));
 }
 
 #[test]
-fn test_verify_signature_invalid_did_key_format() {
-    let key = SigningKey::random(&mut rand::thread_rng());
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {},
-        "prev": null
-    });
-    let signed = sign_operation(&op, &key).unwrap();
-    let invalid_keys = vec!["not-a-did-key".to_string()];
-    let result = verify_operation_signature(&signed, &invalid_keys);
-    assert!(result.is_ok());
-    assert!(!result.unwrap());
-}
-
-#[test]
-fn test_tombstone_validation() {
-    let op = json!({
-        "type": "plc_tombstone",
-        "prev": "bafyreig6xxxxxyyyyyzzzzzz",
-        "sig": "test"
-    });
-    let result = validate_plc_operation(&op);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_cid_for_cbor_deterministic() {
-    let value = json!({
-        "alpha": 1,
-        "beta": 2
-    });
+fn test_cid_and_key_utilities() {
+    let value = json!({ "alpha": 1, "beta": 2 });
     let cid1 = cid_for_cbor(&value).unwrap();
     let cid2 = cid_for_cbor(&value).unwrap();
-    assert_eq!(cid1, cid2, "CID generation should be deterministic");
-    assert!(
-        cid1.starts_with("bafyrei"),
-        "CID should start with bafyrei (dag-cbor + sha256)"
-    );
-}
+    assert_eq!(cid1, cid2, "CID should be deterministic");
+    assert!(cid1.starts_with("bafyrei"), "CID should be dag-cbor + sha256");
 
-#[test]
-fn test_cid_different_for_different_data() {
-    let value1 = json!({"data": 1});
-    let value2 = json!({"data": 2});
-    let cid1 = cid_for_cbor(&value1).unwrap();
-    let cid2 = cid_for_cbor(&value2).unwrap();
-    assert_ne!(cid1, cid2, "Different data should produce different CIDs");
-}
+    let value2 = json!({ "alpha": 999 });
+    let cid3 = cid_for_cbor(&value2).unwrap();
+    assert_ne!(cid1, cid3, "Different data should produce different CIDs");
 
-#[test]
-fn test_signing_key_to_did_key_format() {
     let key = SigningKey::random(&mut rand::thread_rng());
-    let did_key = signing_key_to_did_key(&key);
-    assert!(
-        did_key.starts_with("did:key:z"),
-        "Should start with did:key:z"
-    );
-    assert!(did_key.len() > 50, "Did key should be reasonably long");
-}
+    let did = signing_key_to_did_key(&key);
+    assert!(did.starts_with("did:key:z") && did.len() > 50);
+    assert_eq!(did, signing_key_to_did_key(&key), "Same key should produce same did");
 
-#[test]
-fn test_signing_key_to_did_key_unique() {
-    let key1 = SigningKey::random(&mut rand::thread_rng());
     let key2 = SigningKey::random(&mut rand::thread_rng());
-    let did1 = signing_key_to_did_key(&key1);
-    let did2 = signing_key_to_did_key(&key2);
-    assert_ne!(
-        did1, did2,
-        "Different keys should produce different did:keys"
-    );
+    assert_ne!(did, signing_key_to_did_key(&key2), "Different keys should produce different dids");
 }
 
 #[test]
-fn test_signing_key_to_did_key_consistent() {
-    let key = SigningKey::random(&mut rand::thread_rng());
-    let did1 = signing_key_to_did_key(&key);
-    let did2 = signing_key_to_did_key(&key);
-    assert_eq!(did1, did2, "Same key should produce same did:key");
-}
+fn test_tombstone_operations() {
+    let tombstone = json!({ "type": "plc_tombstone", "prev": "bafyreig6xxxxxyyyyyzzzzzz", "sig": "test" });
+    assert!(validate_plc_operation(&tombstone).is_ok());
 
-#[test]
-fn test_sign_operation_removes_existing_sig() {
-    let key = SigningKey::random(&mut rand::thread_rng());
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {},
-        "prev": null,
-        "sig": "old_signature"
-    });
-    let signed = sign_operation(&op, &key).unwrap();
-    let new_sig = signed.get("sig").and_then(|v| v.as_str()).unwrap();
-    assert_ne!(new_sig, "old_signature", "Should replace old signature");
-}
-
-#[test]
-fn test_validate_plc_operation_not_object() {
-    let result = validate_plc_operation(&json!("not an object"));
-    assert!(matches!(result, Err(PlcError::InvalidResponse(_))));
-}
-
-#[test]
-fn test_validate_for_submission_tombstone_passes() {
     let key = SigningKey::random(&mut rand::thread_rng());
     let did_key = signing_key_to_did_key(&key);
-    let op = json!({
-        "type": "plc_tombstone",
-        "prev": "bafyreig6xxxxxyyyyyzzzzzz",
-        "sig": "test"
-    });
     let ctx = PlcValidationContext {
         server_rotation_key: did_key.clone(),
         expected_signing_key: did_key,
         expected_handle: "test.handle".to_string(),
         expected_pds_endpoint: "https://pds.example.com".to_string(),
     };
-    let result = validate_plc_operation_for_submission(&op, &ctx);
-    assert!(
-        result.is_ok(),
-        "Tombstone should pass submission validation"
-    );
+    assert!(validate_plc_operation_for_submission(&tombstone, &ctx).is_ok());
 }
 
 #[test]
-fn test_verify_signature_missing_sig() {
+fn test_sign_operation_and_struct() {
+    let key = SigningKey::random(&mut rand::thread_rng());
     let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {}
+        "type": "plc_operation", "rotationKeys": [], "verificationMethods": {},
+        "alsoKnownAs": [], "services": {}, "prev": null, "sig": "old_signature"
     });
-    let result = verify_operation_signature(&op, &[]);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(msg)) if msg.contains("sig")));
-}
+    let signed = sign_operation(&op, &key).unwrap();
+    assert_ne!(signed.get("sig").and_then(|v| v.as_str()).unwrap(), "old_signature");
 
-#[test]
-fn test_verify_signature_invalid_base64() {
-    let op = json!({
-        "type": "plc_operation",
-        "rotationKeys": [],
-        "verificationMethods": {},
-        "alsoKnownAs": [],
-        "services": {},
-        "sig": "not-valid-base64!!!"
-    });
-    let result = verify_operation_signature(&op, &[]);
-    assert!(matches!(result, Err(PlcError::InvalidResponse(_))));
-}
-
-#[test]
-fn test_plc_operation_struct() {
     let mut services = HashMap::new();
-    services.insert(
-        "atproto_pds".to_string(),
-        PlcService {
-            service_type: "AtprotoPersonalDataServer".to_string(),
-            endpoint: "https://pds.example.com".to_string(),
-        },
-    );
+    services.insert("atproto_pds".to_string(), PlcService {
+        service_type: "AtprotoPersonalDataServer".to_string(),
+        endpoint: "https://pds.example.com".to_string(),
+    });
     let mut verification_methods = HashMap::new();
     verification_methods.insert("atproto".to_string(), "did:key:zTest123".to_string());
     let op = PlcOperation {

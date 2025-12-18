@@ -56,8 +56,10 @@ pub async fn prepare_repo_write(
     state: &AppState,
     headers: &HeaderMap,
     repo_did: &str,
+    http_method: &str,
+    http_uri: &str,
 ) -> Result<(String, Uuid, Cid), Response> {
-    let token = crate::auth::extract_bearer_token_from_header(
+    let extracted = crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     )
     .ok_or_else(|| {
@@ -67,15 +69,26 @@ pub async fn prepare_repo_write(
         )
             .into_response()
     })?;
-    let auth_user = crate::auth::validate_bearer_token(&state.db, &token)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
-            )
-                .into_response()
-        })?;
+    let dpop_proof = headers
+        .get("DPoP")
+        .and_then(|h| h.to_str().ok());
+    let auth_user = crate::auth::validate_token_with_dpop(
+        &state.db,
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        http_method,
+        http_uri,
+        false,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response()
+    })?;
     if repo_did != auth_user.did {
         return Err((
             StatusCode::FORBIDDEN,
@@ -172,10 +185,11 @@ pub struct CreateRecordOutput {
 pub async fn create_record(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<CreateRecordInput>,
 ) -> Response {
     let (did, user_id, current_root_cid) =
-        match prepare_repo_write(&state, &headers, &input.repo).await {
+        match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
             Ok(res) => res,
             Err(err_res) => return err_res,
         };
@@ -339,10 +353,11 @@ pub struct PutRecordOutput {
 pub async fn put_record(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<PutRecordInput>,
 ) -> Response {
     let (did, user_id, current_root_cid) =
-        match prepare_repo_write(&state, &headers, &input.repo).await {
+        match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
             Ok(res) => res,
             Err(err_res) => return err_res,
         };
