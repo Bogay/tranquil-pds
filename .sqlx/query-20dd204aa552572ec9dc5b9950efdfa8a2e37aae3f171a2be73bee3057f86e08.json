@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE notification_queue\n            SET status = 'processing', updated_at = NOW()\n            WHERE id IN (\n                SELECT id FROM notification_queue\n                WHERE status = 'pending'\n                  AND scheduled_for <= $1\n                  AND attempts < max_attempts\n                ORDER BY scheduled_for ASC\n                LIMIT $2\n                FOR UPDATE SKIP LOCKED\n            )\n            RETURNING\n                id, user_id,\n                channel as \"channel: NotificationChannel\",\n                notification_type as \"notification_type: super::types::NotificationType\",\n                status as \"status: NotificationStatus\",\n                recipient, subject, body, metadata,\n                attempts, max_attempts, last_error,\n                created_at, updated_at, scheduled_for, processed_at\n            ",
+  "query": "\n            UPDATE comms_queue\n            SET status = 'processing', updated_at = NOW()\n            WHERE id IN (\n                SELECT id FROM comms_queue\n                WHERE status = 'pending'\n                  AND scheduled_for <= $1\n                  AND attempts < max_attempts\n                ORDER BY scheduled_for ASC\n                LIMIT $2\n                FOR UPDATE SKIP LOCKED\n            )\n            RETURNING\n                id, user_id,\n                channel as \"channel: CommsChannel\",\n                comms_type as \"comms_type: super::types::CommsType\",\n                status as \"status: CommsStatus\",\n                recipient, subject, body, metadata,\n                attempts, max_attempts, last_error,\n                created_at, updated_at, scheduled_for, processed_at\n            ",
   "describe": {
     "columns": [
       {
@@ -15,10 +15,10 @@
       },
       {
         "ordinal": 2,
-        "name": "channel: NotificationChannel",
+        "name": "channel: CommsChannel",
         "type_info": {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -32,10 +32,10 @@
       },
       {
         "ordinal": 3,
-        "name": "notification_type: super::types::NotificationType",
+        "name": "comms_type: super::types::CommsType",
         "type_info": {
           "Custom": {
-            "name": "notification_type",
+            "name": "comms_type",
             "kind": {
               "Enum": [
                 "welcome",
@@ -54,10 +54,10 @@
       },
       {
         "ordinal": 4,
-        "name": "status: NotificationStatus",
+        "name": "status: CommsStatus",
         "type_info": {
           "Custom": {
-            "name": "notification_status",
+            "name": "comms_status",
             "kind": {
               "Enum": [
                 "pending",
@@ -150,5 +150,5 @@
       true
     ]
   },
-  "hash": "cb6f48aaba124c79308d20e66c23adb44d1196296b7f93fad19b2d17548ed3de"
+  "hash": "20dd204aa552572ec9dc5b9950efdfa8a2e37aae3f171a2be73bee3057f86e08"
 }

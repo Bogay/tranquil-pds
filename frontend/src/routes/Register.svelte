@@ -1,7 +1,10 @@
 <script lang="ts">
-  import { register, confirmSignup, resendVerification, getAuthState } from '../lib/auth.svelte'
+  import { register, getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError, type VerificationChannel } from '../lib/api'
+
+  const STORAGE_KEY = 'bspds_pending_verification'
+
   let handle = $state('')
   let email = $state('')
   let password = $state('')
@@ -13,28 +16,28 @@
   let signalNumber = $state('')
   let submitting = $state(false)
   let error = $state<string | null>(null)
-  let pendingVerification = $state<{ did: string; handle: string; channel: string } | null>(null)
-  let verificationCode = $state('')
-  let resendingCode = $state(false)
-  let resendMessage = $state<string | null>(null)
   let serverInfo = $state<{
     availableUserDomains: string[]
     inviteCodeRequired: boolean
   } | null>(null)
   let loadingServerInfo = $state(true)
   let serverInfoLoaded = false
+
   const auth = getAuthState()
+
   $effect(() => {
     if (auth.session) {
       navigate('/dashboard')
     }
   })
+
   $effect(() => {
     if (!serverInfoLoaded) {
       serverInfoLoaded = true
       loadServerInfo()
     }
   })
+
   async function loadServerInfo() {
     try {
       serverInfo = await api.describeServer()
@@ -44,6 +47,7 @@
       loadingServerInfo = false
     }
   }
+
   function validateForm(): string | null {
     if (!handle.trim()) return 'Handle is required'
     if (!password) return 'Password is required'
@@ -68,18 +72,16 @@
     }
     return null
   }
+
   async function handleSubmit(e: Event) {
     e.preventDefault()
-    console.log('[Register] handleSubmit called')
     const validationError = validateForm()
     if (validationError) {
-      console.log('[Register] validation error:', validationError)
       error = validationError
       return
     }
     submitting = true
     error = null
-    console.log('[Register] starting registration...')
     try {
       const result = await register({
         handle: handle.trim(),
@@ -91,21 +93,17 @@
         telegramUsername: telegramUsername.trim() || undefined,
         signalNumber: signalNumber.trim() || undefined,
       })
-      console.log('[Register] registration result:', result)
       if (result.verificationRequired) {
-        console.log('[Register] setting pendingVerification')
-        pendingVerification = {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
           did: result.did,
           handle: result.handle,
           channel: result.verificationChannel,
-        }
-        console.log('[Register] pendingVerification set to:', pendingVerification)
+        }))
+        navigate('/verify')
       } else {
-        console.log('[Register] no verification required, navigating to dashboard')
         navigate('/dashboard')
       }
     } catch (err: any) {
-      console.error('[Register] error:', err)
       if (err instanceof ApiError) {
         error = err.message || 'Registration failed'
       } else if (err instanceof Error) {
@@ -115,37 +113,9 @@
       }
     } finally {
       submitting = false
-      console.log('[Register] finished, submitting=false')
     }
   }
-  async function handleVerification(e: Event) {
-    e.preventDefault()
-    if (!pendingVerification || !verificationCode.trim()) return
-    submitting = true
-    error = null
-    try {
-      await confirmSignup(pendingVerification.did, verificationCode.trim())
-      navigate('/dashboard')
-    } catch (e: any) {
-      error = e.message || 'Verification failed'
-    } finally {
-      submitting = false
-    }
-  }
-  async function handleResendCode() {
-    if (!pendingVerification || resendingCode) return
-    resendingCode = true
-    resendMessage = null
-    error = null
-    try {
-      await resendVerification(pendingVerification.did)
-      resendMessage = 'Verification code resent!'
-    } catch (e: any) {
-      error = e.message || 'Failed to resend code'
-    } finally {
-      resendingCode = false
-    }
-  }
+
   let fullHandle = $derived(() => {
     if (!handle.trim()) return ''
     if (handle.includes('.')) return handle.trim()
@@ -153,53 +123,12 @@
     if (domain) return `${handle.trim()}.${domain}`
     return handle.trim()
   })
-  function channelLabel(ch: string): string {
-    switch (ch) {
-      case 'email': return 'Email'
-      case 'discord': return 'Discord'
-      case 'telegram': return 'Telegram'
-      case 'signal': return 'Signal'
-      default: return ch
-    }
-  }
 </script>
 <div class="register-container">
   {#if error}
     <div class="error">{error}</div>
   {/if}
-  {#if pendingVerification}
-    <h1>Verify Your Account</h1>
-    <p class="subtitle">
-      We've sent a verification code to your {channelLabel(pendingVerification.channel)}.
-      Enter it below to complete registration.
-    </p>
-    {#if resendMessage}
-      <div class="success">{resendMessage}</div>
-    {/if}
-    <form onsubmit={(e) => { e.preventDefault(); handleVerification(e); }}>
-      <div class="field">
-        <label for="verification-code">Verification Code</label>
-        <input
-          id="verification-code"
-          type="text"
-          bind:value={verificationCode}
-          placeholder="Enter 6-digit code"
-          disabled={submitting}
-          required
-          maxlength="6"
-          inputmode="numeric"
-          autocomplete="one-time-code"
-        />
-      </div>
-      <button type="submit" disabled={submitting || !verificationCode.trim()}>
-        {submitting ? 'Verifying...' : 'Verify Account'}
-      </button>
-      <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
-        {resendingCode ? 'Resending...' : 'Resend Code'}
-      </button>
-    </form>
-  {:else}
-    <h1>Create Account</h1>
+  <h1>Create Account</h1>
     <p class="subtitle">Create a new account on this PDS</p>
     {#if loadingServerInfo}
       <p class="loading">Loading...</p>
@@ -322,17 +251,6 @@
               required
             />
           </div>
-        {:else}
-          <div class="field optional">
-            <label for="invite-code">Invite Code <span class="optional-label">(optional)</span></label>
-            <input
-              id="invite-code"
-              type="text"
-              bind:value={inviteCode}
-              placeholder="Enter invite code if you have one"
-              disabled={submitting}
-            />
-          </div>
         {/if}
         <button type="submit" disabled={submitting}>
           {submitting ? 'Creating account...' : 'Create Account'}
@@ -342,7 +260,6 @@
         Already have an account? <a href="#/login">Sign in</a>
       </p>
     {/if}
-  {/if}
 </div>
 <style>
   .register-container {
@@ -371,19 +288,12 @@
     flex-direction: column;
     gap: 0.25rem;
   }
-  .field.optional {
-    opacity: 0.8;
-  }
   label {
     font-size: 0.875rem;
     font-weight: 500;
   }
   .required {
     color: var(--error-text);
-  }
-  .optional-label {
-    color: var(--text-secondary);
-    font-weight: normal;
   }
   input, select {
     padding: 0.75rem;
@@ -435,28 +345,12 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
-  button.secondary {
-    background: transparent;
-    color: var(--accent);
-    border: 1px solid var(--accent);
-  }
-  button.secondary:hover:not(:disabled) {
-    background: var(--accent);
-    color: white;
-  }
   .error {
     padding: 0.75rem;
     background: var(--error-bg);
     border: 1px solid var(--error-border);
     border-radius: 4px;
     color: var(--error-text);
-  }
-  .success {
-    padding: 0.75rem;
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
-    border-radius: 4px;
-    color: var(--success-text);
   }
   .login-link {
     text-align: center;

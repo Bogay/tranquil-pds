@@ -1,6 +1,6 @@
 mod common;
 use common::{base_url, client, create_account_and_login, get_db_connection_string};
-use bspds::notifications::{NewNotification, NotificationType, enqueue_notification};
+use bspds::comms::{NewComms, CommsType, enqueue_comms};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
@@ -26,14 +26,14 @@ async fn test_get_notification_history() {
         .expect("User not found");
 
     for i in 0..3 {
-        let notification = NewNotification::email(
+        let comms = NewComms::email(
             user_id,
-            NotificationType::Welcome,
+            CommsType::Welcome,
             "test@example.com".to_string(),
             format!("Subject {}", i),
             format!("Body {}", i),
         );
-        enqueue_notification(&pool, notification).await.expect("Failed to enqueue");
+        enqueue_comms(&pool, comms).await.expect("Failed to enqueue");
     }
 
     let resp = client

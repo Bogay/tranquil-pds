@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, did, email, password_hash, two_factor_enabled,\n               preferred_notification_channel as \"preferred_notification_channel: NotificationChannel\",\n               deactivated_at, takedown_ref\n        FROM users\n        WHERE handle = $1 OR email = $1\n        ",
+  "query": "\n        SELECT id, did, email, password_hash, two_factor_enabled,\n               preferred_comms_channel as \"preferred_comms_channel: CommsChannel\",\n               deactivated_at, takedown_ref,\n               email_verified, discord_verified, telegram_verified, signal_verified\n        FROM users\n        WHERE handle = $1 OR email = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -30,10 +30,10 @@
       },
       {
         "ordinal": 5,
-        "name": "preferred_notification_channel: NotificationChannel",
+        "name": "preferred_comms_channel: CommsChannel",
         "type_info": {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -54,6 +54,26 @@
         "ordinal": 7,
         "name": "takedown_ref",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "discord_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "telegram_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "signal_verified",
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -69,8 +89,12 @@
       false,
       false,
       true,
-      true
+      true,
+      false,
+      false,
+      false,
+      false
     ]
   },
-  "hash": "458c98edc9c01286dc2677fcff82c1f84c5db138fdef9a8e8756771c30b66810"
+  "hash": "f6aede22ec69c30a653b573fed52310cc84faa056f230b0d7ea62a0b457534e0"
 }

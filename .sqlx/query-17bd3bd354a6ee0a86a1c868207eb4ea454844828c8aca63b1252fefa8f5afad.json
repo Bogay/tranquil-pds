@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE comms_queue\n            SET status = 'sent', processed_at = NOW(), updated_at = NOW()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "17bd3bd354a6ee0a86a1c868207eb4ea454844828c8aca63b1252fefa8f5afad"
+}

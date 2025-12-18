@@ -299,7 +299,7 @@ pub async fn request_account_delete(
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_account_deletion(
+    if let Err(e) = crate::comms::enqueue_account_deletion(
         &state.db,
         user_id,
         &confirmation_token,

@@ -19,6 +19,7 @@
   let currentPassword = $state('')
   let newPassword = $state('')
   let confirmNewPassword = $state('')
+  let showBYOHandle = $state(false)
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -230,22 +231,80 @@
     {#if auth.session}
       <p class="current">Current: @{auth.session.handle}</p>
     {/if}
-    <form onsubmit={handleUpdateHandle}>
-      <div class="field">
-        <label for="new-handle">New Handle</label>
-        <input
-          id="new-handle"
-          type="text"
-          bind:value={newHandle}
-          placeholder="newhandle.bsky.social"
-          disabled={handleLoading}
-          required
-        />
-      </div>
-      <button type="submit" disabled={handleLoading || !newHandle}>
-        {handleLoading ? 'Updating...' : 'Change Handle'}
+    <div class="tabs">
+      <button
+        type="button"
+        class="tab"
+        class:active={!showBYOHandle}
+        onclick={() => showBYOHandle = false}
+      >
+        PDS Handle
       </button>
-    </form>
+      <button
+        type="button"
+        class="tab"
+        class:active={showBYOHandle}
+        onclick={() => showBYOHandle = true}
+      >
+        Custom Domain
+      </button>
+    </div>
+    {#if showBYOHandle}
+      <div class="byo-handle">
+        <p class="description">Use your own domain as your handle. You need to verify domain ownership first.</p>
+        {#if auth.session}
+          <div class="verification-info">
+            <h3>Setup Instructions</h3>
+            <p>Choose one of these verification methods:</p>
+            <div class="method">
+              <h4>Option 1: DNS TXT Record (Recommended)</h4>
+              <p>Add this TXT record to your domain:</p>
+              <code class="record">_atproto.{newHandle || 'yourdomain.com'} TXT "did={auth.session.did}"</code>
+            </div>
+            <div class="method">
+              <h4>Option 2: HTTP Well-Known File</h4>
+              <p>Serve your DID at this URL:</p>
+              <code class="record">https://{newHandle || 'yourdomain.com'}/.well-known/atproto-did</code>
+              <p>The file should contain only:</p>
+              <code class="record">{auth.session.did}</code>
+            </div>
+          </div>
+        {/if}
+        <form onsubmit={handleUpdateHandle}>
+          <div class="field">
+            <label for="new-handle-byo">Your Domain</label>
+            <input
+              id="new-handle-byo"
+              type="text"
+              bind:value={newHandle}
+              placeholder="example.com"
+              disabled={handleLoading}
+              required
+            />
+          </div>
+          <button type="submit" disabled={handleLoading || !newHandle}>
+            {handleLoading ? 'Verifying...' : 'Verify & Update Handle'}
+          </button>
+        </form>
+      </div>
+    {:else}
+      <form onsubmit={handleUpdateHandle}>
+        <div class="field">
+          <label for="new-handle">New Handle</label>
+          <input
+            id="new-handle"
+            type="text"
+            bind:value={newHandle}
+            placeholder="yourhandle"
+            disabled={handleLoading}
+            required
+          />
+        </div>
+        <button type="submit" disabled={handleLoading || !newHandle}>
+          {handleLoading ? 'Updating...' : 'Change Handle'}
+        </button>
+      </form>
+    {/if}
   </section>
   <section>
     <h2>Change Password</h2>
@@ -457,5 +516,76 @@
     color: var(--error-text);
     font-size: 0.875rem;
     margin-bottom: 1rem;
+  }
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+  }
+  .tab {
+    flex: 1;
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid var(--border-color-light);
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+  .tab:first-child {
+    border-radius: 4px 0 0 4px;
+  }
+  .tab:last-child {
+    border-radius: 0 4px 4px 0;
+  }
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  .tab:hover:not(.active) {
+    background: var(--bg-card);
+  }
+  .byo-handle .description {
+    margin-bottom: 1rem;
+  }
+  .verification-info {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color-light);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .verification-info h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
+  }
+  .verification-info h4 {
+    margin: 0.75rem 0 0.25rem 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+  .verification-info p {
+    margin: 0.25rem 0;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+  .method {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color-light);
+  }
+  .method:first-of-type {
+    margin-top: 0.5rem;
+    padding-top: 0;
+    border-top: none;
+  }
+  code.record {
+    display: block;
+    background: var(--bg-input);
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    word-break: break-all;
+    margin: 0.25rem 0;
   }
 </style>

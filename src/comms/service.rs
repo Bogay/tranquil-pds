@@ -9,17 +9,17 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::sender::{NotificationSender, SendError};
-use super::types::{NewNotification, NotificationChannel, NotificationStatus, QueuedNotification};
+use super::sender::{CommsSender, SendError};
+use super::types::{NewComms, CommsChannel, CommsStatus, QueuedComms};
 
-pub struct NotificationService {
+pub struct CommsService {
     db: PgPool,
-    senders: HashMap<NotificationChannel, Arc<dyn NotificationSender>>,
+    senders: HashMap<CommsChannel, Arc<dyn CommsSender>>,
     poll_interval: Duration,
     batch_size: i64,
 }
 
-impl NotificationService {
+impl CommsService {
     pub fn new(db: PgPool) -> Self {
         let poll_interval_ms: u64 = std::env::var("NOTIFICATION_POLL_INTERVAL_MS")
             .ok()
@@ -47,30 +47,30 @@ impl NotificationService {
         self
     }
 
-    pub fn register_sender<S: NotificationSender + 'static>(mut self, sender: S) -> Self {
+    pub fn register_sender<S: CommsSender + 'static>(mut self, sender: S) -> Self {
         self.senders.insert(sender.channel(), Arc::new(sender));
         self
     }
 
-    pub async fn enqueue(&self, notification: NewNotification) -> Result<Uuid, sqlx::Error> {
+    pub async fn enqueue(&self, item: NewComms) -> Result<Uuid, sqlx::Error> {
         let id = sqlx::query_scalar!(
             r#"
-            INSERT INTO notification_queue
-                (user_id, channel, notification_type, recipient, subject, body, metadata)
+            INSERT INTO comms_queue
+                (user_id, channel, comms_type, recipient, subject, body, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id
             "#,
-            notification.user_id,
-            notification.channel as NotificationChannel,
-            notification.notification_type as super::types::NotificationType,
-            notification.recipient,
-            notification.subject,
-            notification.body,
-            notification.metadata
+            item.user_id,
+            item.channel as CommsChannel,
+            item.comms_type as super::types::CommsType,
+            item.recipient,
+            item.subject,
+            item.body,
+            item.metadata
         )
         .fetch_one(&self.db)
         .await?;
-        debug!(notification_id = %id, "Notification enqueued");
+        debug!(comms_id = %id, "Comms enqueued");
         Ok(id)
     }
 
@@ -81,26 +81,26 @@ impl NotificationService {
     pub async fn run(self, mut shutdown: watch::Receiver<bool>) {
         if self.senders.is_empty() {
             warn!(
-                "Notification service starting with no senders configured. Notifications will be queued but not delivered until senders are configured."
+                "Comms service starting with no senders configured. Messages will be queued but not delivered until senders are configured."
             );
         }
         info!(
             poll_interval_secs = self.poll_interval.as_secs(),
             batch_size = self.batch_size,
             channels = ?self.senders.keys().collect::<Vec<_>>(),
-            "Starting notification service"
+            "Starting comms service"
         );
         let mut ticker = interval(self.poll_interval);
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
                     if let Err(e) = self.process_batch().await {
-                        error!(error = %e, "Failed to process notification batch");
+                        error!(error = %e, "Failed to process comms batch");
                     }
                 }
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
-                        info!("Notification service shutting down");
+                        info!("Comms service shutting down");
                         break;
                     }
                 }
@@ -109,26 +109,26 @@ impl NotificationService {
     }
 
     async fn process_batch(&self) -> Result<(), sqlx::Error> {
-        let notifications = self.fetch_pending_notifications().await?;
-        if notifications.is_empty() {
+        let items = self.fetch_pending().await?;
+        if items.is_empty() {
             return Ok(());
         }
-        debug!(count = notifications.len(), "Processing notification batch");
-        for notification in notifications {
-            self.process_notification(notification).await;
+        debug!(count = items.len(), "Processing comms batch");
+        for item in items {
+            self.process_item(item).await;
         }
         Ok(())
     }
 
-    async fn fetch_pending_notifications(&self) -> Result<Vec<QueuedNotification>, sqlx::Error> {
+    async fn fetch_pending(&self) -> Result<Vec<QueuedComms>, sqlx::Error> {
         let now = Utc::now();
         sqlx::query_as!(
-            QueuedNotification,
+            QueuedComms,
             r#"
-            UPDATE notification_queue
+            UPDATE comms_queue
             SET status = 'processing', updated_at = NOW()
             WHERE id IN (
-                SELECT id FROM notification_queue
+                SELECT id FROM comms_queue
                 WHERE status = 'pending'
                   AND scheduled_for <= $1
                   AND attempts < max_attempts
@@ -138,9 +138,9 @@ impl NotificationService {
             )
             RETURNING
                 id, user_id,
-                channel as "channel: NotificationChannel",
-                notification_type as "notification_type: super::types::NotificationType",
-                status as "status: NotificationStatus",
+                channel as "channel: CommsChannel",
+                comms_type as "comms_type: super::types::CommsType",
+                status as "status: CommsStatus",
                 recipient, subject, body, metadata,
                 attempts, max_attempts, last_error,
                 created_at, updated_at, scheduled_for, processed_at
@@ -152,14 +152,14 @@ impl NotificationService {
         .await
     }
 
-    async fn process_notification(&self, notification: QueuedNotification) {
-        let notification_id = notification.id;
-        let channel = notification.channel;
+    async fn process_item(&self, item: QueuedComms) {
+        let comms_id = item.id;
+        let channel = item.channel;
         let result = match self.senders.get(&channel) {
-            Some(sender) => sender.send(&notification).await,
+            Some(sender) => sender.send(&item).await,
             None => {
                 warn!(
-                    notification_id = %notification_id,
+                    comms_id = %comms_id,
                     channel = ?channel,
                     "No sender registered for channel"
                 );
@@ -168,27 +168,27 @@ impl NotificationService {
         };
         match result {
             Ok(()) => {
-                debug!(notification_id = %notification_id, "Notification sent successfully");
-                if let Err(e) = self.mark_sent(notification_id).await {
+                debug!(comms_id = %comms_id, "Comms sent successfully");
+                if let Err(e) = self.mark_sent(comms_id).await {
                     error!(
-                        notification_id = %notification_id,
+                        comms_id = %comms_id,
                         error = %e,
-                        "Failed to mark notification as sent"
+                        "Failed to mark comms as sent"
                     );
                 }
             }
             Err(e) => {
                 let error_msg = e.to_string();
                 warn!(
-                    notification_id = %notification_id,
+                    comms_id = %comms_id,
                     error = %error_msg,
-                    "Failed to send notification"
+                    "Failed to send comms"
                 );
-                if let Err(db_err) = self.mark_failed(notification_id, &error_msg).await {
+                if let Err(db_err) = self.mark_failed(comms_id, &error_msg).await {
                     error!(
-                        notification_id = %notification_id,
+                        comms_id = %comms_id,
                         error = %db_err,
-                        "Failed to mark notification as failed"
+                        "Failed to mark comms as failed"
                     );
                 }
             }
@@ -198,7 +198,7 @@ impl NotificationService {
     async fn mark_sent(&self, id: Uuid) -> Result<(), sqlx::Error> {
         sqlx::query!(
             r#"
-            UPDATE notification_queue
+            UPDATE comms_queue
             SET status = 'sent', processed_at = NOW(), updated_at = NOW()
             WHERE id = $1
             "#,
@@ -212,11 +212,11 @@ impl NotificationService {
     async fn mark_failed(&self, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
         sqlx::query!(
             r#"
-            UPDATE notification_queue
+            UPDATE comms_queue
             SET
                 status = CASE
-                    WHEN attempts + 1 >= max_attempts THEN 'failed'::notification_status
-                    ELSE 'pending'::notification_status
+                    WHEN attempts + 1 >= max_attempts THEN 'failed'::comms_status
+                    ELSE 'pending'::comms_status
                 END,
                 attempts = attempts + 1,
                 last_error = $2,
@@ -233,45 +233,42 @@ impl NotificationService {
     }
 }
 
-pub async fn enqueue_notification(
-    db: &PgPool,
-    notification: NewNotification,
-) -> Result<Uuid, sqlx::Error> {
+pub async fn enqueue_comms(db: &PgPool, item: NewComms) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar!(
         r#"
-        INSERT INTO notification_queue
-            (user_id, channel, notification_type, recipient, subject, body, metadata)
+        INSERT INTO comms_queue
+            (user_id, channel, comms_type, recipient, subject, body, metadata)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
         "#,
-        notification.user_id,
-        notification.channel as NotificationChannel,
-        notification.notification_type as super::types::NotificationType,
-        notification.recipient,
-        notification.subject,
-        notification.body,
-        notification.metadata
+        item.user_id,
+        item.channel as CommsChannel,
+        item.comms_type as super::types::CommsType,
+        item.recipient,
+        item.subject,
+        item.body,
+        item.metadata
     )
     .fetch_one(db)
     .await
 }
 
-pub struct UserNotificationPrefs {
-    pub channel: NotificationChannel,
+pub struct UserCommsPrefs {
+    pub channel: CommsChannel,
     pub email: Option<String>,
     pub handle: String,
 }
 
-pub async fn get_user_notification_prefs(
+pub async fn get_user_comms_prefs(
     db: &PgPool,
     user_id: Uuid,
-) -> Result<UserNotificationPrefs, sqlx::Error> {
+) -> Result<UserCommsPrefs, sqlx::Error> {
     let row = sqlx::query!(
         r#"
         SELECT
             email,
             handle,
-            preferred_notification_channel as "channel: NotificationChannel"
+            preferred_comms_channel as "channel: CommsChannel"
         FROM users
         WHERE id = $1
         "#,
@@ -279,7 +276,7 @@ pub async fn get_user_notification_prefs(
     )
     .fetch_one(db)
     .await?;
-    Ok(UserNotificationPrefs {
+    Ok(UserCommsPrefs {
         channel: row.channel,
         email: row.email,
         handle: row.handle,
@@ -291,17 +288,17 @@ pub async fn enqueue_welcome(
     user_id: Uuid,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_notification_prefs(db, user_id).await?;
+    let prefs = get_user_comms_prefs(db, user_id).await?;
     let body = format!(
         "Welcome to {}!\n\nYour handle is: @{}\n\nThank you for joining us.",
         hostname, prefs.handle
     );
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::new(
+        NewComms::new(
             user_id,
             prefs.channel,
-            super::types::NotificationType::Welcome,
+            super::types::CommsType::Welcome,
             prefs.email.clone().unwrap_or_default(),
             Some(format!("Welcome to {}", hostname)),
             body,
@@ -322,11 +319,11 @@ pub async fn enqueue_email_verification(
         "Hello @{},\n\nYour email verification code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this email.",
         handle, code
     );
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::email(
+        NewComms::email(
             user_id,
-            super::types::NotificationType::EmailVerification,
+            super::types::CommsType::EmailVerification,
             email.to_string(),
             format!("Verify your email - {}", hostname),
             body,
@@ -341,17 +338,17 @@ pub async fn enqueue_password_reset(
     code: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_notification_prefs(db, user_id).await?;
+    let prefs = get_user_comms_prefs(db, user_id).await?;
     let body = format!(
         "Hello @{},\n\nYour password reset code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this message.",
         prefs.handle, code
     );
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::new(
+        NewComms::new(
             user_id,
             prefs.channel,
-            super::types::NotificationType::PasswordReset,
+            super::types::CommsType::PasswordReset,
             prefs.email.clone().unwrap_or_default(),
             Some(format!("Password Reset - {}", hostname)),
             body,
@@ -372,11 +369,11 @@ pub async fn enqueue_email_update(
         "Hello @{},\n\nYour email update confirmation code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this email.",
         handle, code
     );
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::email(
+        NewComms::email(
             user_id,
-            super::types::NotificationType::EmailUpdate,
+            super::types::CommsType::EmailUpdate,
             new_email.to_string(),
             format!("Confirm your new email - {}", hostname),
             body,
@@ -391,17 +388,17 @@ pub async fn enqueue_account_deletion(
     code: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_notification_prefs(db, user_id).await?;
+    let prefs = get_user_comms_prefs(db, user_id).await?;
     let body = format!(
         "Hello @{},\n\nYour account deletion confirmation code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please secure your account immediately.",
         prefs.handle, code
     );
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::new(
+        NewComms::new(
             user_id,
             prefs.channel,
-            super::types::NotificationType::AccountDeletion,
+            super::types::CommsType::AccountDeletion,
             prefs.email.clone().unwrap_or_default(),
             Some(format!("Account Deletion Request - {}", hostname)),
             body,
@@ -416,17 +413,17 @@ pub async fn enqueue_plc_operation(
     token: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_notification_prefs(db, user_id).await?;
+    let prefs = get_user_comms_prefs(db, user_id).await?;
     let body = format!(
         "Hello @{},\n\nYou requested to sign a PLC operation for your account.\n\nYour verification token is: {}\n\nThis token will expire in 10 minutes.\n\nIf you did not request this, you can safely ignore this message.",
         prefs.handle, token
     );
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::new(
+        NewComms::new(
             user_id,
             prefs.channel,
-            super::types::NotificationType::PlcOperation,
+            super::types::CommsType::PlcOperation,
             prefs.email.clone().unwrap_or_default(),
             Some(format!("{} - PLC Operation Token", hostname)),
             body,
@@ -441,17 +438,17 @@ pub async fn enqueue_2fa_code(
     code: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_notification_prefs(db, user_id).await?;
+    let prefs = get_user_comms_prefs(db, user_id).await?;
     let body = format!(
         "Hello @{},\n\nYour sign-in verification code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please secure your account immediately.",
         prefs.handle, code
     );
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::new(
+        NewComms::new(
             user_id,
             prefs.channel,
-            super::types::NotificationType::TwoFactorCode,
+            super::types::CommsType::TwoFactorCode,
             prefs.email.clone().unwrap_or_default(),
             Some(format!("Sign-in Verification - {}", hostname)),
             body,
@@ -460,12 +457,12 @@ pub async fn enqueue_2fa_code(
     .await
 }
 
-pub fn channel_display_name(channel: NotificationChannel) -> &'static str {
+pub fn channel_display_name(channel: CommsChannel) -> &'static str {
     match channel {
-        NotificationChannel::Email => "email",
-        NotificationChannel::Discord => "Discord",
-        NotificationChannel::Telegram => "Telegram",
-        NotificationChannel::Signal => "Signal",
+        CommsChannel::Email => "email",
+        CommsChannel::Discord => "Discord",
+        CommsChannel::Telegram => "Telegram",
+        CommsChannel::Signal => "Signal",
     }
 }
 
@@ -477,27 +474,27 @@ pub async fn enqueue_signup_verification(
     code: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let notification_channel = match channel {
-        "email" => NotificationChannel::Email,
-        "discord" => NotificationChannel::Discord,
-        "telegram" => NotificationChannel::Telegram,
-        "signal" => NotificationChannel::Signal,
-        _ => NotificationChannel::Email,
+    let comms_channel = match channel {
+        "email" => CommsChannel::Email,
+        "discord" => CommsChannel::Discord,
+        "telegram" => CommsChannel::Telegram,
+        "signal" => CommsChannel::Signal,
+        _ => CommsChannel::Email,
     };
     let body = format!(
         "Welcome! Your account verification code is: {}\n\nThis code will expire in 30 minutes.\n\nEnter this code to complete your registration on {}.",
         code, hostname
     );
-    let subject = match notification_channel {
-        NotificationChannel::Email => Some(format!("Verify your account - {}", hostname)),
+    let subject = match comms_channel {
+        CommsChannel::Email => Some(format!("Verify your account - {}", hostname)),
         _ => None,
     };
-    enqueue_notification(
+    enqueue_comms(
         db,
-        NewNotification::new(
+        NewComms::new(
             user_id,
-            notification_channel,
-            super::types::NotificationType::EmailVerification,
+            comms_channel,
+            super::types::CommsType::EmailVerification,
             recipient.to_string(),
             subject,
             body,

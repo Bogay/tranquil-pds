@@ -35,6 +35,14 @@ fn normalize_handle(identifier: &str, pds_hostname: &str) -> String {
     }
 }
 
+fn full_handle(stored_handle: &str, pds_hostname: &str) -> String {
+    if stored_handle.contains('.') {
+        stored_handle.to_string()
+    } else {
+        format!("{}.{}", stored_handle, pds_hostname)
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreateSessionInput {
     pub identifier: String,
@@ -76,7 +84,7 @@ pub async fn create_session(
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.password_hash,
-            u.email_confirmed, u.discord_verified, u.telegram_verified, u.signal_verified,
+            u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,
             k.key_bytes, k.encryption_version
         FROM users u
         JOIN user_keys k ON u.id = k.user_id
@@ -128,7 +136,7 @@ pub async fn create_session(
             .into_response();
     }
     let is_verified =
-        row.email_confirmed || row.discord_verified || row.telegram_verified || row.signal_verified;
+        row.email_verified || row.discord_verified || row.telegram_verified || row.signal_verified;
     if !is_verified {
         warn!("Login attempt for unverified account: {}", row.did);
         return (
@@ -169,11 +177,11 @@ pub async fn create_session(
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-    let full_handle = format!("{}.{}", row.handle, pds_hostname);
+    let handle = full_handle(&row.handle, &pds_hostname);
     Json(CreateSessionOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
-        handle: full_handle,
+        handle,
         did: row.did,
     })
     .into_response()
@@ -185,8 +193,8 @@ pub async fn get_session(
 ) -> Response {
     match sqlx::query!(
         r#"SELECT
-            handle, email, email_confirmed, is_admin,
-            preferred_notification_channel as "preferred_channel: crate::notifications::NotificationChannel",
+            handle, email, email_verified, is_admin,
+            preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
             discord_verified, telegram_verified, signal_verified
         FROM users WHERE did = $1"#,
         auth_user.did
@@ -196,18 +204,18 @@ pub async fn get_session(
     {
         Ok(Some(row)) => {
             let (preferred_channel, preferred_channel_verified) = match row.preferred_channel {
-                crate::notifications::NotificationChannel::Email => ("email", row.email_confirmed),
-                crate::notifications::NotificationChannel::Discord => ("discord", row.discord_verified),
-                crate::notifications::NotificationChannel::Telegram => ("telegram", row.telegram_verified),
-                crate::notifications::NotificationChannel::Signal => ("signal", row.signal_verified),
+                crate::comms::CommsChannel::Email => ("email", row.email_verified),
+                crate::comms::CommsChannel::Discord => ("discord", row.discord_verified),
+                crate::comms::CommsChannel::Telegram => ("telegram", row.telegram_verified),
+                crate::comms::CommsChannel::Signal => ("signal", row.signal_verified),
             };
             let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-            let full_handle = format!("{}.{}", row.handle, pds_hostname);
+            let handle = full_handle(&row.handle, &pds_hostname);
             Json(json!({
-                "handle": full_handle,
+                "handle": handle,
                 "did": auth_user.did,
                 "email": row.email,
-                "emailConfirmed": row.email_confirmed,
+                "emailVerified": row.email_verified,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "isAdmin": row.is_admin,
@@ -407,8 +415,8 @@ pub async fn refresh_session(
     }
     match sqlx::query!(
         r#"SELECT
-            handle, email, email_confirmed, is_admin,
-            preferred_notification_channel as "preferred_channel: crate::notifications::NotificationChannel",
+            handle, email, email_verified, is_admin,
+            preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
             discord_verified, telegram_verified, signal_verified
         FROM users WHERE did = $1"#,
         session_row.did
@@ -418,20 +426,20 @@ pub async fn refresh_session(
     {
         Ok(Some(u)) => {
             let (preferred_channel, preferred_channel_verified) = match u.preferred_channel {
-                crate::notifications::NotificationChannel::Email => ("email", u.email_confirmed),
-                crate::notifications::NotificationChannel::Discord => ("discord", u.discord_verified),
-                crate::notifications::NotificationChannel::Telegram => ("telegram", u.telegram_verified),
-                crate::notifications::NotificationChannel::Signal => ("signal", u.signal_verified),
+                crate::comms::CommsChannel::Email => ("email", u.email_verified),
+                crate::comms::CommsChannel::Discord => ("discord", u.discord_verified),
+                crate::comms::CommsChannel::Telegram => ("telegram", u.telegram_verified),
+                crate::comms::CommsChannel::Signal => ("signal", u.signal_verified),
             };
             let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-            let full_handle = format!("{}.{}", u.handle, pds_hostname);
+            let handle = full_handle(&u.handle, &pds_hostname);
             Json(json!({
                 "accessJwt": new_access_meta.token,
                 "refreshJwt": new_refresh_meta.token,
-                "handle": full_handle,
+                "handle": handle,
                 "did": session_row.did,
                 "email": u.email,
-                "emailConfirmed": u.email_confirmed,
+                "emailVerified": u.email_verified,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "isAdmin": u.is_admin,
@@ -464,7 +472,7 @@ pub struct ConfirmSignupOutput {
     pub handle: String,
     pub did: String,
     pub email: Option<String>,
-    pub email_confirmed: bool,
+    pub email_verified: bool,
     pub preferred_channel: String,
     pub preferred_channel_verified: bool,
 }
@@ -477,7 +485,7 @@ pub async fn confirm_signup(
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.email,
-            u.preferred_notification_channel as "channel: crate::notifications::NotificationChannel",
+            u.preferred_comms_channel as "channel: crate::comms::CommsChannel",
             k.key_bytes, k.encryption_version
         FROM users u
         JOIN user_keys k ON u.id = k.user_id
@@ -534,10 +542,10 @@ pub async fn confirm_signup(
         }
     };
     let verified_column = match row.channel {
-        crate::notifications::NotificationChannel::Email => "email_confirmed",
-        crate::notifications::NotificationChannel::Discord => "discord_verified",
-        crate::notifications::NotificationChannel::Telegram => "telegram_verified",
-        crate::notifications::NotificationChannel::Signal => "signal_verified",
+        crate::comms::CommsChannel::Email => "email_verified",
+        crate::comms::CommsChannel::Discord => "discord_verified",
+        crate::comms::CommsChannel::Telegram => "telegram_verified",
+        crate::comms::CommsChannel::Signal => "signal_verified",
     };
     let update_query = format!(
         "UPDATE users SET {} = TRUE WHERE did = $1",
@@ -590,18 +598,18 @@ pub async fn confirm_signup(
         return ApiError::InternalError.into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::notifications::enqueue_welcome(&state.db, row.id, &hostname).await {
+    if let Err(e) = crate::comms::enqueue_welcome(&state.db, row.id, &hostname).await {
         warn!("Failed to enqueue welcome notification: {:?}", e);
     }
-    let email_confirmed = matches!(
+    let email_verified = matches!(
         row.channel,
-        crate::notifications::NotificationChannel::Email
+        crate::comms::CommsChannel::Email
     );
     let preferred_channel = match row.channel {
-        crate::notifications::NotificationChannel::Email => "email",
-        crate::notifications::NotificationChannel::Discord => "discord",
-        crate::notifications::NotificationChannel::Telegram => "telegram",
-        crate::notifications::NotificationChannel::Signal => "signal",
+        crate::comms::CommsChannel::Email => "email",
+        crate::comms::CommsChannel::Discord => "discord",
+        crate::comms::CommsChannel::Telegram => "telegram",
+        crate::comms::CommsChannel::Signal => "signal",
     };
     Json(ConfirmSignupOutput {
         access_jwt: access_meta.token,
@@ -609,7 +617,7 @@ pub async fn confirm_signup(
         handle: row.handle,
         did: row.did,
         email: row.email,
-        email_confirmed,
+        email_verified,
         preferred_channel: preferred_channel.to_string(),
         preferred_channel_verified: true,
     })
@@ -630,9 +638,9 @@ pub async fn resend_verification(
     let row = match sqlx::query!(
         r#"SELECT
             id, handle, email,
-            preferred_notification_channel as "channel: crate::notifications::NotificationChannel",
+            preferred_comms_channel as "channel: crate::comms::CommsChannel",
             discord_id, telegram_username, signal_number,
-            email_confirmed, discord_verified, telegram_verified, signal_verified
+            email_verified, discord_verified, telegram_verified, signal_verified
         FROM users
         WHERE did = $1"#,
         input.did
@@ -650,7 +658,7 @@ pub async fn resend_verification(
         }
     };
     let is_verified =
-        row.email_confirmed || row.discord_verified || row.telegram_verified || row.signal_verified;
+        row.email_verified || row.discord_verified || row.telegram_verified || row.signal_verified;
     if is_verified {
         return ApiError::InvalidRequest("Account is already verified".into()).into_response();
     }
@@ -678,20 +686,20 @@ pub async fn resend_verification(
         return ApiError::InternalError.into_response();
     }
     let (channel_str, recipient) = match row.channel {
-        crate::notifications::NotificationChannel::Email => {
+        crate::comms::CommsChannel::Email => {
             ("email", row.email.unwrap_or_default())
         }
-        crate::notifications::NotificationChannel::Discord => {
+        crate::comms::CommsChannel::Discord => {
             ("discord", row.discord_id.unwrap_or_default())
         }
-        crate::notifications::NotificationChannel::Telegram => {
+        crate::comms::CommsChannel::Telegram => {
             ("telegram", row.telegram_username.unwrap_or_default())
         }
-        crate::notifications::NotificationChannel::Signal => {
+        crate::comms::CommsChannel::Signal => {
             ("signal", row.signal_number.unwrap_or_default())
         }
     };
-    if let Err(e) = crate::notifications::enqueue_signup_verification(
+    if let Err(e) = crate::comms::enqueue_signup_verification(
         &state.db,
         row.id,
         channel_str,

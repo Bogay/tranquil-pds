@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = $2::notification_channel",
+  "query": "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = $2::comms_channel",
   "describe": {
     "columns": [],
     "parameters": {
@@ -8,7 +8,7 @@
         "Uuid",
         {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -23,5 +23,5 @@
     },
     "nullable": []
   },
-  "hash": "90f5c38a28537b2deddd0f897b8902a97547983851bd95a9ae496943064b1849"
+  "hash": "57229564a518b14dca6fecef677d4b58b5ab6892846e65a4f1549ae5f147c13e"
 }

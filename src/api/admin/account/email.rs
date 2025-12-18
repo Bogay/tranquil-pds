@@ -87,14 +87,14 @@ pub async fn send_email(
         .subject
         .clone()
         .unwrap_or_else(|| format!("Message from {}", hostname));
-    let notification = crate::notifications::NewNotification::email(
+    let item = crate::comms::NewComms::email(
         user_id,
-        crate::notifications::NotificationType::AdminEmail,
+        crate::comms::CommsType::AdminEmail,
         email,
         subject,
         content.to_string(),
     );
-    let result = crate::notifications::enqueue_notification(&state.db, notification).await;
+    let result = crate::comms::enqueue_comms(&state.db, item).await;
     match result {
         Ok(_) => {
             tracing::info!("Admin email queued for {} ({})", handle, recipient_did);

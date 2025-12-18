@@ -39,7 +39,7 @@ async fn test_send_email_success() {
         .await
         .expect("User not found");
     let notification = sqlx::query!(
-        "SELECT subject, body, notification_type as \"notification_type: String\" FROM notification_queue WHERE user_id = $1 AND notification_type = 'admin_email' ORDER BY created_at DESC LIMIT 1",
+        "SELECT subject, body, comms_type as \"comms_type: String\" FROM comms_queue WHERE user_id = $1 AND comms_type = 'admin_email' ORDER BY created_at DESC LIMIT 1",
         user.id
     )
     .fetch_one(&pool)
@@ -78,7 +78,7 @@ async fn test_send_email_default_subject() {
         .await
         .expect("User not found");
     let notification = sqlx::query!(
-        "SELECT subject FROM notification_queue WHERE user_id = $1 AND notification_type = 'admin_email' AND body = 'Email without subject' LIMIT 1",
+        "SELECT subject FROM comms_queue WHERE user_id = $1 AND comms_type = 'admin_email' AND body = 'Email without subject' LIMIT 1",
         user.id
     )
     .fetch_one(&pool)

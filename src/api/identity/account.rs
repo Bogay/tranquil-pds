@@ -322,47 +322,59 @@ pub async fn create_account(
         }
         Ok(None) => {}
     }
-    if let Some(code) = &input.invite_code {
-        let invite_query = sqlx::query!(
-            "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
-            code
+    let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    if invite_code_required && input.invite_code.as_ref().map(|c| c.trim().is_empty()).unwrap_or(true) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidInviteCode", "message": "Invite code is required"})),
         )
-        .fetch_optional(&mut *tx)
-        .await;
-        match invite_query {
-            Ok(Some(row)) => {
-                if row.available_uses <= 0 {
-                    return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidInviteCode", "message": "Invite code exhausted"}))).into_response();
+            .into_response();
+    }
+    if let Some(code) = &input.invite_code {
+        if !code.trim().is_empty() {
+            let invite_query = sqlx::query!(
+                "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
+                code
+            )
+            .fetch_optional(&mut *tx)
+            .await;
+            match invite_query {
+                Ok(Some(row)) => {
+                    if row.available_uses <= 0 {
+                        return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidInviteCode", "message": "Invite code exhausted"}))).into_response();
+                    }
+                    let update_invite = sqlx::query!(
+                        "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
+                        code
+                    )
+                    .execute(&mut *tx)
+                    .await;
+                    if let Err(e) = update_invite {
+                        error!("Error updating invite code: {:?}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError"})),
+                        )
+                            .into_response();
+                    }
                 }
-                let update_invite = sqlx::query!(
-                    "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
-                    code
-                )
-                .execute(&mut *tx)
-                .await;
-                if let Err(e) = update_invite {
-                    error!("Error updating invite code: {:?}", e);
+                Ok(None) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "InvalidInviteCode", "message": "Invite code not found"})),
+                    )
+                        .into_response();
+                }
+                Err(e) => {
+                    error!("Error checking invite code: {:?}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": "InternalError"})),
                     )
                         .into_response();
                 }
-            }
-            Ok(None) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidInviteCode", "message": "Invite code not found"})),
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                error!("Error checking invite code: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
             }
         }
     }
@@ -387,10 +399,10 @@ pub async fn create_account(
     let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
         r#"INSERT INTO users (
             handle, email, did, password_hash,
-            preferred_notification_channel,
+            preferred_comms_channel,
             discord_id, telegram_username, signal_number,
             is_admin
-        ) VALUES ($1, $2, $3, $4, $5::notification_channel, $6, $7, $8, $9) RETURNING id"#,
+        ) VALUES ($1, $2, $3, $4, $5::comms_channel, $6, $7, $8, $9) RETURNING id"#,
     )
     .bind(short_handle)
     .bind(&email)
@@ -598,20 +610,22 @@ pub async fn create_account(
             .into_response();
     }
     if let Some(code) = &input.invite_code {
-        let use_insert = sqlx::query!(
-            "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
-            code,
-            user_id
-        )
-        .execute(&mut *tx)
-        .await;
-        if let Err(e) = use_insert {
-            error!("Error recording invite usage: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
+        if !code.trim().is_empty() {
+            let use_insert = sqlx::query!(
+                "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
+                code,
+                user_id
             )
-                .into_response();
+            .execute(&mut *tx)
+            .await;
+            if let Err(e) = use_insert {
+                error!("Error recording invite usage: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
         }
     }
     if let Err(e) = tx.commit().await {
@@ -646,7 +660,7 @@ pub async fn create_account(
     {
         warn!("Failed to create default profile for {}: {}", did, e);
     }
-    if let Err(e) = crate::notifications::enqueue_signup_verification(
+    if let Err(e) = crate::comms::enqueue_signup_verification(
         &state.db,
         user_id,
         verification_channel,

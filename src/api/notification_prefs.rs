@@ -60,7 +60,7 @@ pub async fn get_notification_prefs(State(state): State<AppState>, headers: Head
             r#"
         SELECT
             email,
-            preferred_notification_channel::text as channel,
+            preferred_comms_channel::text as channel,
             discord_id,
             discord_verified,
             telegram_username,
@@ -110,7 +110,7 @@ pub async fn get_notification_prefs(State(state): State<AppState>, headers: Head
 pub struct NotificationHistoryEntry {
     pub created_at: String,
     pub channel: String,
-    pub notification_type: String,
+    pub comms_type: String,
     pub status: String,
     pub subject: Option<String>,
     pub body: String,
@@ -164,11 +164,11 @@ pub async fn get_notification_history(
         SELECT
             created_at,
             channel as "channel: String",
-            notification_type as "notification_type: String",
+            comms_type as "comms_type: String",
             status as "status: String",
             subject,
             body
-        FROM notification_queue
+        FROM comms_queue
         WHERE user_id = $1
         ORDER BY created_at DESC
         LIMIT 50
@@ -190,7 +190,7 @@ pub async fn get_notification_history(
         NotificationHistoryEntry {
             created_at: row.created_at.to_rfc3339(),
             channel: row.channel.clone(),
-            notification_type: row.notification_type.clone(),
+            comms_type: row.comms_type.clone(),
             status: row.status.clone(),
             subject: row.subject.clone(),
             body: row.body.clone(),
@@ -231,7 +231,7 @@ pub async fn request_channel_verification(
     sqlx::query!(
         r#"
         INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at)
-        VALUES ($1, $2::notification_channel, $3, $4, $5)
+        VALUES ($1, $2::comms_channel, $3, $4, $5)
         ON CONFLICT (user_id, channel) DO UPDATE
         SET code = $3, pending_identifier = $4, expires_at = $5, created_at = NOW()
         "#,
@@ -248,14 +248,14 @@ pub async fn request_channel_verification(
     if channel == "email" {
         let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         let handle_str = handle.unwrap_or("user");
-        crate::notifications::enqueue_email_update(db, user_id, identifier, handle_str, &code, &hostname)
+        crate::comms::enqueue_email_update(db, user_id, identifier, handle_str, &code, &hostname)
             .await
             .map_err(|e| format!("Failed to enqueue email notification: {}", e))?;
     } else {
         sqlx::query!(
             r#"
-            INSERT INTO notification_queue (user_id, channel, notification_type, recipient, subject, body, metadata)
-            VALUES ($1, $2::notification_channel, 'channel_verification', $3, 'Verify your channel', $4, $5)
+            INSERT INTO comms_queue (user_id, channel, comms_type, recipient, subject, body, metadata)
+            VALUES ($1, $2::comms_channel, 'channel_verification', $3, 'Verify your channel', $4, $5)
             "#,
             user_id,
             channel as _,
@@ -331,7 +331,7 @@ pub async fn update_notification_prefs(
                 .into_response();
         }
         if let Err(e) = sqlx::query(
-            r#"UPDATE users SET preferred_notification_channel = $1::notification_channel, updated_at = NOW() WHERE did = $2"#
+            r#"UPDATE users SET preferred_comms_channel = $1::comms_channel, updated_at = NOW() WHERE did = $2"#
         )
         .bind(channel)
         .bind(&user.did)

@@ -68,7 +68,7 @@ pub async fn request_plc_operation_signature(
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) =
-        crate::notifications::enqueue_plc_operation(&state.db, user.id, &plc_token, &hostname).await
+        crate::comms::enqueue_plc_operation(&state.db, user.id, &plc_token, &hostname).await
     {
         warn!("Failed to enqueue PLC operation notification: {:?}", e);
     }

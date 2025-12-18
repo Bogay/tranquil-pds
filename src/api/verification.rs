@@ -68,7 +68,7 @@ pub async fn confirm_channel_verification(
     let record = match sqlx::query!(
         r#"
         SELECT code, pending_identifier, expires_at FROM channel_verifications
-        WHERE user_id = $1 AND channel = $2::notification_channel
+        WHERE user_id = $1 AND channel = $2::comms_channel
         "#,
         user_id,
         channel_str as _
@@ -163,7 +163,7 @@ pub async fn confirm_channel_verification(
     }
 
     if let Err(e) = sqlx::query!(
-        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = $2::notification_channel",
+        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = $2::comms_channel",
         user_id,
         channel_str as _
     )

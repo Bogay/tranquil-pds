@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            id, handle, email,\n            preferred_notification_channel as \"channel: crate::notifications::NotificationChannel\",\n            discord_id, telegram_username, signal_number,\n            email_confirmed, discord_verified, telegram_verified, signal_verified\n        FROM users\n        WHERE did = $1",
+  "query": "SELECT\n            id, handle, email,\n            preferred_comms_channel as \"channel: crate::comms::CommsChannel\",\n            discord_id, telegram_username, signal_number,\n            email_verified, discord_verified, telegram_verified, signal_verified\n        FROM users\n        WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -20,10 +20,10 @@
       },
       {
         "ordinal": 3,
-        "name": "channel: crate::notifications::NotificationChannel",
+        "name": "channel: crate::comms::CommsChannel",
         "type_info": {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -52,7 +52,7 @@
       },
       {
         "ordinal": 7,
-        "name": "email_confirmed",
+        "name": "email_verified",
         "type_info": "Bool"
       },
       {
@@ -90,5 +90,5 @@
       false
     ]
   },
-  "hash": "ae85520d67815e95802c0e28db120c3c10badee74f78722d3cea58d183734bf6"
+  "hash": "4a77184e491ed1f011966fd7fa1332bfeaf782a7787784008f15254c02ef57d5"
 }

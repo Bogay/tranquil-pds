@@ -1,5 +1,5 @@
 use super::validation::validate_record;
-use super::write::has_verified_notification_channel;
+use super::write::has_verified_comms_channel;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -109,7 +109,7 @@ pub async fn apply_writes(
         )
             .into_response();
     }
-    match has_verified_notification_channel(&state.db, &did).await {
+    match has_verified_comms_channel(&state.db, &did).await {
         Ok(true) => {}
         Ok(false) => {
             return (

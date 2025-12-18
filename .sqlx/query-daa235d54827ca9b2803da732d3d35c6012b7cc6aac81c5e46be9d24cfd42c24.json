@@ -1,34 +1,24 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            handle, email, email_confirmed, is_admin,\n            preferred_notification_channel as \"preferred_channel: crate::notifications::NotificationChannel\",\n            discord_verified, telegram_verified, signal_verified\n        FROM users WHERE did = $1",
+  "query": "\n        SELECT id, two_factor_enabled,\n               preferred_comms_channel as \"preferred_comms_channel: CommsChannel\",\n               email_verified, discord_verified, telegram_verified, signal_verified\n        FROM users\n        WHERE did = $1\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "handle",
-        "type_info": "Text"
+        "name": "id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 1,
-        "name": "email",
-        "type_info": "Text"
+        "name": "two_factor_enabled",
+        "type_info": "Bool"
       },
       {
         "ordinal": 2,
-        "name": "email_confirmed",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 3,
-        "name": "is_admin",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 4,
-        "name": "preferred_channel: crate::notifications::NotificationChannel",
+        "name": "preferred_comms_channel: CommsChannel",
         "type_info": {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -41,17 +31,22 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 3,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
         "name": "discord_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "telegram_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "signal_verified",
         "type_info": "Bool"
       }
@@ -63,7 +58,6 @@
     },
     "nullable": [
       false,
-      true,
       false,
       false,
       false,
@@ -72,5 +66,5 @@
       false
     ]
   },
-  "hash": "088e0b03c2f706402d474e4431562a40a64a5ce575bd8884b2c5d51f04871de1"
+  "hash": "daa235d54827ca9b2803da732d3d35c6012b7cc6aac81c5e46be9d24cfd42c24"
 }

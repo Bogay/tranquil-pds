@@ -1,30 +1,24 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT code, pending_identifier, expires_at FROM channel_verifications\n        WHERE user_id = $1 AND channel = $2::notification_channel\n        ",
+  "query": "\n        SELECT\n            email,\n            handle,\n            preferred_comms_channel as \"channel: CommsChannel\"\n        FROM users\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "code",
+        "name": "email",
         "type_info": "Text"
       },
       {
         "ordinal": 1,
-        "name": "pending_identifier",
+        "name": "handle",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
-        "name": "expires_at",
-        "type_info": "Timestamptz"
-      }
-    ],
-    "parameters": {
-      "Left": [
-        "Uuid",
-        {
+        "name": "channel: CommsChannel",
+        "type_info": {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -35,13 +29,18 @@
             }
           }
         }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
       ]
     },
     "nullable": [
-      false,
       true,
+      false,
       false
     ]
   },
-  "hash": "4bd5937b38e9ea67215a24f8f4ece05d107b4cdacdb59c30fa3782bb36942b26"
+  "hash": "8c69c5f98e3ee59b50346094ff39eed73bb602f0b5ab48c11e53c82839a66721"
 }

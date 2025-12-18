@@ -24,7 +24,7 @@ pub struct AccountInfo {
     pub indexed_at: String,
     pub invite_note: Option<String>,
     pub invites_disabled: bool,
-    pub email_confirmed_at: Option<String>,
+    pub email_verified_at: Option<String>,
     pub deactivated_at: Option<String>,
 }
 
@@ -67,7 +67,7 @@ pub async fn get_account_info(
                 indexed_at: row.created_at.to_rfc3339(),
                 invite_note: None,
                 invites_disabled: false,
-                email_confirmed_at: None,
+                email_verified_at: None,
                 deactivated_at: None,
             }),
         )
@@ -143,7 +143,7 @@ pub async fn get_account_infos(
                 indexed_at: row.created_at.to_rfc3339(),
                 invite_note: None,
                 invites_disabled: false,
-                email_confirmed_at: None,
+                email_verified_at: None,
                 deactivated_at: None,
             });
         }

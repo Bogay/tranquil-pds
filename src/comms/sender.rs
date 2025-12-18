@@ -6,16 +6,16 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use super::types::{NotificationChannel, QueuedNotification};
+use super::types::{CommsChannel, QueuedComms};
 
 const HTTP_TIMEOUT_SECS: u64 = 30;
 const MAX_RETRIES: u32 = 3;
 const INITIAL_RETRY_DELAY_MS: u64 = 500;
 
 #[async_trait]
-pub trait NotificationSender: Send + Sync {
-    fn channel(&self) -> NotificationChannel;
-    async fn send(&self, notification: &QueuedNotification) -> Result<(), SendError>;
+pub trait CommsSender: Send + Sync {
+    fn channel(&self) -> CommsChannel;
+    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -25,7 +25,7 @@ pub enum SendError {
     #[error("Sendmail exited with non-zero status: {0}")]
     SendmailFailed(String),
     #[error("Channel not configured: {0:?}")]
-    NotConfigured(NotificationChannel),
+    NotConfigured(CommsChannel),
     #[error("External service error: {0}")]
     ExternalService(String),
     #[error("Invalid recipient format: {0}")]
@@ -91,7 +91,7 @@ impl EmailSender {
         Some(Self::new(from_address, from_name))
     }
 
-    pub fn format_email(&self, notification: &QueuedNotification) -> String {
+    pub fn format_email(&self, notification: &QueuedComms) -> String {
         let subject =
             sanitize_header_value(notification.subject.as_deref().unwrap_or("Notification"));
         let recipient = sanitize_header_value(&notification.recipient);
@@ -112,12 +112,12 @@ impl EmailSender {
 }
 
 #[async_trait]
-impl NotificationSender for EmailSender {
-    fn channel(&self) -> NotificationChannel {
-        NotificationChannel::Email
+impl CommsSender for EmailSender {
+    fn channel(&self) -> CommsChannel {
+        CommsChannel::Email
     }
 
-    async fn send(&self, notification: &QueuedNotification) -> Result<(), SendError> {
+    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
         let email_content = self.format_email(notification);
         let mut child = Command::new(&self.sendmail_path)
             .arg("-t")
@@ -158,12 +158,12 @@ impl DiscordSender {
 }
 
 #[async_trait]
-impl NotificationSender for DiscordSender {
-    fn channel(&self) -> NotificationChannel {
-        NotificationChannel::Discord
+impl CommsSender for DiscordSender {
+    fn channel(&self) -> CommsChannel {
+        CommsChannel::Discord
     }
 
-    async fn send(&self, notification: &QueuedNotification) -> Result<(), SendError> {
+    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
         let subject = notification.subject.as_deref().unwrap_or("Notification");
         let content = format!("**{}**\n\n{}", subject, notification.body);
         let payload = json!({
@@ -237,12 +237,12 @@ impl TelegramSender {
 }
 
 #[async_trait]
-impl NotificationSender for TelegramSender {
-    fn channel(&self) -> NotificationChannel {
-        NotificationChannel::Telegram
+impl CommsSender for TelegramSender {
+    fn channel(&self) -> CommsChannel {
+        CommsChannel::Telegram
     }
 
-    async fn send(&self, notification: &QueuedNotification) -> Result<(), SendError> {
+    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
         let chat_id = &notification.recipient;
         let subject = notification.subject.as_deref().unwrap_or("Notification");
         let text = format!("*{}*\n\n{}", subject, notification.body);
@@ -316,12 +316,12 @@ impl SignalSender {
 }
 
 #[async_trait]
-impl NotificationSender for SignalSender {
-    fn channel(&self) -> NotificationChannel {
-        NotificationChannel::Signal
+impl CommsSender for SignalSender {
+    fn channel(&self) -> CommsChannel {
+        CommsChannel::Signal
     }
 
-    async fn send(&self, notification: &QueuedNotification) -> Result<(), SendError> {
+    async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
         let recipient = &notification.recipient;
         if !is_valid_phone_number(recipient) {
             return Err(SendError::InvalidRecipient(format!(

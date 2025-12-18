@@ -950,6 +950,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "governor",
+ "hickory-resolver",
  "hkdf",
  "hmac",
  "image",

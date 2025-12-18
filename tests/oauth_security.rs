@@ -45,9 +45,12 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
 async fn get_oauth_tokens(http_client: &reqwest::Client, url: &str) -> (String, String, String) {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("sec-test-{}", ts);
-    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+    let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "security-test-password" }))
         .send().await.unwrap();
+    let account: Value = create_res.json().await.unwrap();
+    let did = account["did"].as_str().unwrap();
+    verify_new_account(http_client, did).await;
     let redirect_uri = "https://example.com/sec-callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
@@ -129,9 +132,11 @@ async fn test_pkce_security() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST, "Missing PKCE challenge should be rejected");
     let ts = Utc::now().timestamp_millis();
     let handle = format!("pkce-attack-{}", ts);
-    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+    let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "pkce-password" }))
         .send().await.unwrap();
+    let account: Value = create_res.json().await.unwrap();
+    verify_new_account(&http_client, account["did"].as_str().unwrap()).await;
     let (_, code_challenge) = generate_pkce();
     let (attacker_verifier, _) = generate_pkce();
     let par_body: Value = http_client.post(format!("{}/oauth/par", url))
@@ -158,9 +163,11 @@ async fn test_replay_attacks() {
     let http_client = client();
     let ts = Utc::now().timestamp_millis();
     let handle = format!("replay-{}", ts);
-    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+    let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "replay-password" }))
         .send().await.unwrap();
+    let account: Value = create_res.json().await.unwrap();
+    verify_new_account(&http_client, account["did"].as_str().unwrap()).await;
     let redirect_uri = "https://example.com/replay-callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
@@ -243,9 +250,11 @@ async fn test_oauth_security_boundaries() {
     let client_id_b = mock_b.uri();
     let ts2 = Utc::now().timestamp_millis();
     let handle2 = format!("cross-{}", ts2);
-    http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+    let create_res2 = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle2, "email": format!("{}@example.com", handle2), "password": "cross-password" }))
         .send().await.unwrap();
+    let account2: Value = create_res2.json().await.unwrap();
+    verify_new_account(&http_client, account2["did"].as_str().unwrap()).await;
     let (code_verifier2, code_challenge2) = generate_pkce();
     let par_a: Value = http_client.post(format!("{}/oauth/par", url))
         .form(&[("response_type", "code"), ("client_id", &client_id_a), ("redirect_uri", redirect_uri_a),

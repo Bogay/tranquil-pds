@@ -373,7 +373,7 @@ async fn test_reset_password_creates_notification() {
         .await
         .expect("User not found");
     let initial_count: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM notification_queue WHERE user_id = $1 AND notification_type = 'password_reset'",
+        "SELECT COUNT(*) FROM comms_queue WHERE user_id = $1 AND comms_type = 'password_reset'",
         user.id
     )
     .fetch_one(&pool)
@@ -391,7 +391,7 @@ async fn test_reset_password_creates_notification() {
         .expect("Failed to request password reset");
     assert_eq!(res.status(), StatusCode::OK);
     let final_count: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM notification_queue WHERE user_id = $1 AND notification_type = 'password_reset'",
+        "SELECT COUNT(*) FROM comms_queue WHERE user_id = $1 AND comms_type = 'password_reset'",
         user.id
     )
     .fetch_one(&pool)

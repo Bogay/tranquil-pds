@@ -3,6 +3,7 @@
   import { initAuth, getAuthState } from './lib/auth.svelte'
   import Login from './routes/Login.svelte'
   import Register from './routes/Register.svelte'
+  import Verify from './routes/Verify.svelte'
   import ResetPassword from './routes/ResetPassword.svelte'
   import Dashboard from './routes/Dashboard.svelte'
   import AppPasswords from './routes/AppPasswords.svelte'
@@ -25,6 +26,8 @@
         return Login
       case '/register':
         return Register
+      case '/verify':
+        return Verify
       case '/reset-password':
         return ResetPassword
       case '/dashboard':

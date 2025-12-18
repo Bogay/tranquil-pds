@@ -4,8 +4,8 @@ use sqlx::FromRow;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "notification_channel", rename_all = "lowercase")]
-pub enum NotificationChannel {
+#[sqlx(type_name = "comms_channel", rename_all = "lowercase")]
+pub enum CommsChannel {
     Email,
     Discord,
     Telegram,
@@ -13,8 +13,8 @@ pub enum NotificationChannel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "notification_status", rename_all = "lowercase")]
-pub enum NotificationStatus {
+#[sqlx(type_name = "comms_status", rename_all = "lowercase")]
+pub enum CommsStatus {
     Pending,
     Processing,
     Sent,
@@ -22,8 +22,8 @@ pub enum NotificationStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, Deserialize)]
-#[sqlx(type_name = "notification_type", rename_all = "snake_case")]
-pub enum NotificationType {
+#[sqlx(type_name = "comms_type", rename_all = "snake_case")]
+pub enum CommsType {
     Welcome,
     EmailVerification,
     PasswordReset,
@@ -35,12 +35,12 @@ pub enum NotificationType {
 }
 
 #[derive(Debug, Clone, FromRow)]
-pub struct QueuedNotification {
+pub struct QueuedComms {
     pub id: Uuid,
     pub user_id: Uuid,
-    pub channel: NotificationChannel,
-    pub notification_type: NotificationType,
-    pub status: NotificationStatus,
+    pub channel: CommsChannel,
+    pub comms_type: CommsType,
+    pub status: CommsStatus,
     pub recipient: String,
     pub subject: Option<String>,
     pub body: String,
@@ -54,21 +54,21 @@ pub struct QueuedNotification {
     pub processed_at: Option<DateTime<Utc>>,
 }
 
-pub struct NewNotification {
+pub struct NewComms {
     pub user_id: Uuid,
-    pub channel: NotificationChannel,
-    pub notification_type: NotificationType,
+    pub channel: CommsChannel,
+    pub comms_type: CommsType,
     pub recipient: String,
     pub subject: Option<String>,
     pub body: String,
     pub metadata: Option<serde_json::Value>,
 }
 
-impl NewNotification {
+impl NewComms {
     pub fn new(
         user_id: Uuid,
-        channel: NotificationChannel,
-        notification_type: NotificationType,
+        channel: CommsChannel,
+        comms_type: CommsType,
         recipient: String,
         subject: Option<String>,
         body: String,
@@ -76,7 +76,7 @@ impl NewNotification {
         Self {
             user_id,
             channel,
-            notification_type,
+            comms_type,
             recipient,
             subject,
             body,
@@ -86,15 +86,15 @@ impl NewNotification {
 
     pub fn email(
         user_id: Uuid,
-        notification_type: NotificationType,
+        comms_type: CommsType,
         recipient: String,
         subject: String,
         body: String,
     ) -> Self {
         Self::new(
             user_id,
-            NotificationChannel::Email,
-            notification_type,
+            CommsChannel::Email,
+            comms_type,
             recipient,
             Some(subject),
             body,

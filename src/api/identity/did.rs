@@ -53,11 +53,22 @@ pub async fn resolve_handle(
                 .await;
             (StatusCode::OK, Json(json!({ "did": row.did }))).into_response()
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "HandleNotFound", "message": "Unable to resolve handle"})),
-        )
-            .into_response(),
+        Ok(None) => {
+            match crate::handle::resolve_handle(handle).await {
+                Ok(did) => {
+                    let _ = state
+                        .cache
+                        .set(&cache_key, &did, std::time::Duration::from_secs(300))
+                        .await;
+                    (StatusCode::OK, Json(json!({ "did": did }))).into_response()
+                }
+                Err(_) => (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "HandleNotFound", "message": "Unable to resolve handle"})),
+                )
+                    .into_response(),
+            }
+        }
         Err(e) => {
             error!("DB error resolving handle: {:?}", e);
             (
@@ -396,6 +407,54 @@ pub async fn update_handle(
         )
             .into_response();
     }
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let is_service_domain = crate::handle::is_service_domain_handle(new_handle, &hostname);
+    let (handle_to_store, full_handle) = if is_service_domain {
+        let suffix = format!(".{}", hostname);
+        let short_handle = if new_handle.ends_with(&suffix) {
+            new_handle.strip_suffix(&suffix).unwrap_or(new_handle)
+        } else {
+            new_handle
+        };
+        (short_handle.to_string(), format!("{}.{}", short_handle, hostname))
+    } else {
+        match crate::handle::verify_handle_ownership(new_handle, &did).await {
+            Ok(()) => {}
+            Err(crate::handle::HandleResolutionError::NotFound) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "HandleNotAvailable",
+                        "message": "Handle verification failed. Please set up DNS TXT record at _atproto.{} or serve your DID at https://{}/.well-known/atproto-did",
+                        "handle": new_handle
+                    })),
+                )
+                    .into_response();
+            }
+            Err(crate::handle::HandleResolutionError::DidMismatch { expected, actual }) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "HandleNotAvailable",
+                        "message": format!("Handle points to different DID. Expected {}, got {}", expected, actual)
+                    })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                warn!("Handle verification failed: {}", e);
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "HandleNotAvailable",
+                        "message": format!("Handle verification failed: {}", e)
+                    })),
+                )
+                    .into_response();
+            }
+        }
+        (new_handle.to_string(), new_handle.to_string())
+    };
     let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE id = $1", user_id)
         .fetch_optional(&state.db)
         .await
@@ -403,7 +462,7 @@ pub async fn update_handle(
         .flatten();
     let existing = sqlx::query!(
         "SELECT id FROM users WHERE handle = $1 AND id != $2",
-        new_handle,
+        handle_to_store,
         user_id
     )
     .fetch_optional(&state.db)
@@ -417,7 +476,7 @@ pub async fn update_handle(
     }
     let result = sqlx::query!(
         "UPDATE users SET handle = $1 WHERE id = $2",
-        new_handle,
+        handle_to_store,
         user_id
     )
     .execute(&state.db)
@@ -427,15 +486,19 @@ pub async fn update_handle(
             if let Some(old) = old_handle {
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
-            let _ = state.cache.delete(&format!("handle:{}", new_handle)).await;
-            let hostname =
-                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-            let full_handle = format!("{}.{}", new_handle, hostname);
+            let _ = state
+                .cache
+                .delete(&format!("handle:{}", handle_to_store))
+                .await;
+            let _ = state.cache.delete(&format!("handle:{}", full_handle)).await;
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle))
                     .await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
+            }
+            if let Err(e) = update_plc_handle(&state, &did, &full_handle).await {
+                warn!("Failed to update PLC handle: {}", e);
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }
@@ -448,6 +511,38 @@ pub async fn update_handle(
                 .into_response()
         }
     }
+}
+
+async fn update_plc_handle(
+    state: &AppState,
+    did: &str,
+    new_handle: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if !did.starts_with("did:plc:") {
+        return Ok(());
+    }
+    let user_row = sqlx::query!(
+        r#"SELECT u.id, uk.key_bytes, uk.encryption_version
+           FROM users u
+           JOIN user_keys uk ON u.id = uk.user_id
+           WHERE u.did = $1"#,
+        did
+    )
+    .fetch_optional(&state.db)
+    .await?;
+    let user_row = match user_row {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+    let key_bytes = crate::config::decrypt_key(&user_row.key_bytes, user_row.encryption_version)?;
+    let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)?;
+    let plc_client = crate::plc::PlcClient::new(None);
+    let last_op = plc_client.get_last_op(did).await?;
+    let new_also_known_as = vec![format!("at://{}", new_handle)];
+    let update_op = crate::plc::create_update_op(&last_op, None, None, Some(new_also_known_as), None)?;
+    let signed_op = crate::plc::sign_operation(&update_op, &signing_key)?;
+    plc_client.send_operation(did, &signed_op).await?;
+    Ok(())
 }
 
 pub async fn well_known_atproto_did(State(state): State<AppState>, headers: HeaderMap) -> Response {

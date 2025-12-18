@@ -2,7 +2,8 @@ mod common;
 mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
-use common::{base_url, client, create_account_and_login, get_db_connection_string};
+use common::{base_url, client, get_db_connection_string};
+use helpers::verify_new_account;
 use reqwest::{StatusCode, redirect};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -124,6 +125,7 @@ async fn test_full_oauth_flow() {
     assert_eq!(create_res.status(), StatusCode::OK);
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap();
+    verify_new_account(&http_client, user_did).await;
     let redirect_uri = "https://example.com/oauth/callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
@@ -261,6 +263,7 @@ async fn test_oauth_2fa_flow() {
     assert_eq!(create_res.status(), StatusCode::OK);
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap();
+    verify_new_account(&http_client, user_did).await;
     let db_url = get_db_connection_string().await;
     let pool = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect(&db_url).await.unwrap();
     sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
@@ -324,6 +327,7 @@ async fn test_oauth_2fa_lockout() {
         .send().await.unwrap();
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap();
+    verify_new_account(&http_client, user_did).await;
     let db_url = get_db_connection_string().await;
     let pool = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect(&db_url).await.unwrap();
     sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
@@ -375,6 +379,7 @@ async fn test_account_selector_with_2fa() {
         .send().await.unwrap();
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap().to_string();
+    verify_new_account(&http_client, &user_did).await;
     let redirect_uri = "https://example.com/selector-2fa-callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
@@ -451,10 +456,12 @@ async fn test_oauth_state_encoding() {
     let handle = format!("state-special-{}", ts);
     let email = format!("state-special-{}@example.com", ts);
     let password = "state-special-password";
-    http_client
+    let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": password }))
         .send().await.unwrap();
+    let account: Value = create_res.json().await.unwrap();
+    verify_new_account(&http_client, account["did"].as_str().unwrap()).await;
     let redirect_uri = "https://example.com/state-special-callback";
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();

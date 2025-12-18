@@ -22,14 +22,14 @@ use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
 
-pub async fn has_verified_notification_channel(
+pub async fn has_verified_comms_channel(
     db: &PgPool,
     did: &str,
 ) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
         r#"
         SELECT
-            email_confirmed,
+            email_verified,
             discord_verified,
             telegram_verified,
             signal_verified
@@ -42,11 +42,11 @@ pub async fn has_verified_notification_channel(
     .await?;
     match row {
         Some(r) => {
-            let email_confirmed: bool = r.get("email_confirmed");
+            let email_verified: bool = r.get("email_verified");
             let discord_verified: bool = r.get("discord_verified");
             let telegram_verified: bool = r.get("telegram_verified");
             let signal_verified: bool = r.get("signal_verified");
-            Ok(email_confirmed || discord_verified || telegram_verified || signal_verified)
+            Ok(email_verified || discord_verified || telegram_verified || signal_verified)
         }
         None => Ok(false),
     }
@@ -96,7 +96,7 @@ pub async fn prepare_repo_write(
         )
             .into_response());
     }
-    match has_verified_notification_channel(&state.db, &auth_user.did).await {
+    match has_verified_comms_channel(&state.db, &auth_user.did).await {
         Ok(true) => {}
         Ok(false) => {
             return Err((

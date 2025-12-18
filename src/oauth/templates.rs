@@ -369,7 +369,7 @@ pub fn login_page(
             </div>
             <div class="buttons">
                 <button type="submit" class="btn btn-primary">Sign In</button>
-                <button type="submit" formaction="/oauth/authorize/deny" class="btn btn-secondary">Cancel</button>
+                <button type="submit" formaction="/oauth/authorize/deny" formnovalidate class="btn btn-secondary">Cancel</button>
             </div>
         </form>
         <p class="help-text">

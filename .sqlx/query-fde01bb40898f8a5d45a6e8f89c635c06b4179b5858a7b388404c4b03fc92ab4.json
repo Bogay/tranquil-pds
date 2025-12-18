@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            created_at,\n            channel as \"channel: String\",\n            notification_type as \"notification_type: String\",\n            status as \"status: String\",\n            subject,\n            body\n        FROM notification_queue\n        WHERE user_id = $1\n        ORDER BY created_at DESC\n        LIMIT 50\n        ",
+  "query": "\n        SELECT\n            created_at,\n            channel as \"channel: String\",\n            comms_type as \"comms_type: String\",\n            status as \"status: String\",\n            subject,\n            body\n        FROM comms_queue\n        WHERE user_id = $1\n        ORDER BY created_at DESC\n        LIMIT 50\n        ",
   "describe": {
     "columns": [
       {
@@ -13,7 +13,7 @@
         "name": "channel: String",
         "type_info": {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -27,10 +27,10 @@
       },
       {
         "ordinal": 2,
-        "name": "notification_type: String",
+        "name": "comms_type: String",
         "type_info": {
           "Custom": {
-            "name": "notification_type",
+            "name": "comms_type",
             "kind": {
               "Enum": [
                 "welcome",
@@ -52,7 +52,7 @@
         "name": "status: String",
         "type_info": {
           "Custom": {
-            "name": "notification_status",
+            "name": "comms_status",
             "kind": {
               "Enum": [
                 "pending",
@@ -89,5 +89,5 @@
       false
     ]
   },
-  "hash": "4f131ba30c73a48ddf5630e75f92a86b6ce8a00a4bcae60442d05abc785abc1a"
+  "hash": "fde01bb40898f8a5d45a6e8f89c635c06b4179b5858a7b388404c4b03fc92ab4"
 }

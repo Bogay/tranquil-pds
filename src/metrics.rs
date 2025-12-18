@@ -54,8 +54,8 @@ fn describe_metrics() {
         "Total number of S3/blob storage operations"
     );
     metrics::describe_gauge!(
-        "bspds_notification_queue_size",
-        "Current size of the notification queue"
+        "bspds_comms_queue_size",
+        "Current size of the comms queue"
     );
     metrics::describe_counter!(
         "bspds_rate_limit_rejections_total",
@@ -167,8 +167,8 @@ pub fn record_s3_operation(op_type: &str, status: &str) {
     .increment(1);
 }
 
-pub fn set_notification_queue_size(size: usize) {
-    gauge!("bspds_notification_queue_size").set(size as f64);
+pub fn set_comms_queue_size(size: usize) {
+    gauge!("bspds_comms_queue_size").set(size as f64);
 }
 
 pub fn record_rate_limit_rejection(limiter: &str) {

@@ -1,6 +1,6 @@
 mod common;
 use bspds::image::{ImageError, ImageProcessor};
-use bspds::notifications::{SendError, is_valid_phone_number, sanitize_header_value};
+use bspds::comms::{SendError, is_valid_phone_number, sanitize_header_value};
 use bspds::oauth::templates::{error_page, login_page, success_page};
 
 #[test]

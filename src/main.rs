@@ -1,7 +1,5 @@
+use bspds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
 use bspds::crawlers::{Crawlers, start_crawlers_service};
-use bspds::notifications::{
-    DiscordSender, EmailSender, NotificationService, SignalSender, TelegramSender,
-};
 use bspds::state::AppState;
 use std::net::SocketAddr;
 use std::process::ExitCode;
@@ -68,31 +66,31 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let mut notification_service = NotificationService::new(pool);
+    let mut comms_service = CommsService::new(pool);
 
     if let Some(email_sender) = EmailSender::from_env() {
-        info!("Email notifications enabled");
-        notification_service = notification_service.register_sender(email_sender);
+        info!("Email comms enabled");
+        comms_service = comms_service.register_sender(email_sender);
     } else {
-        warn!("Email notifications disabled (MAIL_FROM_ADDRESS not set)");
+        warn!("Email comms disabled (MAIL_FROM_ADDRESS not set)");
     }
 
     if let Some(discord_sender) = DiscordSender::from_env() {
-        info!("Discord notifications enabled");
-        notification_service = notification_service.register_sender(discord_sender);
+        info!("Discord comms enabled");
+        comms_service = comms_service.register_sender(discord_sender);
     }
 
     if let Some(telegram_sender) = TelegramSender::from_env() {
-        info!("Telegram notifications enabled");
-        notification_service = notification_service.register_sender(telegram_sender);
+        info!("Telegram comms enabled");
+        comms_service = comms_service.register_sender(telegram_sender);
     }
 
     if let Some(signal_sender) = SignalSender::from_env() {
-        info!("Signal notifications enabled");
-        notification_service = notification_service.register_sender(signal_sender);
+        info!("Signal comms enabled");
+        comms_service = comms_service.register_sender(signal_sender);
     }
 
-    let notification_handle = tokio::spawn(notification_service.run(shutdown_rx.clone()));
+    let comms_handle = tokio::spawn(comms_service.run(shutdown_rx.clone()));
 
     let crawlers_handle = if let Some(crawlers) = Crawlers::from_env() {
         let crawlers = Arc::new(
@@ -122,7 +120,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_graceful_shutdown(shutdown_signal(shutdown_tx))
         .await;
 
-    notification_handle.await.ok();
+    comms_handle.await.ok();
 
     if let Some(handle) = crawlers_handle {
         handle.await.ok();

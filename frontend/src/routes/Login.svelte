@@ -8,11 +8,6 @@
   let resendMessage = $state<string | null>(null)
   let showNewLogin = $state(false)
   const auth = getAuthState()
-  $effect(() => {
-    if (auth.session) {
-      navigate('/dashboard')
-    }
-  })
   async function handleSwitchAccount(did: string) {
     submitting = true
     try {

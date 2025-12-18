@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO notification_queue (user_id, channel, notification_type, recipient, subject, body, metadata)\n            VALUES ($1, $2::notification_channel, 'channel_verification', $3, 'Verify your channel', $4, $5)\n            ",
+  "query": "\n            INSERT INTO comms_queue (user_id, channel, comms_type, recipient, subject, body, metadata)\n            VALUES ($1, $2::comms_channel, 'channel_verification', $3, 'Verify your channel', $4, $5)\n            ",
   "describe": {
     "columns": [],
     "parameters": {
@@ -8,7 +8,7 @@
         "Uuid",
         {
           "Custom": {
-            "name": "notification_channel",
+            "name": "comms_channel",
             "kind": {
               "Enum": [
                 "email",
@@ -26,5 +26,5 @@
     },
     "nullable": []
   },
-  "hash": "0bb332a1a1b648aaeca02415b8d2fc39c045bac9b3897b1c886b6ffc68538bac"
+  "hash": "e774d655b838c219c8291a5bc8e6fb90b793c78402c648dd380538b6e2b47134"
 }

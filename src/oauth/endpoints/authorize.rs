@@ -1,4 +1,4 @@
-use crate::notifications::{NotificationChannel, channel_display_name, enqueue_2fa_code};
+use crate::comms::{CommsChannel, channel_display_name, enqueue_2fa_code};
 use crate::oauth::{
     Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, client::ClientMetadataCache, db, templates,
 };
@@ -406,8 +406,9 @@ pub async fn authorize_post(
     let user = match sqlx::query!(
         r#"
         SELECT id, did, email, password_hash, two_factor_enabled,
-               preferred_notification_channel as "preferred_notification_channel: NotificationChannel",
-               deactivated_at, takedown_ref
+               preferred_comms_channel as "preferred_comms_channel: CommsChannel",
+               deactivated_at, takedown_ref,
+               email_verified, discord_verified, telegram_verified, signal_verified
         FROM users
         WHERE handle = $1 OR email = $1
         "#,
@@ -428,6 +429,13 @@ pub async fn authorize_post(
     }
     if user.takedown_ref.is_some() {
         return show_login_error("This account has been taken down.", json_response);
+    }
+    let is_verified = user.email_verified
+        || user.discord_verified
+        || user.telegram_verified
+        || user.signal_verified;
+    if !is_verified {
+        return show_login_error("Please verify your account before logging in.", json_response);
     }
     let password_valid = match bcrypt::verify(&form.password, &user.password_hash) {
         Ok(valid) => valid,
@@ -451,7 +459,7 @@ pub async fn authorize_post(
                         "Failed to enqueue 2FA notification"
                     );
                 }
-                let channel_name = channel_display_name(user.preferred_notification_channel);
+                let channel_name = channel_display_name(user.preferred_comms_channel);
                 let redirect_url = format!(
                     "/oauth/authorize/2fa?request_uri={}&channel={}",
                     url_encode(&form.request_uri),
@@ -577,7 +585,8 @@ pub async fn authorize_select(
     let user = match sqlx::query!(
         r#"
         SELECT id, two_factor_enabled,
-               preferred_notification_channel as "preferred_notification_channel: NotificationChannel"
+               preferred_comms_channel as "preferred_comms_channel: CommsChannel",
+               email_verified, discord_verified, telegram_verified, signal_verified
         FROM users
         WHERE did = $1
         "#,
@@ -600,6 +609,17 @@ pub async fn authorize_select(
             )).into_response();
         }
     };
+    let is_verified = user.email_verified
+        || user.discord_verified
+        || user.telegram_verified
+        || user.signal_verified;
+    if !is_verified {
+        return Html(templates::error_page(
+            "access_denied",
+            Some("Please verify your account before logging in."),
+        ))
+        .into_response();
+    }
     if user.two_factor_enabled {
         let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
         match db::create_2fa_challenge(&state.db, &form.did, &form.request_uri).await {
@@ -615,7 +635,7 @@ pub async fn authorize_select(
                         "Failed to enqueue 2FA notification"
                     );
                 }
-                let channel_name = channel_display_name(user.preferred_notification_channel);
+                let channel_name = channel_display_name(user.preferred_comms_channel);
                 let redirect_url = format!(
                     "/oauth/authorize/2fa?request_uri={}&channel={}",
                     url_encode(&form.request_uri),
@@ -836,7 +856,7 @@ pub async fn authorize_2fa_post(
     if !code_valid {
         let _ = db::increment_2fa_attempts(&state.db, challenge.id).await;
         let channel = match sqlx::query_scalar!(
-            r#"SELECT preferred_notification_channel as "channel: NotificationChannel" FROM users WHERE did = $1"#,
+            r#"SELECT preferred_comms_channel as "channel: CommsChannel" FROM users WHERE did = $1"#,
             challenge.did
         )
         .fetch_optional(&state.db)
