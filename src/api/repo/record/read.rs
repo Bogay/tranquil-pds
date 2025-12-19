@@ -197,6 +197,7 @@ pub struct ListRecordsInput {
 }
 #[derive(Serialize)]
 pub struct ListRecordsOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     pub records: Vec<serde_json::Value>,
 }

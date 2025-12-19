@@ -78,6 +78,7 @@ pub struct InviteCodeUseInfo {
 
 #[derive(Serialize)]
 pub struct GetInviteCodesOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     pub codes: Vec<InviteCodeInfo>,
 }

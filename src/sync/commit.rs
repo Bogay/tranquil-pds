@@ -101,6 +101,7 @@ pub struct RepoInfo {
 
 #[derive(Serialize)]
 pub struct ListReposOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     pub repos: Vec<RepoInfo>,
 }

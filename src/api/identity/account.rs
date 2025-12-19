@@ -364,26 +364,154 @@ pub async fn create_account(
                 .into_response();
         }
     };
-    let exists_query = sqlx::query!("SELECT 1 as one FROM users WHERE handle = $1", short_handle)
-        .fetch_optional(&mut *tx)
-        .await;
-    match exists_query {
-        Ok(Some(_)) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "HandleTaken", "message": "Handle already taken"})),
+    if is_migration {
+        let existing_account: Option<(uuid::Uuid, String, Option<chrono::DateTime<chrono::Utc>>)> =
+            sqlx::query_as(
+                "SELECT id, handle, deactivated_at FROM users WHERE did = $1 FOR UPDATE",
             )
-                .into_response();
+            .bind(&did)
+            .fetch_optional(&mut *tx)
+            .await
+            .unwrap_or(None);
+        if let Some((account_id, old_handle, deactivated_at)) = existing_account {
+            if deactivated_at.is_some() {
+                info!(did = %did, old_handle = %old_handle, new_handle = %short_handle, "Preparing existing account for inbound migration");
+                let update_result: Result<_, sqlx::Error> = sqlx::query(
+                    "UPDATE users SET handle = $1 WHERE id = $2",
+                )
+                .bind(short_handle)
+                .bind(account_id)
+                .execute(&mut *tx)
+                .await;
+                if let Err(e) = update_result {
+                    if let Some(db_err) = e.as_database_error() {
+                        if db_err.constraint().map(|c| c.contains("handle")).unwrap_or(false) {
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": "HandleTaken", "message": "Handle already taken by another account"})),
+                            )
+                                .into_response();
+                        }
+                    }
+                    error!("Error reactivating account: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+                if let Err(e) = tx.commit().await {
+                    error!("Error committing reactivation: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+                let key_row: Option<(Vec<u8>, i32)> = sqlx::query_as(
+                    "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
+                )
+                .bind(account_id)
+                .fetch_optional(&state.db)
+                .await
+                .unwrap_or(None);
+                let secret_key_bytes = match key_row {
+                    Some((key_bytes, encryption_version)) => {
+                        match crate::config::decrypt_key(&key_bytes, Some(encryption_version)) {
+                            Ok(k) => k,
+                            Err(e) => {
+                                error!("Error decrypting key for reactivated account: {:?}", e);
+                                return (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    Json(json!({"error": "InternalError"})),
+                                )
+                                    .into_response();
+                            }
+                        }
+                    }
+                    None => {
+                        error!("No signing key found for reactivated account");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError", "message": "Account signing key not found"})),
+                        )
+                            .into_response();
+                    }
+                };
+                let access_meta = match crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        error!("Error creating access token: {:?}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError"})),
+                        )
+                            .into_response();
+                    }
+                };
+                let refresh_meta = match crate::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        error!("Error creating refresh token: {:?}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError"})),
+                        )
+                            .into_response();
+                    }
+                };
+                let session_result: Result<_, sqlx::Error> = sqlx::query(
+                    "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+                )
+                .bind(&did)
+                .bind(&access_meta.jti)
+                .bind(&refresh_meta.jti)
+                .bind(access_meta.expires_at)
+                .bind(refresh_meta.expires_at)
+                .execute(&state.db)
+                .await;
+                if let Err(e) = session_result {
+                    error!("Error creating session: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+                return (
+                    StatusCode::OK,
+                    Json(CreateAccountOutput {
+                        handle: full_handle.clone(),
+                        did,
+                        access_jwt: Some(access_meta.token),
+                        refresh_jwt: Some(refresh_meta.token),
+                        verification_required: false,
+                        verification_channel: "email".to_string(),
+                    }),
+                )
+                    .into_response();
+            } else {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "AccountAlreadyExists", "message": "An active account with this DID already exists"})),
+                )
+                    .into_response();
+            }
         }
-        Err(e) => {
-            error!("Error checking handle: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-        Ok(None) => {}
+    }
+    let exists_result: Option<(i32,)> = sqlx::query_as(
+        "SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL",
+    )
+    .bind(short_handle)
+    .fetch_optional(&mut *tx)
+    .await
+    .unwrap_or(None);
+    if exists_result.is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "HandleTaken", "message": "Handle already taken"})),
+        )
+            .into_response();
     }
     let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
         .map(|v| v == "true" || v == "1")

@@ -110,6 +110,7 @@ pub struct ListBlobsParams {
 
 #[derive(Serialize)]
 pub struct ListBlobsOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     pub cids: Vec<String>,
 }

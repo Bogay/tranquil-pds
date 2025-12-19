@@ -84,6 +84,12 @@
         {/if}
       </div>
     </header>
+    {#if auth.session.status === 'deactivated' || auth.session.active === false}
+      <div class="deactivated-banner">
+        <strong>Account Deactivated</strong>
+        <p>Your account is currently deactivated. This typically happens during account migration. Some features may be limited until your account is reactivated.</p>
+      </div>
+    {/if}
     <section class="account-overview">
       <h2>Account Overview</h2>
       <dl>
@@ -92,6 +98,9 @@
           @{auth.session.handle}
           {#if auth.session.isAdmin}
             <span class="badge admin">Admin</span>
+          {/if}
+          {#if auth.session.status === 'deactivated' || auth.session.active === false}
+            <span class="badge deactivated">Deactivated</span>
           {/if}
         </dd>
         <dt>DID</dt>
@@ -301,6 +310,11 @@
     background: var(--accent);
     color: white;
   }
+  .badge.deactivated {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+    border: 1px solid #d4a03c;
+  }
   .nav-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -340,5 +354,21 @@
     text-align: center;
     padding: 4rem;
     color: var(--text-secondary);
+  }
+  .deactivated-banner {
+    background: var(--warning-bg);
+    border: 1px solid #d4a03c;
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .deactivated-banner strong {
+    color: var(--warning-text);
+    font-size: 1rem;
+  }
+  .deactivated-banner p {
+    margin: 0.5rem 0 0 0;
+    color: var(--warning-text);
+    font-size: 0.875rem;
   }
 </style>

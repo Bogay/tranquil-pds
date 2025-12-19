@@ -48,6 +48,8 @@ export interface Session {
   preferredChannel?: string
   preferredChannelVerified?: boolean
   isAdmin?: boolean
+  active?: boolean
+  status?: 'active' | 'deactivated'
   accessJwt: string
   refreshJwt: string
 }
