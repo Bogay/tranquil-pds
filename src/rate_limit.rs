@@ -122,14 +122,16 @@ impl RateLimiters {
 pub fn extract_client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
-            && let Some(first_ip) = value.split(',').next() {
-                return first_ip.trim().to_string();
-            }
+        && let Some(first_ip) = value.split(',').next()
+    {
+        return first_ip.trim().to_string();
+    }
 
     if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str() {
-            return value.trim().to_string();
-        }
+        && let Ok(value) = real_ip.to_str()
+    {
+        return value.trim().to_string();
+    }
 
     addr.map(|a| a.ip().to_string())
         .unwrap_or_else(|| "unknown".to_string())

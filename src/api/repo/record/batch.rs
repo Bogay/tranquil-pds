@@ -101,7 +101,9 @@ pub async fn apply_writes(
                 .into_response();
         }
     };
-    let did = auth_user.did;
+    let did = auth_user.did.clone();
+    let is_oauth = auth_user.is_oauth;
+    let scope = auth_user.scope;
     if input.repo != did {
         return (
             StatusCode::FORBIDDEN,
@@ -144,6 +146,75 @@ pub async fn apply_writes(
         )
             .into_response();
     }
+
+    if is_oauth {
+        use std::collections::HashSet;
+        let create_collections: HashSet<&str> = input
+            .writes
+            .iter()
+            .filter_map(|w| {
+                if let WriteOp::Create { collection, .. } = w {
+                    Some(collection.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let update_collections: HashSet<&str> = input
+            .writes
+            .iter()
+            .filter_map(|w| {
+                if let WriteOp::Update { collection, .. } = w {
+                    Some(collection.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let delete_collections: HashSet<&str> = input
+            .writes
+            .iter()
+            .filter_map(|w| {
+                if let WriteOp::Delete { collection, .. } = w {
+                    Some(collection.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for collection in create_collections {
+            if let Err(e) = crate::auth::scope_check::check_repo_scope(
+                is_oauth,
+                scope.as_deref(),
+                crate::oauth::RepoAction::Create,
+                collection,
+            ) {
+                return e;
+            }
+        }
+        for collection in update_collections {
+            if let Err(e) = crate::auth::scope_check::check_repo_scope(
+                is_oauth,
+                scope.as_deref(),
+                crate::oauth::RepoAction::Update,
+                collection,
+            ) {
+                return e;
+            }
+        }
+        for collection in delete_collections {
+            if let Err(e) = crate::auth::scope_check::check_repo_scope(
+                is_oauth,
+                scope.as_deref(),
+                crate::oauth::RepoAction::Delete,
+                collection,
+            ) {
+                return e;
+            }
+        }
+    }
+
     let user_id: uuid::Uuid = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -184,13 +255,14 @@ pub async fn apply_writes(
         }
     };
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
-            )
-                .into_response();
-        }
+        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+    {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
+        )
+            .into_response();
+    }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
@@ -225,9 +297,10 @@ pub async fn apply_writes(
                 value,
             } => {
                 if input.validate.unwrap_or(true)
-                    && let Err(err_response) = validate_record(value, collection) {
-                        return *err_response;
-                    }
+                    && let Err(err_response) = validate_record(value, collection)
+                {
+                    return *err_response;
+                }
                 let rkey = rkey
                     .clone()
                     .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
@@ -276,9 +349,10 @@ pub async fn apply_writes(
                 value,
             } => {
                 if input.validate.unwrap_or(true)
-                    && let Err(err_response) = validate_record(value, collection) {
-                        return *err_response;
-                    }
+                    && let Err(err_response) = validate_record(value, collection)
+                {
+                    return *err_response;
+                }
                 let mut record_bytes = Vec::new();
                 if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();
@@ -353,7 +427,11 @@ pub async fn apply_writes(
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
     for key in &modified_keys {
-        if mst.blocks_for_path(key, &mut relevant_blocks).await.is_err() {
+        if mst
+            .blocks_for_path(key, &mut relevant_blocks)
+            .await
+            .is_err()
+        {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
         }
         if original_mst

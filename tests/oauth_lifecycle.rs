@@ -5,7 +5,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
 use common::{base_url, client};
 use helpers::verify_new_account;
-use reqwest::{StatusCode, redirect};
+use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use wiremock::matchers::{method, path};
@@ -19,13 +19,6 @@ fn generate_pkce() -> (String, String) {
     let hash = hasher.finalize();
     let code_challenge = URL_SAFE_NO_PAD.encode(&hash);
     (code_verifier, code_challenge)
-}
-
-fn no_redirect_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .redirect(redirect::Policy::none())
-        .build()
-        .unwrap()
 }
 
 async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
@@ -102,24 +95,46 @@ async fn create_user_and_oauth_session(
     );
     let par_body: Value = par_res.json().await.unwrap();
     let request_uri = par_body["request_uri"].as_str().unwrap();
-    let auth_client = no_redirect_client();
-    let auth_res = auth_client
+    let auth_res = http_client
         .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri),
-            ("username", &handle),
-            ("password", &password),
-            ("remember_device", "false"),
-        ])
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "username": &handle,
+            "password": &password,
+            "remember_device": false
+        }))
         .send()
         .await
         .expect("Authorize failed");
-    let location = auth_res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    assert_eq!(
+        auth_res.status(),
+        StatusCode::OK,
+        "Authorize should return OK"
+    );
+    let auth_body: Value = auth_res.json().await.unwrap();
+    let mut location = auth_body["redirect_uri"]
+        .as_str()
+        .expect("Expected redirect_uri")
+        .to_string();
+    if location.contains("/oauth/consent") {
+        let consent_res = http_client
+            .post(format!("{}/oauth/authorize/consent", url))
+            .header("Content-Type", "application/json")
+            .json(&json!({"request_uri": request_uri, "approved_scopes": ["atproto"], "remember": false}))
+            .send().await.expect("Consent request failed");
+        assert_eq!(
+            consent_res.status(),
+            StatusCode::OK,
+            "Consent should succeed"
+        );
+        let consent_body: Value = consent_res.json().await.unwrap();
+        location = consent_body["redirect_uri"]
+            .as_str()
+            .expect("Expected redirect_uri from consent")
+            .to_string();
+    }
     let code = location
         .split("code=")
         .nth(1)
@@ -596,24 +611,31 @@ async fn test_oauth_multiple_clients_same_user() {
         .unwrap();
     let par_body1: Value = par_res1.json().await.unwrap();
     let request_uri1 = par_body1["request_uri"].as_str().unwrap();
-    let auth_client = no_redirect_client();
-    let auth_res1 = auth_client
+    let auth_res1 = http_client
         .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri1),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&json!({
+            "request_uri": request_uri1,
+            "username": &handle,
+            "password": password,
+            "remember_device": false
+        }))
         .send()
         .await
         .unwrap();
-    let location1 = auth_res1
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    assert_eq!(auth_res1.status(), StatusCode::OK);
+    let auth_body1: Value = auth_res1.json().await.unwrap();
+    let mut location1 = auth_body1["redirect_uri"].as_str().unwrap().to_string();
+    if location1.contains("/oauth/consent") {
+        let consent_res = http_client
+            .post(format!("{}/oauth/authorize/consent", url))
+            .header("Content-Type", "application/json")
+            .json(&json!({"request_uri": request_uri1, "approved_scopes": ["atproto"], "remember": false}))
+            .send().await.unwrap();
+        let consent_body: Value = consent_res.json().await.unwrap();
+        location1 = consent_body["redirect_uri"].as_str().unwrap().to_string();
+    }
     let code1 = location1
         .split("code=")
         .nth(1)
@@ -650,23 +672,31 @@ async fn test_oauth_multiple_clients_same_user() {
         .unwrap();
     let par_body2: Value = par_res2.json().await.unwrap();
     let request_uri2 = par_body2["request_uri"].as_str().unwrap();
-    let auth_res2 = auth_client
+    let auth_res2 = http_client
         .post(format!("{}/oauth/authorize", url))
-        .form(&[
-            ("request_uri", request_uri2),
-            ("username", &handle),
-            ("password", password),
-            ("remember_device", "false"),
-        ])
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&json!({
+            "request_uri": request_uri2,
+            "username": &handle,
+            "password": password,
+            "remember_device": false
+        }))
         .send()
         .await
         .unwrap();
-    let location2 = auth_res2
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    assert_eq!(auth_res2.status(), StatusCode::OK);
+    let auth_body2: Value = auth_res2.json().await.unwrap();
+    let mut location2 = auth_body2["redirect_uri"].as_str().unwrap().to_string();
+    if location2.contains("/oauth/consent") {
+        let consent_res = http_client
+            .post(format!("{}/oauth/authorize/consent", url))
+            .header("Content-Type", "application/json")
+            .json(&json!({"request_uri": request_uri2, "approved_scopes": ["atproto"], "remember": false}))
+            .send().await.unwrap();
+        let consent_body: Value = consent_res.json().await.unwrap();
+        location2 = consent_body["redirect_uri"].as_str().unwrap().to_string();
+    }
     let code2 = location2
         .split("code=")
         .nth(1)

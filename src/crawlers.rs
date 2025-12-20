@@ -79,10 +79,11 @@ impl Crawlers {
         }
 
         if let Some(cb) = &self.circuit_breaker
-            && !cb.can_execute().await {
-                debug!("Skipping crawler notification due to circuit breaker open");
-                return;
-            }
+            && !cb.can_execute().await
+        {
+            debug!("Skipping crawler notification due to circuit breaker open");
+            return;
+        }
 
         self.mark_notified();
         let circuit_breaker = self.circuit_breaker.clone();

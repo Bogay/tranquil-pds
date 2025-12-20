@@ -278,11 +278,13 @@ impl Default for ServiceTokenVerifier {
 
 fn parse_did_key_multibase(multibase: &str) -> Result<VerifyingKey> {
     if !multibase.starts_with('z') {
-        return Err(anyhow!("Expected base58btc multibase encoding (starts with 'z')"));
+        return Err(anyhow!(
+            "Expected base58btc multibase encoding (starts with 'z')"
+        ));
     }
 
-    let (_, decoded) = multibase::decode(multibase)
-        .map_err(|e| anyhow!("Failed to decode multibase: {}", e))?;
+    let (_, decoded) =
+        multibase::decode(multibase).map_err(|e| anyhow!("Failed to decode multibase: {}", e))?;
 
     if decoded.len() < 2 {
         return Err(anyhow!("Invalid multicodec data"));
@@ -302,8 +304,7 @@ fn parse_did_key_multibase(multibase: &str) -> Result<VerifyingKey> {
         return Err(anyhow!("Only secp256k1 keys are supported"));
     }
 
-    VerifyingKey::from_sec1_bytes(key_bytes)
-        .map_err(|e| anyhow!("Invalid public key: {}", e))
+    VerifyingKey::from_sec1_bytes(key_bytes).map_err(|e| anyhow!("Invalid public key: {}", e))
 }
 
 pub fn is_service_token(token: &str) -> bool {

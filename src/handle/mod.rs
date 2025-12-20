@@ -1,5 +1,5 @@
-use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;
 use std::time::Duration;
 use thiserror::Error;

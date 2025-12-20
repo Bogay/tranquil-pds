@@ -133,7 +133,7 @@ pub async fn activate_account(
         "https://{}/xrpc/com.atproto.server.activateAccount",
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
-    let did = match crate::auth::validate_token_with_dpop(
+    let auth_user = match crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
         extracted.is_dpop,
@@ -144,9 +144,20 @@ pub async fn activate_account(
     )
     .await
     {
-        Ok(user) => user.did,
+        Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
+
+    if let Err(e) = crate::auth::scope_check::check_account_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::AccountAttr::Repo,
+        crate::oauth::scopes::AccountAction::Manage,
+    ) {
+        return e;
+    }
+
+    let did = auth_user.did;
     let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -170,6 +181,14 @@ pub async fn activate_account(
                     .await
             {
                 warn!("Failed to sequence identity event for activation: {}", e);
+            }
+            if let Err(e) =
+                crate::api::repo::record::sequence_empty_commit_event(&state, &did).await
+            {
+                warn!(
+                    "Failed to sequence empty commit event for activation: {}",
+                    e
+                );
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }
@@ -206,7 +225,7 @@ pub async fn deactivate_account(
         "https://{}/xrpc/com.atproto.server.deactivateAccount",
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
-    let did = match crate::auth::validate_token_with_dpop(
+    let auth_user = match crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
         extracted.is_dpop,
@@ -217,9 +236,20 @@ pub async fn deactivate_account(
     )
     .await
     {
-        Ok(user) => user.did,
+        Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
+
+    if let Err(e) = crate::auth::scope_check::check_account_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::AccountAttr::Repo,
+        crate::oauth::scopes::AccountAction::Manage,
+    ) {
+        return e;
+    }
+
+    let did = auth_user.did;
     let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -236,8 +266,13 @@ pub async fn deactivate_account(
             if let Some(ref h) = handle {
                 let _ = state.cache.delete(&format!("handle:{}", h)).await;
             }
-            if let Err(e) =
-                crate::api::repo::record::sequence_account_event(&state, &did, false, Some("deactivated")).await
+            if let Err(e) = crate::api::repo::record::sequence_account_event(
+                &state,
+                &did,
+                false,
+                Some("deactivated"),
+            )
+            .await
             {
                 warn!("Failed to sequence account deactivation event: {}", e);
             }
@@ -315,13 +350,9 @@ pub async fn request_account_delete(
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::comms::enqueue_account_deletion(
-        &state.db,
-        user_id,
-        &confirmation_token,
-        &hostname,
-    )
-    .await
+    if let Err(e) =
+        crate::comms::enqueue_account_deletion(&state.db, user_id, &confirmation_token, &hostname)
+            .await
     {
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }
@@ -501,6 +532,19 @@ pub async fn delete_account(
                     Json(json!({"error": "InternalError"})),
                 )
                     .into_response();
+            }
+            if let Err(e) = crate::api::repo::record::sequence_account_event(
+                &state,
+                did,
+                false,
+                Some("deleted"),
+            )
+            .await
+            {
+                warn!(
+                    "Failed to sequence account deletion event for {}: {}",
+                    did, e
+                );
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             info!("Account {} deleted successfully", did);

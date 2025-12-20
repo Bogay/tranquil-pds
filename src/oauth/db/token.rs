@@ -268,3 +268,18 @@ pub async fn enforce_token_limit_for_user(pool: &PgPool, did: &str) -> Result<()
     }
     Ok(())
 }
+
+pub async fn revoke_tokens_for_client(
+    pool: &PgPool,
+    did: &str,
+    client_id: &str,
+) -> Result<u64, OAuthError> {
+    let result = sqlx::query!(
+        "DELETE FROM oauth_token WHERE did = $1 AND client_id = $2",
+        did,
+        client_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}

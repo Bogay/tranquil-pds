@@ -24,7 +24,10 @@ pub fn init_metrics() -> PrometheusHandle {
 }
 
 fn describe_metrics() {
-    metrics::describe_counter!("tranquil_pds_http_requests_total", "Total number of HTTP requests");
+    metrics::describe_counter!(
+        "tranquil_pds_http_requests_total",
+        "Total number of HTTP requests"
+    );
     metrics::describe_histogram!(
         "tranquil_pds_http_request_duration_seconds",
         "HTTP request duration in seconds"
@@ -61,7 +64,10 @@ fn describe_metrics() {
         "tranquil_pds_rate_limit_rejections_total",
         "Total number of rate limit rejections"
     );
-    metrics::describe_counter!("tranquil_pds_db_queries_total", "Total number of database queries");
+    metrics::describe_counter!(
+        "tranquil_pds_db_queries_total",
+        "Total number of database queries"
+    );
     metrics::describe_histogram!(
         "tranquil_pds_db_query_duration_seconds",
         "Database query duration in seconds"
@@ -116,12 +122,13 @@ pub async fn metrics_middleware(request: Request<Body>, next: Next) -> Response 
 
 fn normalize_path(path: &str) -> String {
     if path.starts_with("/xrpc/")
-        && let Some(method) = path.strip_prefix("/xrpc/") {
-            if let Some(q) = method.find('?') {
-                return format!("/xrpc/{}", &method[..q]);
-            }
-            return path.to_string();
+        && let Some(method) = path.strip_prefix("/xrpc/")
+    {
+        if let Some(q) = method.find('?') {
+            return format!("/xrpc/{}", &method[..q]);
         }
+        return path.to_string();
+    }
 
     if path.starts_with("/u/") && path.ends_with("/did.json") {
         return "/u/{handle}/did.json".to_string();
@@ -135,11 +142,13 @@ fn normalize_path(path: &str) -> String {
 }
 
 pub fn record_auth_cache_hit(cache_type: &str) {
-    counter!("tranquil_pds_auth_cache_hits_total", "cache_type" => cache_type.to_string()).increment(1);
+    counter!("tranquil_pds_auth_cache_hits_total", "cache_type" => cache_type.to_string())
+        .increment(1);
 }
 
 pub fn record_auth_cache_miss(cache_type: &str) {
-    counter!("tranquil_pds_auth_cache_misses_total", "cache_type" => cache_type.to_string()).increment(1);
+    counter!("tranquil_pds_auth_cache_misses_total", "cache_type" => cache_type.to_string())
+        .increment(1);
 }
 
 pub fn set_firehose_subscribers(count: usize) {
@@ -172,7 +181,8 @@ pub fn set_comms_queue_size(size: usize) {
 }
 
 pub fn record_rate_limit_rejection(limiter: &str) {
-    counter!("tranquil_pds_rate_limit_rejections_total", "limiter" => limiter.to_string()).increment(1);
+    counter!("tranquil_pds_rate_limit_rejections_total", "limiter" => limiter.to_string())
+        .increment(1);
 }
 
 pub fn record_db_query(query_type: &str, duration_seconds: f64) {

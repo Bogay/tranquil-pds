@@ -111,12 +111,13 @@ impl RecordValidator {
             }
         }
         if let Some(langs) = obj.get("langs").and_then(|v| v.as_array())
-            && langs.len() > 3 {
-                return Err(ValidationError::InvalidField {
-                    path: "langs".to_string(),
-                    message: "Maximum 3 languages allowed".to_string(),
-                });
-            }
+            && langs.len() > 3
+        {
+            return Err(ValidationError::InvalidField {
+                path: "langs".to_string(),
+                message: "Maximum 3 languages allowed".to_string(),
+            });
+        }
         if let Some(tags) = obj.get("tags").and_then(|v| v.as_array()) {
             if tags.len() > 8 {
                 return Err(ValidationError::InvalidField {
@@ -126,12 +127,13 @@ impl RecordValidator {
             }
             for (i, tag) in tags.iter().enumerate() {
                 if let Some(tag_str) = tag.as_str()
-                    && tag_str.len() > 640 {
-                        return Err(ValidationError::InvalidField {
-                            path: format!("tags/{}", i),
-                            message: "Tag exceeds maximum length of 640 bytes".to_string(),
-                        });
-                    }
+                    && tag_str.len() > 640
+                {
+                    return Err(ValidationError::InvalidField {
+                        path: format!("tags/{}", i),
+                        message: "Tag exceeds maximum length of 640 bytes".to_string(),
+                    });
+                }
             }
         }
         Ok(())
@@ -198,12 +200,13 @@ impl RecordValidator {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
         if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
-            && !subject.starts_with("did:") {
-                return Err(ValidationError::InvalidField {
-                    path: "subject".to_string(),
-                    message: "Subject must be a DID".to_string(),
-                });
-            }
+            && !subject.starts_with("did:")
+        {
+            return Err(ValidationError::InvalidField {
+                path: "subject".to_string(),
+                message: "Subject must be a DID".to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -215,12 +218,13 @@ impl RecordValidator {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
         if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
-            && !subject.starts_with("did:") {
-                return Err(ValidationError::InvalidField {
-                    path: "subject".to_string(),
-                    message: "Subject must be a DID".to_string(),
-                });
-            }
+            && !subject.starts_with("did:")
+        {
+            return Err(ValidationError::InvalidField {
+                path: "subject".to_string(),
+                message: "Subject must be a DID".to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -235,12 +239,13 @@ impl RecordValidator {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
         if let Some(name) = obj.get("name").and_then(|v| v.as_str())
-            && (name.is_empty() || name.len() > 64) {
-                return Err(ValidationError::InvalidField {
-                    path: "name".to_string(),
-                    message: "Name must be 1-64 characters".to_string(),
-                });
-            }
+            && (name.is_empty() || name.len() > 64)
+        {
+            return Err(ValidationError::InvalidField {
+                path: "name".to_string(),
+                message: "Name must be 1-64 characters".to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -274,12 +279,13 @@ impl RecordValidator {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
         if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str())
-            && (display_name.is_empty() || display_name.len() > 240) {
-                return Err(ValidationError::InvalidField {
-                    path: "displayName".to_string(),
-                    message: "displayName must be 1-240 characters".to_string(),
-                });
-            }
+            && (display_name.is_empty() || display_name.len() > 240)
+        {
+            return Err(ValidationError::InvalidField {
+                path: "displayName".to_string(),
+                message: "displayName must be 1-240 characters".to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -328,12 +334,13 @@ impl RecordValidator {
             return Err(ValidationError::MissingField(format!("{}/cid", path)));
         }
         if let Some(uri) = obj.get("uri").and_then(|v| v.as_str())
-            && !uri.starts_with("at://") {
-                return Err(ValidationError::InvalidField {
-                    path: format!("{}/uri", path),
-                    message: "URI must be an at:// URI".to_string(),
-                });
-            }
+            && !uri.starts_with("at://")
+        {
+            return Err(ValidationError::InvalidField {
+                path: format!("{}/uri", path),
+                message: "URI must be an at:// URI".to_string(),
+            });
+        }
         Ok(())
     }
 }

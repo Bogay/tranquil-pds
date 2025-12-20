@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO oauth_scope_preference (did, client_id, scope, granted, created_at, updated_at)\n            VALUES ($1, $2, $3, $4, NOW(), NOW())\n            ON CONFLICT (did, client_id, scope) DO UPDATE SET granted = $4, updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0dfe6b602497942ce871d9b54f4d34ae9e846f3bb9f8693ecd6d90463e83d114"
+}

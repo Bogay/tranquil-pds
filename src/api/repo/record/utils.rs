@@ -151,27 +151,36 @@ pub async fn commit_and_log(
     match lock_result {
         Err(e) => {
             if let Some(db_err) = e.as_database_error()
-                && db_err.code().as_deref() == Some("55P03") {
-                    return Err(
-                        "ConcurrentModification: Another request is modifying this repo"
-                            .to_string(),
-                    );
-                }
+                && db_err.code().as_deref() == Some("55P03")
+            {
+                return Err(
+                    "ConcurrentModification: Another request is modifying this repo".to_string(),
+                );
+            }
             return Err(format!("Failed to acquire repo lock: {}", e));
         }
         Ok(Some(row)) => {
             if let Some(expected_root) = &current_root_cid
-                && row.repo_root_cid != expected_root.to_string() {
-                    return Err(
-                        "ConcurrentModification: Repo has been modified since last read"
-                            .to_string(),
-                    );
-                }
+                && row.repo_root_cid != expected_root.to_string()
+            {
+                return Err(
+                    "ConcurrentModification: Repo has been modified since last read".to_string(),
+                );
+            }
         }
         Ok(None) => {
             return Err("Repo not found".to_string());
         }
     }
+    let is_account_active = sqlx::query_scalar!(
+        "SELECT deactivated_at IS NULL FROM users WHERE id = $1",
+        user_id
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("Failed to check account status: {}", e))?
+    .flatten()
+    .unwrap_or(false);
     sqlx::query!(
         "UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2",
         new_root_cid.to_string(),
@@ -289,35 +298,39 @@ pub async fn commit_and_log(
             }
         })
         .collect::<Vec<_>>();
-    let event_type = "commit";
-    let prev_cid_str = current_root_cid.map(|c| c.to_string());
-    let prev_data_cid_str = prev_data_cid.map(|c| c.to_string());
-    let seq_row = sqlx::query!(
-        r#"
-        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, prev_data_cid)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING seq
-        "#,
-        did,
-        event_type,
-        new_root_cid.to_string(),
-        prev_cid_str,
-        json!(ops_json),
-        &[] as &[String],
-        blocks_cids,
-        prev_data_cid_str,
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| format!("DB Error (repo_seq): {}", e))?;
-    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&mut *tx)
+    if is_account_active {
+        let event_type = "commit";
+        let prev_cid_str = current_root_cid.map(|c| c.to_string());
+        let prev_data_cid_str = prev_data_cid.map(|c| c.to_string());
+        let seq_row = sqlx::query!(
+            r#"
+            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, prev_data_cid)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING seq
+            "#,
+            did,
+            event_type,
+            new_root_cid.to_string(),
+            prev_cid_str,
+            json!(ops_json),
+            &[] as &[String],
+            blocks_cids,
+            prev_data_cid_str,
+        )
+        .fetch_one(&mut *tx)
         .await
-        .map_err(|e| format!("DB Error (notify): {}", e))?;
+        .map_err(|e| format!("DB Error (repo_seq): {}", e))?;
+        sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("DB Error (notify): {}", e))?;
+    }
     tx.commit()
         .await
         .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-    let _ = sequence_sync_event(state, did, &new_root_cid.to_string()).await;
+    if is_account_active {
+        let _ = sequence_sync_event(state, did, &new_root_cid.to_string()).await;
+    }
     Ok(CommitResult {
         commit_cid: new_root_cid,
         rev: rev_str,
@@ -476,6 +489,40 @@ pub async fn sequence_sync_event(
     .fetch_one(&state.db)
     .await
     .map_err(|e| format!("DB Error (repo_seq sync): {}", e))?;
+    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
+        .execute(&state.db)
+        .await
+        .map_err(|e| format!("DB Error (notify): {}", e))?;
+    Ok(seq_row.seq)
+}
+
+pub async fn sequence_empty_commit_event(state: &AppState, did: &str) -> Result<i64, String> {
+    let repo_root = sqlx::query_scalar!(
+        "SELECT r.repo_root_cid FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
+        did
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| format!("DB Error fetching repo root: {}", e))?
+    .ok_or_else(|| "Repo not found".to_string())?;
+    let ops = serde_json::json!([]);
+    let blobs: Vec<String> = vec![];
+    let blocks_cids: Vec<String> = vec![];
+    let seq_row = sqlx::query!(
+        r#"
+        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids)
+        VALUES ($1, 'commit', $2, $2, $3, $4, $5)
+        RETURNING seq
+        "#,
+        did,
+        repo_root,
+        ops,
+        &blobs,
+        &blocks_cids
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| format!("DB Error (repo_seq empty commit): {}", e))?;
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
         .execute(&state.db)
         .await

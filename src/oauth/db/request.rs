@@ -67,6 +67,27 @@ pub async fn get_authorization_request(
     }
 }
 
+pub async fn set_authorization_did(
+    pool: &PgPool,
+    request_id: &str,
+    did: &str,
+    device_id: Option<&str>,
+) -> Result<(), OAuthError> {
+    sqlx::query!(
+        r#"
+        UPDATE oauth_authorization_request
+        SET did = $2, device_id = $3
+        WHERE id = $1
+        "#,
+        request_id,
+        did,
+        device_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn update_authorization_request(
     pool: &PgPool,
     request_id: &str,
@@ -150,4 +171,44 @@ pub async fn delete_expired_authorization_requests(pool: &PgPool) -> Result<u64,
     .execute(pool)
     .await?;
     Ok(result.rows_affected())
+}
+
+pub async fn mark_request_authenticated(
+    pool: &PgPool,
+    request_id: &str,
+    did: &str,
+    device_id: Option<&str>,
+) -> Result<(), OAuthError> {
+    sqlx::query!(
+        r#"
+        UPDATE oauth_authorization_request
+        SET did = $2, device_id = $3
+        WHERE id = $1
+        "#,
+        request_id,
+        did,
+        device_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn update_request_scope(
+    pool: &PgPool,
+    request_id: &str,
+    scope: &str,
+) -> Result<(), OAuthError> {
+    sqlx::query!(
+        r#"
+        UPDATE oauth_authorization_request
+        SET parameters = jsonb_set(parameters, '{scope}', to_jsonb($2::text))
+        WHERE id = $1
+        "#,
+        request_id,
+        scope
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }

@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use cid::Cid;
 use std::collections::HashMap;
-use std::str::FromStr;
 mod common;
 
 #[tokio::test]
@@ -108,6 +107,7 @@ fn parse_car(
     cursor.read_exact(&mut header_bytes)?;
     #[derive(serde::Deserialize)]
     struct CarHeader {
+        #[allow(dead_code)]
         version: u64,
         roots: Vec<cid::Cid>,
     }
@@ -135,7 +135,7 @@ fn parse_car(
 fn parse_cid(bytes: &[u8]) -> Result<(Cid, usize), Box<dyn std::error::Error>> {
     if bytes[0] == 0x01 {
         let codec = bytes[1];
-        let hash_type = bytes[2];
+        let _hash_type = bytes[2];
         let hash_len = bytes[3] as usize;
         let cid_len = 4 + hash_len;
         let cid = Cid::new_v1(

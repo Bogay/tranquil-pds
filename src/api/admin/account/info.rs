@@ -93,9 +93,8 @@ fn parse_repeated_param(query: Option<&str>, key: &str) -> Vec<String> {
         .map(|q| {
             q.split('&')
                 .filter_map(|pair| {
-                    let mut parts = pair.splitn(2, '=');
-                    let k = parts.next()?;
-                    let v = parts.next()?;
+                    let (k, v) = pair.split_once('=')?;
+
                     if k == key {
                         Some(urlencoding::decode(v).ok()?.into_owned())
                     } else {

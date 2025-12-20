@@ -34,19 +34,34 @@ pub async fn delete_record(
     axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<DeleteRecordInput>,
 ) -> Response {
-    let (did, user_id, current_root_cid) =
+    let auth =
         match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
             Ok(res) => res,
             Err(err_res) => return err_res,
         };
+
+    if let Err(e) = crate::auth::scope_check::check_repo_scope(
+        auth.is_oauth,
+        auth.scope.as_deref(),
+        crate::oauth::RepoAction::Delete,
+        &input.collection,
+    ) {
+        return e;
+    }
+
+    let did = auth.did;
+    let user_id = auth.user_id;
+    let current_root_cid = auth.current_root_cid;
+
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
-            )
-                .into_response();
-        }
+        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+    {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
+        )
+            .into_response();
+    }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
@@ -115,10 +130,18 @@ pub async fn delete_record(
         prev: prev_record_cid,
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
-    if new_mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
+    if new_mst
+        .blocks_for_path(&key, &mut relevant_blocks)
+        .await
+        .is_err()
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
     }
-    if mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
+    if mst
+        .blocks_for_path(&key, &mut relevant_blocks)
+        .await
+        .is_err()
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get old MST blocks for path"}))).into_response();
     }
     let mut written_cids = tracking_store.get_all_relevant_cids();

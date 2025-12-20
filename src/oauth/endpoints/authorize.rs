@@ -1,16 +1,16 @@
 use crate::comms::{CommsChannel, channel_display_name, enqueue_2fa_code};
 use crate::oauth::{
-    Code, DeviceAccount, DeviceData, DeviceId, OAuthError, SessionId, client::ClientMetadataCache, db, templates,
+    Code, DeviceData, DeviceId, OAuthError, SessionId, client::ClientMetadataCache, db,
 };
 use crate::state::{AppState, RateLimitKind};
 use axum::{
-    Form, Json,
+    Json,
     extract::{Query, State},
     http::{
         HeaderMap, StatusCode,
         header::{LOCATION, SET_COOKIE},
     },
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,14 @@ const DEVICE_COOKIE_NAME: &str = "oauth_device_id";
 
 fn redirect_see_other(uri: &str) -> Response {
     (StatusCode::SEE_OTHER, [(LOCATION, uri.to_string())]).into_response()
+}
+
+fn redirect_to_frontend_error(error: &str, description: &str) -> Response {
+    redirect_see_other(&format!(
+        "/#/oauth/error?error={}&error_description={}",
+        url_encode(error),
+        url_encode(description)
+    ))
 }
 
 fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
@@ -41,13 +49,15 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
-            && let Some(first_ip) = value.split(',').next() {
-                return first_ip.trim().to_string();
-            }
+        && let Some(first_ip) = value.split(',').next()
+    {
+        return first_ip.trim().to_string();
+    }
     if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str() {
-            return value.trim().to_string();
-        }
+        && let Ok(value) = real_ip.to_str()
+    {
+        return value.trim().to_string();
+    }
     "0.0.0.0".to_string()
 }
 
@@ -115,21 +125,17 @@ pub async fn authorize_get(
         None => {
             if wants_json(&headers) {
                 return (
-                    axum::http::StatusCode::BAD_REQUEST,
+                    StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({
                         "error": "invalid_request",
                         "error_description": "Missing request_uri parameter. Use PAR to initiate authorization."
                     })),
                 ).into_response();
             }
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Html(templates::error_page(
-                    "invalid_request",
-                    Some("Missing request_uri parameter. Use PAR to initiate authorization."),
-                )),
-            )
-                .into_response();
+            return redirect_to_frontend_error(
+                "invalid_request",
+                "Missing request_uri parameter. Use PAR to initiate authorization.",
+            );
         }
     };
     let request_data = match db::get_authorization_request(&state.db, &request_uri).await {
@@ -137,28 +143,22 @@ pub async fn authorize_get(
         Ok(None) => {
             if wants_json(&headers) {
                 return (
-                    axum::http::StatusCode::BAD_REQUEST,
+                    StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({
                         "error": "invalid_request",
                         "error_description": "Invalid or expired request_uri. Please start a new authorization request."
                     })),
                 ).into_response();
             }
-            return (
-                axum::http::StatusCode::BAD_REQUEST,
-                Html(templates::error_page(
-                    "invalid_request",
-                    Some(
-                        "Invalid or expired request_uri. Please start a new authorization request.",
-                    ),
-                )),
-            )
-                .into_response();
+            return redirect_to_frontend_error(
+                "invalid_request",
+                "Invalid or expired request_uri. Please start a new authorization request.",
+            );
         }
         Err(e) => {
             if wants_json(&headers) {
                 return (
-                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({
                         "error": "server_error",
                         "error_description": format!("Database error: {:?}", e)
@@ -166,35 +166,24 @@ pub async fn authorize_get(
                 )
                     .into_response();
             }
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Html(templates::error_page(
-                    "server_error",
-                    Some(&format!("Database error: {:?}", e)),
-                )),
-            )
-                .into_response();
+            return redirect_to_frontend_error("server_error", "A database error occurred.");
         }
     };
     if request_data.expires_at < Utc::now() {
         let _ = db::delete_authorization_request(&state.db, &request_uri).await;
         if wants_json(&headers) {
             return (
-                axum::http::StatusCode::BAD_REQUEST,
+                StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
                     "error": "invalid_request",
                     "error_description": "Authorization request has expired. Please start a new request."
                 })),
             ).into_response();
         }
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            Html(templates::error_page(
-                "invalid_request",
-                Some("Authorization request has expired. Please start a new request."),
-            )),
-        )
-            .into_response();
+        return redirect_to_frontend_error(
+            "invalid_request",
+            "Authorization request has expired. Please start a new request.",
+        );
     }
     let client_cache = ClientMetadataCache::new(3600);
     let client_name = client_cache
@@ -216,34 +205,18 @@ pub async fn authorize_get(
     let force_new_account = query.new_account.unwrap_or(false);
     if !force_new_account
         && let Some(device_id) = extract_device_cookie(&headers)
-            && let Ok(accounts) = db::get_device_accounts(&state.db, &device_id).await
-                && !accounts.is_empty() {
-                    let device_accounts: Vec<DeviceAccount> = accounts
-                        .into_iter()
-                        .map(|row| DeviceAccount {
-                            did: row.did,
-                            handle: row.handle,
-                            email: row.email,
-                            last_used_at: row.last_used_at,
-                        })
-                        .collect();
-                    return Html(templates::account_selector_page(
-                        &request_data.parameters.client_id,
-                        client_name.as_deref(),
-                        &request_uri,
-                        &device_accounts,
-                    ))
-                    .into_response();
-                }
-    Html(templates::login_page(
-        &request_data.parameters.client_id,
-        client_name.as_deref(),
-        request_data.parameters.scope.as_deref(),
-        &request_uri,
-        None,
-        request_data.parameters.login_hint.as_deref(),
+        && let Ok(accounts) = db::get_device_accounts(&state.db, &device_id).await
+        && !accounts.is_empty()
+    {
+        return redirect_see_other(&format!(
+            "/#/oauth/accounts?request_uri={}",
+            url_encode(&request_uri)
+        ));
+    }
+    redirect_see_other(&format!(
+        "/#/oauth/login?request_uri={}",
+        url_encode(&request_uri)
     ))
-    .into_response()
 }
 
 pub async fn authorize_get_json(
@@ -272,10 +245,93 @@ pub async fn authorize_get_json(
     }))
 }
 
+#[derive(Debug, Serialize)]
+pub struct AccountInfo {
+    pub did: String,
+    pub handle: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AccountsResponse {
+    pub accounts: Vec<AccountInfo>,
+    pub request_uri: String,
+}
+
+fn mask_email(email: &str) -> String {
+    if let Some(at_pos) = email.find('@') {
+        let local = &email[..at_pos];
+        let domain = &email[at_pos..];
+        if local.len() <= 2 {
+            format!("{}***{}", local.chars().next().unwrap_or('*'), domain)
+        } else {
+            let first = local.chars().next().unwrap_or('*');
+            let last = local.chars().last().unwrap_or('*');
+            format!("{}***{}{}", first, last, domain)
+        }
+    } else {
+        "***".to_string()
+    }
+}
+
+pub async fn authorize_accounts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AuthorizeQuery>,
+) -> Response {
+    let request_uri = match query.request_uri {
+        Some(uri) => uri,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Missing request_uri parameter"
+                })),
+            )
+                .into_response();
+        }
+    };
+    let device_id = match extract_device_cookie(&headers) {
+        Some(id) => id,
+        None => {
+            return Json(AccountsResponse {
+                accounts: vec![],
+                request_uri,
+            })
+            .into_response();
+        }
+    };
+    let accounts = match db::get_device_accounts(&state.db, &device_id).await {
+        Ok(accts) => accts,
+        Err(_) => {
+            return Json(AccountsResponse {
+                accounts: vec![],
+                request_uri,
+            })
+            .into_response();
+        }
+    };
+    let account_infos: Vec<AccountInfo> = accounts
+        .into_iter()
+        .map(|row| AccountInfo {
+            did: row.did,
+            handle: row.handle,
+            email: row.email.map(|e| mask_email(&e)),
+        })
+        .collect();
+    Json(AccountsResponse {
+        accounts: account_infos,
+        request_uri,
+    })
+    .into_response()
+}
+
 pub async fn authorize_post(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Form(form): Form<AuthorizeSubmit>,
+    Json(form): Json<AuthorizeSubmit>,
 ) -> Response {
     let json_response = wants_json(&headers);
     let client_ip = extract_client_ip(&headers);
@@ -294,14 +350,10 @@ pub async fn authorize_post(
             )
                 .into_response();
         }
-        return (
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            Html(templates::error_page(
-                "RateLimitExceeded",
-                Some("Too many login attempts. Please try again later."),
-            )),
-        )
-            .into_response();
+        return redirect_to_frontend_error(
+            "RateLimitExceeded",
+            "Too many login attempts. Please try again later.",
+        );
     }
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
         Ok(Some(data)) => data,
@@ -316,11 +368,10 @@ pub async fn authorize_post(
                 )
                     .into_response();
             }
-            return Html(templates::error_page(
+            return redirect_to_frontend_error(
                 "invalid_request",
-                Some("Invalid or expired request_uri. Please start a new authorization request."),
-            ))
-            .into_response();
+                "Invalid or expired request_uri. Please start a new authorization request.",
+            );
         }
         Err(e) => {
             if json_response {
@@ -333,11 +384,7 @@ pub async fn authorize_post(
                 )
                     .into_response();
             }
-            return Html(templates::error_page(
-                "server_error",
-                Some(&format!("Database error: {:?}", e)),
-            ))
-            .into_response();
+            return redirect_to_frontend_error("server_error", &format!("Database error: {:?}", e));
         }
     };
     if request_data.expires_at < Utc::now() {
@@ -352,18 +399,11 @@ pub async fn authorize_post(
             )
                 .into_response();
         }
-        return Html(templates::error_page(
+        return redirect_to_frontend_error(
             "invalid_request",
-            Some("Authorization request has expired. Please start a new request."),
-        ))
-        .into_response();
+            "Authorization request has expired. Please start a new request.",
+        );
     }
-    let client_cache = ClientMetadataCache::new(3600);
-    let client_name = client_cache
-        .get(&request_data.parameters.client_id)
-        .await
-        .ok()
-        .and_then(|m| m.client_name);
     let show_login_error = |error_msg: &str, json: bool| -> Response {
         if json {
             return (
@@ -375,15 +415,11 @@ pub async fn authorize_post(
             )
                 .into_response();
         }
-        Html(templates::login_page(
-            &request_data.parameters.client_id,
-            client_name.as_deref(),
-            request_data.parameters.scope.as_deref(),
-            &form.request_uri,
-            Some(error_msg),
-            Some(&form.username),
+        redirect_see_other(&format!(
+            "/#/oauth/login?request_uri={}&error={}",
+            url_encode(&form.request_uri),
+            url_encode(error_msg)
         ))
-        .into_response()
     };
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let normalized_username = form.username.trim();
@@ -419,7 +455,10 @@ pub async fn authorize_post(
     {
         Ok(Some(u)) => u,
         Ok(None) => {
-            let _ = bcrypt::verify(&form.password, "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK");
+            let _ = bcrypt::verify(
+                &form.password,
+                "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK",
+            );
             return show_login_error("Invalid handle/email or password.", json_response);
         }
         Err(_) => return show_login_error("An error occurred. Please try again.", json_response),
@@ -435,7 +474,10 @@ pub async fn authorize_post(
         || user.telegram_verified
         || user.signal_verified;
     if !is_verified {
-        return show_login_error("Please verify your account before logging in.", json_response);
+        return show_login_error(
+            "Please verify your account before logging in.",
+            json_response,
+        );
     }
     let password_valid = match bcrypt::verify(&form.password, &user.password_hash) {
         Ok(valid) => valid,
@@ -460,19 +502,24 @@ pub async fn authorize_post(
                     );
                 }
                 let channel_name = channel_display_name(user.preferred_comms_channel);
-                let redirect_url = format!(
-                    "/oauth/authorize/2fa?request_uri={}&channel={}",
+                if json_response {
+                    return Json(serde_json::json!({
+                        "needs_2fa": true,
+                        "channel": channel_name
+                    }))
+                    .into_response();
+                }
+                return redirect_see_other(&format!(
+                    "/#/oauth/2fa?request_uri={}&channel={}",
                     url_encode(&form.request_uri),
                     url_encode(channel_name)
-                );
-                return Redirect::temporary(&redirect_url).into_response();
+                ));
             }
             Err(_) => {
                 return show_login_error("An error occurred. Please try again.", json_response);
             }
         }
     }
-    let code = Code::generate();
     let mut device_id: Option<String> = extract_device_cookie(&headers);
     let mut new_cookie: Option<String> = None;
     if form.remember_device {
@@ -497,6 +544,60 @@ pub async fn authorize_post(
         };
         let _ = db::upsert_account_device(&state.db, &user.did, &final_device_id).await;
     }
+    if db::set_authorization_did(
+        &state.db,
+        &form.request_uri,
+        &user.did,
+        device_id.as_deref(),
+    )
+    .await
+    .is_err()
+    {
+        return show_login_error("An error occurred. Please try again.", json_response);
+    }
+    let requested_scope_str = request_data
+        .parameters
+        .scope
+        .as_deref()
+        .unwrap_or("atproto");
+    let requested_scopes: Vec<String> = requested_scope_str
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let needs_consent = db::should_show_consent(
+        &state.db,
+        &user.did,
+        &request_data.parameters.client_id,
+        &requested_scopes,
+    )
+    .await
+    .unwrap_or(true);
+    if needs_consent {
+        let consent_url = format!(
+            "/#/oauth/consent?request_uri={}",
+            url_encode(&form.request_uri)
+        );
+        if json_response {
+            if let Some(cookie) = new_cookie {
+                return (
+                    StatusCode::OK,
+                    [(SET_COOKIE, cookie)],
+                    Json(serde_json::json!({"redirect_uri": consent_url})),
+                )
+                    .into_response();
+            }
+            return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
+        }
+        if let Some(cookie) = new_cookie {
+            return (
+                StatusCode::SEE_OTHER,
+                [(SET_COOKIE, cookie), (LOCATION, consent_url)],
+            )
+                .into_response();
+        }
+        return redirect_see_other(&consent_url);
+    }
+    let code = Code::generate();
     if db::update_authorization_request(
         &state.db,
         &form.request_uri,
@@ -513,8 +614,20 @@ pub async fn authorize_post(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
+        request_data.parameters.response_mode.as_deref(),
     );
-    if let Some(cookie) = new_cookie {
+    if json_response {
+        if let Some(cookie) = new_cookie {
+            (
+                StatusCode::OK,
+                [(SET_COOKIE, cookie)],
+                Json(serde_json::json!({"redirect_uri": redirect_url})),
+            )
+                .into_response()
+        } else {
+            Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
+        }
+    } else if let Some(cookie) = new_cookie {
         (
             StatusCode::SEE_OTHER,
             [(SET_COOKIE, cookie), (LOCATION, redirect_url)],
@@ -528,59 +641,69 @@ pub async fn authorize_post(
 pub async fn authorize_select(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Form(form): Form<AuthorizeSelectSubmit>,
+    Json(form): Json<AuthorizeSelectSubmit>,
 ) -> Response {
+    let json_error = |status: StatusCode, error: &str, description: &str| -> Response {
+        (
+            status,
+            Json(serde_json::json!({
+                "error": error,
+                "error_description": description
+            })),
+        )
+            .into_response()
+    };
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
         Ok(Some(data)) => data,
         Ok(None) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::BAD_REQUEST,
                 "invalid_request",
-                Some("Invalid or expired request_uri. Please start a new authorization request."),
-            ))
-            .into_response();
+                "Invalid or expired request_uri. Please start a new authorization request.",
+            );
         }
         Err(_) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
-                Some("An error occurred. Please try again."),
-            ))
-            .into_response();
+                "An error occurred. Please try again.",
+            );
         }
     };
     if request_data.expires_at < Utc::now() {
         let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
-        return Html(templates::error_page(
+        return json_error(
+            StatusCode::BAD_REQUEST,
             "invalid_request",
-            Some("Authorization request has expired. Please start a new request."),
-        ))
-        .into_response();
+            "Authorization request has expired. Please start a new request.",
+        );
     }
     let device_id = match extract_device_cookie(&headers) {
         Some(id) => id,
         None => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::BAD_REQUEST,
                 "invalid_request",
-                Some("No device session found. Please sign in."),
-            ))
-            .into_response();
+                "No device session found. Please sign in.",
+            );
         }
     };
     let account_valid = match db::verify_account_on_device(&state.db, &device_id, &form.did).await {
         Ok(valid) => valid,
         Err(_) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
-                Some("An error occurred. Please try again."),
-            ))
-            .into_response();
+                "An error occurred. Please try again.",
+            );
         }
     };
     if !account_valid {
-        return Html(templates::error_page(
+        return json_error(
+            StatusCode::FORBIDDEN,
             "access_denied",
-            Some("This account is not available on this device. Please sign in."),
-        ))
-        .into_response();
+            "This account is not available on this device. Please sign in.",
+        );
     }
     let user = match sqlx::query!(
         r#"
@@ -597,16 +720,18 @@ pub async fn authorize_select(
     {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::FORBIDDEN,
                 "access_denied",
-                Some("Account not found. Please sign in."),
-            )).into_response();
+                "Account not found. Please sign in.",
+            );
         }
         Err(_) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
-                Some("An error occurred. Please try again."),
-            )).into_response();
+                "An error occurred. Please try again.",
+            );
         }
     };
     let is_verified = user.email_verified
@@ -614,11 +739,11 @@ pub async fn authorize_select(
         || user.telegram_verified
         || user.signal_verified;
     if !is_verified {
-        return Html(templates::error_page(
+        return json_error(
+            StatusCode::FORBIDDEN,
             "access_denied",
-            Some("Please verify your account before logging in."),
-        ))
-        .into_response();
+            "Please verify your account before logging in.",
+        );
     }
     if user.two_factor_enabled {
         let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
@@ -636,19 +761,18 @@ pub async fn authorize_select(
                     );
                 }
                 let channel_name = channel_display_name(user.preferred_comms_channel);
-                let redirect_url = format!(
-                    "/oauth/authorize/2fa?request_uri={}&channel={}",
-                    url_encode(&form.request_uri),
-                    url_encode(channel_name)
-                );
-                return Redirect::temporary(&redirect_url).into_response();
+                return Json(serde_json::json!({
+                    "needs_2fa": true,
+                    "channel": channel_name
+                }))
+                .into_response();
             }
             Err(_) => {
-                return Html(templates::error_page(
+                return json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     "server_error",
-                    Some("An error occurred. Please try again."),
-                ))
-                .into_response();
+                    "An error occurred. Please try again.",
+                );
             }
         }
     }
@@ -664,23 +788,39 @@ pub async fn authorize_select(
     .await
     .is_err()
     {
-        return Html(templates::error_page(
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
             "server_error",
-            Some("An error occurred. Please try again."),
-        ))
-        .into_response();
+            "An error occurred. Please try again.",
+        );
     }
     let redirect_url = build_success_redirect(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
+        request_data.parameters.response_mode.as_deref(),
     );
-    redirect_see_other(&redirect_url)
+    Json(serde_json::json!({
+        "redirect_uri": redirect_url
+    }))
+    .into_response()
 }
 
-fn build_success_redirect(redirect_uri: &str, code: &str, state: Option<&str>) -> String {
+fn build_success_redirect(
+    redirect_uri: &str,
+    code: &str,
+    state: Option<&str>,
+    response_mode: Option<&str>,
+) -> String {
     let mut redirect_url = redirect_uri.to_string();
-    let separator = if redirect_url.contains('?') { '&' } else { '?' };
+    let use_fragment = response_mode == Some("fragment");
+    let separator = if use_fragment {
+        '#'
+    } else if redirect_url.contains('?') {
+        '&'
+    } else {
+        '?'
+    };
     redirect_url.push(separator);
     redirect_url.push_str(&format!("code={}", url_encode(code)));
     if let Some(req_state) = state {
@@ -702,12 +842,32 @@ pub struct AuthorizeDenyResponse {
 
 pub async fn authorize_deny(
     State(state): State<AppState>,
-    Form(form): Form<AuthorizeDenyForm>,
-) -> Result<Response, OAuthError> {
-    let request_data = db::get_authorization_request(&state.db, &form.request_uri)
-        .await?
-        .ok_or_else(|| OAuthError::InvalidRequest("Invalid request_uri".to_string()))?;
-    db::delete_authorization_request(&state.db, &form.request_uri).await?;
+    Json(form): Json<AuthorizeDenyForm>,
+) -> Response {
+    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+        Ok(Some(data)) => data,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid request_uri"
+                })),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred"
+                })),
+            )
+                .into_response();
+        }
+    };
+    let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
     let redirect_uri = &request_data.parameters.redirect_uri;
     let mut redirect_url = redirect_uri.to_string();
     let separator = if redirect_url.contains('?') { '&' } else { '?' };
@@ -717,7 +877,10 @@ pub async fn authorize_deny(
     if let Some(state) = &request_data.parameters.state {
         redirect_url.push_str(&format!("&state={}", url_encode(state)));
     }
-    Ok(redirect_see_other(&redirect_url))
+    Json(serde_json::json!({
+        "redirect_uri": redirect_url
+    }))
+    .into_response()
 }
 
 #[derive(Debug, Deserialize)]
@@ -746,106 +909,452 @@ pub async fn authorize_2fa_get(
     let challenge = match db::get_2fa_challenge(&state.db, &query.request_uri).await {
         Ok(Some(c)) => c,
         Ok(None) => {
-            return Html(templates::error_page(
+            return redirect_to_frontend_error(
                 "invalid_request",
-                Some("No 2FA challenge found. Please start over."),
-            ))
-            .into_response();
+                "No 2FA challenge found. Please start over.",
+            );
         }
         Err(_) => {
-            return Html(templates::error_page(
+            return redirect_to_frontend_error(
                 "server_error",
-                Some("An error occurred. Please try again."),
-            ))
-            .into_response();
+                "An error occurred. Please try again.",
+            );
         }
     };
     if challenge.expires_at < Utc::now() {
         let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
-        return Html(templates::error_page(
+        return redirect_to_frontend_error(
             "invalid_request",
-            Some("2FA code has expired. Please start over."),
-        ))
-        .into_response();
+            "2FA code has expired. Please start over.",
+        );
     }
     let _request_data = match db::get_authorization_request(&state.db, &query.request_uri).await {
         Ok(Some(d)) => d,
         Ok(None) => {
-            return Html(templates::error_page(
+            return redirect_to_frontend_error(
                 "invalid_request",
-                Some("Authorization request not found. Please start over."),
-            ))
-            .into_response();
+                "Authorization request not found. Please start over.",
+            );
         }
         Err(_) => {
-            return Html(templates::error_page(
+            return redirect_to_frontend_error(
                 "server_error",
-                Some("An error occurred. Please try again."),
-            ))
-            .into_response();
+                "An error occurred. Please try again.",
+            );
         }
     };
     let channel = query.channel.as_deref().unwrap_or("email");
-    Html(templates::two_factor_page(
-        &query.request_uri,
-        channel,
-        None,
+    redirect_see_other(&format!(
+        "/#/oauth/2fa?request_uri={}&channel={}",
+        url_encode(&query.request_uri),
+        url_encode(channel)
     ))
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScopeInfo {
+    pub scope: String,
+    pub category: String,
+    pub required: bool,
+    pub description: String,
+    pub display_name: String,
+    pub granted: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConsentResponse {
+    pub request_uri: String,
+    pub client_id: String,
+    pub client_name: Option<String>,
+    pub client_uri: Option<String>,
+    pub logo_uri: Option<String>,
+    pub scopes: Vec<ScopeInfo>,
+    pub show_consent: bool,
+    pub did: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConsentQuery {
+    pub request_uri: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConsentSubmit {
+    pub request_uri: String,
+    pub approved_scopes: Vec<String>,
+    pub remember: bool,
+}
+
+pub async fn consent_get(
+    State(state): State<AppState>,
+    Query(query): Query<ConsentQuery>,
+) -> Response {
+    let request_data = match db::get_authorization_request(&state.db, &query.request_uri).await {
+        Ok(Some(data)) => data,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid or expired request_uri"
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": format!("Database error: {:?}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+    if request_data.expires_at < Utc::now() {
+        let _ = db::delete_authorization_request(&state.db, &query.request_uri).await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Authorization request has expired"
+            })),
+        )
+            .into_response();
+    }
+    let did = match &request_data.did {
+        Some(d) => d.clone(),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Not authenticated"
+                })),
+            )
+                .into_response();
+        }
+    };
+    let client_cache = ClientMetadataCache::new(3600);
+    let client_metadata = client_cache
+        .get(&request_data.parameters.client_id)
+        .await
+        .ok();
+    let requested_scope_str = request_data
+        .parameters
+        .scope
+        .as_deref()
+        .unwrap_or("atproto");
+    let requested_scopes: Vec<&str> = requested_scope_str.split_whitespace().collect();
+    let preferences =
+        db::get_scope_preferences(&state.db, &did, &request_data.parameters.client_id)
+            .await
+            .unwrap_or_default();
+    let pref_map: std::collections::HashMap<_, _> = preferences
+        .iter()
+        .map(|p| (p.scope.as_str(), p.granted))
+        .collect();
+    let requested_scope_strings: Vec<String> =
+        requested_scopes.iter().map(|s| s.to_string()).collect();
+    let show_consent = db::should_show_consent(
+        &state.db,
+        &did,
+        &request_data.parameters.client_id,
+        &requested_scope_strings,
+    )
+    .await
+    .unwrap_or(true);
+    let mut scopes = Vec::new();
+    for scope in &requested_scopes {
+        let (category, required, description, display_name) =
+            if let Some(def) = crate::oauth::scopes::SCOPE_DEFINITIONS.get(*scope) {
+                (
+                    def.category.display_name().to_string(),
+                    def.required,
+                    def.description.to_string(),
+                    def.display_name.to_string(),
+                )
+            } else if scope.starts_with("ref:") {
+                (
+                    "Reference".to_string(),
+                    false,
+                    "Referenced scope".to_string(),
+                    scope.to_string(),
+                )
+            } else {
+                (
+                    "Other".to_string(),
+                    false,
+                    format!("Access to {}", scope),
+                    scope.to_string(),
+                )
+            };
+        let granted = pref_map.get(*scope).copied();
+        scopes.push(ScopeInfo {
+            scope: scope.to_string(),
+            category,
+            required,
+            description,
+            display_name,
+            granted,
+        });
+    }
+    Json(ConsentResponse {
+        request_uri: query.request_uri.clone(),
+        client_id: request_data.parameters.client_id.clone(),
+        client_name: client_metadata.as_ref().and_then(|m| m.client_name.clone()),
+        client_uri: client_metadata.as_ref().and_then(|m| m.client_uri.clone()),
+        logo_uri: client_metadata.as_ref().and_then(|m| m.logo_uri.clone()),
+        scopes,
+        show_consent,
+        did,
+    })
+    .into_response()
+}
+
+pub async fn consent_post(
+    State(state): State<AppState>,
+    Json(form): Json<ConsentSubmit>,
+) -> Response {
+    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+        Ok(Some(data)) => data,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid or expired request_uri"
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": format!("Database error: {:?}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+    if request_data.expires_at < Utc::now() {
+        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Authorization request has expired"
+            })),
+        )
+            .into_response();
+    }
+    let did = match &request_data.did {
+        Some(d) => d.clone(),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Not authenticated"
+                })),
+            )
+                .into_response();
+        }
+    };
+    let requested_scope_str = request_data
+        .parameters
+        .scope
+        .as_deref()
+        .unwrap_or("atproto");
+    let requested_scopes: Vec<&str> = requested_scope_str.split_whitespace().collect();
+    let has_granular_scopes = requested_scopes.iter().any(|s| {
+        s.starts_with("repo:")
+            || s.starts_with("blob:")
+            || s.starts_with("rpc:")
+            || s.starts_with("account:")
+            || s.starts_with("identity:")
+    });
+    let user_denied_some_granular = has_granular_scopes
+        && requested_scopes
+            .iter()
+            .filter(|s| {
+                s.starts_with("repo:")
+                    || s.starts_with("blob:")
+                    || s.starts_with("rpc:")
+                    || s.starts_with("account:")
+                    || s.starts_with("identity:")
+            })
+            .any(|s| !form.approved_scopes.contains(&s.to_string()));
+    let atproto_was_requested = requested_scopes.contains(&"atproto");
+    if atproto_was_requested
+        && !has_granular_scopes
+        && !form.approved_scopes.contains(&"atproto".to_string())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "The atproto scope was requested and must be approved"
+            })),
+        )
+            .into_response();
+    }
+    let final_approved: Vec<String> = if user_denied_some_granular {
+        form.approved_scopes
+            .iter()
+            .filter(|s| *s != "atproto")
+            .cloned()
+            .collect()
+    } else {
+        form.approved_scopes.clone()
+    };
+    if final_approved.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "At least one scope must be approved"
+            })),
+        )
+            .into_response();
+    }
+    let approved_scope_str = final_approved.join(" ");
+    let has_valid_scope = final_approved.iter().all(|s| {
+        s == "atproto"
+            || s == "transition:generic"
+            || s == "transition:chat.bsky"
+            || s == "transition:email"
+            || s.starts_with("repo:")
+            || s.starts_with("blob:")
+            || s.starts_with("rpc:")
+            || s.starts_with("account:")
+            || s.starts_with("include:")
+    });
+    if !has_valid_scope {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Invalid scope format"
+            })),
+        )
+            .into_response();
+    }
+    if form.remember {
+        let preferences: Vec<db::ScopePreference> = requested_scopes
+            .iter()
+            .map(|s| db::ScopePreference {
+                scope: s.to_string(),
+                granted: form.approved_scopes.contains(&s.to_string()),
+            })
+            .collect();
+        let _ = db::upsert_scope_preferences(
+            &state.db,
+            &did,
+            &request_data.parameters.client_id,
+            &preferences,
+        )
+        .await;
+    }
+    if let Err(e) =
+        db::update_request_scope(&state.db, &form.request_uri, &approved_scope_str).await
+    {
+        tracing::warn!("Failed to update request scope: {:?}", e);
+    }
+    let code = Code::generate();
+    if db::update_authorization_request(
+        &state.db,
+        &form.request_uri,
+        &did,
+        request_data.device_id.as_deref(),
+        &code.0,
+    )
+    .await
+    .is_err()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "Failed to complete authorization"
+            })),
+        )
+            .into_response();
+    }
+    let redirect_url = build_success_redirect(
+        &request_data.parameters.redirect_uri,
+        &code.0,
+        request_data.parameters.state.as_deref(),
+        request_data.parameters.response_mode.as_deref(),
+    );
+    Json(serde_json::json!({
+        "redirect_uri": redirect_url
+    }))
     .into_response()
 }
 
 pub async fn authorize_2fa_post(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Form(form): Form<Authorize2faSubmit>,
+    Json(form): Json<Authorize2faSubmit>,
 ) -> Response {
+    let json_error = |status: StatusCode, error: &str, description: &str| -> Response {
+        (
+            status,
+            Json(serde_json::json!({
+                "error": error,
+                "error_description": description
+            })),
+        )
+            .into_response()
+    };
     let client_ip = extract_client_ip(&headers);
     if !state
         .check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip)
         .await
     {
         tracing::warn!(ip = %client_ip, "OAuth 2FA rate limit exceeded");
-        return (
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            Html(templates::error_page(
-                "RateLimitExceeded",
-                Some("Too many attempts. Please try again later."),
-            )),
-        )
-            .into_response();
+        return json_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "RateLimitExceeded",
+            "Too many attempts. Please try again later.",
+        );
     }
     let challenge = match db::get_2fa_challenge(&state.db, &form.request_uri).await {
         Ok(Some(c)) => c,
         Ok(None) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::BAD_REQUEST,
                 "invalid_request",
-                Some("No 2FA challenge found. Please start over."),
-            ))
-            .into_response();
+                "No 2FA challenge found. Please start over.",
+            );
         }
         Err(_) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
-                Some("An error occurred. Please try again."),
-            ))
-            .into_response();
+                "An error occurred. Please try again.",
+            );
         }
     };
     if challenge.expires_at < Utc::now() {
         let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
-        return Html(templates::error_page(
+        return json_error(
+            StatusCode::BAD_REQUEST,
             "invalid_request",
-            Some("2FA code has expired. Please start over."),
-        ))
-        .into_response();
+            "2FA code has expired. Please start over.",
+        );
     }
     if challenge.attempts >= MAX_2FA_ATTEMPTS {
         let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
-        return Html(templates::error_page(
+        return json_error(
+            StatusCode::FORBIDDEN,
             "access_denied",
-            Some("Too many failed attempts. Please start over."),
-        ))
-        .into_response();
+            "Too many failed attempts. Please start over.",
+        );
     }
     let code_valid: bool = form
         .code
@@ -855,57 +1364,28 @@ pub async fn authorize_2fa_post(
         .into();
     if !code_valid {
         let _ = db::increment_2fa_attempts(&state.db, challenge.id).await;
-        let channel = match sqlx::query_scalar!(
-            r#"SELECT preferred_comms_channel as "channel: CommsChannel" FROM users WHERE did = $1"#,
-            challenge.did
-        )
-        .fetch_optional(&state.db)
-        .await
-        {
-            Ok(Some(ch)) => channel_display_name(ch).to_string(),
-            Ok(None) | Err(_) => "email".to_string(),
-        };
-        let _request_data = match db::get_authorization_request(&state.db, &form.request_uri).await
-        {
-            Ok(Some(d)) => d,
-            Ok(None) => {
-                return Html(templates::error_page(
-                    "invalid_request",
-                    Some("Authorization request not found. Please start over."),
-                ))
-                .into_response();
-            }
-            Err(_) => {
-                return Html(templates::error_page(
-                    "server_error",
-                    Some("An error occurred. Please try again."),
-                ))
-                .into_response();
-            }
-        };
-        return Html(templates::two_factor_page(
-            &form.request_uri,
-            &channel,
-            Some("Invalid verification code. Please try again."),
-        ))
-        .into_response();
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "invalid_code",
+            "Invalid verification code. Please try again.",
+        );
     }
     let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
         Ok(Some(d)) => d,
         Ok(None) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::BAD_REQUEST,
                 "invalid_request",
-                Some("Authorization request not found."),
-            ))
-            .into_response();
+                "Authorization request not found.",
+            );
         }
         Err(_) => {
-            return Html(templates::error_page(
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "server_error",
-                Some("An error occurred."),
-            ))
-            .into_response();
+                "An error occurred.",
+            );
         }
     };
     let code = Code::generate();
@@ -920,16 +1400,20 @@ pub async fn authorize_2fa_post(
     .await
     .is_err()
     {
-        return Html(templates::error_page(
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
             "server_error",
-            Some("An error occurred. Please try again."),
-        ))
-        .into_response();
+            "An error occurred. Please try again.",
+        );
     }
     let redirect_url = build_success_redirect(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
+        request_data.parameters.response_mode.as_deref(),
     );
-    redirect_see_other(&redirect_url)
+    Json(serde_json::json!({
+        "redirect_uri": redirect_url
+    }))
+    .into_response()
 }

@@ -84,13 +84,10 @@ async fn test_email_update_flow_success() {
         .await
         .expect("Failed to confirm email");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT email FROM users WHERE handle = $1",
-        handle
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("User not found");
+    let user = sqlx::query!("SELECT email FROM users WHERE handle = $1", handle)
+        .fetch_one(&pool)
+        .await
+        .expect("User not found");
     assert_eq!(user.email, Some(new_email));
 
     let verification = sqlx::query!(
@@ -320,13 +317,10 @@ async fn test_update_email_with_valid_token() {
         .await
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!(
-        "SELECT email FROM users WHERE handle = $1",
-        handle
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("User not found");
+    let user = sqlx::query!("SELECT email FROM users WHERE handle = $1", handle)
+        .fetch_one(&pool)
+        .await
+        .expect("User not found");
     assert_eq!(user.email, Some(new_email));
     let verification = sqlx::query!(
         "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",

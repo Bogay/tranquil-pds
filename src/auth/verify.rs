@@ -113,13 +113,14 @@ fn verify_token_internal(
         serde_json::from_slice(&header_bytes).context("JSON decode of header failed")?;
 
     if let Some(expected) = expected_typ
-        && header.typ != expected {
-            return Err(anyhow!(
-                "Invalid token type: expected {}, got {}",
-                expected,
-                header.typ
-            ));
-        }
+        && header.typ != expected
+    {
+        return Err(anyhow!(
+            "Invalid token type: expected {}, got {}",
+            expected,
+            header.typ
+        ));
+    }
 
     let signature_bytes = URL_SAFE_NO_PAD
         .decode(signature_b64)
@@ -185,13 +186,14 @@ fn verify_token_hs256_internal(
     }
 
     if let Some(expected) = expected_typ
-        && header.typ != expected {
-            return Err(anyhow!(
-                "Invalid token type: expected {}, got {}",
-                expected,
-                header.typ
-            ));
-        }
+        && header.typ != expected
+    {
+        return Err(anyhow!(
+            "Invalid token type: expected {}, got {}",
+            expected,
+            header.typ
+        ));
+    }
 
     let signature_bytes = URL_SAFE_NO_PAD
         .decode(signature_b64)

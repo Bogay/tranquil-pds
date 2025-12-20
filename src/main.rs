@@ -1,11 +1,11 @@
-use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
-use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
-use tranquil_pds::state::AppState;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
+use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
+use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
+use tranquil_pds::state::AppState;
 
 #[tokio::main]
 async fn main() -> ExitCode {

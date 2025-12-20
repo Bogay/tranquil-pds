@@ -1,7 +1,6 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client as S3Client;
 use aws_sdk_s3::config::Credentials;
-use tranquil_pds::state::AppState;
 use chrono::Utc;
 use reqwest::{Client, StatusCode, header};
 use serde_json::{Value, json};
@@ -12,6 +11,7 @@ use std::sync::OnceLock;
 #[allow(unused_imports)]
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tranquil_pds::state::AppState;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -232,8 +232,7 @@ async fn setup_mock_did_document(mock_server: &MockServer, did: &str, service_en
         .await;
 }
 
-async fn setup_mock_appview(_mock_server: &MockServer) {
-}
+async fn setup_mock_appview(_mock_server: &MockServer) {}
 
 async fn spawn_app(database_url: String) -> String {
     use tranquil_pds::rate_limit::RateLimiters;

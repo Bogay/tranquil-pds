@@ -1,14 +1,16 @@
 use crate::oauth::{
     AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData, RequestId,
-    client::ClientMetadataCache, db,
+    client::ClientMetadataCache,
+    db,
+    scopes::{ParsedScope, parse_scope},
 };
 use crate::state::{AppState, RateLimitKind};
-use axum::{Form, Json, extract::State, http::HeaderMap};
+use axum::body::Bytes;
+use axum::{Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 const PAR_EXPIRY_SECONDS: i64 = 600;
-const SUPPORTED_SCOPES: &[&str] = &["atproto", "transition:generic", "transition:chat.bsky"];
 
 #[derive(Debug, Deserialize)]
 pub struct ParRequest {
@@ -23,6 +25,8 @@ pub struct ParRequest {
     pub code_challenge: Option<String>,
     #[serde(default)]
     pub code_challenge_method: Option<String>,
+    #[serde(default)]
+    pub response_mode: Option<String>,
     #[serde(default)]
     pub login_hint: Option<String>,
     #[serde(default)]
@@ -44,8 +48,24 @@ pub struct ParResponse {
 pub async fn pushed_authorization_request(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Form(request): Form<ParRequest>,
+    body: Bytes,
 ) -> Result<(axum::http::StatusCode, Json<ParResponse>), OAuthError> {
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let request: ParRequest = if content_type.starts_with("application/json") {
+        serde_json::from_slice(&body)
+            .map_err(|e| OAuthError::InvalidRequest(format!("Invalid JSON: {}", e)))?
+    } else if content_type.starts_with("application/x-www-form-urlencoded") {
+        serde_urlencoded::from_bytes(&body)
+            .map_err(|e| OAuthError::InvalidRequest(format!("Invalid form data: {}", e)))?
+    } else {
+        return Err(OAuthError::InvalidRequest(
+            "Content-Type must be application/json or application/x-www-form-urlencoded"
+                .to_string(),
+        ));
+    };
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
     if !state
         .check_rate_limit(RateLimitKind::OAuthPar, &client_ip)
@@ -77,6 +97,16 @@ pub async fn pushed_authorization_request(
     let validated_scope = validate_scope(&request.scope, &client_metadata)?;
     let request_id = RequestId::generate();
     let expires_at = Utc::now() + Duration::seconds(PAR_EXPIRY_SECONDS);
+    let response_mode = match request.response_mode.as_deref() {
+        Some("fragment") => Some("fragment".to_string()),
+        Some("query") | None => None,
+        Some(mode) => {
+            return Err(OAuthError::InvalidRequest(format!(
+                "Unsupported response_mode: {}",
+                mode
+            )));
+        }
+    };
     let parameters = AuthorizationRequestParameters {
         response_type: request.response_type,
         client_id: request.client_id.clone(),
@@ -85,6 +115,7 @@ pub async fn pushed_authorization_request(
         state: request.state,
         code_challenge: code_challenge.clone(),
         code_challenge_method: code_challenge_method.to_string(),
+        response_mode,
         login_hint: request.login_hint,
         dpop_jkt: request.dpop_jkt,
         extra: None,
@@ -149,19 +180,45 @@ fn validate_scope(
     if requested_scopes.is_empty() {
         return Ok(Some("atproto".to_string()));
     }
+    let mut has_transition = false;
+    let mut has_granular = false;
+
     for scope in &requested_scopes {
-        if !SUPPORTED_SCOPES.contains(scope) {
-            return Err(OAuthError::InvalidScope(format!(
-                "Unsupported scope: {}. Supported scopes: {}",
-                scope,
-                SUPPORTED_SCOPES.join(", ")
-            )));
+        let parsed = parse_scope(scope);
+        match &parsed {
+            ParsedScope::Unknown(_) => {
+                return Err(OAuthError::InvalidScope(format!(
+                    "Unsupported scope: {}",
+                    scope
+                )));
+            }
+            ParsedScope::TransitionGeneric
+            | ParsedScope::TransitionChat
+            | ParsedScope::TransitionEmail => {
+                has_transition = true;
+            }
+            ParsedScope::Repo(_)
+            | ParsedScope::Blob(_)
+            | ParsedScope::Rpc(_)
+            | ParsedScope::Account(_)
+            | ParsedScope::Identity(_)
+            | ParsedScope::Include(_) => {
+                has_granular = true;
+            }
+            ParsedScope::Atproto => {}
         }
     }
+
+    if has_transition && has_granular {
+        return Err(OAuthError::InvalidScope(
+            "Cannot mix transition scopes with granular scopes. Use either transition:* scopes OR granular scopes (repo:*, blob:*, rpc:*, account:*, include:*), not both.".to_string()
+        ));
+    }
+
     if let Some(client_scope) = &client_metadata.scope {
         let client_scopes: Vec<&str> = client_scope.split_whitespace().collect();
         for scope in &requested_scopes {
-            if !client_scopes.contains(scope) {
+            if !client_scopes.iter().any(|cs| scope_matches(cs, scope)) {
                 return Err(OAuthError::InvalidScope(format!(
                     "Scope '{}' not registered for this client",
                     scope
@@ -170,4 +227,27 @@ fn validate_scope(
         }
     }
     Ok(Some(requested_scopes.join(" ")))
+}
+
+fn scope_matches(client_scope: &str, requested_scope: &str) -> bool {
+    if client_scope == requested_scope {
+        return true;
+    }
+
+    fn get_resource_type(scope: &str) -> &str {
+        let base = scope.split('?').next().unwrap_or(scope);
+        base.split(':').next().unwrap_or(base)
+    }
+
+    let client_type = get_resource_type(client_scope);
+    let requested_type = get_resource_type(requested_scope);
+
+    if client_type == requested_type {
+        let client_base = client_scope.split('?').next().unwrap_or(client_scope);
+        if client_base.contains('*') {
+            return true;
+        }
+    }
+
+    false
 }

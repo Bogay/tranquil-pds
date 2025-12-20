@@ -1,35 +1,39 @@
+use image::{DynamicImage, ImageFormat};
+use std::io::Cursor;
 use tranquil_pds::image::{
     DEFAULT_MAX_FILE_SIZE, ImageError, ImageProcessor, OutputFormat, THUMB_SIZE_FEED,
     THUMB_SIZE_FULL,
 };
-use image::{DynamicImage, ImageFormat};
-use std::io::Cursor;
 
 fn create_test_png(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+        .unwrap();
     buf
 }
 
 fn create_test_jpeg(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg)
+        .unwrap();
     buf
 }
 
 fn create_test_gif(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Gif).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Gif)
+        .unwrap();
     buf
 }
 
 fn create_test_webp(width: u32, height: u32) -> Vec<u8> {
     let img = DynamicImage::new_rgb8(width, height);
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::WebP).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::WebP)
+        .unwrap();
     buf
 }
 
@@ -62,18 +66,36 @@ fn test_thumbnail_generation() {
 
     let small = create_test_png(100, 100);
     let result = processor.process(&small, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_none(), "Small image should not get feed thumbnail");
-    assert!(result.thumbnail_full.is_none(), "Small image should not get full thumbnail");
+    assert!(
+        result.thumbnail_feed.is_none(),
+        "Small image should not get feed thumbnail"
+    );
+    assert!(
+        result.thumbnail_full.is_none(),
+        "Small image should not get full thumbnail"
+    );
 
     let medium = create_test_png(500, 500);
     let result = processor.process(&medium, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_some(), "Medium image should have feed thumbnail");
-    assert!(result.thumbnail_full.is_none(), "Medium image should NOT have full thumbnail");
+    assert!(
+        result.thumbnail_feed.is_some(),
+        "Medium image should have feed thumbnail"
+    );
+    assert!(
+        result.thumbnail_full.is_none(),
+        "Medium image should NOT have full thumbnail"
+    );
 
     let large = create_test_png(2000, 2000);
     let result = processor.process(&large, "image/png").unwrap();
-    assert!(result.thumbnail_feed.is_some(), "Large image should have feed thumbnail");
-    assert!(result.thumbnail_full.is_some(), "Large image should have full thumbnail");
+    assert!(
+        result.thumbnail_feed.is_some(),
+        "Large image should have feed thumbnail"
+    );
+    assert!(
+        result.thumbnail_full.is_some(),
+        "Large image should have full thumbnail"
+    );
     let thumb = result.thumbnail_feed.unwrap();
     assert!(thumb.width <= THUMB_SIZE_FEED && thumb.height <= THUMB_SIZE_FEED);
     let full = result.thumbnail_full.unwrap();
@@ -81,13 +103,37 @@ fn test_thumbnail_generation() {
 
     let at_feed = create_test_png(THUMB_SIZE_FEED, THUMB_SIZE_FEED);
     let above_feed = create_test_png(THUMB_SIZE_FEED + 1, THUMB_SIZE_FEED + 1);
-    assert!(processor.process(&at_feed, "image/png").unwrap().thumbnail_feed.is_none());
-    assert!(processor.process(&above_feed, "image/png").unwrap().thumbnail_feed.is_some());
+    assert!(
+        processor
+            .process(&at_feed, "image/png")
+            .unwrap()
+            .thumbnail_feed
+            .is_none()
+    );
+    assert!(
+        processor
+            .process(&above_feed, "image/png")
+            .unwrap()
+            .thumbnail_feed
+            .is_some()
+    );
 
     let at_full = create_test_png(THUMB_SIZE_FULL, THUMB_SIZE_FULL);
     let above_full = create_test_png(THUMB_SIZE_FULL + 1, THUMB_SIZE_FULL + 1);
-    assert!(processor.process(&at_full, "image/png").unwrap().thumbnail_full.is_none());
-    assert!(processor.process(&above_full, "image/png").unwrap().thumbnail_full.is_some());
+    assert!(
+        processor
+            .process(&at_full, "image/png")
+            .unwrap()
+            .thumbnail_full
+            .is_none()
+    );
+    assert!(
+        processor
+            .process(&above_full, "image/png")
+            .unwrap()
+            .thumbnail_full
+            .is_some()
+    );
 
     let disabled = ImageProcessor::new().with_thumbnails(false);
     let result = disabled.process(&large, "image/png").unwrap();
@@ -100,13 +146,34 @@ fn test_output_format_conversion() {
     let jpeg = create_test_jpeg(300, 300);
 
     let webp_proc = ImageProcessor::new().with_output_format(OutputFormat::WebP);
-    assert_eq!(webp_proc.process(&png, "image/png").unwrap().original.mime_type, "image/webp");
+    assert_eq!(
+        webp_proc
+            .process(&png, "image/png")
+            .unwrap()
+            .original
+            .mime_type,
+        "image/webp"
+    );
 
     let jpeg_proc = ImageProcessor::new().with_output_format(OutputFormat::Jpeg);
-    assert_eq!(jpeg_proc.process(&png, "image/png").unwrap().original.mime_type, "image/jpeg");
+    assert_eq!(
+        jpeg_proc
+            .process(&png, "image/png")
+            .unwrap()
+            .original
+            .mime_type,
+        "image/jpeg"
+    );
 
     let png_proc = ImageProcessor::new().with_output_format(OutputFormat::Png);
-    assert_eq!(png_proc.process(&jpeg, "image/jpeg").unwrap().original.mime_type, "image/png");
+    assert_eq!(
+        png_proc
+            .process(&jpeg, "image/jpeg")
+            .unwrap()
+            .original
+            .mime_type,
+        "image/png"
+    );
 }
 
 #[test]
@@ -116,12 +183,22 @@ fn test_size_and_dimension_limits() {
     let max_dim = ImageProcessor::new().with_max_dimension(1000);
     let large = create_test_png(2000, 2000);
     let result = max_dim.process(&large, "image/png");
-    assert!(matches!(result, Err(ImageError::TooLarge { width: 2000, height: 2000, max_dimension: 1000 })));
+    assert!(matches!(
+        result,
+        Err(ImageError::TooLarge {
+            width: 2000,
+            height: 2000,
+            max_dimension: 1000
+        })
+    ));
 
     let max_file = ImageProcessor::new().with_max_file_size(100);
     let data = create_test_png(500, 500);
     let result = max_file.process(&data, "image/png");
-    assert!(matches!(result, Err(ImageError::FileTooLarge { max_size: 100, .. })));
+    assert!(matches!(
+        result,
+        Err(ImageError::FileTooLarge { max_size: 100, .. })
+    ));
 }
 
 #[test]

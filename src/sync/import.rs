@@ -77,19 +77,20 @@ pub fn find_blob_refs_ipld(value: &Ipld, depth: usize) -> Vec<BlobRef> {
         Ipld::Map(obj) => {
             if let Some(Ipld::String(type_str)) = obj.get("$type")
                 && type_str == "blob"
-                    && let Some(Ipld::Link(link_cid)) = obj.get("ref") {
-                        let mime = obj.get("mimeType").and_then(|v| {
-                            if let Ipld::String(s) = v {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        });
-                        return vec![BlobRef {
-                            cid: link_cid.to_string(),
-                            mime_type: mime,
-                        }];
+                && let Some(Ipld::Link(link_cid)) = obj.get("ref")
+            {
+                let mime = obj.get("mimeType").and_then(|v| {
+                    if let Ipld::String(s) = v {
+                        Some(s.clone())
+                    } else {
+                        None
                     }
+                });
+                return vec![BlobRef {
+                    cid: link_cid.to_string(),
+                    mime_type: mime,
+                }];
+            }
             obj.values()
                 .flat_map(|v| find_blob_refs_ipld(v, depth + 1))
                 .collect()
@@ -110,17 +111,18 @@ pub fn find_blob_refs(value: &JsonValue, depth: usize) -> Vec<BlobRef> {
         JsonValue::Object(obj) => {
             if let Some(JsonValue::String(type_str)) = obj.get("$type")
                 && type_str == "blob"
-                    && let Some(JsonValue::Object(ref_obj)) = obj.get("ref")
-                        && let Some(JsonValue::String(link)) = ref_obj.get("$link") {
-                            let mime = obj
-                                .get("mimeType")
-                                .and_then(|v| v.as_str())
-                                .map(String::from);
-                            return vec![BlobRef {
-                                cid: link.clone(),
-                                mime_type: mime,
-                            }];
-                        }
+                && let Some(JsonValue::Object(ref_obj)) = obj.get("ref")
+                && let Some(JsonValue::String(link)) = ref_obj.get("$link")
+            {
+                let mime = obj
+                    .get("mimeType")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                return vec![BlobRef {
+                    cid: link.clone(),
+                    mime_type: mime,
+                }];
+            }
             obj.values()
                 .flat_map(|v| find_blob_refs(v, depth + 1))
                 .collect()
@@ -195,22 +197,22 @@ pub fn walk_mst(
                         });
                         if let (Some(key), Some(record_cid)) = (key, record_cid)
                             && let Some(record_block) = blocks.get(&record_cid)
-                                && let Ok(record_value) =
-                                    serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
-                                {
-                                    let blob_refs = find_blob_refs_ipld(&record_value, 0);
-                                    let parts: Vec<&str> = key.split('/').collect();
-                                    if parts.len() >= 2 {
-                                        let collection = parts[..parts.len() - 1].join("/");
-                                        let rkey = parts[parts.len() - 1].to_string();
-                                        records.push(ImportedRecord {
-                                            collection,
-                                            rkey,
-                                            cid: record_cid,
-                                            blob_refs,
-                                        });
-                                    }
-                                }
+                            && let Ok(record_value) =
+                                serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
+                        {
+                            let blob_refs = find_blob_refs_ipld(&record_value, 0);
+                            let parts: Vec<&str> = key.split('/').collect();
+                            if parts.len() >= 2 {
+                                let collection = parts[..parts.len() - 1].join("/");
+                                let rkey = parts[parts.len() - 1].to_string();
+                                records.push(ImportedRecord {
+                                    collection,
+                                    rkey,
+                                    cid: record_cid,
+                                    blob_refs,
+                                });
+                            }
+                        }
                         if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
                             stack.push(*tree_cid);
                         }
@@ -300,9 +302,10 @@ pub async fn apply_import(
     .await
     .map_err(|e| {
         if let sqlx::Error::Database(ref db_err) = e
-            && db_err.code().as_deref() == Some("55P03") {
-                return ImportError::ConcurrentModification;
-            }
+            && db_err.code().as_deref() == Some("55P03")
+        {
+            return ImportError::ConcurrentModification;
+        }
         ImportError::Database(e)
     })?;
     if repo.is_none() {

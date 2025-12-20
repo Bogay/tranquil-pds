@@ -18,10 +18,7 @@ pub async fn proxy_handler(
     RawQuery(query): RawQuery,
     body: Bytes,
 ) -> Response {
-    let proxy_header = match headers
-        .get("atproto-proxy")
-        .and_then(|h| h.to_str().ok())
-    {
+    let proxy_header = match headers.get("atproto-proxy").and_then(|h| h.to_str().ok()) {
         Some(h) => h.to_string(),
         None => {
             return (
@@ -66,6 +63,15 @@ pub async fn proxy_handler(
     ) {
         match crate::auth::validate_bearer_token(&state.db, &token).await {
             Ok(auth_user) => {
+                if let Err(e) = crate::auth::scope_check::check_rpc_scope(
+                    auth_user.is_oauth,
+                    auth_user.scope.as_deref(),
+                    &resolved.did,
+                    &method,
+                ) {
+                    return e;
+                }
+
                 if let Some(key_bytes) = auth_user.key_bytes {
                     match crate::auth::create_service_token(
                         &auth_user.did,

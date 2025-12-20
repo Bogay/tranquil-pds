@@ -62,6 +62,17 @@ pub async fn upload_blob(
     } else {
         match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
             Ok(user) => {
+                let mime_type_for_check = headers
+                    .get("content-type")
+                    .and_then(|h| h.to_str().ok())
+                    .unwrap_or("application/octet-stream");
+                if let Err(e) = crate::auth::scope_check::check_blob_scope(
+                    user.is_oauth,
+                    user.scope.as_deref(),
+                    mime_type_for_check,
+                ) {
+                    return e;
+                }
                 let deactivated = sqlx::query_scalar!(
                     "SELECT deactivated_at FROM users WHERE did = $1",
                     user.did
@@ -171,23 +182,22 @@ pub async fn upload_blob(
             .blob_store
             .put_bytes(&storage_key, bytes::Bytes::from(data))
             .await
-        {
-            error!("Failed to upload blob to storage: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
-            )
-                .into_response();
-        }
+    {
+        error!("Failed to upload blob to storage: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
+        )
+            .into_response();
+    }
     if let Err(e) = tx.commit().await {
         error!("Failed to commit blob transaction: {:?}", e);
-        if was_inserted
-            && let Err(cleanup_err) = state.blob_store.delete(&storage_key).await {
-                error!(
-                    "Failed to cleanup orphaned blob {}: {:?}",
-                    storage_key, cleanup_err
-                );
-            }
+        if was_inserted && let Err(cleanup_err) = state.blob_store.delete(&storage_key).await {
+            error!(
+                "Failed to cleanup orphaned blob {}: {:?}",
+                storage_key, cleanup_err
+            );
+        }
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),
@@ -231,11 +241,12 @@ fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
     if let Some(obj) = val.as_object() {
         if let Some(type_val) = obj.get("$type")
             && type_val == "blob"
-                && let Some(r) = obj.get("ref")
-                    && let Some(link) = r.get("$link")
-                        && let Some(s) = link.as_str() {
-                            blobs.push(s.to_string());
-                        }
+            && let Some(r) = obj.get("ref")
+            && let Some(link) = r.get("$link")
+            && let Some(s) = link.as_str()
+        {
+            blobs.push(s.to_string());
+        }
         for (_, v) in obj {
             find_blobs(v, blobs);
         }

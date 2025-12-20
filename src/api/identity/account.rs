@@ -21,13 +21,15 @@ use tracing::{debug, error, info, warn};
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
-            && let Some(first_ip) = value.split(',').next() {
-                return first_ip.trim().to_string();
-            }
+        && let Some(first_ip) = value.split(',').next()
+    {
+        return first_ip.trim().to_string();
+    }
     if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str() {
-            return value.trim().to_string();
-        }
+        && let Ok(value) = real_ip.to_str()
+    {
+        return value.trim().to_string();
+    }
     "unknown".to_string()
 }
 
@@ -114,7 +116,11 @@ pub async fn create_account(
     };
 
     let is_migration = migration_auth.is_some()
-        && input.did.as_ref().map(|d| d.starts_with("did:plc:")).unwrap_or(false);
+        && input
+            .did
+            .as_ref()
+            .map(|d| d.starts_with("did:plc:"))
+            .unwrap_or(false);
 
     if is_migration {
         let migration_did = input.did.as_ref().unwrap();
@@ -147,13 +153,14 @@ pub async fn create_account(
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
     if let Some(ref email) = email
-        && !crate::api::validation::is_valid_email(email) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
-            )
-                .into_response();
-        }
+        && !crate::api::validation::is_valid_email(email)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
+        )
+            .into_response();
+    }
     let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
     let valid_channels = ["email", "discord", "telegram", "signal"];
     if !valid_channels.contains(&verification_channel) && !is_migration {
@@ -366,32 +373,32 @@ pub async fn create_account(
     };
     if is_migration {
         let existing_account: Option<(uuid::Uuid, String, Option<chrono::DateTime<chrono::Utc>>)> =
-            sqlx::query_as(
-                "SELECT id, handle, deactivated_at FROM users WHERE did = $1 FOR UPDATE",
-            )
-            .bind(&did)
-            .fetch_optional(&mut *tx)
-            .await
-            .unwrap_or(None);
+            sqlx::query_as("SELECT id, handle, deactivated_at FROM users WHERE did = $1 FOR UPDATE")
+                .bind(&did)
+                .fetch_optional(&mut *tx)
+                .await
+                .unwrap_or(None);
         if let Some((account_id, old_handle, deactivated_at)) = existing_account {
             if deactivated_at.is_some() {
                 info!(did = %did, old_handle = %old_handle, new_handle = %short_handle, "Preparing existing account for inbound migration");
-                let update_result: Result<_, sqlx::Error> = sqlx::query(
-                    "UPDATE users SET handle = $1 WHERE id = $2",
-                )
-                .bind(short_handle)
-                .bind(account_id)
-                .execute(&mut *tx)
-                .await;
+                let update_result: Result<_, sqlx::Error> =
+                    sqlx::query("UPDATE users SET handle = $1 WHERE id = $2")
+                        .bind(short_handle)
+                        .bind(account_id)
+                        .execute(&mut *tx)
+                        .await;
                 if let Err(e) = update_result {
-                    if let Some(db_err) = e.as_database_error() {
-                        if db_err.constraint().map(|c| c.contains("handle")).unwrap_or(false) {
-                            return (
+                    if let Some(db_err) = e.as_database_error()
+                        && db_err
+                            .constraint()
+                            .map(|c| c.contains("handle"))
+                            .unwrap_or(false)
+                    {
+                        return (
                                 StatusCode::BAD_REQUEST,
                                 Json(json!({"error": "HandleTaken", "message": "Handle already taken by another account"})),
                             )
                                 .into_response();
-                        }
                     }
                     error!("Error reactivating account: {:?}", e);
                     return (
@@ -438,18 +445,22 @@ pub async fn create_account(
                             .into_response();
                     }
                 };
-                let access_meta = match crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        error!("Error creating access token: {:?}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError"})),
-                        )
-                            .into_response();
-                    }
-                };
-                let refresh_meta = match crate::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes) {
+                let access_meta =
+                    match crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            error!("Error creating access token: {:?}", e);
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": "InternalError"})),
+                            )
+                                .into_response();
+                        }
+                    };
+                let refresh_meta = match crate::auth::create_refresh_token_with_metadata(
+                    &did,
+                    &secret_key_bytes,
+                ) {
                     Ok(m) => m,
                     Err(e) => {
                         error!("Error creating refresh token: {:?}", e);
@@ -499,13 +510,12 @@ pub async fn create_account(
             }
         }
     }
-    let exists_result: Option<(i32,)> = sqlx::query_as(
-        "SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL",
-    )
-    .bind(short_handle)
-    .fetch_optional(&mut *tx)
-    .await
-    .unwrap_or(None);
+    let exists_result: Option<(i32,)> =
+        sqlx::query_as("SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL")
+            .bind(short_handle)
+            .fetch_optional(&mut *tx)
+            .await
+            .unwrap_or(None);
     if exists_result.is_some() {
         return (
             StatusCode::BAD_REQUEST,
@@ -516,56 +526,62 @@ pub async fn create_account(
     let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
-    if invite_code_required && input.invite_code.as_ref().map(|c| c.trim().is_empty()).unwrap_or(true) {
+    if invite_code_required
+        && input
+            .invite_code
+            .as_ref()
+            .map(|c| c.trim().is_empty())
+            .unwrap_or(true)
+    {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidInviteCode", "message": "Invite code is required"})),
         )
             .into_response();
     }
-    if let Some(code) = &input.invite_code {
-        if !code.trim().is_empty() {
-            let invite_query = sqlx::query!(
-                "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
-                code
-            )
-            .fetch_optional(&mut *tx)
-            .await;
-            match invite_query {
-                Ok(Some(row)) => {
-                    if row.available_uses <= 0 {
-                        return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidInviteCode", "message": "Invite code exhausted"}))).into_response();
-                    }
-                    let update_invite = sqlx::query!(
-                        "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
-                        code
-                    )
-                    .execute(&mut *tx)
-                    .await;
-                    if let Err(e) = update_invite {
-                        error!("Error updating invite code: {:?}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError"})),
-                        )
-                            .into_response();
-                    }
+    if let Some(code) = &input.invite_code
+        && !code.trim().is_empty()
+    {
+        let invite_query = sqlx::query!(
+            "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
+            code
+        )
+        .fetch_optional(&mut *tx)
+        .await;
+        match invite_query {
+            Ok(Some(row)) => {
+                if row.available_uses <= 0 {
+                    return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidInviteCode", "message": "Invite code exhausted"}))).into_response();
                 }
-                Ok(None) => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "InvalidInviteCode", "message": "Invite code not found"})),
-                    )
-                        .into_response();
-                }
-                Err(e) => {
-                    error!("Error checking invite code: {:?}", e);
+                let update_invite = sqlx::query!(
+                    "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
+                    code
+                )
+                .execute(&mut *tx)
+                .await;
+                if let Err(e) = update_invite {
+                    error!("Error updating invite code: {:?}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({"error": "InternalError"})),
                     )
                         .into_response();
                 }
+            }
+            Ok(None) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidInviteCode", "message": "Invite code not found"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                error!("Error checking invite code: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
             }
         }
     }
@@ -635,37 +651,38 @@ pub async fn create_account(
         Ok((id,)) => id,
         Err(e) => {
             if let Some(db_err) = e.as_database_error()
-                && db_err.code().as_deref() == Some("23505") {
-                    let constraint = db_err.constraint().unwrap_or("");
-                    if constraint.contains("handle") || constraint.contains("users_handle") {
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({
-                                "error": "HandleNotAvailable",
-                                "message": "Handle already taken"
-                            })),
-                        )
-                            .into_response();
-                    } else if constraint.contains("email") || constraint.contains("users_email") {
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({
-                                "error": "InvalidEmail",
-                                "message": "Email already registered"
-                            })),
-                        )
-                            .into_response();
-                    } else if constraint.contains("did") || constraint.contains("users_did") {
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({
-                                "error": "AccountAlreadyExists",
-                                "message": "An account with this DID already exists"
-                            })),
-                        )
-                            .into_response();
-                    }
+                && db_err.code().as_deref() == Some("23505")
+            {
+                let constraint = db_err.constraint().unwrap_or("");
+                if constraint.contains("handle") || constraint.contains("users_handle") {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "HandleNotAvailable",
+                            "message": "Handle already taken"
+                        })),
+                    )
+                        .into_response();
+                } else if constraint.contains("email") || constraint.contains("users_email") {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "InvalidEmail",
+                            "message": "Email already registered"
+                        })),
+                    )
+                        .into_response();
+                } else if constraint.contains("did") || constraint.contains("users_did") {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "AccountAlreadyExists",
+                            "message": "An account with this DID already exists"
+                        })),
+                    )
+                        .into_response();
                 }
+            }
             error!("Error inserting user: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -675,8 +692,8 @@ pub async fn create_account(
         }
     };
 
-    if !is_migration {
-        if let Err(e) = sqlx::query!(
+    if !is_migration
+        && let Err(e) = sqlx::query!(
             "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, 'email', $2, $3, $4)",
             user_id,
             verification_code,
@@ -692,7 +709,6 @@ pub async fn create_account(
             )
                 .into_response();
         }
-    }
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(enc) => enc,
         Err(e) => {
@@ -809,23 +825,23 @@ pub async fn create_account(
         )
             .into_response();
     }
-    if let Some(code) = &input.invite_code {
-        if !code.trim().is_empty() {
-            let use_insert = sqlx::query!(
-                "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
-                code,
-                user_id
+    if let Some(code) = &input.invite_code
+        && !code.trim().is_empty()
+    {
+        let use_insert = sqlx::query!(
+            "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
+            code,
+            user_id
+        )
+        .execute(&mut *tx)
+        .await;
+        if let Err(e) = use_insert {
+            error!("Error recording invite usage: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
             )
-            .execute(&mut *tx)
-            .await;
-            if let Err(e) = use_insert {
-                error!("Error recording invite usage: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
+                .into_response();
         }
     }
     if let Err(e) = tx.commit().await {
@@ -838,11 +854,13 @@ pub async fn create_account(
     }
     if !is_migration {
         if let Err(e) =
-            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle)).await
+            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle))
+                .await
         {
             warn!("Failed to sequence identity event for {}: {}", did, e);
         }
-        if let Err(e) = crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+        if let Err(e) =
+            crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
         {
             warn!("Failed to sequence account event for {}: {}", did, e);
         }
@@ -861,8 +879,8 @@ pub async fn create_account(
         {
             warn!("Failed to create default profile for {}: {}", did, e);
         }
-        if let Some(ref recipient) = verification_recipient {
-            if let Err(e) = crate::comms::enqueue_signup_verification(
+        if let Some(ref recipient) = verification_recipient
+            && let Err(e) = crate::comms::enqueue_signup_verification(
                 &state.db,
                 user_id,
                 verification_channel,
@@ -870,12 +888,11 @@ pub async fn create_account(
                 &verification_code,
             )
             .await
-            {
-                warn!(
-                    "Failed to enqueue signup verification notification: {:?}",
-                    e
-                );
-            }
+        {
+            warn!(
+                "Failed to enqueue signup verification notification: {:?}",
+                e
+            );
         }
     }
 

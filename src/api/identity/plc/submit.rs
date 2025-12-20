@@ -29,10 +29,18 @@ pub async fn submit_plc_operation(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
+            Ok(user) => user,
+            Err(e) => return ApiError::from(e).into_response(),
+        };
+    if let Err(e) = crate::auth::scope_check::check_identity_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::IdentityAttr::Wildcard,
+    ) {
+        return e;
+    }
     let did = &auth_user.did;
     if let Err(e) = validate_plc_operation(&input.operation) {
         return ApiError::InvalidRequest(format!("Invalid operation: {}", e)).into_response();
@@ -40,9 +48,12 @@ pub async fn submit_plc_operation(
     let op = &input.operation;
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let public_url = format!("https://{}", hostname);
-    let user = match sqlx::query!("SELECT id, handle, deactivated_at FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await
+    let user = match sqlx::query!(
+        "SELECT id, handle, deactivated_at FROM users WHERE did = $1",
+        did
+    )
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         _ => {
@@ -94,63 +105,65 @@ pub async fn submit_plc_operation(
         }
     };
     let user_did_key = signing_key_to_did_key(&signing_key);
-    if !is_migration {
-        if let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array()) {
-            let server_rotation_key =
-                std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
-            let has_server_key = rotation_keys
-                .iter()
-                .any(|k| k.as_str() == Some(&server_rotation_key));
-            if !has_server_key {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": "Rotation keys do not include server's rotation key"
-                    })),
-                )
-                    .into_response();
-            }
+    if !is_migration && let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array())
+    {
+        let server_rotation_key =
+            std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
+        let has_server_key = rotation_keys
+            .iter()
+            .any(|k| k.as_str() == Some(&server_rotation_key));
+        if !has_server_key {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": "Rotation keys do not include server's rotation key"
+                })),
+            )
+                .into_response();
         }
     }
     if let Some(services) = op.get("services").and_then(|v| v.as_object())
-        && let Some(pds) = services.get("atproto_pds").and_then(|v| v.as_object()) {
-            let service_type = pds.get("type").and_then(|v| v.as_str());
-            let endpoint = pds.get("endpoint").and_then(|v| v.as_str());
-            if service_type != Some("AtprotoPersonalDataServer") {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": "Incorrect type on atproto_pds service"
-                    })),
-                )
-                    .into_response();
-            }
-            if endpoint != Some(&public_url) {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": "Incorrect endpoint on atproto_pds service"
-                    })),
-                )
-                    .into_response();
-            }
+        && let Some(pds) = services.get("atproto_pds").and_then(|v| v.as_object())
+    {
+        let service_type = pds.get("type").and_then(|v| v.as_str());
+        let endpoint = pds.get("endpoint").and_then(|v| v.as_str());
+        if service_type != Some("AtprotoPersonalDataServer") {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": "Incorrect type on atproto_pds service"
+                })),
+            )
+                .into_response();
         }
+        if endpoint != Some(&public_url) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": "Incorrect endpoint on atproto_pds service"
+                })),
+            )
+                .into_response();
+        }
+    }
     if !is_migration {
-        if let Some(verification_methods) = op.get("verificationMethods").and_then(|v| v.as_object())
+        if let Some(verification_methods) =
+            op.get("verificationMethods").and_then(|v| v.as_object())
             && let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
-                && atproto_key != user_did_key {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "InvalidRequest",
-                            "message": "Incorrect signing key in verificationMethods"
-                        })),
-                    )
-                        .into_response();
-                }
+            && atproto_key != user_did_key
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": "Incorrect signing key in verificationMethods"
+                })),
+            )
+                .into_response();
+        }
         if let Some(also_known_as) = op.get("alsoKnownAs").and_then(|v| v.as_array()) {
             let expected_handle = format!("at://{}", user.handle);
             let first_aka = also_known_as.first().and_then(|v| v.as_str());

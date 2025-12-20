@@ -54,22 +54,20 @@ pub async fn resolve_handle(
                 .await;
             (StatusCode::OK, Json(json!({ "did": row.did }))).into_response()
         }
-        Ok(None) => {
-            match crate::handle::resolve_handle(handle).await {
-                Ok(did) => {
-                    let _ = state
-                        .cache
-                        .set(&cache_key, &did, std::time::Duration::from_secs(300))
-                        .await;
-                    (StatusCode::OK, Json(json!({ "did": did }))).into_response()
-                }
-                Err(_) => (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "HandleNotFound", "message": "Unable to resolve handle"})),
-                )
-                    .into_response(),
+        Ok(None) => match crate::handle::resolve_handle(handle).await {
+            Ok(did) => {
+                let _ = state
+                    .cache
+                    .set(&cache_key, &did, std::time::Duration::from_secs(300))
+                    .await;
+                (StatusCode::OK, Json(json!({ "did": did }))).into_response()
             }
-        }
+            Err(_) => (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "HandleNotFound", "message": "Unable to resolve handle"})),
+            )
+                .into_response(),
+        },
         Err(e) => {
             error!("DB error resolving handle: {:?}", e);
             (
@@ -310,10 +308,11 @@ pub async fn get_recommended_did_credentials(
                 .into_response();
         }
     };
-    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => user,
+            Err(e) => return ApiError::from(e).into_response(),
+        };
     let user = match sqlx::query!(
         "SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1",
         auth_user.did
@@ -378,10 +377,19 @@ pub async fn update_handle(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let did = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-        Ok(user) => user.did,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => user,
+            Err(e) => return ApiError::from(e).into_response(),
+        };
+    if let Err(e) = crate::auth::scope_check::check_identity_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::IdentityAttr::Handle,
+    ) {
+        return e;
+    }
+    let did = auth_user.did;
     let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -414,7 +422,10 @@ pub async fn update_handle(
         } else {
             new_handle
         };
-        (short_handle.to_string(), format!("{}.{}", short_handle, hostname))
+        (
+            short_handle.to_string(),
+            format!("{}.{}", short_handle, hostname),
+        )
     } else {
         match crate::handle::verify_handle_ownership(new_handle, &did).await {
             Ok(()) => {}
@@ -537,7 +548,8 @@ async fn update_plc_handle(
     let plc_client = crate::plc::PlcClient::new(None);
     let last_op = plc_client.get_last_op(did).await?;
     let new_also_known_as = vec![format!("at://{}", new_handle)];
-    let update_op = crate::plc::create_update_op(&last_op, None, None, Some(new_also_known_as), None)?;
+    let update_op =
+        crate::plc::create_update_op(&last_op, None, None, Some(new_also_known_as), None)?;
     let signed_op = crate::plc::sign_operation(&update_op, &signing_key)?;
     plc_client.send_operation(did, &signed_op).await?;
     Ok(())

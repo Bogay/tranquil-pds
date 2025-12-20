@@ -3,6 +3,7 @@ mod device;
 mod dpop;
 mod helpers;
 mod request;
+mod scope_preference;
 mod token;
 mod two_factor;
 
@@ -15,12 +16,17 @@ pub use dpop::{check_and_record_dpop_jti, cleanup_expired_dpop_jtis};
 pub use request::{
     consume_authorization_request_by_code, create_authorization_request,
     delete_authorization_request, delete_expired_authorization_requests, get_authorization_request,
-    update_authorization_request,
+    mark_request_authenticated, set_authorization_did, update_authorization_request,
+    update_request_scope,
+};
+pub use scope_preference::{
+    ScopePreference, delete_scope_preferences, get_scope_preferences, should_show_consent,
+    upsert_scope_preferences,
 };
 pub use token::{
     check_refresh_token_used, count_tokens_for_user, create_token, delete_oldest_tokens_for_user,
     delete_token, delete_token_family, enforce_token_limit_for_user, get_token_by_id,
-    get_token_by_refresh_token, list_tokens_for_user, rotate_token,
+    get_token_by_refresh_token, list_tokens_for_user, revoke_tokens_for_client, rotate_token,
 };
 pub use two_factor::{
     TwoFactorChallenge, check_user_2fa_enabled, cleanup_expired_2fa_challenges,

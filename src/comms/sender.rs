@@ -87,7 +87,8 @@ impl EmailSender {
 
     pub fn from_env() -> Option<Self> {
         let from_address = std::env::var("MAIL_FROM_ADDRESS").ok()?;
-        let from_name = std::env::var("MAIL_FROM_NAME").unwrap_or_else(|_| "Tranquil PDS".to_string());
+        let from_name =
+            std::env::var("MAIL_FROM_NAME").unwrap_or_else(|_| "Tranquil PDS".to_string());
         Some(Self::new(from_address, from_name))
     }
 

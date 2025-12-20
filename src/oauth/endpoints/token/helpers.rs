@@ -36,12 +36,14 @@ pub fn create_access_token(
     token_id: &str,
     sub: &str,
     dpop_jkt: Option<&str>,
+    scope: Option<&str>,
 ) -> Result<String, OAuthError> {
     use serde_json::json;
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let issuer = format!("https://{}", pds_hostname);
     let now = Utc::now().timestamp();
     let exp = now + ACCESS_TOKEN_EXPIRY_SECONDS;
+    let actual_scope = scope.unwrap_or("atproto");
     let mut payload = json!({
         "iss": issuer,
         "sub": sub,
@@ -49,7 +51,7 @@ pub fn create_access_token(
         "iat": now,
         "exp": exp,
         "jti": token_id,
-        "scope": "atproto"
+        "scope": actual_scope
     });
     if let Some(jkt) = dpop_jkt {
         payload["cnf"] = json!({ "jkt": jkt });

@@ -46,11 +46,15 @@ impl AuthConfig {
                 }
             });
 
-            if jwt_secret.len() < 32 && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err() {
+            if jwt_secret.len() < 32
+                && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err()
+            {
                 panic!("JWT_SECRET must be at least 32 characters");
             }
 
-            if dpop_secret.len() < 32 && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err() {
+            if dpop_secret.len() < 32
+                && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err()
+            {
                 panic!("DPOP_SECRET must be at least 32 characters");
             }
 
@@ -97,7 +101,9 @@ impl AuthConfig {
                 }
             });
 
-            if master_key.len() < 32 && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err() {
+            if master_key.len() < 32
+                && std::env::var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS").is_err()
+            {
                 panic!("MASTER_KEY must be at least 32 characters");
             }
 

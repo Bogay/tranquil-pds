@@ -22,10 +22,7 @@ use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
 
-pub async fn has_verified_comms_channel(
-    db: &PgPool,
-    did: &str,
-) -> Result<bool, sqlx::Error> {
+pub async fn has_verified_comms_channel(db: &PgPool, did: &str) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -52,13 +49,21 @@ pub async fn has_verified_comms_channel(
     }
 }
 
+pub struct RepoWriteAuth {
+    pub did: String,
+    pub user_id: Uuid,
+    pub current_root_cid: Cid,
+    pub is_oauth: bool,
+    pub scope: Option<String>,
+}
+
 pub async fn prepare_repo_write(
     state: &AppState,
     headers: &HeaderMap,
     repo_did: &str,
     http_method: &str,
     http_uri: &str,
-) -> Result<(String, Uuid, Cid), Response> {
+) -> Result<RepoWriteAuth, Response> {
     let extracted = crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     )
@@ -69,9 +74,7 @@ pub async fn prepare_repo_write(
         )
             .into_response()
     })?;
-    let dpop_proof = headers
-        .get("DPoP")
-        .and_then(|h| h.to_str().ok());
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
     let auth_user = crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
@@ -163,7 +166,13 @@ pub async fn prepare_repo_write(
         )
             .into_response()
     })?;
-    Ok((auth_user.did, user_id, current_root_cid))
+    Ok(RepoWriteAuth {
+        did: auth_user.did,
+        user_id,
+        current_root_cid,
+        is_oauth: auth_user.is_oauth,
+        scope: auth_user.scope,
+    })
 }
 #[derive(Deserialize)]
 #[allow(dead_code)]
@@ -188,19 +197,34 @@ pub async fn create_record(
     axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<CreateRecordInput>,
 ) -> Response {
-    let (did, user_id, current_root_cid) =
+    let auth =
         match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
             Ok(res) => res,
             Err(err_res) => return err_res,
         };
+
+    if let Err(e) = crate::auth::scope_check::check_repo_scope(
+        auth.is_oauth,
+        auth.scope.as_deref(),
+        crate::oauth::RepoAction::Create,
+        &input.collection,
+    ) {
+        return e;
+    }
+
+    let did = auth.did;
+    let user_id = auth.user_id;
+    let current_root_cid = auth.current_root_cid;
+
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
-            )
-                .into_response();
-        }
+        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+    {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
+        )
+            .into_response();
+    }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
@@ -234,9 +258,10 @@ pub async fn create_record(
         }
     };
     if input.validate.unwrap_or(true)
-        && let Err(err_response) = validate_record(&input.record, &input.collection) {
-            return *err_response;
-        }
+        && let Err(err_response) = validate_record(&input.record, &input.collection)
+    {
+        return *err_response;
+    }
     let rkey = input
         .rkey
         .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
@@ -285,10 +310,18 @@ pub async fn create_record(
         cid: record_cid,
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
-    if new_mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
+    if new_mst
+        .blocks_for_path(&key, &mut relevant_blocks)
+        .await
+        .is_err()
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
     }
-    if mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
+    if mst
+        .blocks_for_path(&key, &mut relevant_blocks)
+        .await
+        .is_err()
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get old MST blocks for path"}))).into_response();
     }
     relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));
@@ -356,19 +389,42 @@ pub async fn put_record(
     axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<PutRecordInput>,
 ) -> Response {
-    let (did, user_id, current_root_cid) =
+    let auth =
         match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
             Ok(res) => res,
             Err(err_res) => return err_res,
         };
+
+    if let Err(e) = crate::auth::scope_check::check_repo_scope(
+        auth.is_oauth,
+        auth.scope.as_deref(),
+        crate::oauth::RepoAction::Create,
+        &input.collection,
+    ) {
+        return e;
+    }
+    if let Err(e) = crate::auth::scope_check::check_repo_scope(
+        auth.is_oauth,
+        auth.scope.as_deref(),
+        crate::oauth::RepoAction::Update,
+        &input.collection,
+    ) {
+        return e;
+    }
+
+    let did = auth.did;
+    let user_id = auth.user_id;
+    let current_root_cid = auth.current_root_cid;
+
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid) {
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
-            )
-                .into_response();
-        }
+        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+    {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
+        )
+            .into_response();
+    }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
@@ -403,9 +459,10 @@ pub async fn put_record(
     };
     let key = format!("{}/{}", collection_nsid, input.rkey);
     if input.validate.unwrap_or(true)
-        && let Err(err_response) = validate_record(&input.record, &input.collection) {
-            return *err_response;
-        }
+        && let Err(err_response) = validate_record(&input.record, &input.collection)
+    {
+        return *err_response;
+    }
     if let Some(swap_record_str) = &input.swap_record {
         let expected_cid = Cid::from_str(swap_record_str).ok();
         let actual_cid = mst.get(&key).await.ok().flatten();
@@ -480,10 +537,18 @@ pub async fn put_record(
         }
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
-    if new_mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
+    if new_mst
+        .blocks_for_path(&key, &mut relevant_blocks)
+        .await
+        .is_err()
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
     }
-    if mst.blocks_for_path(&key, &mut relevant_blocks).await.is_err() {
+    if mst
+        .blocks_for_path(&key, &mut relevant_blocks)
+        .await
+        .is_err()
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get old MST blocks for path"}))).into_response();
     }
     relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));

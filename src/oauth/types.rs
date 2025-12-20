@@ -91,6 +91,7 @@ pub struct AuthorizationRequestParameters {
     pub state: Option<String>,
     pub code_challenge: String,
     pub code_challenge_method: String,
+    pub response_mode: Option<String>,
     pub login_hint: Option<String>,
     pub dpop_jkt: Option<String>,
     #[serde(flatten)]

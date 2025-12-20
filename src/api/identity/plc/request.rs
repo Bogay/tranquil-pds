@@ -24,10 +24,18 @@ pub async fn request_plc_operation_signature(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => user,
+            Err(e) => return ApiError::from(e).into_response(),
+        };
+    if let Err(e) = crate::auth::scope_check::check_identity_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::IdentityAttr::Wildcard,
+    ) {
+        return e;
+    }
     let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", auth_user.did)
         .fetch_optional(&state.db)
         .await

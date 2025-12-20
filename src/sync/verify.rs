@@ -268,12 +268,13 @@ impl CarVerifier {
                                 stack.push(*tree_cid);
                             }
                             if let Some(Ipld::Link(value_cid)) = entry_obj.get("v")
-                                && !blocks.contains_key(value_cid) {
-                                    warn!(
-                                        "Record block {} referenced in MST not in CAR (may be expected for partial export)",
-                                        value_cid
-                                    );
-                                }
+                                && !blocks.contains_key(value_cid)
+                            {
+                                warn!(
+                                    "Record block {} referenced in MST not in CAR (may be expected for partial export)",
+                                    value_cid
+                                );
+                            }
                         }
                     }
                 }

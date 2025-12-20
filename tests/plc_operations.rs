@@ -7,18 +7,45 @@ use sqlx::PgPool;
 #[tokio::test]
 async fn test_plc_operation_auth() {
     let client = client();
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.requestPlcOperationSignature", base_url().await))
-        .send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.requestPlcOperationSignature",
+            base_url().await
+        ))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.signPlcOperation", base_url().await))
-        .json(&json!({})).send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.signPlcOperation",
+            base_url().await
+        ))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.submitPlcOperation", base_url().await))
-        .json(&json!({ "operation": {} })).send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.submitPlcOperation",
+            base_url().await
+        ))
+        .json(&json!({ "operation": {} }))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let (token, _) = create_account_and_login(&client).await;
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.requestPlcOperationSignature", base_url().await))
-        .bearer_auth(&token).send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.requestPlcOperationSignature",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
 
@@ -26,13 +53,29 @@ async fn test_plc_operation_auth() {
 async fn test_sign_plc_operation_validation() {
     let client = client();
     let (token, _) = create_account_and_login(&client).await;
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.signPlcOperation", base_url().await))
-        .bearer_auth(&token).json(&json!({})).send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.signPlcOperation",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.signPlcOperation", base_url().await))
-        .bearer_auth(&token).json(&json!({ "token": "invalid-token-12345" })).send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.signPlcOperation",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .json(&json!({ "token": "invalid-token-12345" }))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["error"] == "InvalidToken" || body["error"] == "ExpiredToken");
@@ -42,17 +85,34 @@ async fn test_sign_plc_operation_validation() {
 async fn test_submit_plc_operation_validation() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| format!("127.0.0.1:{}", app_port()));
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.submitPlcOperation", base_url().await))
-        .bearer_auth(&token).json(&json!({ "operation": { "type": "invalid_type" } })).send().await.unwrap();
+    let hostname =
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| format!("127.0.0.1:{}", app_port()));
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.submitPlcOperation",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .json(&json!({ "operation": { "type": "invalid_type" } }))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.submitPlcOperation", base_url().await))
-        .bearer_auth(&token).json(&json!({
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.submitPlcOperation",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .json(&json!({
             "operation": { "type": "plc_operation", "rotationKeys": [], "verificationMethods": {},
                 "alsoKnownAs": [], "services": {}, "prev": null }
-        })).send().await.unwrap();
+        }))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let handle = did.split(':').last().unwrap_or("user");
     let res = client.post(format!("{}/xrpc/com.atproto.identity.submitPlcOperation", base_url().await))
@@ -75,7 +135,13 @@ async fn test_submit_plc_operation_validation() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
-    assert!(body["message"].as_str().unwrap_or("").contains("signing key") || body["message"].as_str().unwrap_or("").contains("rotation"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("signing key")
+            || body["message"].as_str().unwrap_or("").contains("rotation")
+    );
     let res = client.post(format!("{}/xrpc/com.atproto.identity.submitPlcOperation", base_url().await))
         .bearer_auth(&token).json(&json!({
             "operation": { "type": "plc_operation", "rotationKeys": ["did:key:z123"],
@@ -100,8 +166,15 @@ async fn test_submit_plc_operation_validation() {
 async fn test_plc_token_lifecycle() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.requestPlcOperationSignature", base_url().await))
-        .bearer_auth(&token).send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.requestPlcOperationSignature",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let db_url = get_db_connection_string().await;
     let pool = PgPool::connect(&db_url).await.unwrap();
@@ -113,12 +186,25 @@ async fn test_plc_token_lifecycle() {
     let row = row.unwrap();
     assert_eq!(row.token.len(), 11, "Token should be in format xxxxx-xxxxx");
     assert!(row.token.contains('-'), "Token should contain hyphen");
-    assert!(row.expires_at > chrono::Utc::now(), "Token should not be expired");
+    assert!(
+        row.expires_at > chrono::Utc::now(),
+        "Token should not be expired"
+    );
     let diff = row.expires_at - chrono::Utc::now();
-    assert!(diff.num_minutes() >= 9 && diff.num_minutes() <= 11, "Token should expire in ~10 minutes");
+    assert!(
+        diff.num_minutes() >= 9 && diff.num_minutes() <= 11,
+        "Token should expire in ~10 minutes"
+    );
     let token1 = row.token.clone();
-    let res = client.post(format!("{}/xrpc/com.atproto.identity.requestPlcOperationSignature", base_url().await))
-        .bearer_auth(&token).send().await.unwrap();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.requestPlcOperationSignature",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let token2 = sqlx::query_scalar!(
         "SELECT t.token FROM plc_operation_tokens t JOIN users u ON t.user_id = u.id WHERE u.did = $1", did

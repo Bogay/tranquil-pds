@@ -57,7 +57,11 @@ async fn test_change_password_success() {
         .send()
         .await
         .expect("Failed to try old password");
-    assert_eq!(login_old.status(), StatusCode::UNAUTHORIZED, "Old password should not work");
+    assert_eq!(
+        login_old.status(),
+        StatusCode::UNAUTHORIZED,
+        "Old password should not work"
+    );
     let login_new = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createSession",
@@ -70,7 +74,11 @@ async fn test_change_password_success() {
         .send()
         .await
         .expect("Failed to try new password");
-    assert_eq!(login_new.status(), StatusCode::OK, "New password should work");
+    assert_eq!(
+        login_new.status(),
+        StatusCode::OK,
+        "New password should work"
+    );
 }
 
 #[tokio::test]

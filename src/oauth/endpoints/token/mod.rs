@@ -5,7 +5,8 @@ mod types;
 
 use crate::oauth::OAuthError;
 use crate::state::{AppState, RateLimitKind};
-use axum::{Form, Json, extract::State, http::HeaderMap};
+use axum::body::Bytes;
+use axum::{Json, extract::State, http::HeaderMap};
 
 pub use grants::{handle_authorization_code_grant, handle_refresh_token_grant};
 pub use helpers::{TokenClaims, create_access_token, extract_token_claims, verify_pkce};
@@ -17,21 +18,39 @@ pub use types::{TokenRequest, TokenResponse};
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
-            && let Some(first_ip) = value.split(',').next() {
-                return first_ip.trim().to_string();
-            }
+        && let Some(first_ip) = value.split(',').next()
+    {
+        return first_ip.trim().to_string();
+    }
     if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str() {
-            return value.trim().to_string();
-        }
+        && let Ok(value) = real_ip.to_str()
+    {
+        return value.trim().to_string();
+    }
     "unknown".to_string()
 }
 
 pub async fn token_endpoint(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Form(request): Form<TokenRequest>,
+    body: Bytes,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let request: TokenRequest = if content_type.starts_with("application/json") {
+        serde_json::from_slice(&body)
+            .map_err(|e| OAuthError::InvalidRequest(format!("Invalid JSON: {}", e)))?
+    } else if content_type.starts_with("application/x-www-form-urlencoded") {
+        serde_urlencoded::from_bytes(&body)
+            .map_err(|e| OAuthError::InvalidRequest(format!("Invalid form data: {}", e)))?
+    } else {
+        return Err(OAuthError::InvalidRequest(
+            "Content-Type must be application/json or application/x-www-form-urlencoded"
+                .to_string(),
+        ));
+    };
     let client_ip = extract_client_ip(&headers);
     if !state
         .check_rate_limit(RateLimitKind::OAuthToken, &client_ip)

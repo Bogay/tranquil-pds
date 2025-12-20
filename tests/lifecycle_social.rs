@@ -4,7 +4,7 @@ use chrono::Utc;
 use common::*;
 use helpers::*;
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[tokio::test]
 async fn test_like_lifecycle() {

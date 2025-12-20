@@ -54,7 +54,17 @@ pub async fn search_accounts(
     let limit = params.limit.clamp(1, 100);
     let cursor_did = params.cursor.as_deref().unwrap_or("");
     let handle_filter = params.handle.as_deref().map(|h| format!("%{}%", h));
-    let result = sqlx::query_as::<_, (String, String, Option<String>, chrono::DateTime<chrono::Utc>, bool, Option<chrono::DateTime<chrono::Utc>>)>(
+    let result = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            Option<String>,
+            chrono::DateTime<chrono::Utc>,
+            bool,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ),
+    >(
         r#"
         SELECT did, handle, email, created_at, email_verified, deactivated_at
         FROM users
@@ -74,19 +84,23 @@ pub async fn search_accounts(
             let accounts: Vec<AccountView> = rows
                 .into_iter()
                 .take(limit as usize)
-                .map(|(did, handle, email, created_at, email_verified, deactivated_at)| AccountView {
-                    did: did.clone(),
-                    handle,
-                    email,
-                    indexed_at: created_at.to_rfc3339(),
-                    email_verified_at: if email_verified {
-                        Some(created_at.to_rfc3339())
-                    } else {
-                        None
+                .map(
+                    |(did, handle, email, created_at, email_verified, deactivated_at)| {
+                        AccountView {
+                            did: did.clone(),
+                            handle,
+                            email,
+                            indexed_at: created_at.to_rfc3339(),
+                            email_verified_at: if email_verified {
+                                Some(created_at.to_rfc3339())
+                            } else {
+                                None
+                            },
+                            deactivated_at: deactivated_at.map(|dt| dt.to_rfc3339()),
+                            invites_disabled: None,
+                        }
                     },
-                    deactivated_at: deactivated_at.map(|dt| dt.to_rfc3339()),
-                    invites_disabled: None,
-                })
+                )
                 .collect();
             let next_cursor = if has_more {
                 accounts.last().map(|a| a.did.clone())

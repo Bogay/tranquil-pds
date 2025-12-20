@@ -1,8 +1,8 @@
 mod common;
 use common::{base_url, client, create_account_and_login, get_db_connection_string};
-use tranquil_pds::comms::{NewComms, CommsType, enqueue_comms};
 use serde_json::{Value, json};
 use sqlx::PgPool;
+use tranquil_pds::comms::{CommsType, NewComms, enqueue_comms};
 
 async fn get_pool() -> PgPool {
     let conn_str = get_db_connection_string().await;
@@ -33,11 +33,16 @@ async fn test_get_notification_history() {
             format!("Subject {}", i),
             format!("Body {}", i),
         );
-        enqueue_comms(&pool, comms).await.expect("Failed to enqueue");
+        enqueue_comms(&pool, comms)
+            .await
+            .expect("Failed to enqueue");
     }
 
     let resp = client
-        .get(format!("{}/xrpc/com.tranquil.account.getNotificationHistory", base))
+        .get(format!(
+            "{}/xrpc/com.tranquil.account.getNotificationHistory",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
@@ -63,7 +68,10 @@ async fn test_verify_channel_discord() {
         "discordId": "123456789"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.tranquil.account.updateNotificationPrefs", base))
+        .post(format!(
+            "{}/xrpc/com.tranquil.account.updateNotificationPrefs",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .json(&prefs)
         .send()
@@ -71,7 +79,12 @@ async fn test_verify_channel_discord() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: Value = resp.json().await.unwrap();
-    assert!(body["verificationRequired"].as_array().unwrap().contains(&json!("discord")));
+    assert!(
+        body["verificationRequired"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("discord"))
+    );
 
     let pool = get_pool().await;
     let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
@@ -92,7 +105,10 @@ async fn test_verify_channel_discord() {
         "code": code
     });
     let resp = client
-        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
+        .post(format!(
+            "{}/xrpc/com.tranquil.account.confirmChannelVerification",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -101,7 +117,10 @@ async fn test_verify_channel_discord() {
     assert_eq!(resp.status(), 200);
 
     let resp = client
-        .get(format!("{}/xrpc/com.tranquil.account.getNotificationPrefs", base))
+        .get(format!(
+            "{}/xrpc/com.tranquil.account.getNotificationPrefs",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
@@ -121,7 +140,10 @@ async fn test_verify_channel_invalid_code() {
         "telegramUsername": "testuser"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.tranquil.account.updateNotificationPrefs", base))
+        .post(format!(
+            "{}/xrpc/com.tranquil.account.updateNotificationPrefs",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .json(&prefs)
         .send()
@@ -134,7 +156,10 @@ async fn test_verify_channel_invalid_code() {
         "code": "000000"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
+        .post(format!(
+            "{}/xrpc/com.tranquil.account.confirmChannelVerification",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -154,7 +179,10 @@ async fn test_verify_channel_not_set() {
         "code": "123456"
     });
     let resp = client
-        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
+        .post(format!(
+            "{}/xrpc/com.tranquil.account.confirmChannelVerification",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -175,7 +203,10 @@ async fn test_update_email_via_notification_prefs() {
         "email": unique_email
     });
     let resp = client
-        .post(format!("{}/xrpc/com.tranquil.account.updateNotificationPrefs", base))
+        .post(format!(
+            "{}/xrpc/com.tranquil.account.updateNotificationPrefs",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .json(&prefs)
         .send()
@@ -183,7 +214,12 @@ async fn test_update_email_via_notification_prefs() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let body: Value = resp.json().await.unwrap();
-    assert!(body["verificationRequired"].as_array().unwrap().contains(&json!("email")));
+    assert!(
+        body["verificationRequired"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("email"))
+    );
 
     let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_one(&pool)
@@ -203,7 +239,10 @@ async fn test_update_email_via_notification_prefs() {
         "code": code
     });
     let resp = client
-        .post(format!("{}/xrpc/com.tranquil.account.confirmChannelVerification", base))
+        .post(format!(
+            "{}/xrpc/com.tranquil.account.confirmChannelVerification",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .json(&input)
         .send()
@@ -212,7 +251,10 @@ async fn test_update_email_via_notification_prefs() {
     assert_eq!(resp.status(), 200);
 
     let resp = client
-        .get(format!("{}/xrpc/com.tranquil.account.getNotificationPrefs", base))
+        .get(format!(
+            "{}/xrpc/com.tranquil.account.getNotificationPrefs",
+            base
+        ))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await

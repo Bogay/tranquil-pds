@@ -21,10 +21,18 @@ async fn test_search_accounts_as_admin() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
-    let accounts = body["accounts"].as_array().expect("accounts should be array");
+    let accounts = body["accounts"]
+        .as_array()
+        .expect("accounts should be array");
     assert!(!accounts.is_empty(), "Should return some accounts");
-    let found = accounts.iter().any(|a| a["did"].as_str() == Some(&user_did));
-    assert!(found, "Should find the created user in results (DID: {})", user_did);
+    let found = accounts
+        .iter()
+        .any(|a| a["did"].as_str() == Some(&user_did));
+    assert!(
+        found,
+        "Should find the created user in results (DID: {})",
+        user_did
+    );
 }
 
 #[tokio::test]
@@ -61,7 +69,11 @@ async fn test_search_accounts_with_handle_filter() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
     let accounts = body["accounts"].as_array().unwrap();
-    assert_eq!(accounts.len(), 1, "Should find exactly one account with this handle");
+    assert_eq!(
+        accounts.len(),
+        1,
+        "Should find exactly one account with this handle"
+    );
     assert_eq!(accounts[0]["handle"].as_str(), Some(unique_handle.as_str()));
 }
 
@@ -100,11 +112,23 @@ async fn test_search_accounts_pagination() {
     assert_eq!(res2.status(), StatusCode::OK);
     let body2: Value = res2.json().await.unwrap();
     let accounts2 = body2["accounts"].as_array().unwrap();
-    assert!(!accounts2.is_empty(), "Should return more accounts after cursor");
-    let first_page_dids: Vec<&str> = accounts.iter().map(|a| a["did"].as_str().unwrap()).collect();
-    let second_page_dids: Vec<&str> = accounts2.iter().map(|a| a["did"].as_str().unwrap()).collect();
+    assert!(
+        !accounts2.is_empty(),
+        "Should return more accounts after cursor"
+    );
+    let first_page_dids: Vec<&str> = accounts
+        .iter()
+        .map(|a| a["did"].as_str().unwrap())
+        .collect();
+    let second_page_dids: Vec<&str> = accounts2
+        .iter()
+        .map(|a| a["did"].as_str().unwrap())
+        .collect();
     for did in &second_page_dids {
-        assert!(!first_page_dids.contains(did), "Second page should not repeat first page DIDs");
+        assert!(
+            !first_page_dids.contains(did),
+            "Second page should not repeat first page DIDs"
+        );
     }
 }
 
@@ -160,5 +184,8 @@ async fn test_search_accounts_returns_expected_fields() {
     let account = &accounts[0];
     assert!(account["did"].as_str().is_some(), "Should have did");
     assert!(account["handle"].as_str().is_some(), "Should have handle");
-    assert!(account["indexedAt"].as_str().is_some(), "Should have indexedAt");
+    assert!(
+        account["indexedAt"].as_str().is_some(),
+        "Should have indexedAt"
+    );
 }

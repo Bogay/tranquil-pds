@@ -83,13 +83,13 @@ impl DidResolver {
     pub async fn resolve_did(&self, did: &str) -> Option<ResolvedService> {
         {
             let cache = self.did_cache.read().await;
-            if let Some(cached) = cache.get(did) {
-                if cached.resolved_at.elapsed() < self.cache_ttl {
-                    return Some(ResolvedService {
-                        url: cached.url.clone(),
-                        did: cached.did.clone(),
-                    });
-                }
+            if let Some(cached) = cache.get(did)
+                && cached.resolved_at.elapsed() < self.cache_ttl
+            {
+                return Some(ResolvedService {
+                    url: cached.url.clone(),
+                    did: cached.did.clone(),
+                });
             }
         }
 
@@ -240,17 +240,17 @@ impl DidResolver {
             }
         }
 
-        if let Some(service) = doc.service.first() {
-            if service.service_endpoint.starts_with("http") {
-                warn!(
-                    "No explicit AppView service found for {}, using first service: {}",
-                    doc.id, service.service_endpoint
-                );
-                return Some(ResolvedService {
-                    url: service.service_endpoint.clone(),
-                    did: doc.id.clone(),
-                });
-            }
+        if let Some(service) = doc.service.first()
+            && service.service_endpoint.starts_with("http")
+        {
+            warn!(
+                "No explicit AppView service found for {}, using first service: {}",
+                doc.id, service.service_endpoint
+            );
+            return Some(ResolvedService {
+                url: service.service_endpoint.clone(),
+                did: doc.id.clone(),
+            });
         }
 
         if doc.id.starts_with("did:web:") {

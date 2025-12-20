@@ -16,13 +16,15 @@ use tracing::{error, info, warn};
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
-            && let Some(first_ip) = value.split(',').next() {
-                return first_ip.trim().to_string();
-            }
+        && let Some(first_ip) = value.split(',').next()
+    {
+        return first_ip.trim().to_string();
+    }
     if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str() {
-            return value.trim().to_string();
-        }
+        && let Ok(value) = real_ip.to_str()
+    {
+        return value.trim().to_string();
+    }
     "unknown".to_string()
 }
 
@@ -36,7 +38,8 @@ fn normalize_handle(identifier: &str, pds_hostname: &str) -> String {
 }
 
 fn full_handle(stored_handle: &str, pds_hostname: &str) -> String {
-    if stored_handle.contains('.') {
+    let suffix = format!(".{}", pds_hostname);
+    if stored_handle.ends_with(&suffix) || stored_handle.ends_with(pds_hostname) {
         stored_handle.to_string()
     } else {
         format!("{}.{}", stored_handle, pds_hostname)
@@ -191,6 +194,9 @@ pub async fn get_session(
     State(state): State<AppState>,
     BearerAuthAllowDeactivated(auth_user): BearerAuthAllowDeactivated,
 ) -> Response {
+    let permissions = auth_user.permissions();
+    let can_read_email = permissions.allows_email_read();
+
     match sqlx::query!(
         r#"SELECT
             handle, email, email_verified, is_admin, deactivated_at,
@@ -209,21 +215,29 @@ pub async fn get_session(
                 crate::comms::CommsChannel::Telegram => ("telegram", row.telegram_verified),
                 crate::comms::CommsChannel::Signal => ("signal", row.signal_verified),
             };
-            let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+            let pds_hostname =
+                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&row.handle, &pds_hostname);
             let is_active = row.deactivated_at.is_none();
+            let email_value = if can_read_email {
+                row.email.clone()
+            } else {
+                None
+            };
+            let email_verified_value = can_read_email && row.email_verified;
             Json(json!({
                 "handle": handle,
                 "did": auth_user.did,
-                "email": row.email,
-                "emailVerified": row.email_verified,
+                "email": email_value,
+                "emailVerified": email_verified_value,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "isAdmin": row.is_admin,
                 "active": is_active,
                 "status": if is_active { "active" } else { "deactivated" },
                 "didDoc": {}
-            })).into_response()
+            }))
+            .into_response()
         }
         Ok(None) => ApiError::AuthenticationFailed.into_response(),
         Err(e) => {
@@ -433,7 +447,8 @@ pub async fn refresh_session(
                 crate::comms::CommsChannel::Telegram => ("telegram", u.telegram_verified),
                 crate::comms::CommsChannel::Signal => ("signal", u.signal_verified),
             };
-            let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+            let pds_hostname =
+                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&u.handle, &pds_hostname);
             Json(json!({
                 "accessJwt": new_access_meta.token,
@@ -446,7 +461,8 @@ pub async fn refresh_session(
                 "preferredChannelVerified": preferred_channel_verified,
                 "isAdmin": u.is_admin,
                 "active": true
-            })).into_response()
+            }))
+            .into_response()
         }
         Ok(None) => {
             error!("User not found for existing session: {}", session_row.did);
@@ -500,7 +516,8 @@ pub async fn confirm_signup(
         Ok(Some(row)) => row,
         Ok(None) => {
             warn!("User not found for confirm_signup: {}", input.did);
-            return ApiError::InvalidRequest("Invalid DID or verification code".into()).into_response();
+            return ApiError::InvalidRequest("Invalid DID or verification code".into())
+                .into_response();
         }
         Err(e) => {
             error!("Database error in confirm_signup: {:?}", e);
@@ -532,8 +549,7 @@ pub async fn confirm_signup(
     }
     if verification.expires_at < Utc::now() {
         warn!("Verification code expired for user: {}", input.did);
-        return ApiError::ExpiredTokenMsg("Verification code has expired".into())
-            .into_response();
+        return ApiError::ExpiredTokenMsg("Verification code has expired".into()).into_response();
     }
 
     let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
@@ -549,10 +565,7 @@ pub async fn confirm_signup(
         crate::comms::CommsChannel::Telegram => "telegram_verified",
         crate::comms::CommsChannel::Signal => "signal_verified",
     };
-    let update_query = format!(
-        "UPDATE users SET {} = TRUE WHERE did = $1",
-        verified_column
-    );
+    let update_query = format!("UPDATE users SET {} = TRUE WHERE did = $1", verified_column);
     if let Err(e) = sqlx::query(&update_query)
         .bind(&input.did)
         .execute(&state.db)
@@ -567,7 +580,8 @@ pub async fn confirm_signup(
         row.id
     )
     .execute(&state.db)
-    .await {
+    .await
+    {
         error!("Failed to delete verification record: {:?}", e);
     }
 
@@ -603,10 +617,7 @@ pub async fn confirm_signup(
     if let Err(e) = crate::comms::enqueue_welcome(&state.db, row.id, &hostname).await {
         warn!("Failed to enqueue welcome notification: {:?}", e);
     }
-    let email_verified = matches!(
-        row.channel,
-        crate::comms::CommsChannel::Email
-    );
+    let email_verified = matches!(row.channel, crate::comms::CommsChannel::Email);
     let preferred_channel = match row.channel {
         crate::comms::CommsChannel::Email => "email",
         crate::comms::CommsChannel::Discord => "discord",
@@ -688,18 +699,12 @@ pub async fn resend_verification(
         return ApiError::InternalError.into_response();
     }
     let (channel_str, recipient) = match row.channel {
-        crate::comms::CommsChannel::Email => {
-            ("email", row.email.unwrap_or_default())
-        }
-        crate::comms::CommsChannel::Discord => {
-            ("discord", row.discord_id.unwrap_or_default())
-        }
+        crate::comms::CommsChannel::Email => ("email", row.email.unwrap_or_default()),
+        crate::comms::CommsChannel::Discord => ("discord", row.discord_id.unwrap_or_default()),
         crate::comms::CommsChannel::Telegram => {
             ("telegram", row.telegram_username.unwrap_or_default())
         }
-        crate::comms::CommsChannel::Signal => {
-            ("signal", row.signal_number.unwrap_or_default())
-        }
+        crate::comms::CommsChannel::Signal => ("signal", row.signal_number.unwrap_or_default()),
     };
     if let Err(e) = crate::comms::enqueue_signup_verification(
         &state.db,
@@ -740,7 +745,15 @@ pub async fn list_sessions(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .and_then(|token| crate::auth::get_jti_from_token(token).ok());
-    let result = sqlx::query_as::<_, (i32, String, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>(
+    let result = sqlx::query_as::<
+        _,
+        (
+            i32,
+            String,
+            chrono::DateTime<chrono::Utc>,
+            chrono::DateTime<chrono::Utc>,
+        ),
+    >(
         r#"
         SELECT id, access_jti, created_at, refresh_expires_at
         FROM session_tokens
@@ -759,7 +772,7 @@ pub async fn list_sessions(
                     id: id.to_string(),
                     created_at: created_at.to_rfc3339(),
                     expires_at: expires_at.to_rfc3339(),
-                    is_current: current_jti.as_ref().map_or(false, |j| j == &access_jti),
+                    is_current: current_jti.as_ref() == Some(&access_jti),
                 })
                 .collect();
             (StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response()

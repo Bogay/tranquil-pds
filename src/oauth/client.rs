@@ -135,9 +135,10 @@ impl ClientMetadataCache {
         {
             let cache = self.cache.read().await;
             if let Some(cached) = cache.get(client_id)
-                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs {
-                    return Ok(cached.metadata.clone());
-                }
+                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs
+            {
+                return Ok(cached.metadata.clone());
+            }
         }
         let metadata = self.fetch_metadata(client_id).await?;
         {
@@ -168,9 +169,10 @@ impl ClientMetadataCache {
         {
             let cache = self.jwks_cache.read().await;
             if let Some(cached) = cache.get(jwks_uri)
-                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs {
-                    return Ok(cached.jwks.clone());
-                }
+                && cached.cached_at.elapsed().as_secs() < self.cache_ttl_secs
+            {
+                return Ok(cached.jwks.clone());
+            }
         }
         let jwks = self.fetch_jwks(jwks_uri).await?;
         {
@@ -190,11 +192,11 @@ impl ClientMetadataCache {
         if !jwks_uri.starts_with("https://")
             && (!jwks_uri.starts_with("http://")
                 || (!jwks_uri.contains("localhost") && !jwks_uri.contains("127.0.0.1")))
-            {
-                return Err(OAuthError::InvalidClient(
-                    "jwks_uri must use https (except for localhost)".to_string(),
-                ));
-            }
+        {
+            return Err(OAuthError::InvalidClient(
+                "jwks_uri must use https (except for localhost)".to_string(),
+            ));
+        }
         let response = self
             .http_client
             .get(jwks_uri)
@@ -302,26 +304,27 @@ impl ClientMetadataCache {
             return Ok(());
         }
         if Self::is_loopback_client(&metadata.client_id)
-            && let Ok(req_url) = reqwest::Url::parse(redirect_uri) {
-                let req_host = req_url.host_str().unwrap_or("");
-                let is_loopback_redirect = req_url.scheme() == "http"
-                    && (req_host == "localhost" || req_host == "127.0.0.1" || req_host == "[::1]");
-                if is_loopback_redirect {
-                    for registered in &metadata.redirect_uris {
-                        if let Ok(reg_url) = reqwest::Url::parse(registered) {
-                            let reg_host = reg_url.host_str().unwrap_or("");
-                            let hosts_match = (req_host == "localhost" && reg_host == "localhost")
-                                || (req_host == "127.0.0.1" && reg_host == "127.0.0.1")
-                                || (req_host == "[::1]" && reg_host == "[::1]")
-                                || (req_host == "localhost" && reg_host == "127.0.0.1")
-                                || (req_host == "127.0.0.1" && reg_host == "localhost");
-                            if hosts_match && req_url.path() == reg_url.path() {
-                                return Ok(());
-                            }
+            && let Ok(req_url) = reqwest::Url::parse(redirect_uri)
+        {
+            let req_host = req_url.host_str().unwrap_or("");
+            let is_loopback_redirect = req_url.scheme() == "http"
+                && (req_host == "localhost" || req_host == "127.0.0.1" || req_host == "[::1]");
+            if is_loopback_redirect {
+                for registered in &metadata.redirect_uris {
+                    if let Ok(reg_url) = reqwest::Url::parse(registered) {
+                        let reg_host = reg_url.host_str().unwrap_or("");
+                        let hosts_match = (req_host == "localhost" && reg_host == "localhost")
+                            || (req_host == "127.0.0.1" && reg_host == "127.0.0.1")
+                            || (req_host == "[::1]" && reg_host == "[::1]")
+                            || (req_host == "localhost" && reg_host == "127.0.0.1")
+                            || (req_host == "127.0.0.1" && reg_host == "localhost");
+                        if hosts_match && req_url.path() == reg_url.path() {
+                            return Ok(());
                         }
                     }
                 }
             }
+        }
         Err(OAuthError::InvalidRequest(
             "redirect_uri not registered for client".to_string(),
         ))
@@ -501,11 +504,12 @@ async fn verify_private_key_jwt_async(
         ));
     }
     if let Some(iat) = iat
-        && iat > now + 60 {
-            return Err(OAuthError::InvalidClient(
-                "client_assertion iat is in the future".to_string(),
-            ));
-        }
+        && iat > now + 60
+    {
+        return Err(OAuthError::InvalidClient(
+            "client_assertion iat is in the future".to_string(),
+        ));
+    }
     let jwks = cache.get_jwks(metadata).await?;
     let keys = jwks
         .get("keys")

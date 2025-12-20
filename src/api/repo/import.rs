@@ -53,13 +53,14 @@ pub async fn import_repo(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => user,
+            Err(e) => return ApiError::from(e).into_response(),
+        };
     let did = &auth_user.did;
     let user = match sqlx::query!(
-        "SELECT id, deactivated_at, takedown_ref FROM users WHERE did = $1",
+        "SELECT id, handle, deactivated_at, takedown_ref FROM users WHERE did = $1",
         did
     )
     .fetch_optional(&state.db)
@@ -317,6 +318,30 @@ pub async fn import_repo(
                 records.len(),
                 did
             );
+            if is_migration {
+                if let Err(e) =
+                    sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
+                        .execute(&state.db)
+                        .await
+                {
+                    error!("Failed to reactivate account after import: {:?}", e);
+                }
+                let _ = state.cache.delete(&format!("handle:{}", user.handle)).await;
+                if let Err(e) = crate::api::repo::record::sequence_identity_event(
+                    &state,
+                    did,
+                    Some(&user.handle),
+                )
+                .await
+                {
+                    warn!("Failed to sequence identity event after import: {:?}", e);
+                }
+                if let Err(e) =
+                    crate::api::repo::record::sequence_account_event(&state, did, true, None).await
+                {
+                    warn!("Failed to sequence account event after import: {:?}", e);
+                }
+            }
             if let Err(e) = sequence_import_event(&state, did, &root.to_string()).await {
                 warn!("Failed to sequence import event: {:?}", e);
             }

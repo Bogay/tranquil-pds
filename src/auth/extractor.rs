@@ -8,7 +8,7 @@ use serde_json::json;
 
 use super::{
     AuthenticatedUser, TokenValidationError, validate_bearer_token_cached,
-    validate_bearer_token_cached_allow_deactivated,
+    validate_bearer_token_cached_allow_deactivated, validate_token_with_dpop,
 };
 use crate::state::AppState;
 
@@ -63,6 +63,7 @@ impl IntoResponse for AuthError {
     }
 }
 
+#[cfg(test)]
 fn extract_bearer_token(auth_header: &str) -> Result<&str, AuthError> {
     let auth_header = auth_header.trim();
 
@@ -151,13 +152,37 @@ impl FromRequestParts<AppState> for BearerAuth {
             .to_str()
             .map_err(|_| AuthError::InvalidFormat)?;
 
-        let token = extract_bearer_token(auth_header)?;
+        let extracted =
+            extract_auth_token_from_header(Some(auth_header)).ok_or(AuthError::InvalidFormat)?;
 
-        match validate_bearer_token_cached(&state.db, &state.cache, token).await {
-            Ok(user) => Ok(BearerAuth(user)),
-            Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
-            Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
-            Err(_) => Err(AuthError::AuthenticationFailed),
+        if extracted.is_dpop {
+            let dpop_proof = parts.headers.get("dpop").and_then(|h| h.to_str().ok());
+            let method = parts.method.as_str();
+            let uri = parts.uri.to_string();
+
+            match validate_token_with_dpop(
+                &state.db,
+                &extracted.token,
+                true,
+                dpop_proof,
+                method,
+                &uri,
+                false,
+            )
+            .await
+            {
+                Ok(user) => Ok(BearerAuth(user)),
+                Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
+                Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(_) => Err(AuthError::AuthenticationFailed),
+            }
+        } else {
+            match validate_bearer_token_cached(&state.db, &state.cache, &extracted.token).await {
+                Ok(user) => Ok(BearerAuth(user)),
+                Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
+                Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(_) => Err(AuthError::AuthenticationFailed),
+            }
         }
     }
 }
@@ -178,12 +203,41 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
             .to_str()
             .map_err(|_| AuthError::InvalidFormat)?;
 
-        let token = extract_bearer_token(auth_header)?;
+        let extracted =
+            extract_auth_token_from_header(Some(auth_header)).ok_or(AuthError::InvalidFormat)?;
 
-        match validate_bearer_token_cached_allow_deactivated(&state.db, &state.cache, token).await {
-            Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
-            Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
-            Err(_) => Err(AuthError::AuthenticationFailed),
+        if extracted.is_dpop {
+            let dpop_proof = parts.headers.get("dpop").and_then(|h| h.to_str().ok());
+            let method = parts.method.as_str();
+            let uri = parts.uri.to_string();
+
+            match validate_token_with_dpop(
+                &state.db,
+                &extracted.token,
+                true,
+                dpop_proof,
+                method,
+                &uri,
+                true,
+            )
+            .await
+            {
+                Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
+                Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(_) => Err(AuthError::AuthenticationFailed),
+            }
+        } else {
+            match validate_bearer_token_cached_allow_deactivated(
+                &state.db,
+                &state.cache,
+                &extracted.token,
+            )
+            .await
+            {
+                Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
+                Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(_) => Err(AuthError::AuthenticationFailed),
+            }
         }
     }
 }
@@ -204,19 +258,51 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
             .to_str()
             .map_err(|_| AuthError::InvalidFormat)?;
 
-        let token = extract_bearer_token(auth_header)?;
+        let extracted =
+            extract_auth_token_from_header(Some(auth_header)).ok_or(AuthError::InvalidFormat)?;
 
-        match validate_bearer_token_cached(&state.db, &state.cache, token).await {
-            Ok(user) => {
-                if !user.is_admin {
-                    return Err(AuthError::AdminRequired);
+        let user = if extracted.is_dpop {
+            let dpop_proof = parts.headers.get("dpop").and_then(|h| h.to_str().ok());
+            let method = parts.method.as_str();
+            let uri = parts.uri.to_string();
+
+            match validate_token_with_dpop(
+                &state.db,
+                &extracted.token,
+                true,
+                dpop_proof,
+                method,
+                &uri,
+                false,
+            )
+            .await
+            {
+                Ok(user) => user,
+                Err(TokenValidationError::AccountDeactivated) => {
+                    return Err(AuthError::AccountDeactivated);
                 }
-                Ok(BearerAuthAdmin(user))
+                Err(TokenValidationError::AccountTakedown) => {
+                    return Err(AuthError::AccountTakedown);
+                }
+                Err(_) => return Err(AuthError::AuthenticationFailed),
             }
-            Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
-            Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
-            Err(_) => Err(AuthError::AuthenticationFailed),
+        } else {
+            match validate_bearer_token_cached(&state.db, &state.cache, &extracted.token).await {
+                Ok(user) => user,
+                Err(TokenValidationError::AccountDeactivated) => {
+                    return Err(AuthError::AccountDeactivated);
+                }
+                Err(TokenValidationError::AccountTakedown) => {
+                    return Err(AuthError::AccountTakedown);
+                }
+                Err(_) => return Err(AuthError::AuthenticationFailed),
+            }
+        };
+
+        if !user.is_admin {
+            return Err(AuthError::AdminRequired);
         }
+        Ok(BearerAuthAdmin(user))
     }
 }
 

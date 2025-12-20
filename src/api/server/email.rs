@@ -52,11 +52,21 @@ pub async fn request_email_update(
     };
 
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
-        Ok(user) => user.did,
+    let auth_user = match auth_result {
+        Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
 
+    if let Err(e) = crate::auth::scope_check::check_account_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::AccountAttr::Email,
+        crate::oauth::scopes::AccountAction::Manage,
+    ) {
+        return e;
+    }
+
+    let did = auth_user.did;
     let user = match sqlx::query!("SELECT id, handle, email FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -167,11 +177,21 @@ pub async fn confirm_email(
     };
 
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
-        Ok(user) => user.did,
+    let auth_user = match auth_result {
+        Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
 
+    if let Err(e) = crate::auth::scope_check::check_account_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::AccountAttr::Email,
+        crate::oauth::scopes::AccountAction::Manage,
+    ) {
+        return e;
+    }
+
+    let did = auth_user.did;
     let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_one(&state.db)
         .await
@@ -274,7 +294,7 @@ pub async fn confirm_email(
         return ApiError::InternalError.into_response();
     }
 
-    if let Err(_) = tx.commit().await {
+    if tx.commit().await.is_err() {
         return ApiError::InternalError.into_response();
     }
 
@@ -310,17 +330,24 @@ pub async fn update_email(
     };
 
     let auth_result = crate::auth::validate_bearer_token(&state.db, &token).await;
-    let did = match auth_result {
-        Ok(user) => user.did,
+    let auth_user = match auth_result {
+        Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
 
-    let user = match sqlx::query!(
-        "SELECT id, email FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
+    if let Err(e) = crate::auth::scope_check::check_account_scope(
+        auth_user.is_oauth,
+        auth_user.scope.as_deref(),
+        crate::oauth::scopes::AccountAttr::Email,
+        crate::oauth::scopes::AccountAction::Manage,
+    ) {
+        return e;
+    }
+
+    let did = auth_user.did;
+    let user = match sqlx::query!("SELECT id, email FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
     {
         Ok(Some(row)) => row,
         _ => {
@@ -451,7 +478,7 @@ pub async fn update_email(
     .execute(&mut *tx)
     .await;
 
-    if let Err(_) = tx.commit().await {
+    if tx.commit().await.is_err() {
         return ApiError::InternalError.into_response();
     }
 

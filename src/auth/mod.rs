@@ -5,8 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::cache::Cache;
+use crate::oauth::scopes::ScopePermissions;
 
 pub mod extractor;
+pub mod scope_check;
 pub mod service;
 pub mod token;
 pub mod verify;
@@ -15,6 +17,7 @@ pub use extractor::{
     AuthError, BearerAuth, BearerAuthAdmin, BearerAuthAllowDeactivated, ExtractedToken,
     extract_auth_token_from_header, extract_bearer_token_from_header,
 };
+pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 pub use token::{
     SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH, TOKEN_TYPE_ACCESS,
     TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, TokenWithMetadata, create_access_token,
@@ -24,7 +27,6 @@ pub use token::{
 pub use verify::{
     get_did_from_token, get_jti_from_token, verify_access_token, verify_refresh_token, verify_token,
 };
-pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 
 const KEY_CACHE_TTL_SECS: u64 = 300;
 const SESSION_CACHE_TTL_SECS: u64 = 60;
@@ -53,6 +55,16 @@ pub struct AuthenticatedUser {
     pub key_bytes: Option<Vec<u8>>,
     pub is_oauth: bool,
     pub is_admin: bool,
+    pub scope: Option<String>,
+}
+
+impl AuthenticatedUser {
+    pub fn permissions(&self) -> ScopePermissions {
+        if !self.is_oauth {
+            return ScopePermissions::from_scope_string(Some("atproto"));
+        }
+        ScopePermissions::from_scope_string(self.scope.as_deref())
+    }
 }
 
 pub async fn validate_bearer_token(
@@ -114,7 +126,8 @@ async fn validate_bearer_token_with_options_internal(
             }
         }
 
-        let (decrypted_key, deactivated_at, takedown_ref, is_admin) = if let Some(key) = cached_key {
+        let (decrypted_key, deactivated_at, takedown_ref, is_admin) = if let Some(key) = cached_key
+        {
             let user_status = sqlx::query!(
                 "SELECT deactivated_at, takedown_ref, is_admin FROM users WHERE did = $1",
                 did
@@ -125,7 +138,12 @@ async fn validate_bearer_token_with_options_internal(
             .flatten();
 
             match user_status {
-                Some(status) => (Some(key), status.deactivated_at, status.takedown_ref, status.is_admin),
+                Some(status) => (
+                    Some(key),
+                    status.deactivated_at,
+                    status.takedown_ref,
+                    status.is_admin,
+                ),
                 None => (None, None, None, false),
             }
         } else if let Some(user) = sqlx::query!(
@@ -153,7 +171,12 @@ async fn validate_bearer_token_with_options_internal(
                     .await;
             }
 
-            (Some(key), user.deactivated_at, user.takedown_ref, user.is_admin)
+            (
+                Some(key),
+                user.deactivated_at,
+                user.takedown_ref,
+                user.is_admin,
+            )
         } else {
             (None, None, None, false)
         };
@@ -194,16 +217,15 @@ async fn validate_bearer_token_with_options_internal(
 
                     session_valid = session_exists.is_some();
 
-                    if session_valid
-                        && let Some(c) = cache {
-                            let _ = c
-                                .set(
-                                    &session_cache_key,
-                                    "1",
-                                    Duration::from_secs(SESSION_CACHE_TTL_SECS),
-                                )
-                                .await;
-                        }
+                    if session_valid && let Some(c) = cache {
+                        let _ = c
+                            .set(
+                                &session_cache_key,
+                                "1",
+                                Duration::from_secs(SESSION_CACHE_TTL_SECS),
+                            )
+                            .await;
+                    }
                 }
 
                 if session_valid {
@@ -212,6 +234,7 @@ async fn validate_bearer_token_with_options_internal(
                         key_bytes: Some(decrypted_key),
                         is_oauth: false,
                         is_admin,
+                        scope: None,
                     });
                 }
             }
@@ -232,32 +255,33 @@ async fn validate_bearer_token_with_options_internal(
         .await
         .ok()
         .flatten()
-        {
-            if !allow_deactivated && oauth_token.deactivated_at.is_some() {
-                return Err(TokenValidationError::AccountDeactivated);
-            }
-
-            if oauth_token.takedown_ref.is_some() {
-                return Err(TokenValidationError::AccountTakedown);
-            }
-
-            let now = chrono::Utc::now();
-            if oauth_token.expires_at > now {
-                let key_bytes = if let (Some(kb), Some(ev)) =
-                    (&oauth_token.key_bytes, oauth_token.encryption_version)
-                {
-                    crate::config::decrypt_key(kb, Some(ev)).ok()
-                } else {
-                    None
-                };
-                return Ok(AuthenticatedUser {
-                    did: oauth_token.did,
-                    key_bytes,
-                    is_oauth: true,
-                    is_admin: oauth_token.is_admin,
-                });
-            }
+    {
+        if !allow_deactivated && oauth_token.deactivated_at.is_some() {
+            return Err(TokenValidationError::AccountDeactivated);
         }
+
+        if oauth_token.takedown_ref.is_some() {
+            return Err(TokenValidationError::AccountTakedown);
+        }
+
+        let now = chrono::Utc::now();
+        if oauth_token.expires_at > now {
+            let key_bytes = if let (Some(kb), Some(ev)) =
+                (&oauth_token.key_bytes, oauth_token.encryption_version)
+            {
+                crate::config::decrypt_key(kb, Some(ev)).ok()
+            } else {
+                None
+            };
+            return Ok(AuthenticatedUser {
+                did: oauth_token.did,
+                key_bytes,
+                is_oauth: true,
+                is_admin: oauth_token.is_admin,
+                scope: oauth_info.scope,
+            });
+        }
+    }
 
     Err(TokenValidationError::AuthenticationFailed)
 }
@@ -314,7 +338,9 @@ pub async fn validate_token_with_dpop(
             if user_info.takedown_ref.is_some() {
                 return Err(TokenValidationError::AccountTakedown);
             }
-            let key_bytes = if let (Some(kb), Some(ev)) = (&user_info.key_bytes, user_info.encryption_version) {
+            let key_bytes = if let (Some(kb), Some(ev)) =
+                (&user_info.key_bytes, user_info.encryption_version)
+            {
                 crate::config::decrypt_key(kb, Some(ev)).ok()
             } else {
                 None
@@ -324,6 +350,7 @@ pub async fn validate_token_with_dpop(
                 key_bytes,
                 is_oauth: true,
                 is_admin: user_info.is_admin,
+                scope: result.scope,
             })
         }
         Err(_) => Err(TokenValidationError::AuthenticationFailed),

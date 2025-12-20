@@ -8,10 +8,10 @@ use axum::{
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
-use uuid::Uuid;
 use serde::Deserialize;
 use serde_json::json;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 fn generate_reset_code() -> String {
     crate::util::generate_token_code()
@@ -19,13 +19,15 @@ fn generate_reset_code() -> String {
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
-            && let Some(first_ip) = value.split(',').next() {
-                return first_ip.trim().to_string();
-            }
+        && let Some(first_ip) = value.split(',').next()
+    {
+        return first_ip.trim().to_string();
+    }
     if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str() {
-            return value.trim().to_string();
-        }
+        && let Ok(value) = real_ip.to_str()
+    {
+        return value.trim().to_string();
+    }
     "unknown".to_string()
 }
 
@@ -99,8 +101,7 @@ pub async fn request_password_reset(
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) =
-        crate::comms::enqueue_password_reset(&state.db, user_id, &code, &hostname).await
+    if let Err(e) = crate::comms::enqueue_password_reset(&state.db, user_id, &code, &hostname).await
     {
         warn!("Failed to enqueue password reset notification: {:?}", e);
     }
@@ -335,12 +336,11 @@ pub async fn change_password(
         )
             .into_response();
     }
-    let user = sqlx::query_as::<_, (Uuid, String)>(
-        "SELECT id, password_hash FROM users WHERE did = $1",
-    )
-    .bind(&auth.0.did)
-    .fetch_optional(&state.db)
-    .await;
+    let user =
+        sqlx::query_as::<_, (Uuid, String)>("SELECT id, password_hash FROM users WHERE did = $1")
+            .bind(&auth.0.did)
+            .fetch_optional(&state.db)
+            .await;
     let (user_id, password_hash) = match user {
         Ok(Some(row)) => row,
         Ok(None) => {

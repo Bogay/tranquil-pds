@@ -3,12 +3,12 @@ pub mod appview;
 pub mod auth;
 pub mod cache;
 pub mod circuit_breaker;
+pub mod comms;
 pub mod config;
 pub mod crawlers;
 pub mod handle;
 pub mod image;
 pub mod metrics;
-pub mod comms;
 pub mod oauth;
 pub mod plc;
 pub mod rate_limit;
@@ -344,6 +344,10 @@ pub fn app(state: AppState) -> Router {
         .route("/oauth/authorize", get(oauth::endpoints::authorize_get))
         .route("/oauth/authorize", post(oauth::endpoints::authorize_post))
         .route(
+            "/oauth/authorize/accounts",
+            get(oauth::endpoints::authorize_accounts),
+        )
+        .route(
             "/oauth/authorize/select",
             post(oauth::endpoints::authorize_select),
         )
@@ -359,6 +363,14 @@ pub fn app(state: AppState) -> Router {
             "/oauth/authorize/deny",
             post(oauth::endpoints::authorize_deny),
         )
+        .route(
+            "/oauth/authorize/consent",
+            get(oauth::endpoints::consent_get),
+        )
+        .route(
+            "/oauth/authorize/consent",
+            post(oauth::endpoints::consent_post),
+        )
         .route("/oauth/token", post(oauth::endpoints::token_endpoint))
         .route("/oauth/revoke", post(oauth::endpoints::revoke_token))
         .route(
@@ -368,6 +380,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.atproto.temp.checkSignupQueue",
             get(api::temp::check_signup_queue),
+        )
+        .route(
+            "/xrpc/com.atproto.temp.dereferenceScope",
+            post(api::temp::dereference_scope),
         )
         .route(
             "/xrpc/com.tranquil.account.getNotificationPrefs",

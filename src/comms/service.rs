@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::sender::{CommsSender, SendError};
-use super::types::{NewComms, CommsChannel, CommsStatus, QueuedComms};
+use super::types::{CommsChannel, CommsStatus, NewComms, QueuedComms};
 
 pub struct CommsService {
     db: PgPool,

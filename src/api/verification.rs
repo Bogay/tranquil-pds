@@ -49,11 +49,13 @@ pub async fn confirm_channel_verification(
         .await
     {
         Ok(id) => id,
-        Err(_) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "User not found"})),
-        )
-            .into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "User not found"})),
+            )
+                .into_response();
+        }
     };
 
     let channel_str = input.channel.as_str();
@@ -88,14 +90,15 @@ pub async fn confirm_channel_verification(
             .into_response(),
     };
 
-    let pending_identifier = match record.pending_identifier {
-        Some(p) => p,
-        None => return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "No pending identifier found"})),
-        )
-            .into_response(),
-    };
+    let pending_identifier =
+        match record.pending_identifier {
+            Some(p) => p,
+            None => return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidRequest", "message": "No pending identifier found"})),
+            )
+                .into_response(),
+        };
 
     if record.expires_at < Utc::now() {
         return (
@@ -115,11 +118,13 @@ pub async fn confirm_channel_verification(
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
-        Err(_) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
     };
 
     let update_result = match channel_str {
@@ -148,7 +153,11 @@ pub async fn confirm_channel_verification(
 
     if let Err(e) = update_result {
         error!("Failed to update user channel: {:?}", e);
-        if channel_str == "email" && e.as_database_error().map(|db| db.is_unique_violation()).unwrap_or(false) {
+        if channel_str == "email"
+            && e.as_database_error()
+                .map(|db| db.is_unique_violation())
+                .unwrap_or(false)
+        {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "EmailTaken", "message": "Email already in use"})),
@@ -168,7 +177,8 @@ pub async fn confirm_channel_verification(
         channel_str as _
     )
     .execute(&mut *tx)
-    .await {
+    .await
+    {
         error!("Failed to delete verification record: {:?}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -177,7 +187,7 @@ pub async fn confirm_channel_verification(
             .into_response();
     }
 
-    if let Err(_) = tx.commit().await {
+    if tx.commit().await.is_err() {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),

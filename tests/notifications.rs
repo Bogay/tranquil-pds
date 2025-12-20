@@ -1,8 +1,8 @@
 mod common;
+use sqlx::PgPool;
 use tranquil_pds::comms::{
     CommsChannel, CommsStatus, CommsType, NewComms, enqueue_comms, enqueue_welcome,
 };
-use sqlx::PgPool;
 
 async fn get_pool() -> PgPool {
     let conn_str = common::get_db_connection_string().await;
@@ -109,9 +109,7 @@ async fn test_comms_queue_status_index() {
             "Test".to_string(),
             "Body".to_string(),
         );
-        enqueue_comms(&pool, item)
-            .await
-            .expect("Failed to enqueue");
+        enqueue_comms(&pool, item).await.expect("Failed to enqueue");
     }
     let final_count: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM comms_queue WHERE status = 'pending' AND user_id = $1",

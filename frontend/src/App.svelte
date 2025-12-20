@@ -13,6 +13,11 @@
   import Notifications from './routes/Notifications.svelte'
   import RepoExplorer from './routes/RepoExplorer.svelte'
   import Admin from './routes/Admin.svelte'
+  import OAuthConsent from './routes/OAuthConsent.svelte'
+  import OAuthLogin from './routes/OAuthLogin.svelte'
+  import OAuthAccounts from './routes/OAuthAccounts.svelte'
+  import OAuth2FA from './routes/OAuth2FA.svelte'
+  import OAuthError from './routes/OAuthError.svelte'
 
   const auth = getAuthState()
 
@@ -46,6 +51,16 @@
         return RepoExplorer
       case '/admin':
         return Admin
+      case '/oauth/consent':
+        return OAuthConsent
+      case '/oauth/login':
+        return OAuthLogin
+      case '/oauth/accounts':
+        return OAuthAccounts
+      case '/oauth/2fa':
+        return OAuth2FA
+      case '/oauth/error':
+        return OAuthError
       default:
         return auth.session ? Dashboard : Login
     }

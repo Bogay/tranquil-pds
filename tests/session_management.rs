@@ -20,14 +20,24 @@ async fn test_list_sessions_returns_current_session() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
-    let sessions = body["sessions"].as_array().expect("sessions should be array");
+    let sessions = body["sessions"]
+        .as_array()
+        .expect("sessions should be array");
     assert!(!sessions.is_empty(), "Should have at least one session");
-    let current = sessions.iter().find(|s| s["isCurrent"].as_bool() == Some(true));
+    let current = sessions
+        .iter()
+        .find(|s| s["isCurrent"].as_bool() == Some(true));
     assert!(current.is_some(), "Should have a current session marked");
     let session = current.unwrap();
     assert!(session["id"].as_str().is_some(), "Session should have id");
-    assert!(session["createdAt"].as_str().is_some(), "Session should have createdAt");
-    assert!(session["expiresAt"].as_str().is_some(), "Session should have expiresAt");
+    assert!(
+        session["createdAt"].as_str().is_some(),
+        "Session should have createdAt"
+    );
+    assert!(
+        session["expiresAt"].as_str().is_some(),
+        "Session should have expiresAt"
+    );
     let _ = did;
 }
 
@@ -84,7 +94,11 @@ async fn test_list_sessions_multiple_sessions() {
     assert_eq!(list_res.status(), StatusCode::OK);
     let list_body: Value = list_res.json().await.unwrap();
     let sessions = list_body["sessions"].as_array().unwrap();
-    assert!(sessions.len() >= 2, "Should have at least 2 sessions, got {}", sessions.len());
+    assert!(
+        sessions.len() >= 2,
+        "Should have at least 2 sessions, got {}",
+        sessions.len()
+    );
     let _ = jwt1;
 }
 
@@ -154,8 +168,13 @@ async fn test_revoke_session_success() {
         .expect("Failed to list sessions");
     let list_body: Value = list_res.json().await.unwrap();
     let sessions = list_body["sessions"].as_array().unwrap();
-    let other_session = sessions.iter().find(|s| s["isCurrent"].as_bool() != Some(true));
-    assert!(other_session.is_some(), "Should have another session to revoke");
+    let other_session = sessions
+        .iter()
+        .find(|s| s["isCurrent"].as_bool() != Some(true));
+    assert!(
+        other_session.is_some(),
+        "Should have another session to revoke"
+    );
     let session_id = other_session.unwrap()["id"].as_str().unwrap();
     let revoke_res = client
         .post(format!(
@@ -179,8 +198,13 @@ async fn test_revoke_session_success() {
         .expect("Failed to list sessions after revoke");
     let list_after_body: Value = list_after_res.json().await.unwrap();
     let sessions_after = list_after_body["sessions"].as_array().unwrap();
-    let revoked_still_exists = sessions_after.iter().any(|s| s["id"].as_str() == Some(session_id));
-    assert!(!revoked_still_exists, "Revoked session should not appear in list");
+    let revoked_still_exists = sessions_after
+        .iter()
+        .any(|s| s["id"].as_str() == Some(session_id));
+    assert!(
+        !revoked_still_exists,
+        "Revoked session should not appear in list"
+    );
     let _ = jwt1;
 }
 

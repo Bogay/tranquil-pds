@@ -147,20 +147,24 @@ pub async fn get_notification_history(
         }
     };
 
-    let user_id: uuid::Uuid = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", user.did)
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(id) => id,
-        Err(e) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
-        )
-            .into_response(),
-    };
+    let user_id: uuid::Uuid =
+        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", user.did)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
+                ),
+            )
+                .into_response(),
+        };
 
-    let rows = match sqlx::query!(
-        r#"
+    let rows =
+        match sqlx::query!(
+            r#"
         SELECT
             created_at,
             channel as "channel: String",
@@ -173,29 +177,32 @@ pub async fn get_notification_history(
         ORDER BY created_at DESC
         LIMIT 50
         "#,
-        user_id
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
+            user_id
         )
-            .into_response(),
-    };
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
+                ),
+            )
+                .into_response(),
+        };
 
-    let notifications = rows.iter().map(|row| {
-        NotificationHistoryEntry {
+    let notifications = rows
+        .iter()
+        .map(|row| NotificationHistoryEntry {
             created_at: row.created_at.to_rfc3339(),
             channel: row.channel.clone(),
             comms_type: row.comms_type.clone(),
             status: row.status.clone(),
             subject: row.subject.clone(),
             body: row.body.clone(),
-        }
-    }).collect();
+        })
+        .collect();
 
     Json(GetNotificationHistoryResponse { notifications }).into_response()
 }
@@ -297,20 +304,23 @@ pub async fn update_notification_prefs(
         }
     };
 
-    let user_row = match sqlx::query!(
-        "SELECT id, handle, email FROM users WHERE did = $1",
-        user.did
-    )
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
+    let user_row =
+        match sqlx::query!(
+            "SELECT id, handle, email FROM users WHERE did = $1",
+            user.did
         )
-            .into_response(),
-    };
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(row) => row,
+            Err(e) => return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
+                ),
+            )
+                .into_response(),
+        };
 
     let user_id = user_row.id;
     let handle = user_row.handle;
@@ -384,7 +394,15 @@ pub async fn update_notification_prefs(
                     .into_response();
             }
 
-            if let Err(e) = request_channel_verification(&state.db, user_id, "email", &email_clean, Some(&handle)).await {
+            if let Err(e) = request_channel_verification(
+                &state.db,
+                user_id,
+                "email",
+                &email_clean,
+                Some(&handle),
+            )
+            .await
+            {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "InternalError", "message": e})),
@@ -419,7 +437,9 @@ pub async fn update_notification_prefs(
             .await;
             info!(did = %user.did, "Cleared Discord ID");
         } else {
-            if let Err(e) = request_channel_verification(&state.db, user_id, "discord", discord_id, None).await {
+            if let Err(e) =
+                request_channel_verification(&state.db, user_id, "discord", discord_id, None).await
+            {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "InternalError", "message": e})),
@@ -455,7 +475,10 @@ pub async fn update_notification_prefs(
             .await;
             info!(did = %user.did, "Cleared Telegram username");
         } else {
-            if let Err(e) = request_channel_verification(&state.db, user_id, "telegram", telegram_clean, None).await {
+            if let Err(e) =
+                request_channel_verification(&state.db, user_id, "telegram", telegram_clean, None)
+                    .await
+            {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "InternalError", "message": e})),
@@ -490,7 +513,9 @@ pub async fn update_notification_prefs(
             .await;
             info!(did = %user.did, "Cleared Signal number");
         } else {
-            if let Err(e) = request_channel_verification(&state.db, user_id, "signal", signal, None).await {
+            if let Err(e) =
+                request_channel_verification(&state.db, user_id, "signal", signal, None).await
+            {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "InternalError", "message": e})),
@@ -505,5 +530,6 @@ pub async fn update_notification_prefs(
     Json(UpdateNotificationPrefsResponse {
         success: true,
         verification_required,
-    }).into_response()
+    })
+    .into_response()
 }

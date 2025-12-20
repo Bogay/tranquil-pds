@@ -14,6 +14,7 @@ use subtle::ConstantTimeEq;
 use super::OAuthError;
 use super::db;
 use super::dpop::DPoPVerifier;
+use super::scopes::ScopePermissions;
 use crate::config::AuthConfig;
 use crate::state::AppState;
 
@@ -175,6 +176,7 @@ pub struct OAuthUser {
     pub client_id: Option<String>,
     pub scope: Option<String>,
     pub is_oauth: bool,
+    pub permissions: ScopePermissions,
 }
 
 pub struct OAuthAuthError {
@@ -244,18 +246,23 @@ impl FromRequestParts<AppState> for OAuthUser {
                 client_id: None,
                 scope: None,
                 is_oauth: false,
+                permissions: ScopePermissions::default(),
             });
         }
         let http_method = parts.method.as_str();
         let http_uri = parts.uri.to_string();
         match verify_oauth_access_token(&state.db, token, dpop_proof, http_method, &http_uri).await
         {
-            Ok(result) => Ok(OAuthUser {
-                did: result.did,
-                client_id: Some(result.client_id),
-                scope: result.scope,
-                is_oauth: true,
-            }),
+            Ok(result) => {
+                let permissions = ScopePermissions::from_scope_string(result.scope.as_deref());
+                Ok(OAuthUser {
+                    did: result.did,
+                    client_id: Some(result.client_id),
+                    scope: result.scope,
+                    is_oauth: true,
+                    permissions,
+                })
+            }
             Err(OAuthError::UseDpopNonce(nonce)) => Err(OAuthAuthError {
                 status: StatusCode::UNAUTHORIZED,
                 error: "use_dpop_nonce".to_string(),

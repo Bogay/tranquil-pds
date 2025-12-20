@@ -408,11 +408,12 @@ pub fn validate_plc_operation_for_submission(
             PlcError::InvalidResponse("verificationMethods must be an object".to_string())
         })?;
     if let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
-        && atproto_key != ctx.expected_signing_key {
-            return Err(PlcError::InvalidResponse(
-                "Incorrect signing key".to_string(),
-            ));
-        }
+        && atproto_key != ctx.expected_signing_key
+    {
+        return Err(PlcError::InvalidResponse(
+            "Incorrect signing key".to_string(),
+        ));
+    }
     let also_known_as = obj
         .get("alsoKnownAs")
         .and_then(|v| v.as_array())

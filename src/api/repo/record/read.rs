@@ -48,10 +48,7 @@ pub async fn get_record(
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
         Ok(None) => {
-            if let Some(proxy_header) = headers
-                .get("atproto-proxy")
-                .and_then(|h| h.to_str().ok())
-            {
+            if let Some(proxy_header) = headers.get("atproto-proxy").and_then(|h| h.to_str().ok()) {
                 let did = proxy_header.split('#').next().unwrap_or(proxy_header);
                 if let Some(resolved) = state.did_resolver.resolve_did(did).await {
                     let mut url = format!(
@@ -84,7 +81,8 @@ pub async fn get_record(
                                 .header("content-type", "application/json")
                                 .body(axum::body::Body::from(body))
                                 .unwrap_or_else(|_| {
-                                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+                                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal error")
+                                        .into_response()
                                 });
                         }
                         Err(e) => {
@@ -138,13 +136,14 @@ pub async fn get_record(
         }
     };
     if let Some(expected_cid) = &input.cid
-        && &record_cid_str != expected_cid {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "NotFound", "message": "Record CID mismatch"})),
-            )
-                .into_response();
-        }
+        && &record_cid_str != expected_cid
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "NotFound", "message": "Record CID mismatch"})),
+        )
+            .into_response();
+    }
     let cid = match Cid::from_str(&record_cid_str) {
         Ok(c) => c,
         Err(_) => {
@@ -326,13 +325,14 @@ pub async fn list_records(
     for (cid, block_opt) in cids.iter().zip(blocks.into_iter()) {
         if let Some(block) = block_opt
             && let Some((rkey, cid_str)) = cid_to_rkey.get(cid)
-                && let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block) {
-                    records.push(json!({
-                        "uri": format!("at://{}/{}/{}", input.repo, input.collection, rkey),
-                        "cid": cid_str,
-                        "value": value
-                    }));
-                }
+            && let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block)
+        {
+            records.push(json!({
+                "uri": format!("at://{}/{}/{}", input.repo, input.collection, rkey),
+                "cid": cid_str,
+                "value": value
+            }));
+        }
     }
     Json(ListRecordsOutput {
         cursor: last_rkey,

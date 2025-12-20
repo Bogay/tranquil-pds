@@ -36,9 +36,10 @@ pub async fn handle_authorization_code_grant(
         ));
     }
     if let Some(request_client_id) = &request.client_id
-        && request_client_id != &auth_request.client_id {
-            return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
-        }
+        && request_client_id != &auth_request.client_id
+    {
+        return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
+    }
     let did = auth_request
         .did
         .ok_or_else(|| OAuthError::InvalidGrant("Authorization not completed".to_string()))?;
@@ -65,11 +66,12 @@ pub async fn handle_authorization_code_grant(
     verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
     verify_pkce(&auth_request.parameters.code_challenge, &code_verifier)?;
     if let Some(redirect_uri) = &request.redirect_uri
-        && redirect_uri != &auth_request.parameters.redirect_uri {
-            return Err(OAuthError::InvalidGrant(
-                "redirect_uri mismatch".to_string(),
-            ));
-        }
+        && redirect_uri != &auth_request.parameters.redirect_uri
+    {
+        return Err(OAuthError::InvalidGrant(
+            "redirect_uri mismatch".to_string(),
+        ));
+    }
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
@@ -83,11 +85,12 @@ pub async fn handle_authorization_code_grant(
             ));
         }
         if let Some(expected_jkt) = &auth_request.parameters.dpop_jkt
-            && &result.jkt != expected_jkt {
-                return Err(OAuthError::InvalidDpopProof(
-                    "DPoP key binding mismatch".to_string(),
-                ));
-            }
+            && &result.jkt != expected_jkt
+        {
+            return Err(OAuthError::InvalidDpopProof(
+                "DPoP key binding mismatch".to_string(),
+            ));
+        }
         Some(result.jkt)
     } else if auth_request.parameters.dpop_jkt.is_some() {
         return Err(OAuthError::InvalidRequest(
@@ -96,10 +99,18 @@ pub async fn handle_authorization_code_grant(
     } else {
         None
     };
+    if let Err(e) = db::revoke_tokens_for_client(&state.db, &did, &auth_request.client_id).await {
+        tracing::warn!("Failed to revoke previous tokens for client: {:?}", e);
+    }
     let token_id = TokenId::generate();
     let refresh_token = RefreshToken::generate();
     let now = Utc::now();
-    let access_token = create_access_token(&token_id.0, &did, dpop_jkt.as_deref())?;
+    let access_token = create_access_token(
+        &token_id.0,
+        &did,
+        dpop_jkt.as_deref(),
+        auth_request.parameters.scope.as_deref(),
+    )?;
     let token_data = TokenData {
         did: did.clone(),
         token_id: token_id.0.clone(),
@@ -179,11 +190,12 @@ pub async fn handle_refresh_token_grant(
             ));
         }
         if let Some(expected_jkt) = &token_data.parameters.dpop_jkt
-            && &result.jkt != expected_jkt {
-                return Err(OAuthError::InvalidDpopProof(
-                    "DPoP key binding mismatch".to_string(),
-                ));
-            }
+            && &result.jkt != expected_jkt
+        {
+            return Err(OAuthError::InvalidDpopProof(
+                "DPoP key binding mismatch".to_string(),
+            ));
+        }
         Some(result.jkt)
     } else if token_data.parameters.dpop_jkt.is_some() {
         return Err(OAuthError::InvalidRequest(
@@ -203,7 +215,12 @@ pub async fn handle_refresh_token_grant(
         new_expires_at,
     )
     .await?;
-    let access_token = create_access_token(&new_token_id.0, &token_data.did, dpop_jkt.as_deref())?;
+    let access_token = create_access_token(
+        &new_token_id.0,
+        &token_data.did,
+        dpop_jkt.as_deref(),
+        token_data.scope.as_deref(),
+    )?;
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();
     let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());

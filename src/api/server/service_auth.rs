@@ -55,12 +55,13 @@ pub async fn get_service_auth(
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let auth_user = match crate::auth::validate_bearer_token_for_service_auth(&state.db, &token).await {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
-    let key_bytes = match auth_user.key_bytes {
-        Some(kb) => kb,
+    let auth_user =
+        match crate::auth::validate_bearer_token_for_service_auth(&state.db, &token).await {
+            Ok(user) => user,
+            Err(e) => return ApiError::from(e).into_response(),
+        };
+    let key_bytes = match &auth_user.key_bytes {
+        Some(kb) => kb.clone(),
         None => {
             return ApiError::AuthenticationFailedMsg(
                 "OAuth tokens cannot create service auth".into(),
@@ -71,6 +72,29 @@ pub async fn get_service_auth(
 
     let lxm = params.lxm.as_deref();
     let lxm_for_token = lxm.unwrap_or("*");
+
+    if let Some(method) = lxm {
+        if let Err(e) = crate::auth::scope_check::check_rpc_scope(
+            auth_user.is_oauth,
+            auth_user.scope.as_deref(),
+            &params.aud,
+            method,
+        ) {
+            return e;
+        }
+    } else if auth_user.is_oauth {
+        let permissions = auth_user.permissions();
+        if !permissions.has_full_access() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": "OAuth tokens with granular scopes must specify an lxm parameter"
+                })),
+            )
+                .into_response();
+        }
+    }
 
     let user_status = sqlx::query!(
         "SELECT takedown_ref FROM users WHERE did = $1",
@@ -95,9 +119,10 @@ pub async fn get_service_auth(
             .into_response();
     }
 
-    if let Some(method) = lxm {
-        if PROTECTED_METHODS.contains(&method) {
-            return (
+    if let Some(method) = lxm
+        && PROTECTED_METHODS.contains(&method)
+    {
+        return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({
                     "error": "InvalidRequest",
@@ -105,7 +130,6 @@ pub async fn get_service_auth(
                 })),
             )
                 .into_response();
-        }
     }
 
     if let Some(exp) = params.exp {
@@ -146,18 +170,22 @@ pub async fn get_service_auth(
         }
     }
 
-    let service_token =
-        match crate::auth::create_service_token(&auth_user.did, &params.aud, lxm_for_token, &key_bytes) {
-            Ok(t) => t,
-            Err(e) => {
-                error!("Failed to create service token: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
-        };
+    let service_token = match crate::auth::create_service_token(
+        &auth_user.did,
+        &params.aud,
+        lxm_for_token,
+        &key_bytes,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            error!("Failed to create service token: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
     (
         StatusCode::OK,
         Json(GetServiceAuthOutput {

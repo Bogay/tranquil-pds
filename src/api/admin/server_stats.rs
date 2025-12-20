@@ -16,10 +16,7 @@ pub struct ServerStatsResponse {
     pub blob_storage_bytes: i64,
 }
 
-pub async fn get_server_stats(
-    State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
-) -> Response {
+pub async fn get_server_stats(State(state): State<AppState>, _auth: BearerAuthAdmin) -> Response {
     let user_count: i64 = match sqlx::query_scalar!("SELECT COUNT(*) FROM users")
         .fetch_one(&state.db)
         .await
@@ -47,14 +44,15 @@ pub async fn get_server_stats(
         Err(_) => 0,
     };
 
-    let blob_storage_bytes: i64 = match sqlx::query_scalar!("SELECT COALESCE(SUM(size_bytes), 0)::BIGINT FROM blobs")
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(Some(bytes)) => bytes,
-        Ok(None) => 0,
-        Err(_) => 0,
-    };
+    let blob_storage_bytes: i64 =
+        match sqlx::query_scalar!("SELECT COALESCE(SUM(size_bytes), 0)::BIGINT FROM blobs")
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => 0,
+            Err(_) => 0,
+        };
 
     Json(ServerStatsResponse {
         user_count,
