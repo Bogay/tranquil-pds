@@ -47,7 +47,7 @@ tracing = "0.1.43"
 tracing-subscriber = "0.3.22"
 tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 urlencoding = "2.1"
-uuid = { version = "1.19.0", features = ["v4", "fast-rng"] }
+uuid = { version = "1.19.0", features = ["v4", "v5", "fast-rng"] }
 iroh-car = "0.5.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
@@ -56,6 +56,9 @@ hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 bs58 = "0.5.1"
+totp-rs = { version = "5", features = ["qr"] }
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
+webauthn-rs-proto = "0.5.4"
 [features]
 external-infra = []
 [dev-dependencies]

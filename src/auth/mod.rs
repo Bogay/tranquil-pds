@@ -11,7 +11,9 @@ pub mod extractor;
 pub mod scope_check;
 pub mod service;
 pub mod token;
+pub mod totp;
 pub mod verify;
+pub mod webauthn;
 
 pub use extractor::{
     AuthError, BearerAuth, BearerAuthAdmin, BearerAuthAllowDeactivated, ExtractedToken,

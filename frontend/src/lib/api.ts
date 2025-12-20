@@ -493,4 +493,80 @@ export const api = {
       body: { repo, collection, rkey },
     })
   },
+
+  async getTotpStatus(token: string): Promise<{ enabled: boolean; hasBackupCodes: boolean }> {
+    return xrpc('com.atproto.server.getTotpStatus', { token })
+  },
+
+  async createTotpSecret(token: string): Promise<{ uri: string; qrBase64: string }> {
+    return xrpc('com.atproto.server.createTotpSecret', { method: 'POST', token })
+  },
+
+  async enableTotp(token: string, code: string): Promise<{ success: boolean; backupCodes: string[] }> {
+    return xrpc('com.atproto.server.enableTotp', {
+      method: 'POST',
+      token,
+      body: { code },
+    })
+  },
+
+  async disableTotp(token: string, password: string, code: string): Promise<{ success: boolean }> {
+    return xrpc('com.atproto.server.disableTotp', {
+      method: 'POST',
+      token,
+      body: { password, code },
+    })
+  },
+
+  async regenerateBackupCodes(token: string, password: string, code: string): Promise<{ backupCodes: string[] }> {
+    return xrpc('com.atproto.server.regenerateBackupCodes', {
+      method: 'POST',
+      token,
+      body: { password, code },
+    })
+  },
+
+  async startPasskeyRegistration(token: string, friendlyName?: string): Promise<{ options: unknown }> {
+    return xrpc('com.atproto.server.startPasskeyRegistration', {
+      method: 'POST',
+      token,
+      body: { friendlyName },
+    })
+  },
+
+  async finishPasskeyRegistration(token: string, credential: unknown, friendlyName?: string): Promise<{ id: string; credentialId: string }> {
+    return xrpc('com.atproto.server.finishPasskeyRegistration', {
+      method: 'POST',
+      token,
+      body: { credential, friendlyName },
+    })
+  },
+
+  async listPasskeys(token: string): Promise<{
+    passkeys: Array<{
+      id: string
+      credentialId: string
+      friendlyName: string | null
+      createdAt: string
+      lastUsed: string | null
+    }>
+  }> {
+    return xrpc('com.atproto.server.listPasskeys', { token })
+  },
+
+  async deletePasskey(token: string, id: string): Promise<void> {
+    await xrpc('com.atproto.server.deletePasskey', {
+      method: 'POST',
+      token,
+      body: { id },
+    })
+  },
+
+  async updatePasskey(token: string, id: string, friendlyName: string): Promise<void> {
+    await xrpc('com.atproto.server.updatePasskey', {
+      method: 'POST',
+      token,
+      body: { id, friendlyName },
+    })
+  },
 }

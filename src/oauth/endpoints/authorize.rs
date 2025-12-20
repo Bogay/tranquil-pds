@@ -486,6 +486,25 @@ pub async fn authorize_post(
     if !password_valid {
         return show_login_error("Invalid handle/email or password.", json_response);
     }
+    let has_totp = crate::api::server::has_totp_enabled(&state, &user.did).await;
+    if has_totp {
+        if db::set_authorization_did(&state.db, &form.request_uri, &user.did, None)
+            .await
+            .is_err()
+        {
+            return show_login_error("An error occurred. Please try again.", json_response);
+        }
+        if json_response {
+            return Json(serde_json::json!({
+                "needs_totp": true
+            }))
+            .into_response();
+        }
+        return redirect_see_other(&format!(
+            "/#/oauth/totp?request_uri={}",
+            url_encode(&form.request_uri)
+        ));
+    }
     if user.two_factor_enabled {
         let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
         match db::create_2fa_challenge(&state.db, &user.did, &form.request_uri).await {
@@ -744,6 +763,23 @@ pub async fn authorize_select(
             "access_denied",
             "Please verify your account before logging in.",
         );
+    }
+    let has_totp = crate::api::server::has_totp_enabled(&state, &form.did).await;
+    if has_totp {
+        if db::set_authorization_did(&state.db, &form.request_uri, &form.did, Some(&device_id))
+            .await
+            .is_err()
+        {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "An error occurred. Please try again.",
+            );
+        }
+        return Json(serde_json::json!({
+            "needs_totp": true
+        }))
+        .into_response();
     }
     if user.two_factor_enabled {
         let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
@@ -1323,54 +1359,6 @@ pub async fn authorize_2fa_post(
             "Too many attempts. Please try again later.",
         );
     }
-    let challenge = match db::get_2fa_challenge(&state.db, &form.request_uri).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_request",
-                "No 2FA challenge found. Please start over.",
-            );
-        }
-        Err(_) => {
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "server_error",
-                "An error occurred. Please try again.",
-            );
-        }
-    };
-    if challenge.expires_at < Utc::now() {
-        let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "2FA code has expired. Please start over.",
-        );
-    }
-    if challenge.attempts >= MAX_2FA_ATTEMPTS {
-        let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
-        return json_error(
-            StatusCode::FORBIDDEN,
-            "access_denied",
-            "Too many failed attempts. Please start over.",
-        );
-    }
-    let code_valid: bool = form
-        .code
-        .trim()
-        .as_bytes()
-        .ct_eq(challenge.code.as_bytes())
-        .into();
-    if !code_valid {
-        let _ = db::increment_2fa_attempts(&state.db, challenge.id).await;
-        return json_error(
-            StatusCode::FORBIDDEN,
-            "invalid_code",
-            "Invalid verification code. Please try again.",
-        );
-    }
-    let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
         Ok(Some(d)) => d,
         Ok(None) => {
@@ -1388,12 +1376,135 @@ pub async fn authorize_2fa_post(
             );
         }
     };
+    if request_data.expires_at < Utc::now() {
+        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Authorization request has expired.",
+        );
+    }
+    let challenge = db::get_2fa_challenge(&state.db, &form.request_uri)
+        .await
+        .ok()
+        .flatten();
+    if let Some(challenge) = challenge {
+        if challenge.expires_at < Utc::now() {
+            let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "2FA code has expired. Please start over.",
+            );
+        }
+        if challenge.attempts >= MAX_2FA_ATTEMPTS {
+            let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
+            return json_error(
+                StatusCode::FORBIDDEN,
+                "access_denied",
+                "Too many failed attempts. Please start over.",
+            );
+        }
+        let code_valid: bool = form
+            .code
+            .trim()
+            .as_bytes()
+            .ct_eq(challenge.code.as_bytes())
+            .into();
+        if !code_valid {
+            let _ = db::increment_2fa_attempts(&state.db, challenge.id).await;
+            return json_error(
+                StatusCode::FORBIDDEN,
+                "invalid_code",
+                "Invalid verification code. Please try again.",
+            );
+        }
+        let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
+        let code = Code::generate();
+        let device_id = extract_device_cookie(&headers);
+        if db::update_authorization_request(
+            &state.db,
+            &form.request_uri,
+            &challenge.did,
+            device_id.as_deref(),
+            &code.0,
+        )
+        .await
+        .is_err()
+        {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "An error occurred. Please try again.",
+            );
+        }
+        let redirect_url = build_success_redirect(
+            &request_data.parameters.redirect_uri,
+            &code.0,
+            request_data.parameters.state.as_deref(),
+            request_data.parameters.response_mode.as_deref(),
+        );
+        return Json(serde_json::json!({
+            "redirect_uri": redirect_url
+        }))
+        .into_response();
+    }
+    let did = match &request_data.did {
+        Some(d) => d.clone(),
+        None => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "No 2FA challenge found. Please start over.",
+            );
+        }
+    };
+    if !crate::api::server::has_totp_enabled(&state, &did).await {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "No 2FA challenge found. Please start over.",
+        );
+    }
+    let totp_valid =
+        crate::api::server::verify_totp_or_backup_for_user(&state, &did, &form.code).await;
+    if !totp_valid {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "invalid_code",
+            "Invalid verification code. Please try again.",
+        );
+    }
+    let requested_scope_str = request_data
+        .parameters
+        .scope
+        .as_deref()
+        .unwrap_or("atproto");
+    let requested_scopes: Vec<String> = requested_scope_str
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let needs_consent = db::should_show_consent(
+        &state.db,
+        &did,
+        &request_data.parameters.client_id,
+        &requested_scopes,
+    )
+    .await
+    .unwrap_or(true);
+    if needs_consent {
+        let consent_url = format!(
+            "/#/oauth/consent?request_uri={}",
+            url_encode(&form.request_uri)
+        );
+        return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
+    }
     let code = Code::generate();
     let device_id = extract_device_cookie(&headers);
     if db::update_authorization_request(
         &state.db,
         &form.request_uri,
-        &challenge.did,
+        &did,
         device_id.as_deref(),
         &code.0,
     )
@@ -1412,6 +1523,619 @@ pub async fn authorize_2fa_post(
         request_data.parameters.state.as_deref(),
         request_data.parameters.response_mode.as_deref(),
     );
+    Json(serde_json::json!({
+        "redirect_uri": redirect_url
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckPasskeysQuery {
+    pub identifier: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckPasskeysResponse {
+    pub has_passkeys: bool,
+}
+
+pub async fn check_user_has_passkeys(
+    State(state): State<AppState>,
+    Query(query): Query<CheckPasskeysQuery>,
+) -> Response {
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let normalized_identifier = query.identifier.trim();
+    let normalized_identifier = normalized_identifier
+        .strip_prefix('@')
+        .unwrap_or(normalized_identifier);
+    let normalized_identifier = if let Some(bare_handle) =
+        normalized_identifier.strip_suffix(&format!(".{}", pds_hostname))
+    {
+        bare_handle.to_string()
+    } else {
+        normalized_identifier.to_string()
+    };
+
+    let user = sqlx::query!(
+        "SELECT did FROM users WHERE handle = $1 OR email = $1",
+        normalized_identifier
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let has_passkeys = match user {
+        Ok(Some(u)) => crate::api::server::has_passkeys_for_user(&state, &u.did).await,
+        _ => false,
+    };
+
+    Json(CheckPasskeysResponse { has_passkeys }).into_response()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityStatusResponse {
+    pub has_passkeys: bool,
+    pub has_totp: bool,
+}
+
+pub async fn check_user_security_status(
+    State(state): State<AppState>,
+    Query(query): Query<CheckPasskeysQuery>,
+) -> Response {
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let normalized_identifier = query.identifier.trim();
+    let normalized_identifier = normalized_identifier
+        .strip_prefix('@')
+        .unwrap_or(normalized_identifier);
+    let normalized_identifier = if let Some(bare_handle) =
+        normalized_identifier.strip_suffix(&format!(".{}", pds_hostname))
+    {
+        bare_handle.to_string()
+    } else {
+        normalized_identifier.to_string()
+    };
+
+    let user = sqlx::query!(
+        "SELECT did FROM users WHERE handle = $1 OR email = $1",
+        normalized_identifier
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let (has_passkeys, has_totp) = match user {
+        Ok(Some(u)) => {
+            let passkeys = crate::api::server::has_passkeys_for_user(&state, &u.did).await;
+            let totp = crate::api::server::has_totp_enabled(&state, &u.did).await;
+            (passkeys, totp)
+        }
+        _ => (false, false),
+    };
+
+    Json(SecurityStatusResponse {
+        has_passkeys,
+        has_totp,
+    })
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasskeyStartInput {
+    pub request_uri: String,
+    pub identifier: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasskeyStartResponse {
+    pub options: serde_json::Value,
+}
+
+pub async fn passkey_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(form): Json<PasskeyStartInput>,
+) -> Response {
+    let client_ip = extract_client_ip(&headers);
+
+    if !state
+        .check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip)
+        .await
+    {
+        tracing::warn!(ip = %client_ip, "OAuth passkey rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "error": "RateLimitExceeded",
+                "error_description": "Too many login attempts. Please try again later."
+            })),
+        )
+            .into_response();
+    }
+
+    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+        Ok(Some(data)) => data,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid or expired request_uri."
+                })),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if request_data.expires_at < Utc::now() {
+        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Authorization request has expired."
+            })),
+        )
+            .into_response();
+    }
+
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let normalized_username = form.identifier.trim();
+    let normalized_username = normalized_username
+        .strip_prefix('@')
+        .unwrap_or(normalized_username);
+    let normalized_username = if let Some(bare_handle) =
+        normalized_username.strip_suffix(&format!(".{}", pds_hostname))
+    {
+        bare_handle.to_string()
+    } else {
+        normalized_username.to_string()
+    };
+
+    let user = match sqlx::query!(
+        r#"
+        SELECT did, deactivated_at, takedown_ref,
+               email_verified, discord_verified, telegram_verified, signal_verified
+        FROM users
+        WHERE handle = $1 OR email = $1
+        "#,
+        normalized_username
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "User not found or has no passkeys."
+                })),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if user.deactivated_at.is_some() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "access_denied",
+                "error_description": "This account has been deactivated."
+            })),
+        )
+            .into_response();
+    }
+
+    if user.takedown_ref.is_some() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "access_denied",
+                "error_description": "This account has been taken down."
+            })),
+        )
+            .into_response();
+    }
+
+    let is_verified = user.email_verified
+        || user.discord_verified
+        || user.telegram_verified
+        || user.signal_verified;
+
+    if !is_verified {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "access_denied",
+                "error_description": "Please verify your account before logging in."
+            })),
+        )
+            .into_response();
+    }
+
+    let stored_passkeys =
+        match crate::auth::webauthn::get_passkeys_for_user(&state.db, &user.did).await {
+            Ok(pks) => pks,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to get passkeys");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "server_error",
+                        "error_description": "An error occurred."
+                    })),
+                )
+                    .into_response();
+            }
+        };
+
+    if stored_passkeys.is_empty() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "access_denied",
+                "error_description": "User not found or has no passkeys."
+            })),
+        )
+            .into_response();
+    }
+
+    let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
+        .iter()
+        .filter_map(|sp| sp.to_security_key().ok())
+        .collect();
+
+    if passkeys.is_empty() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "Failed to load passkeys."
+            })),
+        )
+            .into_response();
+    }
+
+    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create WebAuthn config");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "WebAuthn configuration failed."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let (rcr, auth_state) = match webauthn.start_authentication(passkeys) {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to start passkey authentication");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "Failed to start authentication."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) =
+        crate::auth::webauthn::save_authentication_state(&state.db, &user.did, &auth_state).await
+    {
+        tracing::error!(error = %e, "Failed to save authentication state");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "An error occurred."
+            })),
+        )
+            .into_response();
+    }
+
+    if db::set_authorization_did(&state.db, &form.request_uri, &user.did, None)
+        .await
+        .is_err()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "An error occurred."
+            })),
+        )
+            .into_response();
+    }
+
+    let options = serde_json::to_value(&rcr).unwrap_or(serde_json::json!({}));
+
+    Json(PasskeyStartResponse { options }).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasskeyFinishInput {
+    pub request_uri: String,
+    pub credential: serde_json::Value,
+}
+
+pub async fn passkey_finish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(form): Json<PasskeyFinishInput>,
+) -> Response {
+    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+        Ok(Some(data)) => data,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid or expired request_uri."
+                })),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if request_data.expires_at < Utc::now() {
+        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Authorization request has expired."
+            })),
+        )
+            .into_response();
+    }
+
+    let did = match request_data.did {
+        Some(d) => d,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "No passkey authentication in progress."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_state = match crate::auth::webauthn::load_authentication_state(&state.db, &did).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "No passkey authentication in progress or challenge expired."
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to load authentication state");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let credential: webauthn_rs::prelude::PublicKeyCredential =
+        match serde_json::from_value(form.credential) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to parse credential");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "invalid_request",
+                        "error_description": "Failed to parse credential response."
+                    })),
+                )
+                    .into_response();
+            }
+        };
+
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to create WebAuthn config");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "WebAuthn configuration failed."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_result = match webauthn.finish_authentication(&credential, &auth_state) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, did = %did, "Failed to verify passkey authentication");
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Passkey verification failed."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) = crate::auth::webauthn::delete_authentication_state(&state.db, &did).await {
+        tracing::warn!(error = %e, "Failed to delete authentication state");
+    }
+
+    if auth_result.needs_update()
+        && let Err(e) = crate::auth::webauthn::update_passkey_counter(
+            &state.db,
+            auth_result.cred_id(),
+            auth_result.counter(),
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "Failed to update passkey counter");
+    }
+
+    tracing::info!(did = %did, "Passkey authentication successful");
+
+    let has_totp = crate::api::server::has_totp_enabled(&state, &did).await;
+    if has_totp {
+        return Json(serde_json::json!({
+            "needs_totp": true
+        }))
+        .into_response();
+    }
+
+    let user = sqlx::query!(
+        "SELECT two_factor_enabled, preferred_comms_channel as \"preferred_comms_channel: CommsChannel\", id FROM users WHERE did = $1",
+        did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    if let Ok(Some(user)) = user
+        && user.two_factor_enabled
+    {
+        let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
+        match db::create_2fa_challenge(&state.db, &did, &form.request_uri).await {
+            Ok(challenge) => {
+                let hostname =
+                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                if let Err(e) =
+                    enqueue_2fa_code(&state.db, user.id, &challenge.code, &hostname).await
+                {
+                    tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
+                }
+                let channel_name = channel_display_name(user.preferred_comms_channel);
+                return Json(serde_json::json!({
+                    "needs_2fa": true,
+                    "channel": channel_name
+                }))
+                .into_response();
+            }
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "server_error",
+                        "error_description": "An error occurred."
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    let device_id = extract_device_cookie(&headers);
+    let requested_scope_str = request_data
+        .parameters
+        .scope
+        .as_deref()
+        .unwrap_or("atproto");
+    let requested_scopes: Vec<String> = requested_scope_str
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+
+    let needs_consent = db::should_show_consent(
+        &state.db,
+        &did,
+        &request_data.parameters.client_id,
+        &requested_scopes,
+    )
+    .await
+    .unwrap_or(true);
+
+    if needs_consent {
+        let consent_url = format!(
+            "/#/oauth/consent?request_uri={}",
+            url_encode(&form.request_uri)
+        );
+        return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
+    }
+
+    let code = Code::generate();
+    if db::update_authorization_request(
+        &state.db,
+        &form.request_uri,
+        &did,
+        device_id.as_deref(),
+        &code.0,
+    )
+    .await
+    .is_err()
+    {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "An error occurred."
+            })),
+        )
+            .into_response();
+    }
+
+    let redirect_url = build_success_redirect(
+        &request_data.parameters.redirect_uri,
+        &code.0,
+        request_data.parameters.state.as_deref(),
+        request_data.parameters.response_mode.as_deref(),
+    );
+
     Json(serde_json::json!({
         "redirect_uri": redirect_url
     }))

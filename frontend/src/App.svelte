@@ -17,7 +17,9 @@
   import OAuthLogin from './routes/OAuthLogin.svelte'
   import OAuthAccounts from './routes/OAuthAccounts.svelte'
   import OAuth2FA from './routes/OAuth2FA.svelte'
+  import OAuthTotp from './routes/OAuthTotp.svelte'
   import OAuthError from './routes/OAuthError.svelte'
+  import Security from './routes/Security.svelte'
 
   const auth = getAuthState()
 
@@ -59,8 +61,12 @@
         return OAuthAccounts
       case '/oauth/2fa':
         return OAuth2FA
+      case '/oauth/totp':
+        return OAuthTotp
       case '/oauth/error':
         return OAuthError
+      case '/security':
+        return Security
       default:
         return auth.session ? Dashboard : Login
     }

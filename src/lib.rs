@@ -279,6 +279,46 @@ pub fn app(state: AppState) -> Router {
             get(api::server::get_account_invite_codes),
         )
         .route(
+            "/xrpc/com.atproto.server.createTotpSecret",
+            post(api::server::create_totp_secret),
+        )
+        .route(
+            "/xrpc/com.atproto.server.enableTotp",
+            post(api::server::enable_totp),
+        )
+        .route(
+            "/xrpc/com.atproto.server.disableTotp",
+            post(api::server::disable_totp),
+        )
+        .route(
+            "/xrpc/com.atproto.server.getTotpStatus",
+            get(api::server::get_totp_status),
+        )
+        .route(
+            "/xrpc/com.atproto.server.regenerateBackupCodes",
+            post(api::server::regenerate_backup_codes),
+        )
+        .route(
+            "/xrpc/com.atproto.server.startPasskeyRegistration",
+            post(api::server::start_passkey_registration),
+        )
+        .route(
+            "/xrpc/com.atproto.server.finishPasskeyRegistration",
+            post(api::server::finish_passkey_registration),
+        )
+        .route(
+            "/xrpc/com.atproto.server.listPasskeys",
+            get(api::server::list_passkeys),
+        )
+        .route(
+            "/xrpc/com.atproto.server.deletePasskey",
+            post(api::server::delete_passkey),
+        )
+        .route(
+            "/xrpc/com.atproto.server.updatePasskey",
+            post(api::server::update_passkey),
+        )
+        .route(
             "/xrpc/com.atproto.admin.getInviteCodes",
             get(api::admin::get_invite_codes),
         )
@@ -358,6 +398,22 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/oauth/authorize/2fa",
             post(oauth::endpoints::authorize_2fa_post),
+        )
+        .route(
+            "/oauth/passkey/check",
+            get(oauth::endpoints::check_user_has_passkeys),
+        )
+        .route(
+            "/oauth/security-status",
+            get(oauth::endpoints::check_user_security_status),
+        )
+        .route(
+            "/oauth/passkey/start",
+            post(oauth::endpoints::passkey_start),
+        )
+        .route(
+            "/oauth/passkey/finish",
+            post(oauth::endpoints::passkey_finish),
         )
         .route(
             "/oauth/authorize/deny",

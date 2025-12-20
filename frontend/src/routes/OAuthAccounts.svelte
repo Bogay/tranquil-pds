@@ -73,6 +73,11 @@
         return
       }
 
+      if (data.needs_totp) {
+        navigate(`/oauth/totp?request_uri=${encodeURIComponent(requestUri)}`)
+        return
+      }
+
       if (data.needs_2fa) {
         navigate(`/oauth/2fa?request_uri=${encodeURIComponent(requestUri)}&channel=${encodeURIComponent(data.channel || '')}`)
         return

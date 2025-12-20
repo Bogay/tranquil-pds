@@ -155,6 +155,10 @@
         <h3>Account Settings</h3>
         <p>Email, password, handle, and more</p>
       </a>
+      <a href="#/security" class="nav-card">
+        <h3>Security</h3>
+        <p>Two-factor authentication</p>
+      </a>
       <a href="#/notifications" class="nav-card">
         <h3>Notification Preferences</h3>
         <p>Discord, Telegram, Signal channels</p>

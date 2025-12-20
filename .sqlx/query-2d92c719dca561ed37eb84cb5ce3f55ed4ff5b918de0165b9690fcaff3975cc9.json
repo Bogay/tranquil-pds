@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO user_totp (did, secret_encrypted, encryption_version, verified, created_at)\n        VALUES ($1, $2, $3, false, NOW())\n        ON CONFLICT (did) DO UPDATE SET\n            secret_encrypted = $2,\n            encryption_version = $3,\n            verified = false,\n            created_at = NOW(),\n            last_used = NULL\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d92c719dca561ed37eb84cb5ce3f55ed4ff5b918de0165b9690fcaff3975cc9"
+}

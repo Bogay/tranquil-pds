@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_totp SET verified = true, last_used = NOW() WHERE did = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f2533a6aefb5e7449b90787d811297fa42ebae9c876c90f42ecf7b88b2f803af"
+}
