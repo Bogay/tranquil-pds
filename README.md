@@ -1,15 +1,22 @@
 # Tranquil PDS
 
-A production-grade Personal Data Server (PDS) for the AT Protocol. Drop-in replacement for Bluesky's reference PDS, written in rust with postgres and s3-compatible blob storage.
+A Personal Data Server for the AT Protocol.
 
-## Features
+Bluesky runs on a federated protocol called AT Protocol. Your account lives on a PDS, a server that stores your posts, profile, follows, and cryptographic keys. Bluesky hosts one for you at bsky.social, but you can run your own. Self-hosting means you control your data; you're not dependent on any company's servers, and your account + data is actually yours.
 
-- Full AT Protocol support (`com.atproto.*` endpoints)
-- OAuth 2.1 provider (PKCE, DPoP, PAR)
-- WebSocket firehose (`subscribeRepos`)
-- Multi-channel notifications (email, discord, telegram, signal)
-- Built-in web UI for account management
-- Per-IP rate limiting
+This particular PDS thrives under harsh conditions. It is a dandelion growing through the cracks in the sidewalk concrete.
+
+It has full compatibility with Bluesky's reference PDS: same endpoints, same behavior, same client compatibility. Everything works: repo operations, blob storage, firehose, OAuth, handle resolution, account migration, the lot.
+
+Another excellent PDS is [Cocoon](https://github.com/haileyok/cocoon), written in go.
+
+## What's different about Tranquil PDS
+
+This software isn't an afterthought by a company with limited resources.
+
+It is a superset of the reference PDS, including: multi-channel communication (email, discord, telegram, signal) for verification and alerts. Built-in web UI for account management, OAuth consent, repo browsing, and admin. Granular OAuth scopes with UI support such that users choose exactly what apps can access.
+
+The PDS itself is a single small binary with no node/npm runtime. It does require postgres, valkey, and s3-compatible storage, which makes setup heavier than the reference PDS's sqlite. The tradeoff is that these are battle-tested pieces of infra that we already know how to scale, back up, and monitor. 
 
 ## Quick Start
 
@@ -52,6 +59,10 @@ podman-compose -f docker-compose.prod.yml up -d
 | [OpenBSD](docs/install-openbsd.md) | OpenBSD 7.8+ with rc.d |
 | [Containers](docs/install-containers.md) | Podman with quadlets or OpenRC |
 | [Kubernetes](docs/install-kubernetes.md) | You know what you're doing |
+
+## Thanks
+
+This project is very grateful to [@nel.pet](https://bsky.app/profile/did:plc:h5wsnqetncv6lu2weom35lg2), [@nonbinary.computer](https://bsky.app/profile/did:plc:yfvwmnlztr4dwkb7hwz55r2g), [@juli.ee](https://bsky.app/profile/did:plc:7vimlesenouvuaqvle42yhvo), [@mary.my.id](https://bsky.app/profile/did:plc:ia76kvnndjutgedggx2ibrem), and [@baileytownsend.dev](https://bsky.app/profile/did:plc:rnpkyqnmsw4ipey6eotbdnnf) for their help and their code to lean on.
 
 ## License
 

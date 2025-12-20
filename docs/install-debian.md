@@ -1,12 +1,10 @@
 # Tranquil PDS Production Installation on Debian
-> **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
-
-This guide covers installing Tranquil PDS on Debian 13 "Trixie".
+This guide covers installing Tranquil PDS on Debian 13.
 
 ## Prerequisites
 - A VPS with at least 2GB RAM and 20GB disk
 - A domain name pointing to your server's IP
-- A **wildcard TLS certificate** for `*.pds.example.com` (user handles are served as subdomains)
+- A wildcard TLS certificate for `*.pds.example.com` (user handles are served as subdomains)
 - Root or sudo access
 ## 1. System Setup
 ```bash
