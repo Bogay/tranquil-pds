@@ -63,6 +63,12 @@ pub async fn sign_plc_operation(
         return e;
     }
     let did = &auth_user.did;
+    if did.starts_with("did:web:") {
+        return ApiError::InvalidRequest(
+            "PLC operations are only valid for did:plc identities".into(),
+        )
+        .into_response();
+    }
     let token = match &input.token {
         Some(t) => t,
         None => {

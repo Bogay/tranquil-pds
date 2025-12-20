@@ -71,11 +71,15 @@ export interface InviteCode {
 
 export type VerificationChannel = 'email' | 'discord' | 'telegram' | 'signal'
 
+export type DidType = 'plc' | 'web' | 'web-external'
+
 export interface CreateAccountParams {
   handle: string
   email: string
   password: string
   inviteCode?: string
+  didType?: DidType
+  did?: string
   verificationChannel?: VerificationChannel
   discordId?: string
   telegramUsername?: string
@@ -109,6 +113,8 @@ export const api = {
         email: params.email,
         password: params.password,
         inviteCode: params.inviteCode,
+        didType: params.didType,
+        did: params.did,
         verificationChannel: params.verificationChannel,
         discordId: params.discordId,
         telegramUsername: params.telegramUsername,

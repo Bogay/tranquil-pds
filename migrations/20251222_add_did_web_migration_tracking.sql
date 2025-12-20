@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN migrated_to_pds TEXT;
+ALTER TABLE users ADD COLUMN migrated_at TIMESTAMPTZ;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { register, getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
-  import { api, ApiError, type VerificationChannel } from '../lib/api'
+  import { api, ApiError, type VerificationChannel, type DidType } from '../lib/api'
 
   const STORAGE_KEY = 'tranquil_pds_pending_verification'
 
@@ -14,6 +14,8 @@
   let discordId = $state('')
   let telegramUsername = $state('')
   let signalNumber = $state('')
+  let didType = $state<DidType>('plc')
+  let externalDid = $state('')
   let submitting = $state(false)
   let error = $state<string | null>(null)
   let serverInfo = $state<{
@@ -56,6 +58,10 @@
     if (serverInfo?.inviteCodeRequired && !inviteCode.trim()) {
       return 'Invite code is required'
     }
+    if (didType === 'web-external') {
+      if (!externalDid.trim()) return 'External did:web is required'
+      if (!externalDid.trim().startsWith('did:web:')) return 'External DID must start with did:web:'
+    }
     switch (verificationChannel) {
       case 'email':
         if (!email.trim()) return 'Email is required for email verification'
@@ -88,6 +94,8 @@
         email: email.trim(),
         password,
         inviteCode: inviteCode.trim() || undefined,
+        didType,
+        did: didType === 'web-external' ? externalDid.trim() : undefined,
         verificationChannel,
         discordId: discordId.trim() || undefined,
         telegramUsername: telegramUsername.trim() || undefined,
@@ -171,6 +179,76 @@
             required
           />
         </div>
+        <fieldset class="identity-section">
+          <legend>Identity Type</legend>
+          <p class="section-hint">Choose how your decentralized identity will be managed.</p>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input
+                type="radio"
+                name="didType"
+                value="plc"
+                bind:group={didType}
+                disabled={submitting}
+              />
+              <span class="radio-content">
+                <strong>did:plc</strong> (Recommended)
+                <span class="radio-hint">Portable identity managed by PLC Directory</span>
+              </span>
+            </label>
+            <label class="radio-label">
+              <input
+                type="radio"
+                name="didType"
+                value="web"
+                bind:group={didType}
+                disabled={submitting}
+              />
+              <span class="radio-content">
+                <strong>did:web</strong>
+                <span class="radio-hint">Identity hosted on this PDS (read warning below)</span>
+              </span>
+            </label>
+            <label class="radio-label">
+              <input
+                type="radio"
+                name="didType"
+                value="web-external"
+                bind:group={didType}
+                disabled={submitting}
+              />
+              <span class="radio-content">
+                <strong>did:web (BYOD)</strong>
+                <span class="radio-hint">Bring your own domain</span>
+              </span>
+            </label>
+          </div>
+          {#if didType === 'web'}
+            <div class="did-web-warning">
+              <strong>Important: Understand the trade-offs</strong>
+              <ul>
+                <li><strong>Permanent tie to this PDS:</strong> Your identity will be <code>did:web:yourhandle.{serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>. Even if you migrate to another PDS later, this server must continue hosting your DID document.</li>
+                <li><strong>No recovery mechanism:</strong> Unlike did:plc, did:web has no rotation keys. If this PDS goes offline permanently, your identity cannot be recovered.</li>
+                <li><strong>We commit to you:</strong> If you migrate away, we will continue serving a minimal DID document pointing to your new PDS. Your identity will remain functional.</li>
+                <li><strong>Recommendation:</strong> Choose did:plc unless you have a specific reason to prefer did:web.</li>
+              </ul>
+            </div>
+          {/if}
+          {#if didType === 'web-external'}
+            <div class="field">
+              <label for="external-did">Your did:web</label>
+              <input
+                id="external-did"
+                type="text"
+                bind:value={externalDid}
+                placeholder="did:web:yourdomain.com"
+                disabled={submitting}
+                required
+              />
+              <p class="hint">Your domain must serve a valid DID document at /.well-known/did.json pointing to this PDS</p>
+            </div>
+          {/if}
+        </fieldset>
         <fieldset class="verification-section">
           <legend>Contact Method</legend>
           <p class="section-hint">Choose how you'd like to verify your account and receive notifications. You only need one.</p>
@@ -323,10 +401,72 @@
     padding: 0 0.5rem;
     color: var(--text-primary);
   }
+  .identity-section {
+    border: 1px solid var(--border-color-light);
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+  }
+  .identity-section legend {
+    font-weight: 600;
+    padding: 0 0.5rem;
+    color: var(--text-primary);
+  }
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .radio-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    cursor: pointer;
+  }
+  .radio-label input[type="radio"] {
+    margin-top: 0.25rem;
+  }
+  .radio-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  .radio-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
   .section-hint {
     font-size: 0.8rem;
     color: var(--text-secondary);
     margin: 0 0 1rem 0;
+  }
+  .did-web-warning {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--warning-bg, #fff3cd);
+    border: 1px solid var(--warning-border, #ffc107);
+    border-radius: 6px;
+    font-size: 0.875rem;
+  }
+  .did-web-warning strong {
+    color: var(--warning-text, #856404);
+  }
+  .did-web-warning ul {
+    margin: 0.75rem 0 0 0;
+    padding-left: 1.25rem;
+  }
+  .did-web-warning li {
+    margin-bottom: 0.5rem;
+    line-height: 1.4;
+  }
+  .did-web-warning li:last-child {
+    margin-bottom: 0;
+  }
+  .did-web-warning code {
+    background: rgba(0, 0, 0, 0.1);
+    padding: 0.125rem 0.25rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
   }
   button {
     padding: 0.75rem;

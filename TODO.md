@@ -9,6 +9,21 @@ So like... make the thing unique, make it cool.
 - [ ] Unique "brand" style both unauthed and authed
 - [ ] Better documentation on how to sub out the entire frontend for whatever the users want
 
+### Passkeys and 2FA
+Modern passwordless authentication using WebAuthn/FIDO2, plus TOTP for defense in depth.
+
+- [ ] passkeys table (id, did, credential_id, public_key, sign_count, created_at, last_used, friendly_name)
+- [ ] user_totp table (did, secret_encrypted, verified, created_at, last_used)
+- [ ] WebAuthn registration challenge generation and attestation verification
+- [ ] TOTP secret generation with QR code setup flow
+- [ ] Backup codes (hashed, one-time use) with recovery flow
+- [ ] OAuth authorize flow: password -> 2FA (if enabled) -> passkey (as alternative)
+- [ ] Passkey-only account creation (no password)
+- [ ] Settings UI for managing passkeys, TOTP, backup codes
+- [ ] Trusted devices option (remember this browser)
+- [ ] Rate limit 2FA attempts
+- [ ] Re-auth for sensitive actions (email change, adding new auth methods)
+
 ### Delegated accounts
 Accounts controlled by other accounts rather than having their own password. When logging in as a delegated account, OAuth asks you to authenticate with a linked controller account. Uses OAuth scopes as the permission model.
 
@@ -26,20 +41,19 @@ Accounts controlled by other accounts rather than having their own password. Whe
 - [ ] Log all actions with both actor DID and controller DID
 - [ ] Audit log view for delegated account owners
 
-### Passkeys and 2FA
-Modern passwordless authentication using WebAuthn/FIDO2, plus TOTP for defense in depth.
+### Migration tool
+Seamless account migration built into the UI, inspired by pdsmoover. Users shouldn't need external tools or brain surgery on half-done account states.
 
-- [ ] passkeys table (id, did, credential_id, public_key, sign_count, created_at, last_used, friendly_name)
-- [ ] user_totp table (did, secret_encrypted, verified, created_at, last_used)
-- [ ] WebAuthn registration challenge generation and attestation verification
-- [ ] TOTP secret generation with QR code setup flow
-- [ ] Backup codes (hashed, one-time use) with recovery flow
-- [ ] OAuth authorize flow: password → 2FA (if enabled) → passkey (as alternative)
-- [ ] Passkey-only account creation (no password)
-- [ ] Settings UI for managing passkeys, TOTP, backup codes
-- [ ] Trusted devices option (remember this browser)
-- [ ] Rate limit 2FA attempts
-- [ ] Re-auth for sensitive actions (email change, adding new auth methods)
+- [ ] Add `migratingTo` parameter to `deactivateAccount` endpoint
+- [ ] For self-hosted did:web users: set `migrated_to_pds`, update DID doc serviceEndpoint
+- [ ] "Migrated" account state for self-hosted did:web: can authenticate but no repo operations
+- [ ] Migrated did:web user UI: minimal dashboard with "update forwarding PDS" setting, or full migration wizard to handle PDS 2 -> PDS 3 moves automatically
+- [ ] Outbound UI wizard: new PDS URL -> export repo -> guide account creation -> complete migration
+- [ ] Inbound UI wizard: login to old PDS -> choose handle -> import -> PLC token flow
+- [ ] Support `createAccount` with existing DID + service auth token
+- [ ] Progress tracking with resume capability
+- [ ] Scheduled automatic backups (CAR export)
+- [ ] One-click restore from backup
 
 ### Plugin system
 Extensible architecture allowing third-party plugins to add functionality, like minecraft mods or browser extensions.
@@ -74,7 +88,9 @@ Records that only authorized parties can see and decrypt. Requires key federatio
 
 ## Completed
 
-Core ATProto: Health, describeServer, all session endpoints, full repo CRUD, applyWrites, blob upload, importRepo, firehose with cursor replay, CAR export, blob sync, crawler notifications, handle resolution, PLC operations, did:web, full admin API, moderation reports.
+Core ATProto: Health, describeServer, all session endpoints, full repo CRUD, applyWrites, blob upload, importRepo, firehose with cursor replay, CAR export, blob sync, crawler notifications, handle resolution, PLC operations, full admin API, moderation reports.
+
+did:web support: Self-hosted did:web (subdomain format `did:web:handle.pds.com`), external/BYOD did:web, DID document serving via `/.well-known/did.json`, migration tracking for did:web users who leave (serviceEndpoint redirect), clear registration warnings about did:web trade-offs vs did:plc.
 
 OAuth 2.1: Authorization server metadata, JWKS, PAR, authorize endpoint with login UI, token endpoint (auth code + refresh), revocation, introspection, DPoP, PKCE S256, client metadata validation, private_key_jwt verification.
 

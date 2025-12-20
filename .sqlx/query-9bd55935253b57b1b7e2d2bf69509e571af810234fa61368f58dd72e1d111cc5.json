@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, did FROM users WHERE handle = $1",
+  "query": "SELECT id, did, migrated_to_pds FROM users WHERE handle = $1",
   "describe": {
     "columns": [
       {
@@ -12,6 +12,11 @@
         "ordinal": 1,
         "name": "did",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "migrated_to_pds",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -21,8 +26,9 @@
     },
     "nullable": [
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "b2c53e6a278c4549c99a5b98cc7ca77fc1e9cd39a591c1d8ec1ca41adfffa3a6"
+  "hash": "9bd55935253b57b1b7e2d2bf69509e571af810234fa61368f58dd72e1d111cc5"
 }

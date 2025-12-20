@@ -42,6 +42,12 @@ pub async fn submit_plc_operation(
         return e;
     }
     let did = &auth_user.did;
+    if did.starts_with("did:web:") {
+        return ApiError::InvalidRequest(
+            "PLC operations are only valid for did:plc identities".into(),
+        )
+        .into_response();
+    }
     if let Err(e) = validate_plc_operation(&input.operation) {
         return ApiError::InvalidRequest(format!("Invalid operation: {}", e)).into_response();
     }

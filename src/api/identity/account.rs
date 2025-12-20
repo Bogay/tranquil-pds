@@ -41,6 +41,7 @@ pub struct CreateAccountInput {
     pub password: String,
     pub invite_code: Option<String>,
     pub did: Option<String>,
+    pub did_type: Option<String>,
     pub signing_key: Option<String>,
     pub verification_channel: Option<String>,
     pub discord_id: Option<String>,
@@ -268,44 +269,35 @@ pub async fn create_account(
                 .into_response();
         }
     };
-    let did = if let Some(d) = &input.did {
-        if d.trim().is_empty() {
-            let rotation_key = std::env::var("PLC_ROTATION_KEY")
-                .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
-            let genesis_result = match create_genesis_operation(
-                &signing_key,
-                &rotation_key,
-                &full_handle,
-                &pds_endpoint,
-            ) {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Error creating PLC genesis operation: {:?}", e);
+    let did_type = input.did_type.as_deref().unwrap_or("plc");
+    let did = match did_type {
+        "web" => {
+            let subdomain_host = format!("{}.{}", input.handle, hostname);
+            let encoded_subdomain = subdomain_host.replace(':', "%3A");
+            let self_hosted_did = format!("did:web:{}", encoded_subdomain);
+            info!(did = %self_hosted_did, "Creating self-hosted did:web account (subdomain)");
+            self_hosted_did
+        }
+        "web-external" => {
+            let d = match &input.did {
+                Some(d) if !d.trim().is_empty() => d,
+                _ => {
                     return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "InvalidRequest", "message": "External did:web requires the 'did' field to be provided"})),
                     )
                         .into_response();
                 }
             };
-            let plc_client = PlcClient::new(None);
-            if let Err(e) = plc_client
-                .send_operation(&genesis_result.did, &genesis_result.signed_operation)
-                .await
-            {
-                error!("Failed to submit PLC genesis operation: {:?}", e);
+            if !d.starts_with("did:web:") {
                 return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({
-                        "error": "UpstreamError",
-                        "message": format!("Failed to register DID with PLC directory: {}", e)
-                    })),
+                    StatusCode::BAD_REQUEST,
+                    Json(
+                        json!({"error": "InvalidDid", "message": "External DID must be a did:web"}),
+                    ),
                 )
                     .into_response();
             }
-            info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
-            genesis_result.did
-        } else if d.starts_with("did:web:") {
             if let Err(e) = verify_did_web(d, &hostname, &input.handle).await {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -313,52 +305,104 @@ pub async fn create_account(
                 )
                     .into_response();
             }
+            info!(did = %d, "Creating external did:web account");
             d.clone()
-        } else if d.starts_with("did:plc:") && is_migration {
-            d.clone()
-        } else {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidDid", "message": "Only did:web DIDs can be provided; leave empty for did:plc. For migration with existing did:plc, provide service auth."})),
-            )
-                .into_response();
         }
-    } else {
-        let rotation_key = std::env::var("PLC_ROTATION_KEY")
-            .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
-        let genesis_result = match create_genesis_operation(
-            &signing_key,
-            &rotation_key,
-            &full_handle,
-            &pds_endpoint,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Error creating PLC genesis operation: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
-                )
-                    .into_response();
+        _ => {
+            if let Some(d) = &input.did {
+                if d.starts_with("did:plc:") && is_migration {
+                    info!(did = %d, "Migration with existing did:plc");
+                    d.clone()
+                } else if d.starts_with("did:web:") {
+                    if let Err(e) = verify_did_web(d, &hostname, &input.handle).await {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({"error": "InvalidDid", "message": e})),
+                        )
+                            .into_response();
+                    }
+                    d.clone()
+                } else if !d.trim().is_empty() {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "InvalidDid", "message": "Only did:web DIDs can be provided; leave empty for did:plc. For migration with existing did:plc, provide service auth."})),
+                    )
+                        .into_response();
+                } else {
+                    let rotation_key = std::env::var("PLC_ROTATION_KEY")
+                        .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
+                    let genesis_result = match create_genesis_operation(
+                        &signing_key,
+                        &rotation_key,
+                        &full_handle,
+                        &pds_endpoint,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            error!("Error creating PLC genesis operation: {:?}", e);
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
+                            )
+                                .into_response();
+                        }
+                    };
+                    let plc_client = PlcClient::new(None);
+                    if let Err(e) = plc_client
+                        .send_operation(&genesis_result.did, &genesis_result.signed_operation)
+                        .await
+                    {
+                        error!("Failed to submit PLC genesis operation: {:?}", e);
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            Json(json!({
+                                "error": "UpstreamError",
+                                "message": format!("Failed to register DID with PLC directory: {}", e)
+                            })),
+                        )
+                            .into_response();
+                    }
+                    info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
+                    genesis_result.did
+                }
+            } else {
+                let rotation_key = std::env::var("PLC_ROTATION_KEY")
+                    .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
+                let genesis_result = match create_genesis_operation(
+                    &signing_key,
+                    &rotation_key,
+                    &full_handle,
+                    &pds_endpoint,
+                ) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!("Error creating PLC genesis operation: {:?}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
+                        )
+                            .into_response();
+                    }
+                };
+                let plc_client = PlcClient::new(None);
+                if let Err(e) = plc_client
+                    .send_operation(&genesis_result.did, &genesis_result.signed_operation)
+                    .await
+                {
+                    error!("Failed to submit PLC genesis operation: {:?}", e);
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(json!({
+                            "error": "UpstreamError",
+                            "message": format!("Failed to register DID with PLC directory: {}", e)
+                        })),
+                    )
+                        .into_response();
+                }
+                info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
+                genesis_result.did
             }
-        };
-        let plc_client = PlcClient::new(None);
-        if let Err(e) = plc_client
-            .send_operation(&genesis_result.did, &genesis_result.signed_operation)
-            .await
-        {
-            error!("Failed to submit PLC genesis operation: {:?}", e);
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": "UpstreamError",
-                    "message": format!("Failed to register DID with PLC directory: {}", e)
-                })),
-            )
-                .into_response();
         }
-        info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
-        genesis_result.did
     };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,

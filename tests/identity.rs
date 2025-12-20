@@ -143,12 +143,11 @@ async fn test_create_did_web_account_and_resolve() {
         .send()
         .await
         .expect("Failed to fetch DID doc");
-    assert_eq!(res.status(), StatusCode::OK);
-    let doc: Value = res.json().await.expect("DID doc was not JSON");
-    assert_eq!(doc["id"], did);
-    assert_eq!(doc["alsoKnownAs"][0], format!("at://{}", handle));
-    assert_eq!(doc["verificationMethod"][0]["controller"], did);
-    assert!(doc["verificationMethod"][0]["publicKeyJwk"].is_object());
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "External did:web should not have DID doc served by PDS (user hosts their own)"
+    );
 }
 
 #[tokio::test]

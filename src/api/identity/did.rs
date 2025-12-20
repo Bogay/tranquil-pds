@@ -95,9 +95,32 @@ pub fn get_jwk(key_bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
     }))
 }
 
-pub async fn well_known_did(State(_state): State<AppState>) -> impl IntoResponse {
+pub fn get_public_key_multibase(key_bytes: &[u8]) -> Result<String, &'static str> {
+    let secret_key = SecretKey::from_slice(key_bytes).map_err(|_| "Invalid key length")?;
+    let public_key = secret_key.public_key();
+    let compressed = public_key.to_encoded_point(true);
+    let compressed_bytes = compressed.as_bytes();
+    let mut multicodec_key = vec![0xe7, 0x01];
+    multicodec_key.extend_from_slice(compressed_bytes);
+    Ok(format!("z{}", bs58::encode(&multicodec_key).into_string()))
+}
+
+pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    // Kinda for local dev, encode hostname if it contains port
+    let host_header = headers
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or(&hostname);
+    let host_without_port = host_header.split(':').next().unwrap_or(host_header);
+    let hostname_without_port = hostname.split(':').next().unwrap_or(&hostname);
+    if host_without_port != hostname_without_port
+        && host_without_port.ends_with(&format!(".{}", hostname_without_port))
+    {
+        let handle = host_without_port
+            .strip_suffix(&format!(".{}", hostname_without_port))
+            .unwrap_or(host_without_port);
+        return serve_subdomain_did_doc(&state, handle, &hostname).await;
+    }
     let did = if hostname.contains(':') {
         format!("did:web:{}", hostname.replace(':', "%3A"))
     } else {
@@ -112,15 +135,18 @@ pub async fn well_known_did(State(_state): State<AppState>) -> impl IntoResponse
             "serviceEndpoint": format!("https://{}", hostname)
         }]
     }))
+    .into_response()
 }
 
-pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let user = sqlx::query!("SELECT id, did FROM users WHERE handle = $1", handle)
-        .fetch_optional(&state.db)
-        .await;
-    let (user_id, did) = match user {
-        Ok(Some(row)) => (row.id, row.did),
+async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str) -> Response {
+    let user = sqlx::query!(
+        "SELECT id, did, migrated_to_pds FROM users WHERE handle = $1",
+        handle
+    )
+    .fetch_optional(&state.db)
+    .await;
+    let (user_id, did, migrated_to_pds) = match user {
+        Ok(Some(row)) => (row.id, row.did, row.migrated_to_pds),
         Ok(None) => {
             return (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"}))).into_response();
         }
@@ -137,6 +163,16 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         return (
             StatusCode::NOT_FOUND,
             Json(json!({"error": "NotFound", "message": "User is not did:web"})),
+        )
+            .into_response();
+    }
+    let subdomain_host = format!("{}.{}", handle, hostname);
+    let encoded_subdomain = subdomain_host.replace(':', "%3A");
+    let expected_self_hosted = format!("did:web:{}", encoded_subdomain);
+    if did != expected_self_hosted {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "NotFound", "message": "External did:web - DID document hosted by user"})),
         )
             .into_response();
     }
@@ -165,10 +201,10 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
                 .into_response();
         }
     };
-    let jwk = match get_jwk(&key_bytes) {
-        Ok(j) => j,
+    let public_key_multibase = match get_public_key_multibase(&key_bytes) {
+        Ok(pk) => pk,
         Err(e) => {
-            tracing::error!("Failed to generate JWK: {}", e);
+            tracing::error!("Failed to generate public key multibase: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -176,25 +212,148 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
                 .into_response();
         }
     };
+    let full_handle = if handle.contains('.') {
+        handle.to_string()
+    } else {
+        format!("{}.{}", handle, hostname)
+    };
+    let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
     Json(json!({
-        "@context": ["https://www.w3.org/ns/did/v1", "https://w3id.org/security/suites/jws-2020/v1"],
+        "@context": [
+            "https://www.w3.org/ns/did/v1",
+            "https://w3id.org/security/multikey/v1",
+            "https://w3id.org/security/suites/secp256k1-2019/v1"
+        ],
         "id": did,
-        "alsoKnownAs": [format!("at://{}", handle)],
+        "alsoKnownAs": [format!("at://{}", full_handle)],
         "verificationMethod": [{
             "id": format!("{}#atproto", did),
-            "type": "JsonWebKey2020",
+            "type": "Multikey",
             "controller": did,
-            "publicKeyJwk": jwk
+            "publicKeyMultibase": public_key_multibase
         }],
         "service": [{
             "id": "#atproto_pds",
             "type": "AtprotoPersonalDataServer",
-            "serviceEndpoint": format!("https://{}", hostname)
+            "serviceEndpoint": service_endpoint
         }]
-    })).into_response()
+    }))
+    .into_response()
+}
+
+pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let user = sqlx::query!(
+        "SELECT id, did, migrated_to_pds FROM users WHERE handle = $1",
+        handle
+    )
+    .fetch_optional(&state.db)
+    .await;
+    let (user_id, did, migrated_to_pds) = match user {
+        Ok(Some(row)) => (row.id, row.did, row.migrated_to_pds),
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"}))).into_response();
+        }
+        Err(e) => {
+            error!("DB Error: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+    if !did.starts_with("did:web:") {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "NotFound", "message": "User is not did:web"})),
+        )
+            .into_response();
+    }
+    let encoded_hostname = hostname.replace(':', "%3A");
+    let old_path_format = format!("did:web:{}:u:{}", encoded_hostname, handle);
+    let subdomain_host = format!("{}.{}", handle, hostname);
+    let encoded_subdomain = subdomain_host.replace(':', "%3A");
+    let new_subdomain_format = format!("did:web:{}", encoded_subdomain);
+    if did != old_path_format && did != new_subdomain_format {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "NotFound", "message": "External did:web - DID document hosted by user"})),
+        )
+            .into_response();
+    }
+    let key_row = sqlx::query!(
+        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await;
+    let key_bytes: Vec<u8> = match key_row {
+        Ok(Some(row)) => match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+            Ok(k) => k,
+            Err(_) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        },
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+    let public_key_multibase = match get_public_key_multibase(&key_bytes) {
+        Ok(pk) => pk,
+        Err(e) => {
+            tracing::error!("Failed to generate public key multibase: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+    let full_handle = if handle.contains('.') {
+        handle.clone()
+    } else {
+        format!("{}.{}", handle, hostname)
+    };
+    let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
+    Json(json!({
+        "@context": [
+            "https://www.w3.org/ns/did/v1",
+            "https://w3id.org/security/multikey/v1",
+            "https://w3id.org/security/suites/secp256k1-2019/v1"
+        ],
+        "id": did,
+        "alsoKnownAs": [format!("at://{}", full_handle)],
+        "verificationMethod": [{
+            "id": format!("{}#atproto", did),
+            "type": "Multikey",
+            "controller": did,
+            "publicKeyMultibase": public_key_multibase
+        }],
+        "service": [{
+            "id": "#atproto_pds",
+            "type": "AtprotoPersonalDataServer",
+            "serviceEndpoint": service_endpoint
+        }]
+    }))
+    .into_response()
 }
 
 pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(), String> {
+    let subdomain_host = format!("{}.{}", handle, hostname);
+    let encoded_subdomain = subdomain_host.replace(':', "%3A");
+    let expected_subdomain_did = format!("did:web:{}", encoded_subdomain);
+    if did == expected_subdomain_did {
+        return Ok(());
+    }
     let expected_prefix = if hostname.contains(':') {
         format!("did:web:{}", hostname.replace(':', "%3A"))
     } else {
@@ -204,62 +363,61 @@ pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(
         let suffix = &did[expected_prefix.len()..];
         let expected_suffix = format!(":u:{}", handle);
         if suffix == expected_suffix {
-            Ok(())
+            return Ok(());
         } else {
-            Err(format!(
+            return Err(format!(
                 "Invalid DID path for this PDS. Expected {}",
                 expected_suffix
-            ))
+            ));
         }
+    }
+    let parts: Vec<&str> = did.split(':').collect();
+    if parts.len() < 3 || parts[0] != "did" || parts[1] != "web" {
+        return Err("Invalid did:web format".into());
+    }
+    let domain_segment = parts[2];
+    let domain = domain_segment.replace("%3A", ":");
+    let scheme = if domain.starts_with("localhost") || domain.starts_with("127.0.0.1") {
+        "http"
     } else {
-        let parts: Vec<&str> = did.split(':').collect();
-        if parts.len() < 3 || parts[0] != "did" || parts[1] != "web" {
-            return Err("Invalid did:web format".into());
-        }
-        let domain_segment = parts[2];
-        let domain = domain_segment.replace("%3A", ":");
-        let scheme = if domain.starts_with("localhost") || domain.starts_with("127.0.0.1") {
-            "http"
-        } else {
-            "https"
-        };
-        let url = if parts.len() == 3 {
-            format!("{}://{}/.well-known/did.json", scheme, domain)
-        } else {
-            let path = parts[3..].join("/");
-            format!("{}://{}/{}/did.json", scheme, domain, path)
-        };
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|e| format!("Failed to create client: {}", e))?;
-        let resp = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to fetch DID doc: {}", e))?;
-        if !resp.status().is_success() {
-            return Err(format!("Failed to fetch DID doc: HTTP {}", resp.status()));
-        }
-        let doc: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse DID doc: {}", e))?;
-        let services = doc["service"]
-            .as_array()
-            .ok_or("No services found in DID doc")?;
-        let pds_endpoint = format!("https://{}", hostname);
-        let has_valid_service = services.iter().any(|s| {
-            s["type"] == "AtprotoPersonalDataServer" && s["serviceEndpoint"] == pds_endpoint
-        });
-        if has_valid_service {
-            Ok(())
-        } else {
-            Err(format!(
-                "DID document does not list this PDS ({}) as AtprotoPersonalDataServer",
-                pds_endpoint
-            ))
-        }
+        "https"
+    };
+    let url = if parts.len() == 3 {
+        format!("{}://{}/.well-known/did.json", scheme, domain)
+    } else {
+        let path = parts[3..].join("/");
+        format!("{}://{}/{}/did.json", scheme, domain, path)
+    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch DID doc: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Failed to fetch DID doc: HTTP {}", resp.status()));
+    }
+    let doc: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse DID doc: {}", e))?;
+    let services = doc["service"]
+        .as_array()
+        .ok_or("No services found in DID doc")?;
+    let pds_endpoint = format!("https://{}", hostname);
+    let has_valid_service = services
+        .iter()
+        .any(|s| s["type"] == "AtprotoPersonalDataServer" && s["serviceEndpoint"] == pds_endpoint);
+    if has_valid_service {
+        Ok(())
+    } else {
+        Err(format!(
+            "DID document does not list this PDS ({}) as AtprotoPersonalDataServer",
+            pds_endpoint
+        ))
     }
 }
 
@@ -344,10 +502,15 @@ pub async fn get_recommended_did_credentials(
         Err(_) => return ApiError::InternalError.into_response(),
     };
     let did_key = signing_key_to_did_key(&signing_key);
+    let rotation_keys = if auth_user.did.starts_with("did:web:") {
+        vec![]
+    } else {
+        vec![did_key.clone()]
+    };
     (
         StatusCode::OK,
         Json(GetRecommendedDidCredentialsOutput {
-            rotation_keys: vec![did_key.clone()],
+            rotation_keys,
             also_known_as: vec![format!("at://{}", full_handle)],
             verification_methods: VerificationMethods { atproto: did_key },
             services: Services {
