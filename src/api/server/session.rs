@@ -63,7 +63,10 @@ pub async fn create_session(
     headers: HeaderMap,
     Json(input): Json<CreateSessionInput>,
 ) -> Response {
-    info!("create_session called with identifier: {}", input.identifier);
+    info!(
+        "create_session called with identifier: {}",
+        input.identifier
+    );
     let client_ip = extract_client_ip(&headers);
     if !state
         .check_rate_limit(RateLimitKind::Login, &client_ip)
@@ -81,7 +84,10 @@ pub async fn create_session(
     }
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let normalized_identifier = normalize_handle(&input.identifier, &pds_hostname);
-    info!("Normalized identifier: {} -> {}", input.identifier, normalized_identifier);
+    info!(
+        "Normalized identifier: {} -> {}",
+        input.identifier, normalized_identifier
+    );
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.password_hash,
@@ -117,7 +123,12 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-    let password_valid = if verify(&input.password, &row.password_hash).unwrap_or(false) {
+    let password_valid = if row
+        .password_hash
+        .as_ref()
+        .map(|h| verify(&input.password, h).unwrap_or(false))
+        .unwrap_or(false)
+    {
         true
     } else {
         let app_passwords = sqlx::query!(
@@ -523,9 +534,16 @@ pub async fn confirm_signup(
         }
     };
 
+    let channel_str = match row.channel {
+        crate::comms::CommsChannel::Email => "email",
+        crate::comms::CommsChannel::Discord => "discord",
+        crate::comms::CommsChannel::Telegram => "telegram",
+        crate::comms::CommsChannel::Signal => "signal",
+    };
     let verification = match sqlx::query!(
-        "SELECT code, expires_at FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
-        row.id
+        "SELECT code, expires_at FROM channel_verifications WHERE user_id = $1 AND channel = $2::comms_channel",
+        row.id,
+        channel_str as _
     )
     .fetch_optional(&state.db)
     .await
@@ -574,8 +592,9 @@ pub async fn confirm_signup(
     }
 
     if let Err(e) = sqlx::query!(
-        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
-        row.id
+        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = $2::comms_channel",
+        row.id,
+        channel_str as _
     )
     .execute(&state.db)
     .await
@@ -676,18 +695,31 @@ pub async fn resend_verification(
     let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
     let code_expires_at = Utc::now() + chrono::Duration::minutes(30);
 
-    let email = row.email.clone();
+    let (channel_str, recipient) = match row.channel {
+        crate::comms::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
+        crate::comms::CommsChannel::Discord => {
+            ("discord", row.discord_id.clone().unwrap_or_default())
+        }
+        crate::comms::CommsChannel::Telegram => (
+            "telegram",
+            row.telegram_username.clone().unwrap_or_default(),
+        ),
+        crate::comms::CommsChannel::Signal => {
+            ("signal", row.signal_number.clone().unwrap_or_default())
+        }
+    };
 
     if let Err(e) = sqlx::query!(
         r#"
         INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at)
-        VALUES ($1, 'email', $2, $3, $4)
+        VALUES ($1, $2::comms_channel, $3, $4, $5)
         ON CONFLICT (user_id, channel) DO UPDATE
-        SET code = $2, pending_identifier = $3, expires_at = $4, created_at = NOW()
+        SET code = $3, pending_identifier = $4, expires_at = $5, created_at = NOW()
         "#,
         row.id,
+        channel_str as _,
         verification_code,
-        email,
+        recipient,
         code_expires_at
     )
     .execute(&state.db)
@@ -696,14 +728,6 @@ pub async fn resend_verification(
         error!("Failed to update verification code: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-    let (channel_str, recipient) = match row.channel {
-        crate::comms::CommsChannel::Email => ("email", row.email.unwrap_or_default()),
-        crate::comms::CommsChannel::Discord => ("discord", row.discord_id.unwrap_or_default()),
-        crate::comms::CommsChannel::Telegram => {
-            ("telegram", row.telegram_username.unwrap_or_default())
-        }
-        crate::comms::CommsChannel::Signal => ("signal", row.signal_number.unwrap_or_default()),
-    };
     if let Err(e) = crate::comms::enqueue_signup_verification(
         &state.db,
         row.id,

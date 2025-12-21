@@ -37,7 +37,7 @@
     emailLoading = true
     message = null
     try {
-      const result = await api.requestEmailUpdate(auth.session.accessJwt)
+      const result = await api.requestEmailUpdate(auth.session.accessJwt, newEmail)
       emailTokenRequired = result.tokenRequired
       if (emailTokenRequired) {
         showMessage('success', 'Verification code sent to your current email')

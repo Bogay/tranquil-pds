@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, did, email, password_hash, two_factor_enabled,\n               preferred_comms_channel as \"preferred_comms_channel: CommsChannel\",\n               deactivated_at, takedown_ref,\n               email_verified, discord_verified, telegram_verified, signal_verified\n        FROM users\n        WHERE handle = $1 OR email = $1\n        ",
+  "query": "\n        SELECT id, did, email, password_hash, password_required, two_factor_enabled,\n               preferred_comms_channel as \"preferred_comms_channel: CommsChannel\",\n               deactivated_at, takedown_ref,\n               email_verified, discord_verified, telegram_verified, signal_verified\n        FROM users\n        WHERE handle = $1 OR email = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -25,11 +25,16 @@
       },
       {
         "ordinal": 4,
-        "name": "two_factor_enabled",
+        "name": "password_required",
         "type_info": "Bool"
       },
       {
         "ordinal": 5,
+        "name": "two_factor_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
         "name": "preferred_comms_channel: CommsChannel",
         "type_info": {
           "Custom": {
@@ -46,32 +51,32 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "deactivated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "takedown_ref",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "email_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "discord_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "telegram_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "signal_verified",
         "type_info": "Bool"
       }
@@ -85,6 +90,7 @@
       false,
       false,
       true,
+      true,
       false,
       false,
       false,
@@ -96,5 +102,5 @@
       false
     ]
   },
-  "hash": "f6aede22ec69c30a653b573fed52310cc84faa056f230b0d7ea62a0b457534e0"
+  "hash": "eeaf29b5efeb08c4729dec89f1e76c817a53bbf99998c5b1e428227d1b223b0f"
 }

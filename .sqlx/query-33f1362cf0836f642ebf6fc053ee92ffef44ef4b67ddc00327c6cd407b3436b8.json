@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "33f1362cf0836f642ebf6fc053ee92ffef44ef4b67ddc00327c6cd407b3436b8"
+}

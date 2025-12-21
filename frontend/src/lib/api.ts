@@ -2,10 +2,12 @@ const API_BASE = '/xrpc'
 
 export class ApiError extends Error {
   public did?: string
-  constructor(public status: number, public error: string, message: string, did?: string) {
+  public reauthMethods?: string[]
+  constructor(public status: number, public error: string, message: string, did?: string, reauthMethods?: string[]) {
     super(message)
     this.name = 'ApiError'
     this.did = did
+    this.reauthMethods = reauthMethods
   }
 }
 
@@ -35,7 +37,7 @@ async function xrpc<T>(method: string, options?: {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown', message: res.statusText }))
-    throw new ApiError(res.status, err.error, err.message, err.did)
+    throw new ApiError(res.status, err.error, err.message, err.did, err.reauth_methods)
   }
   return res.json()
 }
@@ -208,10 +210,11 @@ export const api = {
     })
   },
 
-  async requestEmailUpdate(token: string): Promise<{ tokenRequired: boolean }> {
+  async requestEmailUpdate(token: string, email: string): Promise<{ tokenRequired: boolean }> {
     return xrpc('com.atproto.server.requestEmailUpdate', {
       method: 'POST',
       token,
+      body: { email },
     })
   },
 
@@ -315,6 +318,17 @@ export const api = {
       token,
       body: { currentPassword, newPassword },
     })
+  },
+
+  async removePassword(token: string): Promise<{ success: boolean }> {
+    return xrpc('com.tranquil.account.removePassword', {
+      method: 'POST',
+      token,
+    })
+  },
+
+  async getPasswordStatus(token: string): Promise<{ hasPassword: boolean }> {
+    return xrpc('com.tranquil.account.getPasswordStatus', { token })
   },
 
   async listSessions(token: string): Promise<{
@@ -567,6 +581,130 @@ export const api = {
       method: 'POST',
       token,
       body: { id, friendlyName },
+    })
+  },
+
+  async listTrustedDevices(token: string): Promise<{
+    devices: Array<{
+      id: string
+      userAgent: string | null
+      friendlyName: string | null
+      trustedAt: string | null
+      trustedUntil: string | null
+      lastSeenAt: string
+    }>
+  }> {
+    return xrpc('com.tranquil.account.listTrustedDevices', { token })
+  },
+
+  async revokeTrustedDevice(token: string, deviceId: string): Promise<{ success: boolean }> {
+    return xrpc('com.tranquil.account.revokeTrustedDevice', {
+      method: 'POST',
+      token,
+      body: { deviceId },
+    })
+  },
+
+  async updateTrustedDevice(token: string, deviceId: string, friendlyName: string): Promise<{ success: boolean }> {
+    return xrpc('com.tranquil.account.updateTrustedDevice', {
+      method: 'POST',
+      token,
+      body: { deviceId, friendlyName },
+    })
+  },
+
+  async getReauthStatus(token: string): Promise<{
+    requiresReauth: boolean
+    lastReauthAt: string | null
+    availableMethods: string[]
+  }> {
+    return xrpc('com.tranquil.account.getReauthStatus', { token })
+  },
+
+  async reauthPassword(token: string, password: string): Promise<{ success: boolean; reauthAt: string }> {
+    return xrpc('com.tranquil.account.reauthPassword', {
+      method: 'POST',
+      token,
+      body: { password },
+    })
+  },
+
+  async reauthTotp(token: string, code: string): Promise<{ success: boolean; reauthAt: string }> {
+    return xrpc('com.tranquil.account.reauthTotp', {
+      method: 'POST',
+      token,
+      body: { code },
+    })
+  },
+
+  async reauthPasskeyStart(token: string): Promise<{ options: unknown }> {
+    return xrpc('com.tranquil.account.reauthPasskeyStart', {
+      method: 'POST',
+      token,
+    })
+  },
+
+  async reauthPasskeyFinish(token: string, credential: unknown): Promise<{ success: boolean; reauthAt: string }> {
+    return xrpc('com.tranquil.account.reauthPasskeyFinish', {
+      method: 'POST',
+      token,
+      body: { credential },
+    })
+  },
+
+  async createPasskeyAccount(params: {
+    handle: string
+    email?: string
+    inviteCode?: string
+    didType?: DidType
+    did?: string
+    signingKey?: string
+    verificationChannel?: VerificationChannel
+    discordId?: string
+    telegramUsername?: string
+    signalNumber?: string
+  }): Promise<{
+    did: string
+    handle: string
+    setupToken: string
+    setupExpiresAt: string
+  }> {
+    return xrpc('com.tranquil.account.createPasskeyAccount', {
+      method: 'POST',
+      body: params,
+    })
+  },
+
+  async startPasskeyRegistrationForSetup(did: string, setupToken: string, friendlyName?: string): Promise<{ options: unknown }> {
+    return xrpc('com.tranquil.account.startPasskeyRegistrationForSetup', {
+      method: 'POST',
+      body: { did, setupToken, friendlyName },
+    })
+  },
+
+  async completePasskeySetup(did: string, setupToken: string, passkeyCredential: unknown, passkeyFriendlyName?: string): Promise<{
+    did: string
+    handle: string
+    appPassword: string
+    appPasswordName: string
+  }> {
+    return xrpc('com.tranquil.account.completePasskeySetup', {
+      method: 'POST',
+      body: { did, setupToken, passkeyCredential, passkeyFriendlyName },
+    })
+  },
+
+  async requestPasskeyRecovery(email: string): Promise<{ success: boolean }> {
+    return xrpc('com.tranquil.account.requestPasskeyRecovery', {
+      method: 'POST',
+      body: { email },
+    })
+  },
+
+  async recoverPasskeyAccount(did: string, recoveryToken: string, newPassword: string): Promise<{ success: boolean }> {
+    return xrpc('com.tranquil.account.recoverPasskeyAccount', {
+      method: 'POST',
+      body: { did, recoveryToken, newPassword },
     })
   },
 }

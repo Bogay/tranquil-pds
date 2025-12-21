@@ -371,7 +371,9 @@ pub async fn update_passkey(
 }
 
 pub async fn has_passkeys_for_user(state: &AppState, did: &str) -> bool {
-    webauthn::has_passkeys(&state.db, did)
-        .await
-        .unwrap_or(false)
+    has_passkeys_for_user_db(&state.db, did).await
+}
+
+pub async fn has_passkeys_for_user_db(db: &sqlx::PgPool, did: &str) -> bool {
+    webauthn::has_passkeys(db, did).await.unwrap_or(false)
 }

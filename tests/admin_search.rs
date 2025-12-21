@@ -10,24 +10,43 @@ async fn test_search_accounts_as_admin() {
     let client = client();
     let (admin_jwt, _) = create_admin_account_and_login(&client).await;
     let (user_did, _) = setup_new_user("search-target").await;
-    let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.admin.searchAccounts?limit=1000",
-            base_url().await
-        ))
-        .bearer_auth(&admin_jwt)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.unwrap();
-    let accounts = body["accounts"]
-        .as_array()
-        .expect("accounts should be array");
-    assert!(!accounts.is_empty(), "Should return some accounts");
-    let found = accounts
-        .iter()
-        .any(|a| a["did"].as_str() == Some(&user_did));
+    let mut found = false;
+    let mut cursor: Option<String> = None;
+    for _ in 0..10 {
+        let url = match &cursor {
+            Some(c) => format!(
+                "{}/xrpc/com.atproto.admin.searchAccounts?limit=100&cursor={}",
+                base_url().await,
+                c
+            ),
+            None => format!(
+                "{}/xrpc/com.atproto.admin.searchAccounts?limit=100",
+                base_url().await
+            ),
+        };
+        let res = client
+            .get(&url)
+            .bearer_auth(&admin_jwt)
+            .send()
+            .await
+            .expect("Failed to send request");
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: Value = res.json().await.unwrap();
+        let accounts = body["accounts"]
+            .as_array()
+            .expect("accounts should be array");
+        if accounts
+            .iter()
+            .any(|a| a["did"].as_str() == Some(&user_did))
+        {
+            found = true;
+            break;
+        }
+        cursor = body["cursor"].as_str().map(|s| s.to_string());
+        if cursor.is_none() {
+            break;
+        }
+    }
     assert!(
         found,
         "Should find the created user in results (DID: {})",

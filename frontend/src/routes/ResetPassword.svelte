@@ -25,7 +25,7 @@
     try {
       await api.requestPasswordReset(email)
       tokenSent = true
-      success = 'Password reset code sent to your email'
+      success = 'Password reset code sent! Check your preferred notification channel.'
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Failed to send reset code'
     } finally {
@@ -66,7 +66,7 @@
   {/if}
   {#if tokenSent}
     <h1>Reset Password</h1>
-    <p class="subtitle">Enter the code from your email and choose a new password.</p>
+    <p class="subtitle">Enter the code you received and choose a new password.</p>
     <form onsubmit={handleReset}>
       <div class="field">
         <label for="token">Reset Code</label>
@@ -74,7 +74,7 @@
           id="token"
           type="text"
           bind:value={token}
-          placeholder="Enter code from email"
+          placeholder="Enter reset code"
           disabled={submitting}
           required
         />
@@ -111,15 +111,15 @@
     </form>
   {:else}
     <h1>Forgot Password</h1>
-    <p class="subtitle">Enter your email address and we'll send you a code to reset your password.</p>
+    <p class="subtitle">Enter your handle or email and we'll send you a code to reset your password.</p>
     <form onsubmit={handleRequestReset}>
       <div class="field">
-        <label for="email">Email</label>
+        <label for="email">Handle or Email</label>
         <input
           id="email"
-          type="email"
+          type="text"
           bind:value={email}
-          placeholder="you@example.com"
+          placeholder="handle or you@example.com"
           disabled={submitting}
           required
         />

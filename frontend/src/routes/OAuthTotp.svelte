@@ -2,6 +2,7 @@
   import { navigate } from '../lib/router.svelte'
 
   let code = $state('')
+  let trustDevice = $state(false)
   let submitting = $state(false)
   let error = $state<string | null>(null)
 
@@ -30,7 +31,8 @@
         },
         body: JSON.stringify({
           request_uri: requestUri,
-          code: code.trim().toUpperCase()
+          code: code.trim().toUpperCase(),
+          trust_device: trustDevice
         })
       })
 
@@ -103,6 +105,15 @@
         {/if}
       </p>
     </div>
+
+    <label class="trust-device-label">
+      <input
+        type="checkbox"
+        bind:checked={trustDevice}
+        disabled={submitting}
+      />
+      <span>Trust this device for 30 days</span>
+    </label>
 
     <div class="actions">
       <button type="button" class="cancel-btn" onclick={handleCancel} disabled={submitting}>
@@ -221,5 +232,20 @@
 
   .submit-btn:hover:not(:disabled) {
     background: var(--accent-hover);
+  }
+
+  .trust-device-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+  }
+
+  .trust-device-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
   }
 </style>

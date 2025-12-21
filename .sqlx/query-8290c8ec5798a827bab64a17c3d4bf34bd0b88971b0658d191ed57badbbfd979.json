@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE session_tokens SET last_reauth_at = $1 WHERE did = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8290c8ec5798a827bab64a17c3d4bf34bd0b88971b0658d191ed57badbbfd979"
+}

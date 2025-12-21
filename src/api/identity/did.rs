@@ -674,13 +674,9 @@ pub async fn update_handle(
             if let Some(old) = old_handle {
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
-            let _ = state
-                .cache
-                .delete(&format!("handle:{}", handle))
-                .await;
+            let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle))
-                    .await
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }

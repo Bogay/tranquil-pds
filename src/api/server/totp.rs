@@ -332,7 +332,10 @@ pub async fn disable_totp(
         }
     };
 
-    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
+    let password_valid = password_hash
+        .as_ref()
+        .map(|h| bcrypt::verify(&input.password, h).unwrap_or(false))
+        .unwrap_or(false);
     if !password_valid {
         return (
             StatusCode::UNAUTHORIZED,
@@ -536,7 +539,10 @@ pub async fn regenerate_backup_codes(
         }
     };
 
-    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
+    let password_valid = password_hash
+        .as_ref()
+        .map(|h| bcrypt::verify(&input.password, h).unwrap_or(false))
+        .unwrap_or(false);
     if !password_valid {
         return (
             StatusCode::UNAUTHORIZED,
@@ -741,8 +747,12 @@ pub async fn verify_totp_or_backup_for_user(state: &AppState, did: &str, code: &
 }
 
 pub async fn has_totp_enabled(state: &AppState, did: &str) -> bool {
+    has_totp_enabled_db(&state.db, did).await
+}
+
+pub async fn has_totp_enabled_db(db: &sqlx::PgPool, did: &str) -> bool {
     let result = sqlx::query_scalar!("SELECT verified FROM user_totp WHERE did = $1", did)
-        .fetch_optional(&state.db)
+        .fetch_optional(db)
         .await;
 
     matches!(result, Ok(Some(true)))

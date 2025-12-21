@@ -97,9 +97,34 @@ async fn test_external_did_web_no_local_doc() {
     let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
     let handle = format!("extweb_{}", uuid::Uuid::new_v4());
     let pds_endpoint = base_url().await.replace("http://", "https://");
+
+    let reserve_res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.reserveSigningKey",
+            base_url().await
+        ))
+        .json(&json!({ "did": did }))
+        .send()
+        .await
+        .expect("Failed to reserve signing key");
+    assert_eq!(reserve_res.status(), StatusCode::OK);
+    let reserve_body: Value = reserve_res.json().await.expect("Response was not JSON");
+    let signing_key = reserve_body["signingKey"]
+        .as_str()
+        .expect("No signingKey returned");
+    let public_key_multibase = signing_key
+        .strip_prefix("did:key:")
+        .expect("signingKey should start with did:key:");
+
     let did_doc = json!({
         "@context": ["https://www.w3.org/ns/did/v1"],
         "id": did,
+        "verificationMethod": [{
+            "id": format!("{}#atproto", did),
+            "type": "Multikey",
+            "controller": did,
+            "publicKeyMultibase": public_key_multibase
+        }],
         "service": [{
             "id": "#atproto_pds",
             "type": "AtprotoPersonalDataServer",
@@ -116,7 +141,8 @@ async fn test_external_did_web_no_local_doc() {
         "email": format!("{}@example.com", handle),
         "password": "password",
         "didType": "web-external",
-        "did": did
+        "did": did,
+        "signingKey": signing_key
     });
     let res = client
         .post(format!(

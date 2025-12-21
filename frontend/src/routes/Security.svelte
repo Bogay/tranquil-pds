@@ -2,6 +2,7 @@
   import { getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
+  import ReauthModal from '../components/ReauthModal.svelte'
 
   const auth = getAuthState()
   let message = $state<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -38,6 +39,15 @@
   let editingPasskeyId = $state<string | null>(null)
   let editPasskeyName = $state('')
 
+  let hasPassword = $state(true)
+  let passwordLoading = $state(true)
+  let showRemovePasswordForm = $state(false)
+  let removePasswordLoading = $state(false)
+
+  let showReauthModal = $state(false)
+  let reauthMethods = $state<string[]>(['password'])
+  let pendingAction = $state<(() => Promise<void>) | null>(null)
+
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -48,8 +58,58 @@
     if (auth.session) {
       loadTotpStatus()
       loadPasskeys()
+      loadPasswordStatus()
     }
   })
+
+  async function loadPasswordStatus() {
+    if (!auth.session) return
+    passwordLoading = true
+    try {
+      const status = await api.getPasswordStatus(auth.session.accessJwt)
+      hasPassword = status.hasPassword
+    } catch {
+      hasPassword = true
+    } finally {
+      passwordLoading = false
+    }
+  }
+
+  async function handleRemovePassword() {
+    if (!auth.session) return
+    removePasswordLoading = true
+    try {
+      await api.removePassword(auth.session.accessJwt)
+      hasPassword = false
+      showRemovePasswordForm = false
+      showMessage('success', 'Password removed. Your account is now passkey-only.')
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.error === 'ReauthRequired') {
+          reauthMethods = e.reauthMethods || ['password']
+          pendingAction = handleRemovePassword
+          showReauthModal = true
+        } else {
+          showMessage('error', e.message)
+        }
+      } else {
+        showMessage('error', 'Failed to remove password')
+      }
+    } finally {
+      removePasswordLoading = false
+    }
+  }
+
+  function handleReauthSuccess() {
+    if (pendingAction) {
+      pendingAction()
+      pendingAction = null
+    }
+  }
+
+  function handleReauthCancel() {
+    pendingAction = null
+  }
 
   async function loadTotpStatus() {
     if (!auth.session) return
@@ -543,8 +603,82 @@
         </div>
       {/if}
     </section>
+
+    <section>
+      <h2>Password</h2>
+      <p class="description">
+        Manage your account password. If you have passkeys set up, you can optionally remove your password for a fully passwordless experience.
+      </p>
+
+      {#if passwordLoading}
+        <div class="loading">Loading...</div>
+      {:else if hasPassword}
+        <div class="status enabled">
+          <span>Password authentication is <strong>enabled</strong></span>
+        </div>
+
+        {#if passkeys.length > 0}
+          {#if !showRemovePasswordForm}
+            <button type="button" class="danger-outline" onclick={() => showRemovePasswordForm = true}>
+              Remove Password
+            </button>
+          {:else}
+            <div class="inline-form danger-form">
+              <h3>Remove Password</h3>
+              <p class="warning-text">
+                This will make your account passkey-only. You'll only be able to sign in using your registered passkeys.
+                If you lose access to all your passkeys, you can recover your account using your notification channel.
+              </p>
+              <div class="info-box-inline">
+                <strong>Before proceeding:</strong>
+                <ul>
+                  <li>Make sure you have at least one reliable passkey registered</li>
+                  <li>Consider registering passkeys on multiple devices</li>
+                  <li>Ensure your recovery notification channel is up to date</li>
+                </ul>
+              </div>
+              <div class="actions">
+                <button type="button" class="secondary" onclick={() => showRemovePasswordForm = false}>
+                  Cancel
+                </button>
+                <button type="button" class="danger" onclick={handleRemovePassword} disabled={removePasswordLoading}>
+                  {removePasswordLoading ? 'Removing...' : 'Remove Password'}
+                </button>
+              </div>
+            </div>
+          {/if}
+        {:else}
+          <p class="hint">Add at least one passkey before you can remove your password.</p>
+        {/if}
+      {:else}
+        <div class="status passkey-only">
+          <span>Your account is <strong>passkey-only</strong></span>
+        </div>
+        <p class="hint">
+          You sign in using passkeys only. If you ever lose access to your passkeys,
+          you can recover your account using the "Lost passkey?" link on the login page.
+        </p>
+      {/if}
+    </section>
+
+    <section>
+      <h2>Trusted Devices</h2>
+      <p class="description">
+        Manage devices that can skip two-factor authentication when signing in. Trust is granted for 30 days and automatically extends when you use the device.
+      </p>
+      <a href="#/trusted-devices" class="section-link">
+        Manage Trusted Devices &rarr;
+      </a>
+    </section>
   {/if}
 </div>
+
+<ReauthModal
+  bind:show={showReauthModal}
+  availableMethods={reauthMethods}
+  onSuccess={handleReauthSuccess}
+  onCancel={handleReauthCancel}
+/>
 
 <style>
   .page {
@@ -893,5 +1027,53 @@
 
   .add-passkey .field {
     margin-bottom: 0.75rem;
+  }
+
+  .section-link {
+    display: inline-block;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .section-link:hover {
+    text-decoration: underline;
+  }
+
+  .status.passkey-only {
+    background: var(--accent);
+    background: linear-gradient(135deg, rgba(77, 166, 255, 0.15), rgba(128, 90, 213, 0.15));
+    border: 1px solid var(--accent);
+    color: var(--accent);
+  }
+
+  .hint {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .info-box-inline {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+  }
+
+  .info-box-inline strong {
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+
+  .info-box-inline ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--text-secondary);
+  }
+
+  .info-box-inline li {
+    margin-bottom: 0.25rem;
   }
 </style>

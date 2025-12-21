@@ -22,10 +22,23 @@ impl std::fmt::Display for HandleValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Empty => write!(f, "Handle cannot be empty"),
-            Self::TooShort => write!(f, "Handle must be at least {} characters", MIN_HANDLE_LENGTH),
-            Self::TooLong => write!(f, "Handle exceeds maximum length of {} characters", MAX_HANDLE_LENGTH),
-            Self::InvalidCharacters => write!(f, "Handle contains invalid characters. Only alphanumeric, hyphens, and underscores are allowed"),
-            Self::StartsWithInvalidChar => write!(f, "Handle cannot start with a hyphen or underscore"),
+            Self::TooShort => write!(
+                f,
+                "Handle must be at least {} characters",
+                MIN_HANDLE_LENGTH
+            ),
+            Self::TooLong => write!(
+                f,
+                "Handle exceeds maximum length of {} characters",
+                MAX_HANDLE_LENGTH
+            ),
+            Self::InvalidCharacters => write!(
+                f,
+                "Handle contains invalid characters. Only alphanumeric, hyphens, and underscores are allowed"
+            ),
+            Self::StartsWithInvalidChar => {
+                write!(f, "Handle cannot start with a hyphen or underscore")
+            }
             Self::EndsWithInvalidChar => write!(f, "Handle cannot end with a hyphen or underscore"),
             Self::ContainsSpaces => write!(f, "Handle cannot contain spaces"),
         }
@@ -125,28 +138,76 @@ mod tests {
     fn test_valid_handles() {
         assert_eq!(validate_short_handle("alice"), Ok("alice".to_string()));
         assert_eq!(validate_short_handle("bob123"), Ok("bob123".to_string()));
-        assert_eq!(validate_short_handle("user-name"), Ok("user-name".to_string()));
-        assert_eq!(validate_short_handle("user_name"), Ok("user_name".to_string()));
-        assert_eq!(validate_short_handle("UPPERCASE"), Ok("uppercase".to_string()));
-        assert_eq!(validate_short_handle("MixedCase123"), Ok("mixedcase123".to_string()));
+        assert_eq!(
+            validate_short_handle("user-name"),
+            Ok("user-name".to_string())
+        );
+        assert_eq!(
+            validate_short_handle("user_name"),
+            Ok("user_name".to_string())
+        );
+        assert_eq!(
+            validate_short_handle("UPPERCASE"),
+            Ok("uppercase".to_string())
+        );
+        assert_eq!(
+            validate_short_handle("MixedCase123"),
+            Ok("mixedcase123".to_string())
+        );
         assert_eq!(validate_short_handle("abc"), Ok("abc".to_string()));
     }
 
     #[test]
     fn test_invalid_handles() {
         assert_eq!(validate_short_handle(""), Err(HandleValidationError::Empty));
-        assert_eq!(validate_short_handle("   "), Err(HandleValidationError::Empty));
-        assert_eq!(validate_short_handle("ab"), Err(HandleValidationError::TooShort));
-        assert_eq!(validate_short_handle("a"), Err(HandleValidationError::TooShort));
-        assert_eq!(validate_short_handle("test spaces"), Err(HandleValidationError::ContainsSpaces));
-        assert_eq!(validate_short_handle("test\ttab"), Err(HandleValidationError::ContainsSpaces));
-        assert_eq!(validate_short_handle("-starts"), Err(HandleValidationError::StartsWithInvalidChar));
-        assert_eq!(validate_short_handle("_starts"), Err(HandleValidationError::StartsWithInvalidChar));
-        assert_eq!(validate_short_handle("ends-"), Err(HandleValidationError::EndsWithInvalidChar));
-        assert_eq!(validate_short_handle("ends_"), Err(HandleValidationError::EndsWithInvalidChar));
-        assert_eq!(validate_short_handle("test@user"), Err(HandleValidationError::InvalidCharacters));
-        assert_eq!(validate_short_handle("test!user"), Err(HandleValidationError::InvalidCharacters));
-        assert_eq!(validate_short_handle("test.user"), Err(HandleValidationError::InvalidCharacters));
+        assert_eq!(
+            validate_short_handle("   "),
+            Err(HandleValidationError::Empty)
+        );
+        assert_eq!(
+            validate_short_handle("ab"),
+            Err(HandleValidationError::TooShort)
+        );
+        assert_eq!(
+            validate_short_handle("a"),
+            Err(HandleValidationError::TooShort)
+        );
+        assert_eq!(
+            validate_short_handle("test spaces"),
+            Err(HandleValidationError::ContainsSpaces)
+        );
+        assert_eq!(
+            validate_short_handle("test\ttab"),
+            Err(HandleValidationError::ContainsSpaces)
+        );
+        assert_eq!(
+            validate_short_handle("-starts"),
+            Err(HandleValidationError::StartsWithInvalidChar)
+        );
+        assert_eq!(
+            validate_short_handle("_starts"),
+            Err(HandleValidationError::StartsWithInvalidChar)
+        );
+        assert_eq!(
+            validate_short_handle("ends-"),
+            Err(HandleValidationError::EndsWithInvalidChar)
+        );
+        assert_eq!(
+            validate_short_handle("ends_"),
+            Err(HandleValidationError::EndsWithInvalidChar)
+        );
+        assert_eq!(
+            validate_short_handle("test@user"),
+            Err(HandleValidationError::InvalidCharacters)
+        );
+        assert_eq!(
+            validate_short_handle("test!user"),
+            Err(HandleValidationError::InvalidCharacters)
+        );
+        assert_eq!(
+            validate_short_handle("test.user"),
+            Err(HandleValidationError::InvalidCharacters)
+        );
     }
 
     #[test]

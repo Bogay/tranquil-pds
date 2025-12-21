@@ -3,8 +3,11 @@
   import { initAuth, getAuthState } from './lib/auth.svelte'
   import Login from './routes/Login.svelte'
   import Register from './routes/Register.svelte'
+  import RegisterPasskey from './routes/RegisterPasskey.svelte'
   import Verify from './routes/Verify.svelte'
   import ResetPassword from './routes/ResetPassword.svelte'
+  import RecoverPasskey from './routes/RecoverPasskey.svelte'
+  import RequestPasskeyRecovery from './routes/RequestPasskeyRecovery.svelte'
   import Dashboard from './routes/Dashboard.svelte'
   import AppPasswords from './routes/AppPasswords.svelte'
   import InviteCodes from './routes/InviteCodes.svelte'
@@ -18,8 +21,10 @@
   import OAuthAccounts from './routes/OAuthAccounts.svelte'
   import OAuth2FA from './routes/OAuth2FA.svelte'
   import OAuthTotp from './routes/OAuthTotp.svelte'
+  import OAuthPasskey from './routes/OAuthPasskey.svelte'
   import OAuthError from './routes/OAuthError.svelte'
   import Security from './routes/Security.svelte'
+  import TrustedDevices from './routes/TrustedDevices.svelte'
 
   const auth = getAuthState()
 
@@ -33,10 +38,16 @@
         return Login
       case '/register':
         return Register
+      case '/register-passkey':
+        return RegisterPasskey
       case '/verify':
         return Verify
       case '/reset-password':
         return ResetPassword
+      case '/recover-passkey':
+        return RecoverPasskey
+      case '/request-passkey-recovery':
+        return RequestPasskeyRecovery
       case '/dashboard':
         return Dashboard
       case '/app-passwords':
@@ -63,10 +74,14 @@
         return OAuth2FA
       case '/oauth/totp':
         return OAuthTotp
+      case '/oauth/passkey':
+        return OAuthPasskey
       case '/oauth/error':
         return OAuthError
       case '/security':
         return Security
+      case '/trusted-devices':
+        return TrustedDevices
       default:
         return auth.session ? Dashboard : Login
     }

@@ -203,6 +203,66 @@ pub fn app(state: AppState) -> Router {
             post(api::server::change_password),
         )
         .route(
+            "/xrpc/com.tranquil.account.removePassword",
+            post(api::server::remove_password),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.getPasswordStatus",
+            get(api::server::get_password_status),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.getReauthStatus",
+            get(api::server::get_reauth_status),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.reauthPassword",
+            post(api::server::reauth_password),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.reauthTotp",
+            post(api::server::reauth_totp),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.reauthPasskeyStart",
+            post(api::server::reauth_passkey_start),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.reauthPasskeyFinish",
+            post(api::server::reauth_passkey_finish),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.listTrustedDevices",
+            get(api::server::list_trusted_devices),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.revokeTrustedDevice",
+            post(api::server::revoke_trusted_device),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.updateTrustedDevice",
+            post(api::server::update_trusted_device),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.createPasskeyAccount",
+            post(api::server::create_passkey_account),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.startPasskeyRegistrationForSetup",
+            post(api::server::start_passkey_registration_for_setup),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.completePasskeySetup",
+            post(api::server::complete_passkey_setup),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.requestPasskeyRecovery",
+            post(api::server::request_passkey_recovery),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.recoverPasskeyAccount",
+            post(api::server::recover_passkey_account),
+        )
+        .route(
             "/xrpc/com.atproto.server.requestEmailUpdate",
             post(api::server::request_email_update),
         )
@@ -398,6 +458,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/oauth/authorize/2fa",
             post(oauth::endpoints::authorize_2fa_post),
+        )
+        .route(
+            "/oauth/authorize/passkey",
+            get(oauth::endpoints::authorize_passkey_start),
+        )
+        .route(
+            "/oauth/authorize/passkey",
+            post(oauth::endpoints::authorize_passkey_finish),
         )
         .route(
             "/oauth/passkey/check",

@@ -32,6 +32,7 @@ pub enum CommsType {
     AdminEmail,
     PlcOperation,
     TwoFactorCode,
+    PasskeyRecovery,
 }
 
 #[derive(Debug, Clone, FromRow)]

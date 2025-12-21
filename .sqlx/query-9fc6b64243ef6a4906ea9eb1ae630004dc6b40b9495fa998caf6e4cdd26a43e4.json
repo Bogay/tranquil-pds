@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET password_hash = NULL, password_required = FALSE WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9fc6b64243ef6a4906ea9eb1ae630004dc6b40b9495fa998caf6e4cdd26a43e4"
+}

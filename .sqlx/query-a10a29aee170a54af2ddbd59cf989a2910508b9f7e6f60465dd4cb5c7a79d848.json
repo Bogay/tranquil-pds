@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, did, recovery_token, recovery_token_expires_at FROM users WHERE did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "recovery_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "recovery_token_expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "a10a29aee170a54af2ddbd59cf989a2910508b9f7e6f60465dd4cb5c7a79d848"
+}

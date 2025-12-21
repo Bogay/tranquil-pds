@@ -115,8 +115,8 @@
     try {
       const response = await fetch('/oauth/authorize/deny', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `request_uri=${encodeURIComponent(consentData.request_uri)}`
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_uri: consentData.request_uri })
       })
 
       if (response.redirected) {

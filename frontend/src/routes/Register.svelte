@@ -342,6 +342,9 @@
       <p class="login-link">
         Already have an account? <a href="#/login">Sign in</a>
       </p>
+      <p class="login-link">
+        Want passwordless security? <a href="#/register-passkey">Create a passkey account</a>
+      </p>
     {/if}
 </div>
 <style>

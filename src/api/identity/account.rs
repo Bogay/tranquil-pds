@@ -139,12 +139,18 @@ pub async fn create_account(
         info!(did = %migration_did, "Processing account migration");
     }
 
-    let hostname_for_validation = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_validation =
+        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_suffix = format!(".{}", hostname_for_validation);
 
-    let validated_short_handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
+    let validated_short_handle = if !input.handle.contains('.')
+        || input.handle.ends_with(&pds_suffix)
+    {
         let handle_to_validate = if input.handle.ends_with(&pds_suffix) {
-            input.handle.strip_suffix(&pds_suffix).unwrap_or(&input.handle)
+            input
+                .handle
+                .strip_suffix(&pds_suffix)
+                .unwrap_or(&input.handle)
         } else {
             &input.handle
         };
@@ -165,6 +171,15 @@ pub async fn create_account(
                 Json(json!({"error": "InvalidHandle", "message": "Handle cannot contain spaces"})),
             )
                 .into_response();
+        }
+        for c in input.handle.chars() {
+            if !c.is_ascii_alphanumeric() && c != '.' && c != '-' {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidHandle", "message": format!("Handle contains invalid character: {}", c)})),
+                )
+                    .into_response();
+            }
         }
         input.handle.to_lowercase()
     };
@@ -319,7 +334,9 @@ pub async fn create_account(
                 )
                     .into_response();
             }
-            if let Err(e) = verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await {
+            if let Err(e) =
+                verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await
+            {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": "InvalidDid", "message": e})),
@@ -335,7 +352,10 @@ pub async fn create_account(
                     info!(did = %d, "Migration with existing did:plc");
                     d.clone()
                 } else if d.starts_with("did:web:") {
-                    if let Err(e) = verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await {
+                    if let Err(e) =
+                        verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref())
+                            .await
+                    {
                         return (
                             StatusCode::BAD_REQUEST,
                             Json(json!({"error": "InvalidDid", "message": e})),
@@ -758,22 +778,24 @@ pub async fn create_account(
     };
 
     if !is_migration
-        && let Err(e) = sqlx::query!(
-            "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, 'email', $2, $3, $4)",
-            user_id,
-            verification_code,
-            email,
-            code_expires_at
-        )
-        .execute(&mut *tx)
-        .await {
-            error!("Error inserting verification code: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
+        && let Some(ref recipient) = verification_recipient
+            && let Err(e) = sqlx::query!(
+                "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, $2::comms_channel, $3, $4, $5)",
+                user_id,
+                verification_channel as _,
+                verification_code,
+                recipient,
+                code_expires_at
             )
-                .into_response();
-        }
+            .execute(&mut *tx)
+            .await {
+                error!("Error inserting verification code: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(enc) => enc,
         Err(e) => {
@@ -919,8 +941,7 @@ pub async fn create_account(
     }
     if !is_migration {
         if let Err(e) =
-            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle))
-                .await
+            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
         {
             warn!("Failed to sequence identity event for {}: {}", did, e);
         }

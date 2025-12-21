@@ -419,7 +419,11 @@ pub async fn delete_account(
                 .into_response();
         }
     };
-    let password_valid = if verify(password, &password_hash).unwrap_or(false) {
+    let password_valid = if password_hash
+        .as_ref()
+        .map(|h| verify(password, h).unwrap_or(false))
+        .unwrap_or(false)
+    {
         true
     } else {
         let app_pass_rows = sqlx::query!(

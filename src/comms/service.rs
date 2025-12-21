@@ -457,6 +457,31 @@ pub async fn enqueue_2fa_code(
     .await
 }
 
+pub async fn enqueue_passkey_recovery(
+    db: &PgPool,
+    user_id: Uuid,
+    recovery_url: &str,
+    hostname: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_comms_prefs(db, user_id).await?;
+    let body = format!(
+        "Hello @{},\n\nYou requested to recover your passkey-only account.\n\nClick the link below to set a temporary password and regain access:\n{}\n\nThis link will expire in 1 hour.\n\nIf you did not request this, please ignore this message. Your account remains secure.",
+        prefs.handle, recovery_url
+    );
+    enqueue_comms(
+        db,
+        NewComms::new(
+            user_id,
+            prefs.channel,
+            super::types::CommsType::PasskeyRecovery,
+            prefs.email.clone().unwrap_or_default(),
+            Some(format!("Account Recovery - {}", hostname)),
+            body,
+        ),
+    )
+    .await
+}
+
 pub fn channel_display_name(channel: CommsChannel) -> &'static str {
     match channel {
         CommsChannel::Email => "email",

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, did, handle, password_required FROM users WHERE LOWER(email) = $1 OR handle = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "password_required",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8835e3653c1b65874ff2828a1993b4505d5442b12d00b9062ee0db5f58ae05b8"
+}

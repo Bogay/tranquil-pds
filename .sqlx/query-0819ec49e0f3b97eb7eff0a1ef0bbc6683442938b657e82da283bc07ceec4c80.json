@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE oauth_device SET trusted_at = NULL, trusted_until = NULL WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0819ec49e0f3b97eb7eff0a1ef0bbc6683442938b657e82da283bc07ceec4c80"
+}

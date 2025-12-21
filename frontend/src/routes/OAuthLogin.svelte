@@ -399,9 +399,28 @@
       </button>
     </div>
   </form>
+
+  <p class="help-links">
+    <a href="#/reset-password">Forgot password?</a> &middot; <a href="#/request-passkey-recovery">Lost passkey?</a>
+  </p>
 </div>
 
 <style>
+  .help-links {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.875rem;
+  }
+
+  .help-links a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .help-links a:hover {
+    text-decoration: underline;
+  }
+
   .oauth-login-container {
     max-width: 400px;
     margin: 4rem auto;

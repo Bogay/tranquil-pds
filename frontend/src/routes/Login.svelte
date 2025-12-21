@@ -142,7 +142,7 @@
       {submitting ? 'Redirecting...' : 'Sign In'}
     </button>
     <p class="forgot-link">
-      <a href="#/reset-password">Forgot password?</a>
+      <a href="#/reset-password">Forgot password?</a> &middot; <a href="#/request-passkey-recovery">Lost passkey?</a>
     </p>
     <p class="register-link">
       Don't have an account? <a href="#/register">Create one</a>

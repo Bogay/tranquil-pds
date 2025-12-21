@@ -33,6 +33,7 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
 
 #[derive(Deserialize)]
 pub struct RequestPasswordResetInput {
+    #[serde(alias = "identifier")]
     pub email: String,
 }
 
@@ -56,21 +57,33 @@ pub async fn request_password_reset(
         )
             .into_response();
     }
-    let email = input.email.trim().to_lowercase();
-    if email.is_empty() {
+    let identifier = input.email.trim();
+    if identifier.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "email is required"})),
+            Json(json!({"error": "InvalidRequest", "message": "email or handle is required"})),
         )
             .into_response();
     }
-    let user = sqlx::query!("SELECT id FROM users WHERE LOWER(email) = $1", email)
-        .fetch_optional(&state.db)
-        .await;
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let normalized = identifier.to_lowercase();
+    let normalized = normalized.strip_prefix('@').unwrap_or(&normalized);
+    let normalized_handle = if normalized.contains('@') || normalized.contains('.') {
+        normalized.to_string()
+    } else {
+        format!("{}.{}", normalized, pds_hostname)
+    };
+    let user = sqlx::query!(
+        "SELECT id FROM users WHERE LOWER(email) = $1 OR handle = $2",
+        normalized,
+        normalized_handle
+    )
+    .fetch_optional(&state.db)
+    .await;
     let user_id = match user {
         Ok(Some(row)) => row.id,
         Ok(None) => {
-            info!("Password reset requested for unknown email");
+            info!("Password reset requested for unknown identifier");
             return (StatusCode::OK, Json(json!({}))).into_response();
         }
         Err(e) => {
@@ -225,7 +238,7 @@ pub async fn reset_password(
         }
     };
     if let Err(e) = sqlx::query!(
-        "UPDATE users SET password_hash = $1, password_reset_code = NULL, password_reset_code_expires_at = NULL WHERE id = $2",
+        "UPDATE users SET password_hash = $1, password_reset_code = NULL, password_reset_code_expires_at = NULL, password_required = TRUE WHERE id = $2",
         password_hash,
         user_id
     )
@@ -403,4 +416,106 @@ pub async fn change_password(
     }
     info!(did = %auth.0.did, "Password changed successfully");
     (StatusCode::OK, Json(json!({}))).into_response()
+}
+
+pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
+    let user = sqlx::query!(
+        "SELECT password_hash IS NOT NULL as has_password FROM users WHERE did = $1",
+        auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    match user {
+        Ok(Some(row)) => {
+            Json(json!({"hasPassword": row.has_password.unwrap_or(false)})).into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "AccountNotFound"})),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) -> Response {
+    if crate::api::server::reauth::check_reauth_required(&state.db, &auth.0.did).await {
+        return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
+    }
+
+    let has_passkeys =
+        crate::api::server::passkeys::has_passkeys_for_user_db(&state.db, &auth.0.did).await;
+    if !has_passkeys {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "NoPasskeys",
+                "message": "You must have at least one passkey registered before removing your password"
+            })),
+        )
+            .into_response();
+    }
+
+    let user = sqlx::query!(
+        "SELECT id, password_hash FROM users WHERE did = $1",
+        auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let user = match user {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "AccountNotFound"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    };
+
+    if user.password_hash.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "NoPassword",
+                "message": "Account already has no password"
+            })),
+        )
+            .into_response();
+    }
+
+    if let Err(e) = sqlx::query!(
+        "UPDATE users SET password_hash = NULL, password_required = FALSE WHERE id = $1",
+        user.id
+    )
+    .execute(&state.db)
+    .await
+    {
+        error!("DB error removing password: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+
+    info!(did = %auth.0.did, "Password removed - account is now passkey-only");
+    (StatusCode::OK, Json(json!({"success": true}))).into_response()
 }

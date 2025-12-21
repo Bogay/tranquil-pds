@@ -1,10 +1,23 @@
 [store]
 dir = "target/nextest"
+
 [profile.default]
 retries = 0
 fail-fast = true
 test-threads = "num-cpus"
+
 [profile.ci]
 retries = 2
 fail-fast = false
 test-threads = "num-cpus"
+
+[test-groups]
+serial-env-tests = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "test(/import_with_verification/) | test(/plc_migration/)"
+test-group = "serial-env-tests"
+
+[[profile.ci.overrides]]
+filter = "test(/import_with_verification/) | test(/plc_migration/)"
+test-group = "serial-env-tests"
