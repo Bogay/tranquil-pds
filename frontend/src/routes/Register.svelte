@@ -50,8 +50,11 @@
     }
   }
 
+  let handleHasDot = $derived(handle.includes('.'))
+
   function validateForm(): string | null {
     if (!handle.trim()) return 'Handle is required'
+    if (handle.includes('.')) return 'Handle cannot contain dots. You can set up a custom domain handle after creating your account.'
     if (!password) return 'Password is required'
     if (password.length < 8) return 'Password must be at least 8 characters'
     if (password !== confirmPassword) return 'Passwords do not match'
@@ -152,7 +155,9 @@
             disabled={submitting}
             required
           />
-          {#if fullHandle()}
+          {#if handleHasDot}
+            <p class="hint warning">Custom domain handles can be set up after account creation in Settings.</p>
+          {:else if fullHandle()}
             <p class="hint">Your full handle will be: @{fullHandle()}</p>
           {/if}
         </div>
@@ -389,6 +394,9 @@
     font-size: 0.75rem;
     color: var(--text-secondary);
     margin: 0.25rem 0 0 0;
+  }
+  .hint.warning {
+    color: var(--warning-text, #856404);
   }
   .verification-section {
     border: 1px solid var(--border-color-light);

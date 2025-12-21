@@ -16,8 +16,8 @@ use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use tracing::{debug, error};
 
-const MAX_BLOB_SIZE: usize = 1_000_000;
-const MAX_VIDEO_BLOB_SIZE: usize = 100_000_000;
+const MAX_BLOB_SIZE: usize = 10_000_000_000;
+const MAX_VIDEO_BLOB_SIZE: usize = 10_000_000_000;
 
 pub async fn upload_blob(
     State(state): State<AppState>,

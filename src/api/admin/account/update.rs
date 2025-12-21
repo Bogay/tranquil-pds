@@ -67,15 +67,15 @@ pub async fn update_account_handle(
     Json(input): Json<UpdateAccountHandleInput>,
 ) -> Response {
     let did = input.did.trim();
-    let handle = input.handle.trim();
-    if did.is_empty() || handle.is_empty() {
+    let input_handle = input.handle.trim();
+    if did.is_empty() || input_handle.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidRequest", "message": "did and handle are required"})),
         )
             .into_response();
     }
-    if !handle
+    if !input_handle
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
     {
@@ -87,6 +87,12 @@ pub async fn update_account_handle(
         )
             .into_response();
     }
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let handle = if !input_handle.contains('.') {
+        format!("{}.{}", input_handle, hostname)
+    } else {
+        input_handle.to_string()
+    };
     let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await

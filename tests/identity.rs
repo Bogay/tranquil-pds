@@ -8,10 +8,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn test_resolve_handle_success() {
     let client = client();
-    let handle = format!("resolvetest_{}", uuid::Uuid::new_v4());
+    let short_handle = format!("resolvetest_{}", uuid::Uuid::new_v4());
     let payload = json!({
-        "handle": handle,
-        "email": format!("{}@example.com", handle),
+        "handle": short_handle,
+        "email": format!("{}@example.com", short_handle),
         "password": "password"
     });
     let res = client
@@ -26,7 +26,8 @@ async fn test_resolve_handle_success() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     let did = body["did"].as_str().expect("No DID").to_string();
-    let params = [("handle", handle.as_str())];
+    let full_handle = body["handle"].as_str().expect("No handle in response").to_string();
+    let params = [("handle", full_handle.as_str())];
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.identity.resolveHandle",

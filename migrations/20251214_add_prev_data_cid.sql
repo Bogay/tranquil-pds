@@ -1,1 +1,0 @@
-ALTER TABLE repo_seq ADD COLUMN IF NOT EXISTS prev_data_cid TEXT;

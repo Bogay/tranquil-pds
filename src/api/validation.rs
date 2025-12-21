@@ -4,6 +4,72 @@ pub const MAX_DOMAIN_LENGTH: usize = 253;
 pub const MAX_DOMAIN_LABEL_LENGTH: usize = 63;
 const EMAIL_LOCAL_SPECIAL_CHARS: &str = ".!#$%&'*+/=?^_`{|}~-";
 
+pub const MIN_HANDLE_LENGTH: usize = 3;
+pub const MAX_HANDLE_LENGTH: usize = 253;
+
+#[derive(Debug, PartialEq)]
+pub enum HandleValidationError {
+    Empty,
+    TooShort,
+    TooLong,
+    InvalidCharacters,
+    StartsWithInvalidChar,
+    EndsWithInvalidChar,
+    ContainsSpaces,
+}
+
+impl std::fmt::Display for HandleValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(f, "Handle cannot be empty"),
+            Self::TooShort => write!(f, "Handle must be at least {} characters", MIN_HANDLE_LENGTH),
+            Self::TooLong => write!(f, "Handle exceeds maximum length of {} characters", MAX_HANDLE_LENGTH),
+            Self::InvalidCharacters => write!(f, "Handle contains invalid characters. Only alphanumeric, hyphens, and underscores are allowed"),
+            Self::StartsWithInvalidChar => write!(f, "Handle cannot start with a hyphen or underscore"),
+            Self::EndsWithInvalidChar => write!(f, "Handle cannot end with a hyphen or underscore"),
+            Self::ContainsSpaces => write!(f, "Handle cannot contain spaces"),
+        }
+    }
+}
+
+pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationError> {
+    let handle = handle.trim();
+
+    if handle.is_empty() {
+        return Err(HandleValidationError::Empty);
+    }
+
+    if handle.contains(' ') || handle.contains('\t') || handle.contains('\n') {
+        return Err(HandleValidationError::ContainsSpaces);
+    }
+
+    if handle.len() < MIN_HANDLE_LENGTH {
+        return Err(HandleValidationError::TooShort);
+    }
+
+    if handle.len() > MAX_HANDLE_LENGTH {
+        return Err(HandleValidationError::TooLong);
+    }
+
+    let first_char = handle.chars().next().unwrap();
+    if first_char == '-' || first_char == '_' {
+        return Err(HandleValidationError::StartsWithInvalidChar);
+    }
+
+    let last_char = handle.chars().last().unwrap();
+    if last_char == '-' || last_char == '_' {
+        return Err(HandleValidationError::EndsWithInvalidChar);
+    }
+
+    for c in handle.chars() {
+        if !c.is_ascii_alphanumeric() && c != '-' && c != '_' {
+            return Err(HandleValidationError::InvalidCharacters);
+        }
+    }
+
+    Ok(handle.to_lowercase())
+}
+
 pub fn is_valid_email(email: &str) -> bool {
     let email = email.trim();
     if email.is_empty() || email.len() > MAX_EMAIL_LENGTH {
@@ -54,6 +120,40 @@ pub fn is_valid_email(email: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_valid_handles() {
+        assert_eq!(validate_short_handle("alice"), Ok("alice".to_string()));
+        assert_eq!(validate_short_handle("bob123"), Ok("bob123".to_string()));
+        assert_eq!(validate_short_handle("user-name"), Ok("user-name".to_string()));
+        assert_eq!(validate_short_handle("user_name"), Ok("user_name".to_string()));
+        assert_eq!(validate_short_handle("UPPERCASE"), Ok("uppercase".to_string()));
+        assert_eq!(validate_short_handle("MixedCase123"), Ok("mixedcase123".to_string()));
+        assert_eq!(validate_short_handle("abc"), Ok("abc".to_string()));
+    }
+
+    #[test]
+    fn test_invalid_handles() {
+        assert_eq!(validate_short_handle(""), Err(HandleValidationError::Empty));
+        assert_eq!(validate_short_handle("   "), Err(HandleValidationError::Empty));
+        assert_eq!(validate_short_handle("ab"), Err(HandleValidationError::TooShort));
+        assert_eq!(validate_short_handle("a"), Err(HandleValidationError::TooShort));
+        assert_eq!(validate_short_handle("test spaces"), Err(HandleValidationError::ContainsSpaces));
+        assert_eq!(validate_short_handle("test\ttab"), Err(HandleValidationError::ContainsSpaces));
+        assert_eq!(validate_short_handle("-starts"), Err(HandleValidationError::StartsWithInvalidChar));
+        assert_eq!(validate_short_handle("_starts"), Err(HandleValidationError::StartsWithInvalidChar));
+        assert_eq!(validate_short_handle("ends-"), Err(HandleValidationError::EndsWithInvalidChar));
+        assert_eq!(validate_short_handle("ends_"), Err(HandleValidationError::EndsWithInvalidChar));
+        assert_eq!(validate_short_handle("test@user"), Err(HandleValidationError::InvalidCharacters));
+        assert_eq!(validate_short_handle("test!user"), Err(HandleValidationError::InvalidCharacters));
+        assert_eq!(validate_short_handle("test.user"), Err(HandleValidationError::InvalidCharacters));
+    }
+
+    #[test]
+    fn test_handle_trimming() {
+        assert_eq!(validate_short_handle("  alice  "), Ok("alice".to_string()));
+    }
+
     #[test]
     fn test_valid_emails() {
         assert!(is_valid_email("user@example.com"));

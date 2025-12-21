@@ -139,15 +139,35 @@ pub async fn create_account(
         info!(did = %migration_did, "Processing account migration");
     }
 
-    if input.handle.contains('!') || input.handle.contains('@') {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(
-                json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"}),
-            ),
-        )
-            .into_response();
-    }
+    let hostname_for_validation = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_suffix = format!(".{}", hostname_for_validation);
+
+    let validated_short_handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
+        let handle_to_validate = if input.handle.ends_with(&pds_suffix) {
+            input.handle.strip_suffix(&pds_suffix).unwrap_or(&input.handle)
+        } else {
+            &input.handle
+        };
+        match crate::api::validation::validate_short_handle(handle_to_validate) {
+            Ok(h) => h,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidHandle", "message": e.to_string()})),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        if input.handle.contains(' ') || input.handle.contains('\t') {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidHandle", "message": "Handle cannot contain spaces"})),
+            )
+                .into_response();
+        }
+        input.handle.to_lowercase()
+    };
     let email: Option<String> = input
         .email
         .as_ref()
@@ -212,12 +232,13 @@ pub async fn create_account(
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
     let suffix = format!(".{}", hostname);
-    let short_handle = if input.handle.ends_with(&suffix) {
-        input.handle.strip_suffix(&suffix).unwrap_or(&input.handle)
+    let handle = if input.handle.ends_with(&suffix) {
+        format!("{}.{}", validated_short_handle, hostname)
+    } else if input.handle.contains('.') {
+        validated_short_handle.clone()
     } else {
-        &input.handle
+        format!("{}.{}", validated_short_handle, hostname)
     };
-    let full_handle = format!("{}.{}", short_handle, hostname);
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
             let reserved = sqlx::query!(
@@ -298,7 +319,7 @@ pub async fn create_account(
                 )
                     .into_response();
             }
-            if let Err(e) = verify_did_web(d, &hostname, &input.handle).await {
+            if let Err(e) = verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(json!({"error": "InvalidDid", "message": e})),
@@ -314,7 +335,7 @@ pub async fn create_account(
                     info!(did = %d, "Migration with existing did:plc");
                     d.clone()
                 } else if d.starts_with("did:web:") {
-                    if let Err(e) = verify_did_web(d, &hostname, &input.handle).await {
+                    if let Err(e) = verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await {
                         return (
                             StatusCode::BAD_REQUEST,
                             Json(json!({"error": "InvalidDid", "message": e})),
@@ -334,7 +355,7 @@ pub async fn create_account(
                     let genesis_result = match create_genesis_operation(
                         &signing_key,
                         &rotation_key,
-                        &full_handle,
+                        &handle,
                         &pds_endpoint,
                     ) {
                         Ok(r) => r,
@@ -371,7 +392,7 @@ pub async fn create_account(
                 let genesis_result = match create_genesis_operation(
                     &signing_key,
                     &rotation_key,
-                    &full_handle,
+                    &handle,
                     &pds_endpoint,
                 ) {
                     Ok(r) => r,
@@ -424,10 +445,10 @@ pub async fn create_account(
                 .unwrap_or(None);
         if let Some((account_id, old_handle, deactivated_at)) = existing_account {
             if deactivated_at.is_some() {
-                info!(did = %did, old_handle = %old_handle, new_handle = %short_handle, "Preparing existing account for inbound migration");
+                info!(did = %did, old_handle = %old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
                 let update_result: Result<_, sqlx::Error> =
                     sqlx::query("UPDATE users SET handle = $1 WHERE id = $2")
-                        .bind(short_handle)
+                        .bind(&handle)
                         .bind(account_id)
                         .execute(&mut *tx)
                         .await;
@@ -536,7 +557,7 @@ pub async fn create_account(
                 return (
                     StatusCode::OK,
                     Json(CreateAccountOutput {
-                        handle: full_handle.clone(),
+                        handle: handle.clone(),
                         did,
                         access_jwt: Some(access_meta.token),
                         refresh_jwt: Some(refresh_meta.token),
@@ -556,7 +577,7 @@ pub async fn create_account(
     }
     let exists_result: Option<(i32,)> =
         sqlx::query_as("SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL")
-            .bind(short_handle)
+            .bind(&handle)
             .fetch_optional(&mut *tx)
             .await
             .unwrap_or(None);
@@ -660,7 +681,7 @@ pub async fn create_account(
             is_admin, deactivated_at, email_verified
         ) VALUES ($1, $2, $3, $4, $5::comms_channel, $6, $7, $8, $9, $10, $11) RETURNING id"#,
     )
-    .bind(short_handle)
+    .bind(&handle)
     .bind(&email)
     .bind(&did)
     .bind(&password_hash)
@@ -898,7 +919,7 @@ pub async fn create_account(
     }
     if !is_migration {
         if let Err(e) =
-            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle))
+            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle))
                 .await
         {
             warn!("Failed to sequence identity event for {}: {}", did, e);
@@ -991,7 +1012,7 @@ pub async fn create_account(
     (
         StatusCode::OK,
         Json(CreateAccountOutput {
-            handle: full_handle.clone(),
+            handle: handle.clone(),
             did,
             access_jwt,
             refresh_jwt,

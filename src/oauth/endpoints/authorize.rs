@@ -426,10 +426,10 @@ pub async fn authorize_post(
     let normalized_username = normalized_username
         .strip_prefix('@')
         .unwrap_or(normalized_username);
-    let normalized_username = if let Some(bare_handle) =
-        normalized_username.strip_suffix(&format!(".{}", pds_hostname))
-    {
-        bare_handle.to_string()
+    let normalized_username = if normalized_username.contains('@') {
+        normalized_username.to_string()
+    } else if !normalized_username.contains('.') {
+        format!("{}.{}", normalized_username, pds_hostname)
     } else {
         normalized_username.to_string()
     };
@@ -1585,16 +1585,14 @@ pub async fn check_user_security_status(
     Query(query): Query<CheckPasskeysQuery>,
 ) -> Response {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let normalized_identifier = query.identifier.trim();
-    let normalized_identifier = normalized_identifier
-        .strip_prefix('@')
-        .unwrap_or(normalized_identifier);
-    let normalized_identifier = if let Some(bare_handle) =
-        normalized_identifier.strip_suffix(&format!(".{}", pds_hostname))
-    {
-        bare_handle.to_string()
+    let identifier = query.identifier.trim();
+    let identifier = identifier.strip_prefix('@').unwrap_or(identifier);
+    let normalized_identifier = if identifier.contains('@') || identifier.starts_with("did:") {
+        identifier.to_string()
+    } else if !identifier.contains('.') {
+        format!("{}.{}", identifier.to_lowercase(), pds_hostname)
     } else {
-        normalized_identifier.to_string()
+        identifier.to_lowercase()
     };
 
     let user = sqlx::query!(
@@ -1695,10 +1693,10 @@ pub async fn passkey_start(
     let normalized_username = normalized_username
         .strip_prefix('@')
         .unwrap_or(normalized_username);
-    let normalized_username = if let Some(bare_handle) =
-        normalized_username.strip_suffix(&format!(".{}", pds_hostname))
-    {
-        bare_handle.to_string()
+    let normalized_username = if normalized_username.contains('@') {
+        normalized_username.to_string()
+    } else if !normalized_username.contains('.') {
+        format!("{}.{}", normalized_username, pds_hostname)
     } else {
         normalized_username.to_string()
     };

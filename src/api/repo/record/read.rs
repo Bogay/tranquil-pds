@@ -34,13 +34,12 @@ pub async fn get_record(
             .await
             .map(|opt| opt.map(|r| r.id))
     } else {
-        let suffix = format!(".{}", hostname);
-        let short_handle = if input.repo.ends_with(&suffix) {
-            input.repo.strip_suffix(&suffix).unwrap_or(&input.repo)
+        let handle = if !input.repo.contains('.') {
+            format!("{}.{}", input.repo, hostname)
         } else {
-            &input.repo
+            input.repo.clone()
         };
-        sqlx::query!("SELECT id FROM users WHERE handle = $1", short_handle)
+        sqlx::query!("SELECT id FROM users WHERE handle = $1", handle)
             .fetch_optional(&state.db)
             .await
             .map(|opt| opt.map(|r| r.id))
@@ -212,13 +211,12 @@ pub async fn list_records(
             .await
             .map(|opt| opt.map(|r| r.id))
     } else {
-        let suffix = format!(".{}", hostname);
-        let short_handle = if input.repo.ends_with(&suffix) {
-            input.repo.strip_suffix(&suffix).unwrap_or(&input.repo)
+        let handle = if !input.repo.contains('.') {
+            format!("{}.{}", input.repo, hostname)
         } else {
-            &input.repo
+            input.repo.clone()
         };
-        sqlx::query!("SELECT id FROM users WHERE handle = $1", short_handle)
+        sqlx::query!("SELECT id FROM users WHERE handle = $1", handle)
             .fetch_optional(&state.db)
             .await
             .map(|opt| opt.map(|r| r.id))

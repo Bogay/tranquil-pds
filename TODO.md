@@ -12,16 +12,16 @@ So like... make the thing unique, make it cool.
 ### Passkeys and 2FA
 Modern passwordless authentication using WebAuthn/FIDO2, plus TOTP for defense in depth.
 
-- [ ] passkeys table (id, did, credential_id, public_key, sign_count, created_at, last_used, friendly_name)
-- [ ] user_totp table (did, secret_encrypted, verified, created_at, last_used)
-- [ ] WebAuthn registration challenge generation and attestation verification
-- [ ] TOTP secret generation with QR code setup flow
-- [ ] Backup codes (hashed, one-time use) with recovery flow
-- [ ] OAuth authorize flow: password -> 2FA (if enabled) -> passkey (as alternative)
+- [x] passkeys table (id, did, credential_id, public_key, sign_count, created_at, last_used, friendly_name)
+- [x] user_totp table (did, secret_encrypted, verified, created_at, last_used)
+- [x] WebAuthn registration challenge generation and attestation verification
+- [x] TOTP secret generation with QR code setup flow
+- [x] Backup codes (hashed, one-time use) with recovery flow
+- [x] OAuth authorize flow: password -> 2FA (if enabled) -> passkey (as alternative)
 - [ ] Passkey-only account creation (no password)
-- [ ] Settings UI for managing passkeys, TOTP, backup codes
+- [x] Settings UI for managing passkeys, TOTP, backup codes
 - [ ] Trusted devices option (remember this browser)
-- [ ] Rate limit 2FA attempts
+- [x] Rate limit 2FA attempts
 - [ ] Re-auth for sensitive actions (email change, adding new auth methods)
 
 ### Delegated accounts

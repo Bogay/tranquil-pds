@@ -17,6 +17,7 @@ pub async fn describe_repo(
     State(state): State<AppState>,
     Query(input): Query<DescribeRepoInput>,
 ) -> Response {
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let user_row = if input.repo.starts_with("did:") {
         sqlx::query!(
             "SELECT id, handle, did FROM users WHERE did = $1",
@@ -26,9 +27,14 @@ pub async fn describe_repo(
         .await
         .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
     } else {
+        let handle = if !input.repo.contains('.') {
+            format!("{}.{}", input.repo, hostname)
+        } else {
+            input.repo.clone()
+        };
         sqlx::query!(
             "SELECT id, handle, did FROM users WHERE handle = $1",
-            input.repo
+            handle
         )
         .fetch_optional(&state.db)
         .await

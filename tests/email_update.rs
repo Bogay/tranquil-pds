@@ -17,7 +17,7 @@ async fn create_verified_account(
     base_url: &str,
     handle: &str,
     email: &str,
-) -> String {
+) -> (String, String) {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
@@ -33,8 +33,9 @@ async fn create_verified_account(
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
-    let did = body["did"].as_str().expect("No did");
-    common::verify_new_account(client, did).await
+    let did = body["did"].as_str().expect("No did").to_string();
+    let jwt = common::verify_new_account(client, &did).await;
+    (jwt, did)
 }
 
 #[tokio::test]
@@ -44,7 +45,7 @@ async fn test_email_update_flow_success() {
     let pool = get_pool().await;
     let handle = format!("emailup_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, did) = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("new_{}@example.com", handle);
     let res = client
         .post(format!(
@@ -61,8 +62,8 @@ async fn test_email_update_flow_success() {
     assert_eq!(body["tokenRequired"], true);
 
     let verification = sqlx::query!(
-        "SELECT pending_identifier, code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
-        handle
+        "SELECT pending_identifier, code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
+        did
     )
     .fetch_one(&pool)
     .await
@@ -84,15 +85,15 @@ async fn test_email_update_flow_success() {
         .await
         .expect("Failed to confirm email");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!("SELECT email FROM users WHERE handle = $1", handle)
+    let user = sqlx::query!("SELECT email FROM users WHERE did = $1", did)
         .fetch_one(&pool)
         .await
         .expect("User not found");
     assert_eq!(user.email, Some(new_email));
 
     let verification = sqlx::query!(
-        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
-        handle
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
+        did
     )
     .fetch_optional(&pool)
     .await
@@ -106,10 +107,10 @@ async fn test_request_email_update_taken_email() {
     let base_url = common::base_url().await;
     let handle1 = format!("emailup_taken1_{}", uuid::Uuid::new_v4());
     let email1 = format!("{}@example.com", handle1);
-    let _ = create_verified_account(&client, &base_url, &handle1, &email1).await;
+    let (_, _) = create_verified_account(&client, &base_url, &handle1, &email1).await;
     let handle2 = format!("emailup_taken2_{}", uuid::Uuid::new_v4());
     let email2 = format!("{}@example.com", handle2);
-    let access_jwt2 = create_verified_account(&client, &base_url, &handle2, &email2).await;
+    let (access_jwt2, _) = create_verified_account(&client, &base_url, &handle2, &email2).await;
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.requestEmailUpdate",
@@ -131,7 +132,7 @@ async fn test_confirm_email_invalid_token() {
     let base_url = common::base_url().await;
     let handle = format!("emailup_inv_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("new_{}@example.com", handle);
     let res = client
         .post(format!(
@@ -166,7 +167,7 @@ async fn test_confirm_email_wrong_email() {
     let pool = get_pool().await;
     let handle = format!("emailup_wrong_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, did) = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("new_{}@example.com", handle);
     let res = client
         .post(format!(
@@ -180,8 +181,8 @@ async fn test_confirm_email_wrong_email() {
         .expect("Failed to request email update");
     assert_eq!(res.status(), StatusCode::OK);
     let verification = sqlx::query!(
-        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
-        handle
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
+        did
     )
     .fetch_one(&pool)
     .await
@@ -209,7 +210,7 @@ async fn test_update_email_success_no_token_required() {
     let pool = get_pool().await;
     let handle = format!("emailup_direct_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, did) = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("direct_{}@example.com", handle);
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
@@ -219,7 +220,7 @@ async fn test_update_email_success_no_token_required() {
         .await
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!("SELECT email FROM users WHERE handle = $1", handle)
+    let user = sqlx::query!("SELECT email FROM users WHERE did = $1", did)
         .fetch_one(&pool)
         .await
         .expect("User not found");
@@ -232,7 +233,7 @@ async fn test_update_email_same_email_noop() {
     let base_url = common::base_url().await;
     let handle = format!("emailup_same_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
         .bearer_auth(&access_jwt)
@@ -253,7 +254,7 @@ async fn test_update_email_requires_token_after_pending() {
     let base_url = common::base_url().await;
     let handle = format!("emailup_token_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("pending_{}@example.com", handle);
     let res = client
         .post(format!(
@@ -285,7 +286,7 @@ async fn test_update_email_with_valid_token() {
     let pool = get_pool().await;
     let handle = format!("emailup_valid_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, did) = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("valid_{}@example.com", handle);
     let res = client
         .post(format!(
@@ -299,8 +300,8 @@ async fn test_update_email_with_valid_token() {
         .expect("Failed to request email update");
     assert_eq!(res.status(), StatusCode::OK);
     let verification = sqlx::query!(
-        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
-        handle
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
+        did
     )
     .fetch_one(&pool)
     .await
@@ -317,14 +318,14 @@ async fn test_update_email_with_valid_token() {
         .await
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK);
-    let user = sqlx::query!("SELECT email FROM users WHERE handle = $1", handle)
+    let user = sqlx::query!("SELECT email FROM users WHERE did = $1", did)
         .fetch_one(&pool)
         .await
         .expect("User not found");
     assert_eq!(user.email, Some(new_email));
     let verification = sqlx::query!(
-        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE handle = $1) AND channel = 'email'",
-        handle
+        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
+        did
     )
     .fetch_optional(&pool)
     .await
@@ -338,7 +339,7 @@ async fn test_update_email_invalid_token() {
     let base_url = common::base_url().await;
     let handle = format!("emailup_badtok_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
     let new_email = format!("badtok_{}@example.com", handle);
     let res = client
         .post(format!(
@@ -372,10 +373,10 @@ async fn test_update_email_already_taken() {
     let base_url = common::base_url().await;
     let handle1 = format!("emailup_dup1_{}", uuid::Uuid::new_v4());
     let email1 = format!("{}@example.com", handle1);
-    let _ = create_verified_account(&client, &base_url, &handle1, &email1).await;
+    let (_, _) = create_verified_account(&client, &base_url, &handle1, &email1).await;
     let handle2 = format!("emailup_dup2_{}", uuid::Uuid::new_v4());
     let email2 = format!("{}@example.com", handle2);
-    let access_jwt2 = create_verified_account(&client, &base_url, &handle2, &email2).await;
+    let (access_jwt2, _) = create_verified_account(&client, &base_url, &handle2, &email2).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
         .bearer_auth(&access_jwt2)
@@ -412,7 +413,7 @@ async fn test_update_email_invalid_format() {
     let base_url = common::base_url().await;
     let handle = format!("emailup_fmt_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let access_jwt = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
         .bearer_auth(&access_jwt)

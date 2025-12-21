@@ -341,14 +341,14 @@
       />
     </div>
 
-    {#if securityStatusChecked && passkeySupported}
+    {#if passkeySupported && username.length >= 3}
       <button
         type="button"
         class="passkey-btn"
-        class:passkey-unavailable={!hasPasskeys}
+        class:passkey-unavailable={!hasPasskeys || checkingSecurityStatus || !securityStatusChecked}
         onclick={handlePasskeyLogin}
-        disabled={submitting || !hasPasskeys || !username}
-        title={hasPasskeys ? 'Sign in with your passkey' : 'No passkeys registered for this account'}
+        disabled={submitting || !hasPasskeys || !username || checkingSecurityStatus || !securityStatusChecked}
+        title={checkingSecurityStatus ? 'Checking passkey status...' : hasPasskeys ? 'Sign in with your passkey' : 'No passkeys registered for this account'}
       >
         <svg class="passkey-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M15 7a4 4 0 1 0-8 0 4 4 0 0 0 8 0z" />
@@ -358,6 +358,8 @@
         <span class="passkey-text">
           {#if submitting}
             Authenticating...
+          {:else if checkingSecurityStatus || !securityStatusChecked}
+            Checking passkey...
           {:else if hasPasskeys}
             Sign in with passkey
           {:else}

@@ -36,14 +36,7 @@ pub async fn resolve_handle(
     if let Some(did) = state.cache.get(&cache_key).await {
         return (StatusCode::OK, Json(json!({ "did": did }))).into_response();
     }
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let suffix = format!(".{}", hostname);
-    let short_handle = if handle.ends_with(&suffix) {
-        handle.strip_suffix(&suffix).unwrap_or(handle)
-    } else {
-        handle
-    };
-    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", short_handle)
+    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
         .fetch_optional(&state.db)
         .await;
     match user {
@@ -139,9 +132,10 @@ pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -
 }
 
 async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str) -> Response {
+    let full_handle = format!("{}.{}", handle, hostname);
     let user = sqlx::query!(
         "SELECT id, did, migrated_to_pds FROM users WHERE handle = $1",
-        handle
+        full_handle
     )
     .fetch_optional(&state.db)
     .await;
@@ -212,11 +206,6 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
                 .into_response();
         }
     };
-    let full_handle = if handle.contains('.') {
-        handle.to_string()
-    } else {
-        format!("{}.{}", handle, hostname)
-    };
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
     Json(json!({
         "@context": [
@@ -225,7 +214,7 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
             "https://w3id.org/security/suites/secp256k1-2019/v1"
         ],
         "id": did,
-        "alsoKnownAs": [format!("at://{}", full_handle)],
+        "alsoKnownAs": [format!("at://{}", handle)],
         "verificationMethod": [{
             "id": format!("{}#atproto", did),
             "type": "Multikey",
@@ -243,9 +232,10 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
 
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let full_handle = format!("{}.{}", handle, hostname);
     let user = sqlx::query!(
         "SELECT id, did, migrated_to_pds FROM users WHERE handle = $1",
-        handle
+        full_handle
     )
     .fetch_optional(&state.db)
     .await;
@@ -318,11 +308,6 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
                 .into_response();
         }
     };
-    let full_handle = if handle.contains('.') {
-        handle.clone()
-    } else {
-        format!("{}.{}", handle, hostname)
-    };
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
     Json(json!({
         "@context": [
@@ -331,7 +316,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
             "https://w3id.org/security/suites/secp256k1-2019/v1"
         ],
         "id": did,
-        "alsoKnownAs": [format!("at://{}", full_handle)],
+        "alsoKnownAs": [format!("at://{}", handle)],
         "verificationMethod": [{
             "id": format!("{}#atproto", did),
             "type": "Multikey",
@@ -347,7 +332,12 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
     .into_response()
 }
 
-pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(), String> {
+pub async fn verify_did_web(
+    did: &str,
+    hostname: &str,
+    handle: &str,
+    expected_signing_key: Option<&str>,
+) -> Result<(), String> {
     let subdomain_host = format!("{}.{}", handle, hostname);
     let encoded_subdomain = subdomain_host.replace(':', "%3A");
     let expected_subdomain_did = format!("did:web:{}", encoded_subdomain);
@@ -371,6 +361,9 @@ pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(
             ));
         }
     }
+    let expected_signing_key = expected_signing_key.ok_or_else(|| {
+        "External did:web requires a pre-reserved signing key. Call com.atproto.server.reserveSigningKey first, configure your DID document with the returned key, then provide the signingKey in createAccount.".to_string()
+    })?;
     let parts: Vec<&str> = did.split(':').collect();
     if parts.len() < 3 || parts[0] != "did" || parts[1] != "web" {
         return Err("Invalid did:web format".into());
@@ -411,14 +404,31 @@ pub async fn verify_did_web(did: &str, hostname: &str, handle: &str) -> Result<(
     let has_valid_service = services
         .iter()
         .any(|s| s["type"] == "AtprotoPersonalDataServer" && s["serviceEndpoint"] == pds_endpoint);
-    if has_valid_service {
-        Ok(())
-    } else {
-        Err(format!(
+    if !has_valid_service {
+        return Err(format!(
             "DID document does not list this PDS ({}) as AtprotoPersonalDataServer",
             pds_endpoint
-        ))
+        ));
     }
+    let verification_methods = doc["verificationMethod"]
+        .as_array()
+        .ok_or("No verificationMethod found in DID doc")?;
+    let expected_multibase = expected_signing_key
+        .strip_prefix("did:key:")
+        .ok_or("Invalid signing key format")?;
+    let has_matching_key = verification_methods.iter().any(|vm| {
+        vm["publicKeyMultibase"]
+            .as_str()
+            .map(|pk| pk == expected_multibase)
+            .unwrap_or(false)
+    });
+    if !has_matching_key {
+        return Err(format!(
+            "DID document verification key does not match reserved signing key. Expected publicKeyMultibase: {}",
+            expected_multibase
+        ));
+    }
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
@@ -492,11 +502,6 @@ pub async fn get_recommended_did_credentials(
     };
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
-    let full_handle = if user.handle.contains('.') {
-        user.handle.clone()
-    } else {
-        format!("{}.{}", user.handle, hostname)
-    };
     let signing_key = match k256::ecdsa::SigningKey::from_slice(&key_bytes) {
         Ok(k) => k,
         Err(_) => return ApiError::InternalError.into_response(),
@@ -511,7 +516,7 @@ pub async fn get_recommended_did_credentials(
         StatusCode::OK,
         Json(GetRecommendedDidCredentialsOutput {
             rotation_keys,
-            also_known_as: vec![format!("at://{}", full_handle)],
+            also_known_as: vec![format!("at://{}", user.handle)],
             verification_methods: VerificationMethods { atproto: did_key },
             services: Services {
                 atproto_pds: AtprotoPds {
@@ -577,18 +582,29 @@ pub async fn update_handle(
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let suffix = format!(".{}", hostname);
     let is_service_domain = crate::handle::is_service_domain_handle(new_handle, &hostname);
-    let (handle_to_store, full_handle) = if is_service_domain {
-        let suffix = format!(".{}", hostname);
-        let short_handle = if new_handle.ends_with(&suffix) {
+    let handle = if is_service_domain {
+        let short_part = if new_handle.ends_with(&suffix) {
             new_handle.strip_suffix(&suffix).unwrap_or(new_handle)
         } else {
             new_handle
         };
-        (
-            short_handle.to_string(),
-            format!("{}.{}", short_handle, hostname),
-        )
+        if short_part.contains('.') {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidHandle",
+                    "message": "Nested subdomains are not allowed. Use a simple handle without dots."
+                })),
+            )
+                .into_response();
+        }
+        if new_handle.ends_with(&suffix) {
+            new_handle.to_string()
+        } else {
+            format!("{}.{}", new_handle, hostname)
+        }
     } else {
         match crate::handle::verify_handle_ownership(new_handle, &did).await {
             Ok(()) => {}
@@ -625,7 +641,7 @@ pub async fn update_handle(
                     .into_response();
             }
         }
-        (new_handle.to_string(), new_handle.to_string())
+        new_handle.to_string()
     };
     let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE id = $1", user_id)
         .fetch_optional(&state.db)
@@ -634,7 +650,7 @@ pub async fn update_handle(
         .flatten();
     let existing = sqlx::query!(
         "SELECT id FROM users WHERE handle = $1 AND id != $2",
-        handle_to_store,
+        handle,
         user_id
     )
     .fetch_optional(&state.db)
@@ -648,7 +664,7 @@ pub async fn update_handle(
     }
     let result = sqlx::query!(
         "UPDATE users SET handle = $1 WHERE id = $2",
-        handle_to_store,
+        handle,
         user_id
     )
     .execute(&state.db)
@@ -660,16 +676,15 @@ pub async fn update_handle(
             }
             let _ = state
                 .cache
-                .delete(&format!("handle:{}", handle_to_store))
+                .delete(&format!("handle:{}", handle))
                 .await;
-            let _ = state.cache.delete(&format!("handle:{}", full_handle)).await;
             if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle))
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle))
                     .await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            if let Err(e) = update_plc_handle(&state, &did, &full_handle).await {
+            if let Err(e) = update_plc_handle(&state, &did, &handle).await {
                 warn!("Failed to update PLC handle: {}", e);
             }
             (StatusCode::OK, Json(json!({}))).into_response()
@@ -723,15 +738,8 @@ pub async fn well_known_atproto_did(State(state): State<AppState>, headers: Head
         Some(h) => h,
         None => return (StatusCode::BAD_REQUEST, "Missing host header").into_response(),
     };
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let suffix = format!(".{}", hostname);
     let handle = host.split(':').next().unwrap_or(host);
-    let short_handle = if handle.ends_with(&suffix) {
-        handle.strip_suffix(&suffix).unwrap_or(handle)
-    } else {
-        return (StatusCode::NOT_FOUND, "Handle not found").into_response();
-    };
-    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", short_handle)
+    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
         .fetch_optional(&state.db)
         .await;
     match user {

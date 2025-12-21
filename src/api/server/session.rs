@@ -29,21 +29,18 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
 }
 
 fn normalize_handle(identifier: &str, pds_hostname: &str) -> String {
-    let suffix = format!(".{}", pds_hostname);
-    if identifier.ends_with(&suffix) {
-        identifier[..identifier.len() - suffix.len()].to_string()
-    } else {
+    let identifier = identifier.trim();
+    if identifier.contains('@') || identifier.starts_with("did:") {
         identifier.to_string()
+    } else if !identifier.contains('.') {
+        format!("{}.{}", identifier.to_lowercase(), pds_hostname)
+    } else {
+        identifier.to_lowercase()
     }
 }
 
-fn full_handle(stored_handle: &str, pds_hostname: &str) -> String {
-    let suffix = format!(".{}", pds_hostname);
-    if stored_handle.ends_with(&suffix) || stored_handle.ends_with(pds_hostname) {
-        stored_handle.to_string()
-    } else {
-        format!("{}.{}", stored_handle, pds_hostname)
-    }
+fn full_handle(stored_handle: &str, _pds_hostname: &str) -> String {
+    stored_handle.to_string()
 }
 
 #[derive(Deserialize)]
@@ -66,7 +63,7 @@ pub async fn create_session(
     headers: HeaderMap,
     Json(input): Json<CreateSessionInput>,
 ) -> Response {
-    info!("create_session called");
+    info!("create_session called with identifier: {}", input.identifier);
     let client_ip = extract_client_ip(&headers);
     if !state
         .check_rate_limit(RateLimitKind::Login, &client_ip)
@@ -84,6 +81,7 @@ pub async fn create_session(
     }
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let normalized_identifier = normalize_handle(&input.identifier, &pds_hostname);
+    info!("Normalized identifier: {} -> {}", input.identifier, normalized_identifier);
     let row = match sqlx::query!(
         r#"SELECT
             u.id, u.did, u.handle, u.password_hash,
