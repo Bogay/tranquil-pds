@@ -2,6 +2,7 @@
   import { register, getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError, type VerificationChannel, type DidType } from '../lib/api'
+  import { _ } from '../lib/i18n'
 
   const STORAGE_KEY = 'tranquil_pds_pending_verification'
 
@@ -47,30 +48,30 @@
   let handleHasDot = $derived(handle.includes('.'))
 
   function validateForm(): string | null {
-    if (!handle.trim()) return 'Handle is required'
-    if (handle.includes('.')) return 'Handle cannot contain dots. You can set up a custom domain handle after creating your account.'
-    if (!password) return 'Password is required'
-    if (password.length < 8) return 'Password must be at least 8 characters'
-    if (password !== confirmPassword) return 'Passwords do not match'
+    if (!handle.trim()) return $_('register.validation.handleRequired')
+    if (handle.includes('.')) return $_('register.validation.handleNoDots')
+    if (!password) return $_('register.validation.passwordRequired')
+    if (password.length < 8) return $_('register.validation.passwordLength')
+    if (password !== confirmPassword) return $_('register.validation.passwordsMismatch')
     if (serverInfo?.inviteCodeRequired && !inviteCode.trim()) {
-      return 'Invite code is required'
+      return $_('register.validation.inviteCodeRequired')
     }
     if (didType === 'web-external') {
-      if (!externalDid.trim()) return 'External did:web is required'
-      if (!externalDid.trim().startsWith('did:web:')) return 'External DID must start with did:web:'
+      if (!externalDid.trim()) return $_('register.validation.externalDidRequired')
+      if (!externalDid.trim().startsWith('did:web:')) return $_('register.validation.externalDidFormat')
     }
     switch (verificationChannel) {
       case 'email':
-        if (!email.trim()) return 'Email is required for email verification'
+        if (!email.trim()) return $_('register.validation.emailRequired')
         break
       case 'discord':
-        if (!discordId.trim()) return 'Discord ID is required for Discord verification'
+        if (!discordId.trim()) return $_('register.validation.discordIdRequired')
         break
       case 'telegram':
-        if (!telegramUsername.trim()) return 'Telegram username is required for Telegram verification'
+        if (!telegramUsername.trim()) return $_('register.validation.telegramRequired')
         break
       case 'signal':
-        if (!signalNumber.trim()) return 'Phone number is required for Signal verification'
+        if (!signalNumber.trim()) return $_('register.validation.signalRequired')
         break
     }
     return null
@@ -129,380 +130,332 @@
     return handle.trim()
   })
 </script>
-<div class="register-container">
+
+<div class="register-page">
   {#if error}
-    <div class="error">{error}</div>
+    <div class="message error">{error}</div>
   {/if}
-  <h1>Create Account</h1>
-    <p class="subtitle">Create a new account on this PDS</p>
-    {#if loadingServerInfo}
-      <p class="loading">Loading...</p>
-    {:else}
-      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(e); }}>
-        <div class="field">
-          <label for="handle">Handle</label>
-          <input
-            id="handle"
-            type="text"
-            bind:value={handle}
-            placeholder="yourname"
-            disabled={submitting}
-            required
-          />
-          {#if handleHasDot}
-            <p class="hint warning">Custom domain handles can be set up after account creation in Settings.</p>
-          {:else if fullHandle()}
-            <p class="hint">Your full handle will be: @{fullHandle()}</p>
-          {/if}
+
+  <h1>{$_('register.title')}</h1>
+  <p class="subtitle">{$_('register.subtitle')}</p>
+
+  {#if loadingServerInfo}
+    <p class="loading">{$_('common.loading')}</p>
+  {:else}
+    <form onsubmit={(e) => { e.preventDefault(); handleSubmit(e); }}>
+      <div class="field">
+        <label for="handle">{$_('register.handle')}</label>
+        <input
+          id="handle"
+          type="text"
+          bind:value={handle}
+          placeholder={$_('register.handlePlaceholder')}
+          disabled={submitting}
+          required
+        />
+        {#if handleHasDot}
+          <p class="hint warning">{$_('register.handleDotWarning')}</p>
+        {:else if fullHandle()}
+          <p class="hint">{$_('register.handleHint', { values: { handle: fullHandle() } })}</p>
+        {/if}
+      </div>
+
+      <div class="field">
+        <label for="password">{$_('register.password')}</label>
+        <input
+          id="password"
+          type="password"
+          bind:value={password}
+          placeholder={$_('register.passwordPlaceholder')}
+          disabled={submitting}
+          required
+          minlength="8"
+        />
+      </div>
+
+      <div class="field">
+        <label for="confirm-password">{$_('register.confirmPassword')}</label>
+        <input
+          id="confirm-password"
+          type="password"
+          bind:value={confirmPassword}
+          placeholder={$_('register.confirmPasswordPlaceholder')}
+          disabled={submitting}
+          required
+        />
+      </div>
+
+      <fieldset class="section-fieldset">
+        <legend>{$_('register.identityType')}</legend>
+        <p class="section-hint">{$_('register.identityHint')}</p>
+
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="didType" value="plc" bind:group={didType} disabled={submitting} />
+            <span class="radio-content">
+              <strong>{$_('register.didPlc')}</strong> {$_('register.didPlcRecommended')}
+              <span class="radio-hint">{$_('register.didPlcHint')}</span>
+            </span>
+          </label>
+
+          <label class="radio-label">
+            <input type="radio" name="didType" value="web" bind:group={didType} disabled={submitting} />
+            <span class="radio-content">
+              <strong>{$_('register.didWeb')}</strong>
+              <span class="radio-hint">{$_('register.didWebHint')}</span>
+            </span>
+          </label>
+
+          <label class="radio-label">
+            <input type="radio" name="didType" value="web-external" bind:group={didType} disabled={submitting} />
+            <span class="radio-content">
+              <strong>{$_('register.didWebBYOD')}</strong>
+              <span class="radio-hint">{$_('register.didWebBYODHint')}</span>
+            </span>
+          </label>
         </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            bind:value={password}
-            placeholder="At least 8 characters"
-            disabled={submitting}
-            required
-            minlength="8"
-          />
-        </div>
-        <div class="field">
-          <label for="confirm-password">Confirm Password</label>
-          <input
-            id="confirm-password"
-            type="password"
-            bind:value={confirmPassword}
-            placeholder="Confirm your password"
-            disabled={submitting}
-            required
-          />
-        </div>
-        <fieldset class="identity-section">
-          <legend>Identity Type</legend>
-          <p class="section-hint">Choose how your decentralized identity will be managed.</p>
-          <div class="radio-group">
-            <label class="radio-label">
-              <input
-                type="radio"
-                name="didType"
-                value="plc"
-                bind:group={didType}
-                disabled={submitting}
-              />
-              <span class="radio-content">
-                <strong>did:plc</strong> (Recommended)
-                <span class="radio-hint">Portable identity managed by PLC Directory</span>
-              </span>
-            </label>
-            <label class="radio-label">
-              <input
-                type="radio"
-                name="didType"
-                value="web"
-                bind:group={didType}
-                disabled={submitting}
-              />
-              <span class="radio-content">
-                <strong>did:web</strong>
-                <span class="radio-hint">Identity hosted on this PDS (read warning below)</span>
-              </span>
-            </label>
-            <label class="radio-label">
-              <input
-                type="radio"
-                name="didType"
-                value="web-external"
-                bind:group={didType}
-                disabled={submitting}
-              />
-              <span class="radio-content">
-                <strong>did:web (BYOD)</strong>
-                <span class="radio-hint">Bring your own domain</span>
-              </span>
-            </label>
+
+        {#if didType === 'web'}
+          <div class="warning-box">
+            <strong>{$_('register.didWebWarningTitle')}</strong>
+            <ul>
+              <li><strong>{$_('register.didWebWarning1')}</strong> {$_('register.didWebWarning1Detail', { values: { did: `did:web:yourhandle.${serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}` } })}</li>
+              <li><strong>{$_('register.didWebWarning2')}</strong> {$_('register.didWebWarning2Detail')}</li>
+              <li><strong>{$_('register.didWebWarning3')}</strong> {$_('register.didWebWarning3Detail')}</li>
+              <li><strong>{$_('register.didWebWarning4')}</strong> {$_('register.didWebWarning4Detail')}</li>
+            </ul>
           </div>
-          {#if didType === 'web'}
-            <div class="did-web-warning">
-              <strong>Important: Understand the trade-offs</strong>
-              <ul>
-                <li><strong>Permanent tie to this PDS:</strong> Your identity will be <code>did:web:yourhandle.{serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>. Even if you migrate to another PDS later, this server must continue hosting your DID document.</li>
-                <li><strong>No recovery mechanism:</strong> Unlike did:plc, did:web has no rotation keys. If this PDS goes offline permanently, your identity cannot be recovered.</li>
-                <li><strong>We commit to you:</strong> If you migrate away, we will continue serving a minimal DID document pointing to your new PDS. Your identity will remain functional.</li>
-                <li><strong>Recommendation:</strong> Choose did:plc unless you have a specific reason to prefer did:web.</li>
-              </ul>
-            </div>
-          {/if}
-          {#if didType === 'web-external'}
-            <div class="field">
-              <label for="external-did">Your did:web</label>
-              <input
-                id="external-did"
-                type="text"
-                bind:value={externalDid}
-                placeholder="did:web:yourdomain.com"
-                disabled={submitting}
-                required
-              />
-              <p class="hint">Your domain must serve a valid DID document at /.well-known/did.json pointing to this PDS</p>
-            </div>
-          {/if}
-        </fieldset>
-        <fieldset class="verification-section">
-          <legend>Contact Method</legend>
-          <p class="section-hint">Choose how you'd like to verify your account and receive notifications. You only need one.</p>
+        {/if}
+
+        {#if didType === 'web-external'}
           <div class="field">
-            <label for="verification-channel">Verification Method</label>
-            <select
-              id="verification-channel"
-              bind:value={verificationChannel}
-              disabled={submitting}
-            >
-              <option value="email">Email</option>
-              <option value="discord">Discord</option>
-              <option value="telegram">Telegram</option>
-              <option value="signal">Signal</option>
-            </select>
-          </div>
-          {#if verificationChannel === 'email'}
-            <div class="field">
-              <label for="email">Email Address</label>
-              <input
-                id="email"
-                type="email"
-                bind:value={email}
-                placeholder="you@example.com"
-                disabled={submitting}
-                required
-              />
-            </div>
-          {:else if verificationChannel === 'discord'}
-            <div class="field">
-              <label for="discord-id">Discord User ID</label>
-              <input
-                id="discord-id"
-                type="text"
-                bind:value={discordId}
-                placeholder="Your Discord user ID"
-                disabled={submitting}
-                required
-              />
-              <p class="hint">Your numeric Discord user ID (enable Developer Mode to find it)</p>
-            </div>
-          {:else if verificationChannel === 'telegram'}
-            <div class="field">
-              <label for="telegram-username">Telegram Username</label>
-              <input
-                id="telegram-username"
-                type="text"
-                bind:value={telegramUsername}
-                placeholder="@yourusername"
-                disabled={submitting}
-                required
-              />
-            </div>
-          {:else if verificationChannel === 'signal'}
-            <div class="field">
-              <label for="signal-number">Signal Phone Number</label>
-              <input
-                id="signal-number"
-                type="tel"
-                bind:value={signalNumber}
-                placeholder="+1234567890"
-                disabled={submitting}
-                required
-              />
-              <p class="hint">Include country code (e.g., +1 for US)</p>
-            </div>
-          {/if}
-        </fieldset>
-        {#if serverInfo?.inviteCodeRequired}
-          <div class="field">
-            <label for="invite-code">Invite Code <span class="required">*</span></label>
+            <label for="external-did">{$_('register.externalDid')}</label>
             <input
-              id="invite-code"
+              id="external-did"
               type="text"
-              bind:value={inviteCode}
-              placeholder="Enter your invite code"
+              bind:value={externalDid}
+              placeholder={$_('register.externalDidPlaceholder')}
+              disabled={submitting}
+              required
+            />
+            <p class="hint">{$_('register.externalDidHint')}</p>
+          </div>
+        {/if}
+      </fieldset>
+
+      <fieldset class="section-fieldset">
+        <legend>{$_('register.contactMethod')}</legend>
+        <p class="section-hint">{$_('register.contactMethodHint')}</p>
+
+        <div class="field">
+          <label for="verification-channel">{$_('register.verificationMethod')}</label>
+          <select id="verification-channel" bind:value={verificationChannel} disabled={submitting}>
+            <option value="email">{$_('register.email')}</option>
+            <option value="discord">{$_('register.discord')}</option>
+            <option value="telegram">{$_('register.telegram')}</option>
+            <option value="signal">{$_('register.signal')}</option>
+          </select>
+        </div>
+
+        {#if verificationChannel === 'email'}
+          <div class="field">
+            <label for="email">{$_('register.emailAddress')}</label>
+            <input
+              id="email"
+              type="email"
+              bind:value={email}
+              placeholder={$_('register.emailPlaceholder')}
               disabled={submitting}
               required
             />
           </div>
+        {:else if verificationChannel === 'discord'}
+          <div class="field">
+            <label for="discord-id">{$_('register.discordId')}</label>
+            <input
+              id="discord-id"
+              type="text"
+              bind:value={discordId}
+              placeholder={$_('register.discordIdPlaceholder')}
+              disabled={submitting}
+              required
+            />
+            <p class="hint">{$_('register.discordIdHint')}</p>
+          </div>
+        {:else if verificationChannel === 'telegram'}
+          <div class="field">
+            <label for="telegram-username">{$_('register.telegramUsername')}</label>
+            <input
+              id="telegram-username"
+              type="text"
+              bind:value={telegramUsername}
+              placeholder={$_('register.telegramUsernamePlaceholder')}
+              disabled={submitting}
+              required
+            />
+          </div>
+        {:else if verificationChannel === 'signal'}
+          <div class="field">
+            <label for="signal-number">{$_('register.signalNumber')}</label>
+            <input
+              id="signal-number"
+              type="tel"
+              bind:value={signalNumber}
+              placeholder={$_('register.signalNumberPlaceholder')}
+              disabled={submitting}
+              required
+            />
+            <p class="hint">{$_('register.signalNumberHint')}</p>
+          </div>
         {/if}
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Creating account...' : 'Create Account'}
-        </button>
-      </form>
-      <p class="login-link">
-        Already have an account? <a href="#/login">Sign in</a>
-      </p>
-      <p class="login-link">
-        Want passwordless security? <a href="#/register-passkey">Create a passkey account</a>
-      </p>
-    {/if}
+      </fieldset>
+
+      {#if serverInfo?.inviteCodeRequired}
+        <div class="field">
+          <label for="invite-code">{$_('register.inviteCode')} <span class="required">{$_('register.inviteCodeRequired')}</span></label>
+          <input
+            id="invite-code"
+            type="text"
+            bind:value={inviteCode}
+            placeholder={$_('register.inviteCodePlaceholder')}
+            disabled={submitting}
+            required
+          />
+        </div>
+      {/if}
+
+      <button type="submit" disabled={submitting}>
+        {submitting ? $_('register.creating') : $_('register.createButton')}
+      </button>
+    </form>
+
+    <p class="link-text">
+      {$_('register.alreadyHaveAccount')} <a href="#/login">{$_('register.signIn')}</a>
+    </p>
+    <p class="link-text">
+      {$_('register.wantPasswordless')} <a href="#/register-passkey">{$_('register.createPasskeyAccount')}</a>
+    </p>
+  {/if}
 </div>
+
 <style>
-  .register-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
+  .register-page {
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
   }
+
   h1 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-3) 0;
   }
+
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 var(--space-7) 0;
   }
+
   .loading {
     text-align: center;
     color: var(--text-secondary);
   }
+
   form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-5);
   }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  label {
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
+
   .required {
     color: var(--error-text);
   }
-  input, select {
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
-    background: var(--bg-input);
-    color: var(--text-primary);
+
+  .section-fieldset {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
   }
-  input:focus, select:focus {
-    outline: none;
-    border-color: var(--accent);
+
+  .section-fieldset legend {
+    font-weight: var(--font-semibold);
+    padding: 0 var(--space-3);
   }
-  .hint {
-    font-size: 0.75rem;
+
+  .section-hint {
+    font-size: var(--text-sm);
     color: var(--text-secondary);
-    margin: 0.25rem 0 0 0;
+    margin: 0 0 var(--space-5) 0;
   }
-  .hint.warning {
-    color: var(--warning-text, #856404);
-  }
-  .verification-section {
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
-    padding: 1rem;
-    margin: 0.5rem 0;
-  }
-  .verification-section legend {
-    font-weight: 600;
-    padding: 0 0.5rem;
-    color: var(--text-primary);
-  }
-  .identity-section {
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
-    padding: 1rem;
-    margin: 0.5rem 0;
-  }
-  .identity-section legend {
-    font-weight: 600;
-    padding: 0 0.5rem;
-    color: var(--text-primary);
-  }
+
   .radio-group {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-4);
   }
+
   .radio-label {
     display: flex;
     align-items: flex-start;
-    gap: 0.5rem;
+    gap: var(--space-3);
     cursor: pointer;
+    font-size: var(--text-base);
+    font-weight: var(--font-normal);
+    margin-bottom: 0;
   }
+
   .radio-label input[type="radio"] {
-    margin-top: 0.25rem;
+    margin-top: var(--space-1);
+    width: auto;
   }
+
   .radio-content {
     display: flex;
     flex-direction: column;
-    gap: 0.125rem;
+    gap: var(--space-1);
   }
+
   .radio-hint {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
   }
-  .section-hint {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    margin: 0 0 1rem 0;
+
+  .warning-box {
+    margin-top: var(--space-5);
+    padding: var(--space-5);
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
   }
-  .did-web-warning {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: var(--warning-bg, #fff3cd);
-    border: 1px solid var(--warning-border, #ffc107);
-    border-radius: 6px;
-    font-size: 0.875rem;
+
+  .warning-box strong {
+    color: var(--warning-text);
   }
-  .did-web-warning strong {
-    color: var(--warning-text, #856404);
+
+  .warning-box ul {
+    margin: var(--space-4) 0 0 0;
+    padding-left: var(--space-5);
   }
-  .did-web-warning ul {
-    margin: 0.75rem 0 0 0;
-    padding-left: 1.25rem;
+
+  .warning-box li {
+    margin-bottom: var(--space-3);
+    line-height: var(--leading-normal);
   }
-  .did-web-warning li {
-    margin-bottom: 0.5rem;
-    line-height: 1.4;
-  }
-  .did-web-warning li:last-child {
+
+  .warning-box li:last-child {
     margin-bottom: 0;
   }
-  .did-web-warning code {
-    background: rgba(0, 0, 0, 0.1);
-    padding: 0.125rem 0.25rem;
-    border-radius: 3px;
-    font-size: 0.8rem;
+
+  button[type="submit"] {
+    margin-top: var(--space-3);
   }
-  button {
-    padding: 0.75rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    margin-top: 0.5rem;
-  }
-  button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  .error {
-    padding: 0.75rem;
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: 4px;
-    color: var(--error-text);
-  }
-  .login-link {
+
+  .link-text {
     text-align: center;
-    margin-top: 1.5rem;
+    margin-top: var(--space-6);
     color: var(--text-secondary);
   }
-  .login-link a {
+
+  .link-text a {
     color: var(--accent);
   }
 </style>

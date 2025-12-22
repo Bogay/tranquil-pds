@@ -2,6 +2,8 @@
   import { getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
+  import { _ } from '../lib/i18n'
+  import { formatDateTime } from '../lib/date'
 
   interface TrustedDevice {
     id: string
@@ -53,13 +55,13 @@
 
   async function handleRevoke(deviceId: string) {
     if (!auth.session) return
-    if (!confirm('Are you sure you want to revoke trust for this device? You will need to enter your 2FA code next time you log in from this device.')) return
+    if (!confirm($_('trustedDevices.revokeConfirm'))) return
     try {
       await api.revokeTrustedDevice(auth.session.accessJwt, deviceId)
       await loadDevices()
-      showMessage('success', 'Device trust revoked')
+      showMessage('success', $_('trustedDevices.deviceRevoked'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to revoke device')
+      showMessage('error', e instanceof ApiError ? e.message : $_('common.error'))
     }
   }
 
@@ -80,24 +82,18 @@
       await loadDevices()
       editingDeviceId = null
       editDeviceName = ''
-      showMessage('success', 'Device renamed')
+      showMessage('success', $_('trustedDevices.deviceRenamed'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to rename device')
+      showMessage('error', e instanceof ApiError ? e.message : $_('common.error'))
     }
   }
 
   function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    return formatDateTime(dateStr)
   }
 
   function parseUserAgent(ua: string | null): string {
-    if (!ua) return 'Unknown device'
+    if (!ua) return $_('trustedDevices.unknownDevice')
     if (ua.includes('Firefox')) return 'Firefox'
     if (ua.includes('Chrome')) return 'Chrome'
     if (ua.includes('Safari')) return 'Safari'
@@ -116,8 +112,8 @@
 
 <div class="page">
   <header>
-    <a href="#/security" class="back">&larr; Security Settings</a>
-    <h1>Trusted Devices</h1>
+    <a href="#/security" class="back">{$_('trustedDevices.backToSecurity')}</a>
+    <h1>{$_('trustedDevices.title')}</h1>
   </header>
 
   {#if message}
@@ -126,17 +122,16 @@
 
   <div class="description">
     <p>
-      Trusted devices can skip two-factor authentication when logging in.
-      Trust is granted for 30 days and automatically extends when you use the device.
+      {$_('trustedDevices.description')}
     </p>
   </div>
 
   {#if loading}
-    <div class="loading">Loading...</div>
+    <div class="loading">{$_('common.loading')}</div>
   {:else if devices.length === 0}
     <div class="empty-state">
-      <p>No trusted devices yet.</p>
-      <p class="hint">When you log in with two-factor authentication enabled, you can choose to trust the device for 30 days.</p>
+      <p>{$_('trustedDevices.noDevices')}</p>
+      <p class="hint">{$_('trustedDevices.noDevicesHint')}</p>
     </div>
   {:else}
     <div class="device-list">
@@ -148,15 +143,15 @@
                 type="text"
                 class="edit-name-input"
                 bind:value={editDeviceName}
-                placeholder="Device name"
+                placeholder={$_('trustedDevices.deviceNamePlaceholder')}
               />
               <div class="edit-actions">
-                <button class="btn-small btn-primary" onclick={handleSaveDeviceName}>Save</button>
-                <button class="btn-small btn-secondary" onclick={cancelEditDevice}>Cancel</button>
+                <button class="btn-small btn-primary" onclick={handleSaveDeviceName}>{$_('common.save')}</button>
+                <button class="btn-small btn-secondary" onclick={cancelEditDevice}>{$_('common.cancel')}</button>
               </div>
             {:else}
               <h3>{device.friendlyName || parseUserAgent(device.userAgent)}</h3>
-              <button class="btn-icon" onclick={() => startEditDevice(device)} title="Rename">
+              <button class="btn-icon" onclick={() => startEditDevice(device)} title={$_('security.rename')}>
                 &#9998;
               </button>
             {/if}
@@ -164,28 +159,28 @@
 
           <div class="device-details">
             {#if device.userAgent && !device.friendlyName}
-              <p class="detail"><span class="label">Browser:</span> {device.userAgent}</p>
+              <p class="detail"><span class="label">{$_('trustedDevices.browser')}</span> {device.userAgent}</p>
             {:else if device.userAgent}
-              <p class="detail"><span class="label">Browser:</span> {parseUserAgent(device.userAgent)}</p>
+              <p class="detail"><span class="label">{$_('trustedDevices.browser')}</span> {parseUserAgent(device.userAgent)}</p>
             {/if}
             <p class="detail">
-              <span class="label">Last seen:</span> {formatDate(device.lastSeenAt)}
+              <span class="label">{$_('trustedDevices.lastSeen')}</span> {formatDate(device.lastSeenAt)}
             </p>
             {#if device.trustedAt}
               <p class="detail">
-                <span class="label">Trusted since:</span> {formatDate(device.trustedAt)}
+                <span class="label">{$_('trustedDevices.trustedSince')}</span> {formatDate(device.trustedAt)}
               </p>
             {/if}
             {#if device.trustedUntil}
               {@const daysRemaining = getDaysRemaining(device.trustedUntil)}
               <p class="detail trust-expiry" class:expiring-soon={daysRemaining <= 7}>
-                <span class="label">Trust expires:</span>
+                <span class="label">{$_('trustedDevices.trustExpires')}</span>
                 {#if daysRemaining <= 0}
-                  Expired
+                  {$_('trustedDevices.expired')}
                 {:else if daysRemaining === 1}
-                  Tomorrow
+                  {$_('trustedDevices.tomorrow')}
                 {:else}
-                  In {daysRemaining} days
+                  {$_('trustedDevices.inDays', { values: { days: daysRemaining } })}
                 {/if}
               </p>
             {/if}
@@ -193,7 +188,7 @@
 
           <div class="device-actions">
             <button class="btn-danger" onclick={() => handleRevoke(device.id)}>
-              Revoke Trust
+              {$_('trustedDevices.revoke')}
             </button>
           </div>
         </div>
@@ -204,21 +199,21 @@
 
 <style>
   .page {
-    max-width: 600px;
+    max-width: var(--width-md);
     margin: 0 auto;
-    padding: 2rem 1rem;
+    padding: var(--space-7) var(--space-4);
   }
 
   header {
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
 
   .back {
     display: inline-block;
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
     color: var(--accent);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .back:hover {
@@ -227,53 +222,35 @@
 
   h1 {
     margin: 0;
-    font-size: 1.75rem;
-  }
-
-  .message {
-    padding: 0.75rem 1rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
-  }
-
-  .message.success {
-    background: var(--success-bg);
-    color: var(--success-text);
-    border: 1px solid var(--success-border);
-  }
-
-  .message.error {
-    background: var(--error-bg);
-    color: var(--error-text);
-    border: 1px solid var(--error-border);
+    font-size: var(--text-2xl);
   }
 
   .description {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 1rem;
-    margin-bottom: 1.5rem;
+    border-radius: var(--radius-xl);
+    padding: var(--space-4);
+    margin-bottom: var(--space-6);
   }
 
   .description p {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: var(--text-sm);
   }
 
   .loading {
     text-align: center;
-    padding: 2rem;
+    padding: var(--space-7);
     color: var(--text-secondary);
   }
 
   .empty-state {
     text-align: center;
-    padding: 3rem 1rem;
+    padding: var(--space-8) var(--space-4);
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--radius-xl);
   }
 
   .empty-state p {
@@ -282,50 +259,46 @@
   }
 
   .empty-state .hint {
-    margin-top: 0.5rem;
-    font-size: 0.875rem;
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
     color: var(--text-muted);
   }
 
   .device-list {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-4);
   }
 
   .device-card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 1rem;
+    border-radius: var(--radius-xl);
+    padding: var(--space-4);
   }
 
   .device-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
   }
 
   .device-header h3 {
     margin: 0;
     flex: 1;
-    font-size: 1rem;
+    font-size: var(--text-base);
   }
 
   .edit-name-input {
     flex: 1;
-    padding: 0.5rem;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    background: var(--bg-input);
-    color: var(--text-primary);
-    font-size: 0.9rem;
+    padding: var(--space-2);
+    font-size: var(--text-sm);
   }
 
   .edit-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
   }
 
   .btn-icon {
@@ -333,8 +306,8 @@
     border: none;
     color: var(--text-secondary);
     cursor: pointer;
-    padding: 0.25rem;
-    font-size: 1rem;
+    padding: var(--space-1);
+    font-size: var(--text-base);
   }
 
   .btn-icon:hover {
@@ -342,12 +315,12 @@
   }
 
   .device-details {
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-3);
   }
 
   .detail {
-    margin: 0.25rem 0;
-    font-size: 0.875rem;
+    margin: var(--space-1) 0;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
 
@@ -362,20 +335,20 @@
   .device-actions {
     display: flex;
     justify-content: flex-end;
-    padding-top: 0.75rem;
+    padding-top: var(--space-3);
     border-top: 1px solid var(--border-color);
   }
 
   .btn-small {
-    padding: 0.375rem 0.75rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
     cursor: pointer;
   }
 
   .btn-primary {
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
   }
 
@@ -397,10 +370,10 @@
     background: transparent;
     border: 1px solid var(--error-border);
     color: var(--error-text);
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .btn-danger:hover {

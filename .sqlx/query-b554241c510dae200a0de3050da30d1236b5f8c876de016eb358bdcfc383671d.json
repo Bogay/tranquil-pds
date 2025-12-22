@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            email,\n            handle,\n            preferred_comms_channel as \"channel: CommsChannel\"\n        FROM users\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT\n            email,\n            handle,\n            preferred_comms_channel as \"channel: CommsChannel\",\n            preferred_locale\n        FROM users\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -29,6 +29,11 @@
             }
           }
         }
+      },
+      {
+        "ordinal": 3,
+        "name": "preferred_locale",
+        "type_info": "Varchar"
       }
     ],
     "parameters": {
@@ -39,8 +44,9 @@
     "nullable": [
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "8c69c5f98e3ee59b50346094ff39eed73bb602f0b5ab48c11e53c82839a66721"
+  "hash": "b554241c510dae200a0de3050da30d1236b5f8c876de016eb358bdcfc383671d"
 }

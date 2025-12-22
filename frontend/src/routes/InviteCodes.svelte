@@ -2,6 +2,8 @@
   import { getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, type InviteCode, ApiError } from '../lib/api'
+  import { _ } from '../lib/i18n'
+  import { formatDate } from '../lib/date'
   const auth = getAuthState()
   let codes = $state<InviteCode[]>([])
   let loading = $state(true)
@@ -54,54 +56,54 @@
 </script>
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">&larr; Dashboard</a>
-    <h1>Invite Codes</h1>
+    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <h1>{$_('inviteCodes.title')}</h1>
   </header>
   <p class="description">
-    Invite codes let you invite friends to join. Each code can be used once.
+    {$_('inviteCodes.description')}
   </p>
   {#if error}
     <div class="error">{error}</div>
   {/if}
   {#if createdCode}
     <div class="created-code">
-      <h3>Invite Code Created</h3>
+      <h3>{$_('inviteCodes.created')}</h3>
       <div class="code-display">
         <code>{createdCode}</code>
-        <button class="copy" onclick={() => copyCode(createdCode!)}>Copy</button>
+        <button class="copy" onclick={() => copyCode(createdCode!)}>{$_('inviteCodes.copy')}</button>
       </div>
-      <button onclick={dismissCreated}>Done</button>
+      <button onclick={dismissCreated}>{$_('common.done')}</button>
     </div>
   {/if}
   <section class="create-section">
     <button onclick={handleCreate} disabled={creating}>
-      {creating ? 'Creating...' : 'Create New Invite Code'}
+      {creating ? $_('inviteCodes.creating') : $_('inviteCodes.createNew')}
     </button>
   </section>
   <section class="list-section">
-    <h2>Your Invite Codes</h2>
+    <h2>{$_('inviteCodes.yourCodes')}</h2>
     {#if loading}
-      <p class="empty">Loading...</p>
+      <p class="empty">{$_('common.loading')}</p>
     {:else if codes.length === 0}
-      <p class="empty">No invite codes yet</p>
+      <p class="empty">{$_('inviteCodes.noCodes')}</p>
     {:else}
       <ul class="code-list">
         {#each codes as code}
           <li class:disabled={code.disabled} class:used={code.uses.length > 0 && code.available === 0}>
             <div class="code-main">
               <code>{code.code}</code>
-              <button class="copy-small" onclick={() => copyCode(code.code)} title="Copy">
-                Copy
+              <button class="copy-small" onclick={() => copyCode(code.code)} title={$_('inviteCodes.copy')}>
+                {$_('inviteCodes.copy')}
               </button>
             </div>
             <div class="code-meta">
-              <span class="date">Created {new Date(code.createdAt).toLocaleDateString()}</span>
+              <span class="date">{$_('inviteCodes.createdOn', { values: { date: formatDate(code.createdAt) } })}</span>
               {#if code.disabled}
-                <span class="status disabled">Disabled</span>
+                <span class="status disabled">{$_('inviteCodes.disabled')}</span>
               {:else if code.uses.length > 0}
-                <span class="status used">Used by @{code.uses[0].usedBy.split(':').pop()}</span>
+                <span class="status used">{$_('inviteCodes.used', { values: { handle: code.uses[0].usedBy.split(':').pop() } })}</span>
               {:else}
-                <span class="status available">Available</span>
+                <span class="status available">{$_('inviteCodes.available')}</span>
               {/if}
             </div>
           </li>
@@ -112,163 +114,176 @@
 </div>
 <style>
   .page {
-    max-width: 600px;
+    max-width: var(--width-md);
     margin: 0 auto;
-    padding: 2rem;
+    padding: var(--space-7);
   }
+
   header {
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
+
   .back {
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .back:hover {
     color: var(--accent);
   }
+
   h1 {
-    margin: 0.5rem 0 0 0;
+    margin: var(--space-2) 0 0 0;
   }
+
   .description {
     color: var(--text-secondary);
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
+
   .error {
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--error-bg);
     border: 1px solid var(--error-border);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     color: var(--error-text);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
+
   .created-code {
-    padding: 1.5rem;
+    padding: var(--space-6);
     background: var(--success-bg);
     border: 1px solid var(--success-border);
-    border-radius: 8px;
-    margin-bottom: 2rem;
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-7);
   }
+
   .created-code h3 {
-    margin: 0 0 1rem 0;
+    margin: 0 0 var(--space-4) 0;
     color: var(--success-text);
   }
+
   .code-display {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: var(--space-4);
     background: var(--bg-card);
-    padding: 1rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
   }
+
   .code-display code {
-    font-size: 1.125rem;
-    font-family: monospace;
+    font-size: var(--text-lg);
+    font-family: ui-monospace, monospace;
     flex: 1;
   }
+
   .copy {
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
   }
+
   .copy:hover {
     background: var(--accent-hover);
   }
+
   .create-section {
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
-  .create-section button {
-    padding: 0.75rem 1.5rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-  }
-  .create-section button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-  .create-section button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+
   section h2 {
-    font-size: 1.125rem;
-    margin: 0 0 1rem 0;
+    font-size: var(--text-lg);
+    margin: 0 0 var(--space-4) 0;
   }
+
   .code-list {
     list-style: none;
     padding: 0;
     margin: 0;
   }
+
   .code-list li {
-    padding: 1rem;
+    padding: var(--space-4);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    margin-bottom: 0.5rem;
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-2);
     background: var(--bg-card);
   }
+
   .code-list li.disabled {
     opacity: 0.6;
   }
+
   .code-list li.used {
     background: var(--bg-secondary);
   }
+
   .code-main {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
   }
+
   .code-main code {
-    font-family: monospace;
-    font-size: 0.9rem;
+    font-family: ui-monospace, monospace;
+    font-size: var(--text-sm);
   }
+
   .copy-small {
-    padding: 0.25rem 0.5rem;
+    padding: var(--space-1) var(--space-2);
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 0.75rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
     cursor: pointer;
     color: var(--text-primary);
   }
+
   .copy-small:hover {
     background: var(--bg-input-disabled);
   }
+
   .code-meta {
     display: flex;
-    gap: 1rem;
-    font-size: 0.875rem;
+    gap: var(--space-4);
+    font-size: var(--text-sm);
   }
+
   .date {
     color: var(--text-secondary);
   }
+
   .status {
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
   }
+
   .status.available {
     background: var(--success-bg);
     color: var(--success-text);
   }
+
   .status.used {
     background: var(--bg-secondary);
     color: var(--text-secondary);
   }
+
   .status.disabled {
     background: var(--error-bg);
     color: var(--error-text);
   }
+
   .empty {
     color: var(--text-secondary);
     text-align: center;
-    padding: 2rem;
+    padding: var(--space-7);
   }
 </style>

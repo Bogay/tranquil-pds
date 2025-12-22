@@ -1,5 +1,6 @@
 <script lang="ts">
   import { navigate } from '../lib/router.svelte'
+  import { _ } from '../lib/i18n'
 
   let loading = $state(false)
   let error = $state<string | null>(null)
@@ -9,6 +10,8 @@
     const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
     return params.get('request_uri')
   }
+
+  const t = $_
 
   function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer)
@@ -44,12 +47,12 @@
   async function startPasskeyAuth() {
     const requestUri = getRequestUri()
     if (!requestUri) {
-      error = 'Missing request_uri parameter'
+      error = t('common.error')
       return
     }
 
     if (!window.PublicKeyCredential) {
-      error = 'Passkeys are not supported in this browser'
+      error = t('common.error')
       return
     }
 
@@ -66,7 +69,7 @@
 
       if (!startResponse.ok) {
         const data = await startResponse.json()
-        error = data.error_description || data.error || 'Failed to start passkey authentication'
+        error = data.error_description || data.error || t('common.error')
         loading = false
         return
       }
@@ -79,7 +82,7 @@
       })
 
       if (!credential) {
-        error = 'Passkey authentication was cancelled'
+        error = t('common.error')
         loading = false
         return
       }
@@ -113,7 +116,7 @@
       const finishData = await finishResponse.json()
 
       if (!finishResponse.ok) {
-        error = finishData.error_description || finishData.error || 'Passkey verification failed'
+        error = finishData.error_description || finishData.error || t('common.error')
         loading = false
         return
       }
@@ -123,13 +126,13 @@
         return
       }
 
-      error = 'Unexpected response from server'
+      error = t('common.error')
       loading = false
     } catch (e) {
       if (e instanceof DOMException && e.name === 'NotAllowedError') {
-        error = 'Passkey authentication was cancelled'
+        error = t('common.error')
       } else {
-        error = 'Failed to authenticate with passkey'
+        error = t('common.error')
       }
       loading = false
     }
@@ -153,9 +156,9 @@
 </script>
 
 <div class="oauth-passkey-container">
-  <h1>Sign In with Passkey</h1>
+  <h1>{t('oauth.passkey.title')}</h1>
   <p class="subtitle">
-    Your account uses a passkey for authentication. Use your fingerprint, face, or security key to sign in.
+    {t('oauth.passkey.subtitle')}
   </p>
 
   {#if error}
@@ -166,24 +169,20 @@
     {#if loading}
       <div class="loading-indicator">
         <div class="spinner"></div>
-        <p>Waiting for passkey...</p>
+        <p>{t('oauth.passkey.waiting')}</p>
       </div>
     {:else}
       <button type="button" class="passkey-btn" onclick={startPasskeyAuth} disabled={loading}>
-        Use Passkey
+        {t('oauth.passkey.title')}
       </button>
     {/if}
   </div>
 
   <div class="actions">
     <button type="button" class="cancel-btn" onclick={handleCancel} disabled={loading}>
-      Cancel
+      {t('common.cancel')}
     </button>
   </div>
-
-  <p class="help-text">
-    If you've lost access to your passkey, you can recover your account using email.
-  </p>
 </div>
 
 <style>

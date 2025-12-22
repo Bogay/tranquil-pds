@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { _ } from '../lib/i18n'
+
   function getError(): string {
     const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
     return params.get('error') || 'Unknown error'
@@ -18,7 +20,7 @@
 </script>
 
 <div class="oauth-error-container">
-  <h1>Authorization Error</h1>
+  <h1>{$_('oauth.error.title')}</h1>
 
   <div class="error-box">
     <div class="error-code">{error}</div>
@@ -28,50 +30,50 @@
   </div>
 
   <button type="button" onclick={handleBack}>
-    Go Back
+    {$_('oauth.error.tryAgain')}
   </button>
 </div>
 
 <style>
   .oauth-error-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
     text-align: center;
   }
 
   h1 {
-    margin: 0 0 1.5rem 0;
+    margin: 0 0 var(--space-6) 0;
     color: var(--error-text);
   }
 
   .error-box {
-    padding: 1.5rem;
+    padding: var(--space-6);
     background: var(--error-bg);
     border: 1px solid var(--error-border);
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-6);
   }
 
   .error-code {
     font-family: monospace;
-    font-size: 1rem;
+    font-size: var(--text-base);
     color: var(--error-text);
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
   }
 
   .error-description {
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   button {
-    padding: 0.75rem 1.5rem;
+    padding: var(--space-3) var(--space-6);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
-    border-radius: 4px;
-    font-size: 1rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     cursor: pointer;
   }
 

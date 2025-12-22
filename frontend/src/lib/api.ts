@@ -343,6 +343,14 @@ export const api = {
     })
   },
 
+  async updateLocale(token: string, preferredLocale: string): Promise<{ preferredLocale: string }> {
+    return xrpc('com.tranquil.account.updateLocale', {
+      method: 'POST',
+      token,
+      body: { preferredLocale },
+    })
+  },
+
   async listSessions(token: string): Promise<{
     sessions: Array<{
       id: string

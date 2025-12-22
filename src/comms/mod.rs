@@ -1,3 +1,4 @@
+mod locale;
 mod sender;
 mod service;
 mod types;

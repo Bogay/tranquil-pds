@@ -1,5 +1,6 @@
 <script lang="ts">
   import { navigate } from '../lib/router.svelte'
+  import { _ } from '../lib/i18n'
 
   interface AccountInfo {
     did: string
@@ -113,19 +114,19 @@
 <div class="oauth-accounts-container">
   {#if loading}
     <div class="loading">
-      <p>Loading accounts...</p>
+      <p>{$_('common.loading')}</p>
     </div>
   {:else if error}
     <div class="error-container">
       <h1>Error</h1>
       <div class="error">{error}</div>
       <button type="button" onclick={handleDifferentAccount}>
-        Sign in with different account
+        {$_('oauth.accounts.useAnother')}
       </button>
     </div>
   {:else}
-    <h1>Choose an Account</h1>
-    <p class="subtitle">Select an account to continue</p>
+    <h1>{$_('oauth.accounts.title')}</h1>
+    <p class="subtitle">{$_('oauth.accounts.subtitle')}</p>
 
     <div class="accounts-list">
       {#each accounts as account}
@@ -144,25 +145,25 @@
     </div>
 
     <button type="button" class="secondary different-account" onclick={handleDifferentAccount}>
-      Sign in to different account
+      {$_('oauth.accounts.useAnother')}
     </button>
   {/if}
 </div>
 
 <style>
   .oauth-accounts-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
   }
 
   h1 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-2) 0;
   }
 
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 var(--space-7) 0;
   }
 
   .loading {
@@ -178,37 +179,37 @@
   }
 
   .error {
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--error-bg);
     border: 1px solid var(--error-border);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     color: var(--error-text);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
   .accounts-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
   }
 
   .account-item {
     display: flex;
     align-items: center;
-    padding: 1rem;
+    padding: var(--space-4);
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--radius-xl);
     cursor: pointer;
     text-align: left;
     width: 100%;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
 
   .account-item:hover:not(.disabled) {
     border-color: var(--accent);
-    box-shadow: 0 2px 8px rgba(77, 166, 255, 0.15);
+    box-shadow: var(--shadow-sm);
   }
 
   .account-item.disabled {
@@ -219,26 +220,26 @@
   .account-info {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
   }
 
   .account-handle {
-    font-weight: 500;
+    font-weight: var(--font-medium);
     color: var(--text-primary);
   }
 
   .account-email {
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
 
   button {
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
-    border-radius: 4px;
-    font-size: 1rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     cursor: pointer;
   }
 
@@ -260,10 +261,10 @@
 
   button.secondary:hover:not(:disabled) {
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
   }
 
   .different-account {
-    margin-top: 1rem;
+    margin-top: var(--space-4);
   }
 </style>

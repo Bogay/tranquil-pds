@@ -2,6 +2,7 @@
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError, type VerificationChannel, type DidType } from '../lib/api'
   import { getAuthState, confirmSignup, resendVerification } from '../lib/auth.svelte'
+  import { _ } from '../lib/i18n'
 
   const auth = getAuthState()
 
@@ -301,7 +302,7 @@
   })
 </script>
 
-<div class="register-passkey-container">
+<div class="register-page">
   <h1>Create Passkey Account</h1>
   <p class="subtitle">
     {#if step === 'info'}
@@ -318,7 +319,7 @@
   </p>
 
   {#if error}
-    <div class="error">{error}</div>
+    <div class="message error">{error}</div>
   {/if}
 
   {#if loadingServerInfo}
@@ -342,16 +343,12 @@
         {/if}
       </div>
 
-      <fieldset class="section">
+      <fieldset class="section-fieldset">
         <legend>Contact Method</legend>
         <p class="section-hint">Choose how you'd like to verify your account and receive notifications.</p>
         <div class="field">
           <label for="verification-channel">Verification Method</label>
-          <select
-            id="verification-channel"
-            bind:value={verificationChannel}
-            disabled={submitting}
-          >
+          <select id="verification-channel" bind:value={verificationChannel} disabled={submitting}>
             <option value="email">Email</option>
             <option value="discord">Discord</option>
             <option value="telegram">Telegram</option>
@@ -361,94 +358,48 @@
         {#if verificationChannel === 'email'}
           <div class="field">
             <label for="email">Email Address</label>
-            <input
-              id="email"
-              type="email"
-              bind:value={email}
-              placeholder="you@example.com"
-              disabled={submitting}
-              required
-            />
+            <input id="email" type="email" bind:value={email} placeholder="you@example.com" disabled={submitting} required />
           </div>
         {:else if verificationChannel === 'discord'}
           <div class="field">
             <label for="discord-id">Discord User ID</label>
-            <input
-              id="discord-id"
-              type="text"
-              bind:value={discordId}
-              placeholder="Your Discord user ID"
-              disabled={submitting}
-              required
-            />
+            <input id="discord-id" type="text" bind:value={discordId} placeholder="Your Discord user ID" disabled={submitting} required />
             <p class="hint">Your numeric Discord user ID (enable Developer Mode to find it)</p>
           </div>
         {:else if verificationChannel === 'telegram'}
           <div class="field">
             <label for="telegram-username">Telegram Username</label>
-            <input
-              id="telegram-username"
-              type="text"
-              bind:value={telegramUsername}
-              placeholder="@yourusername"
-              disabled={submitting}
-              required
-            />
+            <input id="telegram-username" type="text" bind:value={telegramUsername} placeholder="@yourusername" disabled={submitting} required />
           </div>
         {:else if verificationChannel === 'signal'}
           <div class="field">
             <label for="signal-number">Signal Phone Number</label>
-            <input
-              id="signal-number"
-              type="tel"
-              bind:value={signalNumber}
-              placeholder="+1234567890"
-              disabled={submitting}
-              required
-            />
+            <input id="signal-number" type="tel" bind:value={signalNumber} placeholder="+1234567890" disabled={submitting} required />
             <p class="hint">Include country code (e.g., +1 for US)</p>
           </div>
         {/if}
       </fieldset>
 
-      <fieldset class="section">
+      <fieldset class="section-fieldset">
         <legend>Identity Type</legend>
         <p class="section-hint">Choose how your decentralized identity will be managed.</p>
         <div class="radio-group">
           <label class="radio-label">
-            <input
-              type="radio"
-              name="didType"
-              value="plc"
-              bind:group={didType}
-              disabled={submitting}
-            />
+            <input type="radio" name="didType" value="plc" bind:group={didType} disabled={submitting} />
             <span class="radio-content">
               <strong>did:plc</strong> (Recommended)
               <span class="radio-hint">Portable identity managed by PLC Directory</span>
             </span>
           </label>
           <label class="radio-label">
-            <input
-              type="radio"
-              name="didType"
-              value="web"
-              bind:group={didType}
-              disabled={submitting}
-            />
+            <input type="radio" name="didType" value="web" bind:group={didType} disabled={submitting} />
             <span class="radio-content">
               <strong>did:web</strong>
               <span class="radio-hint">Identity hosted on this PDS (read warning below)</span>
             </span>
           </label>
           <label class="radio-label">
-            <input
-              type="radio"
-              name="didType"
-              value="web-external"
-              bind:group={didType}
-              disabled={submitting}
-            />
+            <input type="radio" name="didType" value="web-external" bind:group={didType} disabled={submitting} />
             <span class="radio-content">
               <strong>did:web (BYOD)</strong>
               <span class="radio-hint">Bring your own domain</span>
@@ -456,12 +407,12 @@
           </label>
         </div>
         {#if didType === 'web'}
-          <div class="did-web-warning">
+          <div class="warning-box">
             <strong>Important: Understand the trade-offs</strong>
             <ul>
-              <li><strong>Permanent tie to this PDS:</strong> Your identity will be <code>did:web:yourhandle.{serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>. Even if you migrate to another PDS later, this server must continue hosting your DID document.</li>
-              <li><strong>No recovery mechanism:</strong> Unlike did:plc, did:web has no rotation keys. If this PDS goes offline permanently, your identity cannot be recovered.</li>
-              <li><strong>We commit to you:</strong> If you migrate away, we will continue serving a minimal DID document pointing to your new PDS. Your identity will remain functional.</li>
+              <li><strong>Permanent tie to this PDS:</strong> Your identity will be <code>did:web:yourhandle.{serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>.</li>
+              <li><strong>No recovery mechanism:</strong> Unlike did:plc, did:web has no rotation keys.</li>
+              <li><strong>We commit to you:</strong> If you migrate away, we will continue serving a minimal DID document.</li>
               <li><strong>Recommendation:</strong> Choose did:plc unless you have a specific reason to prefer did:web.</li>
             </ul>
           </div>
@@ -469,14 +420,7 @@
         {#if didType === 'web-external'}
           <div class="field">
             <label for="external-did">Your did:web</label>
-            <input
-              id="external-did"
-              type="text"
-              bind:value={externalDid}
-              placeholder="did:web:yourdomain.com"
-              disabled={submitting}
-              required
-            />
+            <input id="external-did" type="text" bind:value={externalDid} placeholder="did:web:yourdomain.com" disabled={submitting} required />
             <p class="hint">Your domain must serve a valid DID document at /.well-known/did.json pointing to this PDS</p>
           </div>
         {/if}
@@ -485,22 +429,13 @@
       {#if serverInfo?.inviteCodeRequired}
         <div class="field">
           <label for="invite-code">Invite Code <span class="required">*</span></label>
-          <input
-            id="invite-code"
-            type="text"
-            bind:value={inviteCode}
-            placeholder="Enter your invite code"
-            disabled={submitting}
-            required
-          />
+          <input id="invite-code" type="text" bind:value={inviteCode} placeholder="Enter your invite code" disabled={submitting} required />
         </div>
       {/if}
 
       <div class="info-box">
         <strong>Why passkey-only?</strong>
-        <p>
-          Passkey accounts are more secure than password-based accounts because they:
-        </p>
+        <p>Passkey accounts are more secure than password-based accounts because they:</p>
         <ul>
           <li>Cannot be phished or stolen in data breaches</li>
           <li>Use hardware-backed cryptographic keys</li>
@@ -513,24 +448,18 @@
       </button>
     </form>
 
-    <p class="alt-link">
+    <p class="link-text">
       Want a traditional password? <a href="#/register">Register with password</a>
     </p>
   {:else if step === 'passkey'}
-    <div class="passkey-step">
+    <div class="step-content">
       <div class="field">
         <label for="passkey-name">Passkey Name (optional)</label>
-        <input
-          id="passkey-name"
-          type="text"
-          bind:value={passkeyName}
-          placeholder="e.g., MacBook Touch ID"
-          disabled={submitting}
-        />
+        <input id="passkey-name" type="text" bind:value={passkeyName} placeholder="e.g., MacBook Touch ID" disabled={submitting} />
         <p class="hint">A friendly name to identify this passkey</p>
       </div>
 
-      <div class="passkey-instructions">
+      <div class="info-box">
         <p>Click the button below to create your passkey. You'll be prompted to use:</p>
         <ul>
           <li>Touch ID or Face ID</li>
@@ -548,64 +477,41 @@
       </button>
     </div>
   {:else if step === 'app-password'}
-    <div class="app-password-step">
+    <div class="step-content">
       <div class="warning-box">
         <strong>Important: Save this app password!</strong>
-        <p>
-          This app password is required to sign into apps that don't support passkeys yet (like bsky.app).
-          You will only see this password once.
-        </p>
+        <p>This app password is required to sign into apps that don't support passkeys yet (like bsky.app). You will only see this password once.</p>
       </div>
 
       <div class="app-password-display">
-        <div class="app-password-label">
-          App Password for: <strong>{appPasswordResult?.appPasswordName}</strong>
-        </div>
+        <div class="app-password-label">App Password for: <strong>{appPasswordResult?.appPasswordName}</strong></div>
         <code class="app-password-code">{appPasswordResult?.appPassword}</code>
         <button type="button" class="copy-btn" onclick={copyAppPassword}>
           {appPasswordCopied ? 'Copied!' : 'Copy to Clipboard'}
         </button>
       </div>
 
-      <div class="field acknowledge-field">
+      <div class="field">
         <label class="checkbox-label">
-          <input
-            type="checkbox"
-            bind:checked={appPasswordAcknowledged}
-          />
+          <input type="checkbox" bind:checked={appPasswordAcknowledged} />
           <span>I have saved my app password in a secure location</span>
         </label>
       </div>
 
-      <button onclick={handleFinish} disabled={!appPasswordAcknowledged}>
-        Continue
-      </button>
+      <button onclick={handleFinish} disabled={!appPasswordAcknowledged}>Continue</button>
     </div>
   {:else if step === 'verify'}
-    <div class="verify-step">
-      <p class="verify-info">
-        We've sent a verification code to your {channelLabel(verificationChannel)}.
-        Enter it below to complete your account setup.
-      </p>
+    <div class="step-content">
+      <p class="info-text">We've sent a verification code to your {channelLabel(verificationChannel)}. Enter it below to complete your account setup.</p>
 
       {#if resendMessage}
-        <div class="success">{resendMessage}</div>
+        <div class="message success">{resendMessage}</div>
       {/if}
 
       <form onsubmit={(e) => { e.preventDefault(); handleVerification(); }}>
         <div class="field">
           <label for="verification-code">Verification Code</label>
-          <input
-            id="verification-code"
-            type="text"
-            bind:value={verificationCode}
-            placeholder="Enter 6-digit code"
-            disabled={submitting}
-            required
-            maxlength="6"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-          />
+          <input id="verification-code" type="text" bind:value={verificationCode} placeholder="Enter 6-digit code" disabled={submitting} required maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
         </div>
 
         <button type="submit" disabled={submitting || !verificationCode.trim()}>
@@ -618,37 +524,30 @@
       </form>
     </div>
   {:else if step === 'success'}
-    <div class="success-step">
+    <div class="success-content">
       <div class="success-icon">&#x2714;</div>
       <h2>Account Created!</h2>
       <p>Your passkey-only account has been created successfully.</p>
       <p class="handle-display">@{setupData?.handle}</p>
-
-      <button onclick={goToLogin}>
-        Sign In
-      </button>
+      <button onclick={goToLogin}>Sign In</button>
     </div>
   {/if}
 </div>
 
 <style>
-  .register-passkey-container {
-    max-width: 450px;
-    margin: 4rem auto;
-    padding: 2rem;
+  .register-page {
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
   }
 
-  h1 {
-    margin: 0 0 0.5rem 0;
-  }
-
-  h2 {
-    margin: 0 0 0.5rem 0;
+  h1, h2 {
+    margin: 0 0 var(--space-3) 0;
   }
 
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 var(--space-7) 0;
   }
 
   .loading {
@@ -656,306 +555,170 @@
     color: var(--text-secondary);
   }
 
-  form {
+  form, .step-content {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  label {
-    font-size: 0.875rem;
-    font-weight: 500;
+    gap: var(--space-4);
   }
 
   .required {
     color: var(--error-text);
   }
 
-  input, select {
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
-    background: var(--bg-input);
-    color: var(--text-primary);
+  .section-fieldset {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
   }
 
-  input:focus, select:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
-  .hint {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    margin: 0.25rem 0 0 0;
-  }
-
-  .hint.warning {
-    color: var(--warning-text);
-  }
-
-  .section {
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
-    padding: 1rem;
-    margin: 0.5rem 0;
-  }
-
-  .section legend {
-    font-weight: 600;
-    padding: 0 0.5rem;
-    color: var(--text-primary);
+  .section-fieldset legend {
+    font-weight: var(--font-semibold);
+    padding: 0 var(--space-3);
   }
 
   .section-hint {
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
-    margin: 0 0 1rem 0;
+    margin: 0 0 var(--space-5) 0;
   }
 
   .radio-group {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-4);
   }
 
   .radio-label {
     display: flex;
     align-items: flex-start;
-    gap: 0.5rem;
+    gap: var(--space-3);
     cursor: pointer;
+    font-size: var(--text-base);
+    font-weight: var(--font-normal);
+    margin-bottom: 0;
   }
 
   .radio-label input[type="radio"] {
-    margin-top: 0.25rem;
+    margin-top: var(--space-1);
+    width: auto;
   }
 
   .radio-content {
     display: flex;
     flex-direction: column;
-    gap: 0.125rem;
+    gap: var(--space-1);
   }
 
   .radio-hint {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
-  }
-
-  .did-web-warning {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: var(--warning-bg, #fff3cd);
-    border: 1px solid var(--warning-border, #ffc107);
-    border-radius: 6px;
-    font-size: 0.875rem;
-  }
-
-  .did-web-warning strong {
-    color: var(--warning-text, #856404);
-  }
-
-  .did-web-warning ul {
-    margin: 0.75rem 0 0 0;
-    padding-left: 1.25rem;
-  }
-
-  .did-web-warning li {
-    margin-bottom: 0.5rem;
-    line-height: 1.4;
-  }
-
-  .did-web-warning li:last-child {
-    margin-bottom: 0;
-  }
-
-  .did-web-warning code {
-    background: rgba(0, 0, 0, 0.1);
-    padding: 0.125rem 0.25rem;
-    border-radius: 3px;
-    font-size: 0.8rem;
-  }
-
-  .info-box {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 1rem;
-    font-size: 0.875rem;
-  }
-
-  .info-box strong {
-    display: block;
-    margin-bottom: 0.5rem;
-  }
-
-  .info-box p {
-    margin: 0 0 0.5rem 0;
-    color: var(--text-secondary);
-  }
-
-  .info-box ul {
-    margin: 0;
-    padding-left: 1.25rem;
-    color: var(--text-secondary);
-  }
-
-  .info-box li {
-    margin-bottom: 0.25rem;
-  }
-
-  button {
-    padding: 0.75rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    margin-top: 0.5rem;
-  }
-
-  button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  button.secondary {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color-light);
-  }
-
-  button.secondary:hover:not(:disabled) {
-    background: var(--bg-secondary);
-  }
-
-  .error {
-    padding: 0.75rem;
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: 4px;
-    color: var(--error-text);
-    margin-bottom: 1rem;
-  }
-
-  .alt-link {
-    text-align: center;
-    margin-top: 1.5rem;
-    color: var(--text-secondary);
-  }
-
-  .alt-link a {
-    color: var(--accent);
-  }
-
-  .passkey-step {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .passkey-instructions {
-    background: var(--bg-secondary);
-    border-radius: 6px;
-    padding: 1rem;
-  }
-
-  .passkey-instructions p {
-    margin: 0 0 0.5rem 0;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-  }
-
-  .passkey-instructions ul {
-    margin: 0;
-    padding-left: 1.25rem;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-  }
-
-  .passkey-btn {
-    padding: 1rem;
-    font-size: 1.125rem;
-  }
-
-  .app-password-step {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
   }
 
   .warning-box {
+    margin-top: var(--space-5);
+    padding: var(--space-5);
     background: var(--warning-bg);
-    border: 1px solid var(--warning-border, #ffc107);
-    border-radius: 6px;
-    padding: 1rem;
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
   }
 
   .warning-box strong {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-3);
     color: var(--warning-text);
   }
 
   .warning-box p {
     margin: 0;
-    font-size: 0.875rem;
     color: var(--warning-text);
+  }
+
+  .warning-box ul {
+    margin: var(--space-4) 0 0 0;
+    padding-left: var(--space-5);
+  }
+
+  .warning-box li {
+    margin-bottom: var(--space-3);
+    line-height: var(--leading-normal);
+  }
+
+  .warning-box li:last-child {
+    margin-bottom: 0;
+  }
+
+  .info-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    font-size: var(--text-sm);
+  }
+
+  .info-box strong {
+    display: block;
+    margin-bottom: var(--space-3);
+  }
+
+  .info-box p {
+    margin: 0 0 var(--space-3) 0;
+    color: var(--text-secondary);
+  }
+
+  .info-box ul {
+    margin: 0;
+    padding-left: var(--space-5);
+    color: var(--text-secondary);
+  }
+
+  .info-box li {
+    margin-bottom: var(--space-2);
+  }
+
+  .passkey-btn {
+    padding: var(--space-5);
+    font-size: var(--text-lg);
   }
 
   .app-password-display {
     background: var(--bg-card);
     border: 2px solid var(--accent);
-    border-radius: 8px;
-    padding: 1.5rem;
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
     text-align: center;
   }
 
   .app-password-label {
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-4);
   }
 
   .app-password-code {
     display: block;
-    font-size: 1.5rem;
-    font-family: monospace;
+    font-size: var(--text-xl);
+    font-family: ui-monospace, monospace;
     letter-spacing: 0.1em;
-    padding: 1rem;
+    padding: var(--space-5);
     background: var(--bg-input);
-    border-radius: 4px;
-    margin-bottom: 1rem;
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
     user-select: all;
   }
 
   .copy-btn {
     margin-top: 0;
-    padding: 0.5rem 1rem;
-    font-size: 0.875rem;
-  }
-
-  .acknowledge-field {
-    margin-top: 0;
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm);
   }
 
   .checkbox-label {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-3);
     cursor: pointer;
-    font-weight: normal;
+    font-weight: var(--font-normal);
   }
 
   .checkbox-label input[type="checkbox"] {
@@ -963,43 +726,39 @@
     padding: 0;
   }
 
-  .success-step {
+  .success-content {
     text-align: center;
   }
 
   .success-icon {
-    font-size: 4rem;
+    font-size: var(--text-4xl);
     color: var(--success-text);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
-  .success-step p {
+  .success-content p {
     color: var(--text-secondary);
   }
 
   .handle-display {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--text-primary) !important;
-    margin: 1rem 0;
+    font-size: var(--text-xl);
+    font-weight: var(--font-semibold);
+    color: var(--text-primary);
+    margin: var(--space-4) 0;
   }
 
-  .verify-step {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .verify-info {
+  .info-text {
     color: var(--text-secondary);
     margin: 0;
   }
 
-  .success {
-    padding: 0.75rem;
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
-    border-radius: 4px;
-    color: var(--success-text);
+  .link-text {
+    text-align: center;
+    margin-top: var(--space-6);
+    color: var(--text-secondary);
+  }
+
+  .link-text a {
+    color: var(--accent);
   }
 </style>

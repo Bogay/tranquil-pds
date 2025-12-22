@@ -249,7 +249,7 @@ pub async fn get_session(
 
     match sqlx::query!(
         r#"SELECT
-            handle, email, email_verified, is_admin, deactivated_at,
+            handle, email, email_verified, is_admin, deactivated_at, preferred_locale,
             preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
             discord_verified, telegram_verified, signal_verified
         FROM users WHERE did = $1"#,
@@ -282,6 +282,7 @@ pub async fn get_session(
                 "emailVerified": email_verified_value,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
+                "preferredLocale": row.preferred_locale,
                 "isAdmin": row.is_admin,
                 "active": is_active,
                 "status": if is_active { "active" } else { "deactivated" },
@@ -481,7 +482,7 @@ pub async fn refresh_session(
     }
     match sqlx::query!(
         r#"SELECT
-            handle, email, email_verified, is_admin,
+            handle, email, email_verified, is_admin, preferred_locale,
             preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
             discord_verified, telegram_verified, signal_verified
         FROM users WHERE did = $1"#,
@@ -509,6 +510,7 @@ pub async fn refresh_session(
                 "emailVerified": u.email_verified,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
+                "preferredLocale": u.preferred_locale,
                 "isAdmin": u.is_admin,
                 "active": true
             }))
@@ -777,6 +779,7 @@ pub async fn resend_verification(
         channel_str,
         &recipient,
         &verification_code,
+        None,
     )
     .await
     {
@@ -1197,6 +1200,66 @@ pub async fn update_legacy_login_preference(
             .into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+const VALID_LOCALES: &[&str] = &["en", "zh", "ja", "ko"];
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLocaleInput {
+    pub preferred_locale: String,
+}
+
+pub async fn update_locale(
+    State(state): State<AppState>,
+    auth: BearerAuth,
+    Json(input): Json<UpdateLocaleInput>,
+) -> Response {
+    if !VALID_LOCALES.contains(&input.preferred_locale.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "InvalidRequest",
+                "message": format!("Invalid locale. Valid options: {}", VALID_LOCALES.join(", "))
+            })),
+        )
+            .into_response();
+    }
+
+    let result = sqlx::query!(
+        "UPDATE users SET preferred_locale = $1 WHERE did = $2 RETURNING did",
+        input.preferred_locale,
+        auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    match result {
+        Ok(Some(_)) => {
+            info!(
+                did = %auth.0.did,
+                locale = %input.preferred_locale,
+                "User locale preference updated"
+            );
+            Json(json!({
+                "preferredLocale": input.preferred_locale
+            }))
+            .into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "AccountNotFound"})),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("DB error updating locale: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),

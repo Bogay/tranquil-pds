@@ -235,7 +235,7 @@ async fn test_revoke_session_not_found() {
             base_url().await
         ))
         .bearer_auth(&jwt)
-        .json(&json!({"sessionId": "999999999"}))
+        .json(&json!({"sessionId": "jwt:999999999"}))
         .send()
         .await
         .expect("Failed to send request");

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
+  import { _ } from '../lib/i18n'
 
   let newPassword = $state('')
   let confirmPassword = $state('')
@@ -19,9 +20,9 @@
   let { did, token } = getUrlParams()
 
   function validateForm(): string | null {
-    if (!newPassword) return 'New password is required'
-    if (newPassword.length < 8) return 'Password must be at least 8 characters'
-    if (newPassword !== confirmPassword) return 'Passwords do not match'
+    if (!newPassword) return $_('recoverPasskey.validation.passwordRequired')
+    if (newPassword.length < 8) return $_('recoverPasskey.validation.passwordLength')
+    if (newPassword !== confirmPassword) return $_('recoverPasskey.validation.passwordsMismatch')
     return null
   }
 
@@ -29,7 +30,7 @@
     e.preventDefault()
 
     if (!did || !token) {
-      error = 'Invalid recovery link. Please request a new one.'
+      error = $_('recoverPasskey.errors.invalidLink')
       return
     }
 
@@ -48,16 +49,16 @@
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.error === 'RecoveryLinkExpired') {
-          error = 'This recovery link has expired. Please request a new one.'
+          error = $_('recoverPasskey.errors.expired')
         } else if (err.error === 'InvalidRecoveryLink') {
-          error = 'Invalid recovery link. Please request a new one.'
+          error = $_('recoverPasskey.errors.invalidLink')
         } else {
-          error = err.message || 'Recovery failed'
+          error = err.message || $_('common.error')
         }
       } else if (err instanceof Error) {
-        error = err.message || 'Recovery failed'
+        error = err.message || $_('common.error')
       } else {
-        error = 'Recovery failed'
+        error = $_('common.error')
       }
     } finally {
       submitting = false
@@ -73,44 +74,35 @@
   }
 </script>
 
-<div class="recover-container">
+<div class="recover-page">
   {#if !did || !token}
-    <h1>Invalid Recovery Link</h1>
-    <p class="error-message">
-      This recovery link is invalid or has been corrupted. Please request a new recovery email.
-    </p>
-    <button onclick={requestNewLink}>Go to Login</button>
+    <h1>{$_('recoverPasskey.invalidLinkTitle')}</h1>
+    <p class="error-message">{$_('recoverPasskey.invalidLinkMessage')}</p>
+    <button onclick={requestNewLink}>{$_('recoverPasskey.goToLogin')}</button>
   {:else if success}
     <div class="success-content">
       <div class="success-icon">&#x2714;</div>
-      <h1>Password Set!</h1>
-      <p class="success-message">
-        Your temporary password has been set. You can now sign in with this password.
-      </p>
-      <p class="next-steps">
-        After signing in, we recommend adding a new passkey in your security settings
-        to restore passkey-only authentication.
-      </p>
-      <button onclick={goToLogin}>Sign In</button>
+      <h1>{$_('recoverPasskey.successTitle')}</h1>
+      <p class="success-message">{$_('recoverPasskey.successMessage')}</p>
+      <p class="next-steps">{$_('recoverPasskey.successNextSteps')}</p>
+      <button onclick={goToLogin}>{$_('recoverPasskey.signIn')}</button>
     </div>
   {:else}
-    <h1>Recover Your Account</h1>
-    <p class="subtitle">
-      Set a temporary password to regain access to your passkey-only account.
-    </p>
+    <h1>{$_('recoverPasskey.title')}</h1>
+    <p class="subtitle">{$_('recoverPasskey.subtitle')}</p>
 
     {#if error}
-      <div class="error">{error}</div>
+      <div class="message error">{error}</div>
     {/if}
 
     <form onsubmit={handleSubmit}>
       <div class="field">
-        <label for="new-password">New Password</label>
+        <label for="new-password">{$_('recoverPasskey.newPassword')}</label>
         <input
           id="new-password"
           type="password"
           bind:value={newPassword}
-          placeholder="At least 8 characters"
+          placeholder={$_('recoverPasskey.newPasswordPlaceholder')}
           disabled={submitting}
           required
           minlength="8"
@@ -118,90 +110,62 @@
       </div>
 
       <div class="field">
-        <label for="confirm-password">Confirm Password</label>
+        <label for="confirm-password">{$_('recoverPasskey.confirmPassword')}</label>
         <input
           id="confirm-password"
           type="password"
           bind:value={confirmPassword}
-          placeholder="Confirm your password"
+          placeholder={$_('recoverPasskey.confirmPasswordPlaceholder')}
           disabled={submitting}
           required
         />
       </div>
 
       <div class="info-box">
-        <strong>What happens next?</strong>
-        <p>
-          After setting this password, you can sign in and add a new passkey in your security settings.
-          Once you have a new passkey, you can optionally remove the temporary password.
-        </p>
+        <strong>{$_('recoverPasskey.whatHappensNext')}</strong>
+        <p>{$_('recoverPasskey.whatHappensNextDetail')}</p>
       </div>
 
       <button type="submit" disabled={submitting}>
-        {submitting ? 'Setting password...' : 'Set Password'}
+        {submitting ? $_('recoverPasskey.settingPassword') : $_('recoverPasskey.setPassword')}
       </button>
     </form>
   {/if}
 </div>
 
 <style>
-  .recover-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
+  .recover-page {
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
   }
 
   h1 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-3) 0;
   }
 
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 var(--space-7) 0;
   }
 
   form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  label {
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-
-  input {
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
-    background: var(--bg-input);
-    color: var(--text-primary);
-  }
-
-  input:focus {
-    outline: none;
-    border-color: var(--accent);
+    gap: var(--space-4);
   }
 
   .info-box {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 1rem;
-    font-size: 0.875rem;
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    font-size: var(--text-sm);
   }
 
   .info-box strong {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-3);
   }
 
   .info-box p {
@@ -209,38 +173,9 @@
     color: var(--text-secondary);
   }
 
-  button {
-    padding: 0.75rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    margin-top: 0.5rem;
-  }
-
-  button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .error {
-    padding: 0.75rem;
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: 4px;
-    color: var(--error-text);
-    margin-bottom: 1rem;
-  }
-
   .error-message {
     color: var(--text-secondary);
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-6);
   }
 
   .success-content {
@@ -248,19 +183,19 @@
   }
 
   .success-icon {
-    font-size: 4rem;
+    font-size: var(--text-4xl);
     color: var(--success-text);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
   .success-message {
     color: var(--text-secondary);
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-3);
   }
 
   .next-steps {
     color: var(--text-muted);
-    font-size: 0.875rem;
-    margin-bottom: 1.5rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-6);
   }
 </style>

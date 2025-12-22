@@ -1,18 +1,23 @@
 <script lang="ts">
   import { getAuthState, logout, switchAccount } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
+  import { _ } from '../lib/i18n'
+
   const auth = getAuthState()
   let dropdownOpen = $state(false)
   let switching = $state(false)
+
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
     }
   })
+
   async function handleLogout() {
     await logout()
     navigate('/login')
   }
+
   async function handleSwitchAccount(did: string) {
     switching = true
     dropdownOpen = false
@@ -24,29 +29,34 @@
       switching = false
     }
   }
+
   function toggleDropdown() {
     dropdownOpen = !dropdownOpen
   }
+
   function closeDropdown(e: MouseEvent) {
     const target = e.target as HTMLElement
     if (!target.closest('.account-dropdown')) {
       dropdownOpen = false
     }
   }
+
   $effect(() => {
     if (dropdownOpen) {
       document.addEventListener('click', closeDropdown)
       return () => document.removeEventListener('click', closeDropdown)
     }
   })
+
   let otherAccounts = $derived(
     auth.savedAccounts.filter(a => a.did !== auth.session?.did)
   )
 </script>
+
 {#if auth.session}
   <div class="dashboard">
     <header>
-      <h1>Dashboard</h1>
+      <h1>{$_('dashboard.title')}</h1>
       <div class="account-dropdown">
         <button class="account-trigger" onclick={toggleDropdown} disabled={switching}>
           <span class="account-handle">@{auth.session.handle}</span>
@@ -56,323 +66,356 @@
           <div class="dropdown-menu">
             {#if otherAccounts.length > 0}
               <div class="dropdown-section">
-                <span class="dropdown-label">Switch Account</span>
+                <span class="dropdown-label">{$_('dashboard.switchAccount')}</span>
                 {#each otherAccounts as account}
-                  <button
-                    type="button"
-                    class="dropdown-item"
-                    onclick={() => handleSwitchAccount(account.did)}
-                  >
+                  <button type="button" class="dropdown-item" onclick={() => handleSwitchAccount(account.did)}>
                     @{account.handle}
                   </button>
                 {/each}
               </div>
               <div class="dropdown-divider"></div>
             {/if}
-            <button
-              type="button"
-              class="dropdown-item"
-              onclick={() => { dropdownOpen = false; navigate('/login') }}
-            >
-              Add another account
+            <button type="button" class="dropdown-item" onclick={() => { dropdownOpen = false; navigate('/login') }}>
+              {$_('dashboard.addAnotherAccount')}
             </button>
             <div class="dropdown-divider"></div>
             <button type="button" class="dropdown-item logout-item" onclick={handleLogout}>
-              Sign out @{auth.session.handle}
+              {$_('dashboard.signOut', { values: { handle: auth.session.handle } })}
             </button>
           </div>
         {/if}
       </div>
     </header>
+
     {#if auth.session.status === 'deactivated' || auth.session.active === false}
       <div class="deactivated-banner">
-        <strong>Account Deactivated</strong>
-        <p>Your account is currently deactivated. This typically happens during account migration. Some features may be limited until your account is reactivated.</p>
+        <strong>{$_('dashboard.deactivatedTitle')}</strong>
+        <p>{$_('dashboard.deactivatedMessage')}</p>
       </div>
     {/if}
+
     <section class="account-overview">
-      <h2>Account Overview</h2>
+      <h2>{$_('dashboard.accountOverview')}</h2>
       <dl>
-        <dt>Handle</dt>
+        <dt>{$_('dashboard.handle')}</dt>
         <dd>
           @{auth.session.handle}
           {#if auth.session.isAdmin}
-            <span class="badge admin">Admin</span>
+            <span class="badge admin">{$_('dashboard.admin')}</span>
           {/if}
           {#if auth.session.status === 'deactivated' || auth.session.active === false}
-            <span class="badge deactivated">Deactivated</span>
+            <span class="badge deactivated">{$_('dashboard.deactivated')}</span>
           {/if}
         </dd>
-        <dt>DID</dt>
+        <dt>{$_('dashboard.did')}</dt>
         <dd class="mono">{auth.session.did}</dd>
         {#if auth.session.preferredChannel}
-          <dt>Primary Contact</dt>
+          <dt>{$_('dashboard.primaryContact')}</dt>
           <dd>
             {#if auth.session.preferredChannel === 'email'}
-              {auth.session.email || 'Email'}
+              {auth.session.email || $_('register.email')}
             {:else if auth.session.preferredChannel === 'discord'}
-              Discord
+              {$_('register.discord')}
             {:else if auth.session.preferredChannel === 'telegram'}
-              Telegram
+              {$_('register.telegram')}
             {:else if auth.session.preferredChannel === 'signal'}
-              Signal
+              {$_('register.signal')}
             {:else}
               {auth.session.preferredChannel}
             {/if}
             {#if auth.session.preferredChannelVerified}
-              <span class="badge success">Verified</span>
+              <span class="badge success">{$_('dashboard.verified')}</span>
             {:else}
-              <span class="badge warning">Unverified</span>
+              <span class="badge warning">{$_('dashboard.unverified')}</span>
             {/if}
           </dd>
         {:else if auth.session.email}
-          <dt>Email</dt>
+          <dt>{$_('register.email')}</dt>
           <dd>
             {auth.session.email}
             {#if auth.session.emailConfirmed}
-              <span class="badge success">Verified</span>
+              <span class="badge success">{$_('dashboard.verified')}</span>
             {:else}
-              <span class="badge warning">Unverified</span>
+              <span class="badge warning">{$_('dashboard.unverified')}</span>
             {/if}
           </dd>
         {/if}
       </dl>
     </section>
+
     <nav class="nav-grid">
       <a href="#/app-passwords" class="nav-card">
-        <h3>App Passwords</h3>
-        <p>Manage passwords for third-party apps</p>
+        <h3>{$_('dashboard.navAppPasswords')}</h3>
+        <p>{$_('dashboard.navAppPasswordsDesc')}</p>
       </a>
       <a href="#/sessions" class="nav-card">
-        <h3>Active Sessions</h3>
-        <p>View and manage your login sessions</p>
+        <h3>{$_('dashboard.navSessions')}</h3>
+        <p>{$_('dashboard.navSessionsDesc')}</p>
       </a>
       <a href="#/invite-codes" class="nav-card">
-        <h3>Invite Codes</h3>
-        <p>View and create invite codes</p>
+        <h3>{$_('dashboard.navInviteCodes')}</h3>
+        <p>{$_('dashboard.navInviteCodesDesc')}</p>
       </a>
       <a href="#/settings" class="nav-card">
-        <h3>Account Settings</h3>
-        <p>Email, password, handle, and more</p>
+        <h3>{$_('dashboard.navSettings')}</h3>
+        <p>{$_('dashboard.navSettingsDesc')}</p>
       </a>
       <a href="#/security" class="nav-card">
-        <h3>Security</h3>
-        <p>Two-factor authentication</p>
+        <h3>{$_('dashboard.navSecurity')}</h3>
+        <p>{$_('dashboard.navSecurityDesc')}</p>
       </a>
-      <a href="#/notifications" class="nav-card">
-        <h3>Notification Preferences</h3>
-        <p>Discord, Telegram, Signal channels</p>
+      <a href="#/comms" class="nav-card">
+        <h3>{$_('dashboard.navComms')}</h3>
+        <p>{$_('dashboard.navCommsDesc')}</p>
       </a>
       <a href="#/repo" class="nav-card">
-        <h3>Repository Explorer</h3>
-        <p>Browse and manage raw AT Protocol records</p>
+        <h3>{$_('dashboard.navRepo')}</h3>
+        <p>{$_('dashboard.navRepoDesc')}</p>
       </a>
       {#if auth.session.isAdmin}
         <a href="#/admin" class="nav-card admin-card">
-          <h3>Admin Panel</h3>
-          <p>Server stats and admin operations</p>
+          <h3>{$_('dashboard.navAdmin')}</h3>
+          <p>{$_('dashboard.navAdminDesc')}</p>
         </a>
       {/if}
     </nav>
   </div>
 {:else if auth.loading}
-  <div class="loading">Loading...</div>
+  <div class="loading">{$_('common.loading')}</div>
 {/if}
+
 <style>
   .dashboard {
-    max-width: 800px;
+    max-width: var(--width-lg);
     margin: 0 auto;
-    padding: 2rem;
+    padding: var(--space-7);
   }
+
   header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
+
   header h1 {
     margin: 0;
   }
+
   .account-dropdown {
     position: relative;
   }
+
   .account-trigger {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-5);
     background: transparent;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
     cursor: pointer;
     color: var(--text-primary);
   }
+
   .account-trigger:hover:not(:disabled) {
     background: var(--bg-secondary);
   }
+
   .account-trigger:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
+
   .account-trigger .account-handle {
-    font-weight: 500;
+    font-weight: var(--font-medium);
   }
+
   .dropdown-arrow {
     font-size: 0.625rem;
     color: var(--text-secondary);
   }
+
   .dropdown-menu {
     position: absolute;
     top: 100%;
     right: 0;
-    margin-top: 0.25rem;
+    margin-top: var(--space-2);
     min-width: 200px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
     z-index: 100;
     overflow: hidden;
   }
+
   .dropdown-section {
-    padding: 0.5rem 0;
+    padding: var(--space-3) 0;
   }
+
   .dropdown-label {
     display: block;
-    padding: 0.25rem 1rem;
-    font-size: 0.75rem;
+    padding: var(--space-2) var(--space-5);
+    font-size: var(--text-xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
+
   .dropdown-item {
     display: block;
     width: 100%;
-    padding: 0.75rem 1rem;
+    padding: var(--space-4) var(--space-5);
     background: transparent;
     border: none;
     text-align: left;
     cursor: pointer;
     color: var(--text-primary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .dropdown-item:hover {
     background: var(--bg-secondary);
   }
+
   .dropdown-item.logout-item {
     color: var(--error-text);
   }
+
   .dropdown-divider {
     height: 1px;
     background: var(--border-color);
     margin: 0;
   }
+
   section {
     background: var(--bg-secondary);
-    padding: 1.5rem;
-    border-radius: 8px;
-    margin-bottom: 2rem;
+    padding: var(--space-6);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-7);
   }
+
   section h2 {
-    margin: 0 0 1rem 0;
-    font-size: 1.25rem;
+    margin: 0 0 var(--space-4) 0;
+    font-size: var(--text-xl);
   }
+
   dl {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 0.5rem 1rem;
+    gap: var(--space-3) var(--space-5);
     margin: 0;
   }
+
   dt {
-    font-weight: 500;
+    font-weight: var(--font-medium);
     color: var(--text-secondary);
   }
+
   dd {
     margin: 0;
   }
+
   .mono {
-    font-family: monospace;
-    font-size: 0.875rem;
+    font-family: ui-monospace, monospace;
+    font-size: var(--text-sm);
     word-break: break-all;
   }
+
   .badge {
     display: inline-block;
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    margin-left: 0.5rem;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
+    margin-left: var(--space-3);
   }
+
   .badge.success {
     background: var(--success-bg);
     color: var(--success-text);
   }
+
   .badge.warning {
     background: var(--warning-bg);
     color: var(--warning-text);
   }
+
   .badge.admin {
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
   }
+
   .badge.deactivated {
     background: var(--warning-bg);
     color: var(--warning-text);
-    border: 1px solid #d4a03c;
+    border: 1px solid var(--warning-border);
   }
+
   .nav-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
+    gap: var(--space-4);
   }
+
   .nav-card {
     display: block;
-    padding: 1.5rem;
+    padding: var(--space-6);
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--radius-xl);
     text-decoration: none;
     color: inherit;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
   }
+
   .nav-card:hover {
     border-color: var(--accent);
-    box-shadow: 0 2px 8px rgba(77, 166, 255, 0.15);
+    box-shadow: 0 2px 8px var(--accent-muted);
   }
+
   .nav-card h3 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-3) 0;
     color: var(--accent);
   }
+
   .nav-card p {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .nav-card.admin-card {
     border-color: var(--accent);
-    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(77, 166, 255, 0.05) 100%);
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-muted) 100%);
   }
+
   .nav-card.admin-card:hover {
-    box-shadow: 0 2px 12px rgba(77, 166, 255, 0.25);
+    box-shadow: 0 2px 12px var(--accent-muted);
   }
+
   .loading {
     text-align: center;
-    padding: 4rem;
+    padding: var(--space-9);
     color: var(--text-secondary);
   }
+
   .deactivated-banner {
     background: var(--warning-bg);
-    border: 1px solid #d4a03c;
-    border-radius: 8px;
-    padding: 1rem 1.5rem;
-    margin-bottom: 2rem;
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-5) var(--space-6);
+    margin-bottom: var(--space-7);
   }
+
   .deactivated-banner strong {
     color: var(--warning-text);
-    font-size: 1rem;
+    font-size: var(--text-base);
   }
+
   .deactivated-banner p {
-    margin: 0.5rem 0 0 0;
+    margin: var(--space-3) 0 0 0;
     color: var(--warning-text);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 </style>

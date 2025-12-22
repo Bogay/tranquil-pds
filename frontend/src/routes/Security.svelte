@@ -3,6 +3,8 @@
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import ReauthModal from '../components/ReauthModal.svelte'
+  import { _ } from '../lib/i18n'
+  import { formatDate as formatDateUtil } from '../lib/date'
 
   const auth = getAuthState()
   let message = $state<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -103,8 +105,8 @@
       const result = await api.updateLegacyLoginPreference(auth.session.accessJwt, !allowLegacyLogin)
       allowLegacyLogin = result.allowLegacyLogin
       showMessage('success', allowLegacyLogin
-        ? 'Legacy app login enabled'
-        : 'Legacy app login disabled - only OAuth apps can sign in')
+        ? $_('security.legacyLoginEnabled')
+        : $_('security.legacyLoginDisabled'))
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.error === 'ReauthRequired' || e.error === 'MfaVerificationRequired') {
@@ -115,7 +117,7 @@
           showMessage('error', e.message)
         }
       } else {
-        showMessage('error', 'Failed to update preference')
+        showMessage('error', $_('security.failedToUpdatePreference'))
       }
     } finally {
       legacyLoginUpdating = false
@@ -129,7 +131,7 @@
       await api.removePassword(auth.session.accessJwt)
       hasPassword = false
       showRemovePasswordForm = false
-      showMessage('success', 'Password removed. Your account is now passkey-only.')
+      showMessage('success', $_('security.passwordRemoved'))
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.error === 'ReauthRequired') {
@@ -140,7 +142,7 @@
           showMessage('error', e.message)
         }
       } else {
-        showMessage('error', 'Failed to remove password')
+        showMessage('error', $_('security.failedToRemovePassword'))
       }
     } finally {
       removePasswordLoading = false
@@ -166,7 +168,7 @@
       totpEnabled = status.enabled
       hasBackupCodes = status.hasBackupCodes
     } catch {
-      showMessage('error', 'Failed to load TOTP status')
+      showMessage('error', $_('security.failedToLoadTotpStatus'))
     } finally {
       loading = false
     }
@@ -217,7 +219,7 @@
     backupCodes = []
     qrBase64 = ''
     totpUri = ''
-    showMessage('success', 'Two-factor authentication enabled successfully')
+    showMessage('success', $_('security.totpEnabledSuccess'))
   }
 
   async function handleDisable(e: Event) {
@@ -231,7 +233,7 @@
       showDisableForm = false
       disablePassword = ''
       disableCode = ''
-      showMessage('success', 'Two-factor authentication disabled')
+      showMessage('success', $_('security.totpDisabledSuccess'))
     } catch (e) {
       showMessage('error', e instanceof ApiError ? e.message : 'Failed to disable TOTP')
     } finally {
@@ -260,7 +262,7 @@
   function copyBackupCodes() {
     const text = backupCodes.join('\n')
     navigator.clipboard.writeText(text)
-    showMessage('success', 'Backup codes copied to clipboard')
+    showMessage('success', $_('security.backupCodesCopied'))
   }
 
   async function loadPasskeys() {
@@ -270,7 +272,7 @@
       const result = await api.listPasskeys(auth.session.accessJwt)
       passkeys = result.passkeys
     } catch {
-      showMessage('error', 'Failed to load passkeys')
+      showMessage('error', $_('security.failedToLoadPasskeys'))
     } finally {
       passkeysLoading = false
     }
@@ -279,7 +281,7 @@
   async function handleAddPasskey() {
     if (!auth.session) return
     if (!window.PublicKeyCredential) {
-      showMessage('error', 'Passkeys are not supported in this browser')
+      showMessage('error', $_('security.passkeysNotSupported'))
       return
     }
     addingPasskey = true
@@ -290,7 +292,7 @@
         publicKey: publicKeyOptions
       })
       if (!credential) {
-        showMessage('error', 'Passkey creation was cancelled')
+        showMessage('error', $_('security.passkeyCreationCancelled'))
         return
       }
       const credentialResponse = {
@@ -305,10 +307,10 @@
       await api.finishPasskeyRegistration(auth.session.accessJwt, credentialResponse, newPasskeyName || undefined)
       await loadPasskeys()
       newPasskeyName = ''
-      showMessage('success', 'Passkey added successfully')
+      showMessage('success', $_('security.passkeyAddedSuccess'))
     } catch (e) {
       if (e instanceof DOMException && e.name === 'NotAllowedError') {
-        showMessage('error', 'Passkey creation was cancelled')
+        showMessage('error', $_('security.passkeyCreationCancelled'))
       } else {
         showMessage('error', e instanceof ApiError ? e.message : 'Failed to add passkey')
       }
@@ -319,11 +321,13 @@
 
   async function handleDeletePasskey(id: string) {
     if (!auth.session) return
-    if (!confirm('Are you sure you want to delete this passkey?')) return
+    const passkey = passkeys.find(p => p.id === id)
+    const name = passkey?.friendlyName || 'this passkey'
+    if (!confirm($_('security.deletePasskeyConfirm', { values: { name } }))) return
     try {
       await api.deletePasskey(auth.session.accessJwt, id)
       await loadPasskeys()
-      showMessage('success', 'Passkey deleted')
+      showMessage('success', $_('security.passkeyDeleted'))
     } catch (e) {
       showMessage('error', e instanceof ApiError ? e.message : 'Failed to delete passkey')
     }
@@ -336,7 +340,7 @@
       await loadPasskeys()
       editingPasskeyId = null
       editPasskeyName = ''
-      showMessage('success', 'Passkey renamed')
+      showMessage('success', $_('security.passkeyRenamed'))
     } catch (e) {
       showMessage('error', e instanceof ApiError ? e.message : 'Failed to rename passkey')
     }
@@ -388,14 +392,14 @@
   }
 
   function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString()
+    return formatDateUtil(dateStr)
   }
 </script>
 
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">&larr; Dashboard</a>
-    <h1>Security Settings</h1>
+    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <h1>{$_('security.title')}</h1>
   </header>
 
   {#if message}
@@ -403,53 +407,53 @@
   {/if}
 
   {#if loading}
-    <div class="loading">Loading...</div>
+    <div class="loading">{$_('common.loading')}</div>
   {:else}
     <section>
-      <h2>Two-Factor Authentication</h2>
+      <h2>{$_('security.totp')}</h2>
       <p class="description">
-        Add an extra layer of security to your account using an authenticator app like Google Authenticator, Authy, or 1Password.
+        {$_('security.totpDescription')}
       </p>
 
       {#if setupStep === 'idle'}
         {#if totpEnabled}
           <div class="status enabled">
-            <span>Two-factor authentication is <strong>enabled</strong></span>
+            <span>{$_('security.totpEnabled')}</span>
           </div>
 
           {#if !showDisableForm && !showRegenForm}
             <div class="totp-actions">
               <button type="button" class="secondary" onclick={() => showRegenForm = true}>
-                Regenerate Backup Codes
+                {$_('security.regenerateBackupCodes')}
               </button>
               <button type="button" class="danger-outline" onclick={() => showDisableForm = true}>
-                Disable 2FA
+                {$_('security.disableTotp')}
               </button>
             </div>
           {/if}
 
           {#if showRegenForm}
             <form onsubmit={handleRegenerate} class="inline-form">
-              <h3>Regenerate Backup Codes</h3>
-              <p class="warning-text">This will invalidate all existing backup codes.</p>
+              <h3>{$_('security.regenerateBackupCodes')}</h3>
+              <p class="warning-text">{$_('security.regenerateConfirm')}</p>
               <div class="field">
-                <label for="regen-password">Password</label>
+                <label for="regen-password">{$_('security.password')}</label>
                 <input
                   id="regen-password"
                   type="password"
                   bind:value={regenPassword}
-                  placeholder="Enter your password"
+                  placeholder={$_('security.enterPassword')}
                   disabled={regenLoading}
                   required
                 />
               </div>
               <div class="field">
-                <label for="regen-code">Authenticator Code</label>
+                <label for="regen-code">{$_('security.totpCode')}</label>
                 <input
                   id="regen-code"
                   type="text"
                   bind:value={regenCode}
-                  placeholder="6-digit code"
+                  placeholder="{$_('security.totpCodePlaceholder')}"
                   disabled={regenLoading}
                   required
                   maxlength="6"
@@ -459,10 +463,10 @@
               </div>
               <div class="actions">
                 <button type="button" class="secondary" onclick={() => { showRegenForm = false; regenPassword = ''; regenCode = '' }}>
-                  Cancel
+                  {$_('common.cancel')}
                 </button>
                 <button type="submit" disabled={regenLoading || !regenPassword || regenCode.length !== 6}>
-                  {regenLoading ? 'Regenerating...' : 'Regenerate'}
+                  {regenLoading ? $_('security.regenerating') : $_('security.regenerateBackupCodes')}
                 </button>
               </div>
             </form>
@@ -470,26 +474,26 @@
 
           {#if showDisableForm}
             <form onsubmit={handleDisable} class="inline-form danger-form">
-              <h3>Disable Two-Factor Authentication</h3>
-              <p class="warning-text">This will make your account less secure.</p>
+              <h3>{$_('security.disableTotp')}</h3>
+              <p class="warning-text">{$_('security.disableTotpWarning')}</p>
               <div class="field">
-                <label for="disable-password">Password</label>
+                <label for="disable-password">{$_('security.password')}</label>
                 <input
                   id="disable-password"
                   type="password"
                   bind:value={disablePassword}
-                  placeholder="Enter your password"
+                  placeholder={$_('security.enterPassword')}
                   disabled={disableLoading}
                   required
                 />
               </div>
               <div class="field">
-                <label for="disable-code">Authenticator Code</label>
+                <label for="disable-code">{$_('security.totpCode')}</label>
                 <input
                   id="disable-code"
                   type="text"
                   bind:value={disableCode}
-                  placeholder="6-digit code"
+                  placeholder="{$_('security.totpCodePlaceholder')}"
                   disabled={disableLoading}
                   required
                   maxlength="6"
@@ -499,41 +503,41 @@
               </div>
               <div class="actions">
                 <button type="button" class="secondary" onclick={() => { showDisableForm = false; disablePassword = ''; disableCode = '' }}>
-                  Cancel
+                  {$_('common.cancel')}
                 </button>
                 <button type="submit" class="danger" disabled={disableLoading || !disablePassword || disableCode.length !== 6}>
-                  {disableLoading ? 'Disabling...' : 'Disable 2FA'}
+                  {disableLoading ? $_('security.disabling') : $_('security.disableTotp')}
                 </button>
               </div>
             </form>
           {/if}
         {:else}
           <div class="status disabled">
-            <span>Two-factor authentication is <strong>not enabled</strong></span>
+            <span>{$_('security.totpDisabled')}</span>
           </div>
           <button onclick={handleStartSetup} disabled={verifyLoading}>
-            {verifyLoading ? 'Setting up...' : 'Set Up Two-Factor Authentication'}
+            {$_('security.enableTotp')}
           </button>
         {/if}
       {:else if setupStep === 'qr'}
         <div class="setup-step">
-          <h3>Step 1: Scan QR Code</h3>
-          <p>Scan this QR code with your authenticator app:</p>
+          <h3>{$_('security.totpSetup')}</h3>
+          <p>{$_('security.totpSetupInstructions')}</p>
           <div class="qr-container">
             <img src="data:image/png;base64,{qrBase64}" alt="TOTP QR Code" class="qr-code" />
           </div>
           <details class="manual-entry">
-            <summary>Can't scan? Enter manually</summary>
+            <summary>{$_('security.cantScan')}</summary>
             <code class="secret-code">{totpUri.split('secret=')[1]?.split('&')[0] || ''}</code>
           </details>
           <button onclick={() => setupStep = 'verify'}>
-            Next: Verify Code
+            {$_('security.next')}
           </button>
         </div>
       {:else if setupStep === 'verify'}
         <div class="setup-step">
-          <h3>Step 2: Verify Setup</h3>
-          <p>Enter the 6-digit code from your authenticator app:</p>
+          <h3>{$_('security.totpSetup')}</h3>
+          <p>{$_('security.totpCodePlaceholder')}</p>
           <form onsubmit={handleVerifySetup}>
             <div class="field">
               <input
@@ -547,20 +551,19 @@
             </div>
             <div class="actions">
               <button type="button" class="secondary" onclick={() => { setupStep = 'qr' }}>
-                Back
+                {$_('common.back')}
               </button>
               <button type="submit" disabled={verifyLoading || verifyCode.length !== 6}>
-                {verifyLoading ? 'Verifying...' : 'Verify & Enable'}
+                {$_('security.verifyAndEnable')}
               </button>
             </div>
           </form>
         </div>
       {:else if setupStep === 'backup'}
         <div class="setup-step">
-          <h3>Step 3: Save Backup Codes</h3>
+          <h3>{$_('security.backupCodes')}</h3>
           <p class="warning-text">
-            Save these backup codes in a secure location. Each code can only be used once.
-            If you lose access to your authenticator app, you'll need these to sign in.
+            {$_('security.backupCodesDescription')}
           </p>
           <div class="backup-codes">
             {#each backupCodes as code}
@@ -569,10 +572,10 @@
           </div>
           <div class="actions">
             <button type="button" class="secondary" onclick={copyBackupCodes}>
-              Copy to Clipboard
+              {$_('security.copyToClipboard')}
             </button>
             <button onclick={handleFinishSetup}>
-              I've Saved My Codes
+              {$_('security.savedMyCodes')}
             </button>
           </div>
         </div>
@@ -580,13 +583,13 @@
     </section>
 
     <section>
-      <h2>Passkeys</h2>
+      <h2>{$_('security.passkeys')}</h2>
       <p class="description">
-        Passkeys are a secure, passwordless way to sign in using biometrics (fingerprint or face), a security key, or your device's screen lock.
+        {$_('security.passkeysDescription')}
       </p>
 
       {#if passkeysLoading}
-        <div class="loading">Loading passkeys...</div>
+        <div class="loading">{$_('security.loadingPasskeys')}</div>
       {:else}
         {#if passkeys.length > 0}
           <div class="passkey-list">
@@ -597,31 +600,31 @@
                     <input
                       type="text"
                       bind:value={editPasskeyName}
-                      placeholder="Passkey name"
+                      placeholder="{$_('security.passkeyName')}"
                       class="passkey-name-input"
                     />
                     <div class="passkey-edit-actions">
-                      <button type="button" class="small" onclick={handleSavePasskeyName}>Save</button>
-                      <button type="button" class="small secondary" onclick={cancelEditPasskey}>Cancel</button>
+                      <button type="button" class="small" onclick={handleSavePasskeyName}>{$_('common.save')}</button>
+                      <button type="button" class="small secondary" onclick={cancelEditPasskey}>{$_('common.cancel')}</button>
                     </div>
                   </div>
                 {:else}
                   <div class="passkey-info">
-                    <span class="passkey-name">{passkey.friendlyName || 'Unnamed passkey'}</span>
+                    <span class="passkey-name">{passkey.friendlyName || $_('security.unnamedPasskey')}</span>
                     <span class="passkey-meta">
-                      Added {formatDate(passkey.createdAt)}
+                      {$_('security.added')} {formatDate(passkey.createdAt)}
                       {#if passkey.lastUsed}
-                        &middot; Last used {formatDate(passkey.lastUsed)}
+                        &middot; {$_('security.lastUsed')} {formatDate(passkey.lastUsed)}
                       {/if}
                     </span>
                   </div>
                   <div class="passkey-actions">
                     <button type="button" class="small secondary" onclick={() => startEditPasskey(passkey)}>
-                      Rename
+                      {$_('security.rename')}
                     </button>
                     {#if hasPassword || passkeys.length > 1}
                       <button type="button" class="small danger-outline" onclick={() => handleDeletePasskey(passkey.id)}>
-                        Delete
+                        {$_('security.deletePasskey')}
                       </button>
                     {/if}
                   </div>
@@ -631,113 +634,111 @@
           </div>
         {:else}
           <div class="status disabled">
-            <span>No passkeys registered</span>
+            <span>{$_('security.noPasskeys')}</span>
           </div>
         {/if}
 
         <div class="add-passkey">
           <div class="field">
-            <label for="passkey-name">Passkey Name (optional)</label>
+            <label for="passkey-name">{$_('security.passkeyName')}</label>
             <input
               id="passkey-name"
               type="text"
               bind:value={newPasskeyName}
-              placeholder="e.g., MacBook Touch ID"
+              placeholder="{$_('security.passkeyNamePlaceholder')}"
               disabled={addingPasskey}
             />
           </div>
           <button onclick={handleAddPasskey} disabled={addingPasskey}>
-            {addingPasskey ? 'Adding Passkey...' : 'Add a Passkey'}
+            {addingPasskey ? $_('security.adding') : $_('security.addPasskey')}
           </button>
         </div>
       {/if}
     </section>
 
     <section>
-      <h2>Password</h2>
+      <h2>{$_('security.password')}</h2>
       <p class="description">
-        Manage your account password. If you have passkeys set up, you can optionally remove your password for a fully passwordless experience.
+        {$_('security.passwordDescription')}
       </p>
 
       {#if passwordLoading}
-        <div class="loading">Loading...</div>
+        <div class="loading">{$_('common.loading')}</div>
       {:else if hasPassword}
         <div class="status enabled">
-          <span>Password authentication is <strong>enabled</strong></span>
+          <span>{$_('security.passwordStatus')}</span>
         </div>
 
         {#if passkeys.length > 0}
           {#if !showRemovePasswordForm}
             <button type="button" class="danger-outline" onclick={() => showRemovePasswordForm = true}>
-              Remove Password
+              {$_('security.removePassword')}
             </button>
           {:else}
             <div class="inline-form danger-form">
-              <h3>Remove Password</h3>
+              <h3>{$_('security.removePassword')}</h3>
               <p class="warning-text">
-                This will make your account passkey-only. You'll only be able to sign in using your registered passkeys.
-                If you lose access to all your passkeys, you can recover your account using your notification channel.
+                {$_('security.removePasswordWarning')}
               </p>
               <div class="info-box-inline">
-                <strong>Before proceeding:</strong>
+                <strong>{$_('security.beforeProceeding')}</strong>
                 <ul>
-                  <li>Make sure you have at least one reliable passkey registered</li>
-                  <li>Consider registering passkeys on multiple devices</li>
-                  <li>Ensure your recovery notification channel is up to date</li>
+                  <li>{$_('security.beforeProceedingItem1')}</li>
+                  <li>{$_('security.beforeProceedingItem2')}</li>
+                  <li>{$_('security.beforeProceedingItem3')}</li>
                 </ul>
               </div>
               <div class="actions">
                 <button type="button" class="secondary" onclick={() => showRemovePasswordForm = false}>
-                  Cancel
+                  {$_('common.cancel')}
                 </button>
                 <button type="button" class="danger" onclick={handleRemovePassword} disabled={removePasswordLoading}>
-                  {removePasswordLoading ? 'Removing...' : 'Remove Password'}
+                  {removePasswordLoading ? $_('security.removing') : $_('security.removePassword')}
                 </button>
               </div>
             </div>
           {/if}
         {:else}
-          <p class="hint">Add at least one passkey before you can remove your password.</p>
+          <p class="hint">{$_('security.addPasskeyFirst')}</p>
         {/if}
       {:else}
         <div class="status passkey-only">
-          <span>Your account is <strong>passkey-only</strong></span>
+          <span>{$_('security.noPassword')}</span>
         </div>
         <p class="hint">
-          You sign in using passkeys only. If you ever lose access to your passkeys,
-          you can recover your account using the "Lost passkey?" link on the login page.
+          {$_('security.passkeyOnlyHint')}
         </p>
       {/if}
     </section>
 
     <section>
-      <h2>Trusted Devices</h2>
+      <h2>{$_('security.trustedDevices')}</h2>
       <p class="description">
-        Manage devices that can skip two-factor authentication when signing in. Trust is granted for 30 days and automatically extends when you use the device.
+        {$_('security.trustedDevicesDescription')}
       </p>
       <a href="#/trusted-devices" class="section-link">
-        Manage Trusted Devices &rarr;
+        {$_('security.manageTrustedDevices')} &rarr;
       </a>
     </section>
 
     {#if hasMfa}
       <section>
-        <h2>App Compatibility</h2>
+        <h2>{$_('security.appCompatibility')}</h2>
         <p class="description">
-          Control whether apps that don't support modern authentication (like the official Bluesky app) can sign in to your account.
+          {$_('security.legacyLoginDescription')}
         </p>
 
         {#if legacyLoginLoading}
-          <div class="loading">Loading...</div>
+          <div class="loading">{$_('common.loading')}</div>
         {:else}
           <div class="toggle-row">
             <div class="toggle-info">
-              <span class="toggle-label">Allow legacy app login</span>
+              <span class="toggle-label">{$_('security.legacyLogin')}</span>
               <span class="toggle-description">
                 {#if allowLegacyLogin}
-                  Legacy apps can sign in with just your password, but sensitive actions (like changing your password) will require MFA verification.
+                  {$_('security.legacyLoginOn')}
                 {:else}
-                  Only OAuth-compatible apps can sign in. Legacy apps will be blocked.
+                  {$_('security.legacyLoginOff')}
                 {/if}
               </span>
             </div>
@@ -753,25 +754,18 @@
 
           {#if totpEnabled}
             <div class="warning-box">
-              <strong>Important: Password changes in Bluesky app will fail</strong>
-              <p>
-                With TOTP enabled, changing your password from the Bluesky app (or other legacy apps) will be blocked.
-                To change your password, you have two options:
-              </p>
+              <strong>{$_('security.legacyLoginWarning')}</strong>
+              <p>{$_('security.totpPasswordWarning')}</p>
               <ol>
-                <li><strong>Change it here:</strong> Use this website's <a href="#/settings">Settings page</a> where you can verify with your authenticator app.</li>
-                <li><strong>Verify your session first:</strong> Use the <a href="#/settings">re-authenticate option</a> to verify your Bluesky session with TOTP, then password changes will work temporarily.</li>
+                <li><strong>{$_('security.totpPasswordOption1Label')}</strong> {$_('security.totpPasswordOption1Text')} <a href="#/settings">{$_('security.totpPasswordOption1Link')}</a> {$_('security.totpPasswordOption1Suffix')}</li>
+                <li><strong>{$_('security.totpPasswordOption2Label')}</strong> {$_('security.totpPasswordOption2Text')} <a href="#/settings">{$_('security.totpPasswordOption2Link')}</a> {$_('security.totpPasswordOption2Suffix')}</li>
               </ol>
             </div>
           {/if}
 
           <div class="info-box-inline">
-            <strong>What are legacy apps?</strong>
-            <p>
-              Some apps (like the official Bluesky app) use older authentication that only requires your password.
-              When you have MFA enabled, these apps bypass your second factor.
-              Disabling legacy login forces all apps to use OAuth, which properly enforces MFA.
-            </p>
+            <strong>{$_('security.legacyAppsTitle')}</strong>
+            <p>{$_('security.legacyAppsDescription')}</p>
           </div>
         {/if}
       </section>
@@ -788,19 +782,19 @@
 
 <style>
   .page {
-    max-width: 600px;
+    max-width: var(--width-md);
     margin: 0 auto;
-    padding: 2rem;
+    padding: var(--space-7);
   }
 
   header {
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
 
   .back {
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .back:hover {
@@ -808,58 +802,40 @@
   }
 
   h1 {
-    margin: 0.5rem 0 0 0;
-  }
-
-  .message {
-    padding: 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
-  }
-
-  .message.success {
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
-    color: var(--success-text);
-  }
-
-  .message.error {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
+    margin: var(--space-2) 0 0 0;
   }
 
   .loading {
     text-align: center;
     color: var(--text-secondary);
-    padding: 2rem;
+    padding: var(--space-7);
   }
 
   section {
-    padding: 1.5rem;
+    padding: var(--space-6);
     background: var(--bg-secondary);
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-6);
   }
 
   section h2 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.125rem;
+    margin: 0 0 var(--space-2) 0;
+    font-size: var(--text-lg);
   }
 
   .description {
     color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin-bottom: 1.5rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-6);
   }
 
   .status {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
   }
 
   .status.enabled {
@@ -874,41 +850,20 @@
     color: var(--warning-text);
   }
 
+  .status.passkey-only {
+    background: linear-gradient(135deg, rgba(77, 166, 255, 0.15), rgba(128, 90, 213, 0.15));
+    border: 1px solid var(--accent);
+    color: var(--accent);
+  }
+
   .totp-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
   }
 
-  .field {
-    margin-bottom: 1rem;
-  }
-
-  label {
-    display: block;
-    font-size: 0.875rem;
-    font-weight: 500;
-    margin-bottom: 0.25rem;
-  }
-
-  input {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
-    box-sizing: border-box;
-    background: var(--bg-input);
-    color: var(--text-primary);
-  }
-
-  input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
   .code-input {
-    font-size: 1.5rem;
+    font-size: var(--text-2xl);
     letter-spacing: 0.5em;
     text-align: center;
     max-width: 200px;
@@ -916,70 +871,23 @@
     display: block;
   }
 
-  button {
-    padding: 0.75rem 1.5rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-  }
-
-  button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  button.secondary {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color-light);
-  }
-
-  button.secondary:hover:not(:disabled) {
-    background: var(--bg-card);
-  }
-
-  button.danger {
-    background: var(--error-text);
-  }
-
-  button.danger:hover:not(:disabled) {
-    background: #900;
-  }
-
-  button.danger-outline {
-    background: transparent;
-    color: var(--error-text);
-    border: 1px solid var(--error-border);
-  }
-
-  button.danger-outline:hover:not(:disabled) {
-    background: var(--error-bg);
-  }
-
   .actions {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
   }
 
   .inline-form {
-    margin-top: 1rem;
-    padding: 1rem;
+    margin-top: var(--space-4);
+    padding: var(--space-4);
     background: var(--bg-card);
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
   }
 
   .inline-form h3 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1rem;
+    margin: 0 0 var(--space-2) 0;
+    font-size: var(--text-base);
   }
 
   .danger-form {
@@ -989,31 +897,31 @@
 
   .warning-text {
     color: var(--error-text);
-    font-size: 0.875rem;
-    margin-bottom: 1rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
   }
 
   .setup-step {
-    padding: 1rem;
+    padding: var(--space-4);
     background: var(--bg-card);
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
   }
 
   .setup-step h3 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-2) 0;
   }
 
   .setup-step p {
     color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin-bottom: 1rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
   }
 
   .qr-container {
     display: flex;
     justify-content: center;
-    margin: 1.5rem 0;
+    margin: var(--space-6) 0;
   }
 
   .qr-code {
@@ -1023,8 +931,8 @@
   }
 
   .manual-entry {
-    margin-bottom: 1rem;
-    font-size: 0.875rem;
+    margin-bottom: var(--space-4);
+    font-size: var(--text-sm);
   }
 
   .manual-entry summary {
@@ -1034,127 +942,120 @@
 
   .secret-code {
     display: block;
-    margin-top: 0.5rem;
-    padding: 0.5rem;
+    margin-top: var(--space-2);
+    padding: var(--space-2);
     background: var(--bg-input);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     word-break: break-all;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
   }
 
   .backup-codes {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 0.5rem;
-    margin: 1rem 0;
+    gap: var(--space-2);
+    margin: var(--space-4) 0;
   }
 
   .backup-code {
-    padding: 0.5rem;
+    padding: var(--space-2);
     background: var(--bg-input);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     text-align: center;
-    font-size: 0.875rem;
-    font-family: monospace;
+    font-size: var(--text-sm);
+    font-family: ui-monospace, monospace;
   }
 
   .passkey-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
   }
 
   .passkey-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--bg-card);
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
-    gap: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    gap: var(--space-4);
   }
 
   .passkey-info {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
     flex: 1;
     min-width: 0;
   }
 
   .passkey-name {
-    font-weight: 500;
+    font-weight: var(--font-medium);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .passkey-meta {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
   }
 
   .passkey-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-shrink: 0;
   }
 
   .passkey-edit {
     display: flex;
     flex: 1;
-    gap: 0.5rem;
+    gap: var(--space-2);
     align-items: center;
   }
 
   .passkey-name-input {
     flex: 1;
-    padding: 0.5rem;
-    font-size: 0.875rem;
+    padding: var(--space-2);
+    font-size: var(--text-sm);
   }
 
   .passkey-edit-actions {
     display: flex;
-    gap: 0.25rem;
+    gap: var(--space-1);
   }
 
   button.small {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.75rem;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
   }
 
   .add-passkey {
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border-color-light);
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-color);
   }
 
   .add-passkey .field {
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-3);
   }
 
   .section-link {
     display: inline-block;
     color: var(--accent);
     text-decoration: none;
-    font-weight: 500;
+    font-weight: var(--font-medium);
   }
 
   .section-link:hover {
     text-decoration: underline;
   }
 
-  .status.passkey-only {
-    background: var(--accent);
-    background: linear-gradient(135deg, rgba(77, 166, 255, 0.15), rgba(128, 90, 213, 0.15));
-    border: 1px solid var(--accent);
-    color: var(--accent);
-  }
-
   .hint {
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
     margin: 0;
   }
@@ -1162,25 +1063,25 @@
   .info-box-inline {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 1rem;
-    margin-bottom: 1rem;
-    font-size: 0.875rem;
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
+    font-size: var(--text-sm);
   }
 
   .info-box-inline strong {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
   }
 
   .info-box-inline ul {
     margin: 0;
-    padding-left: 1.25rem;
+    padding-left: var(--space-5);
     color: var(--text-secondary);
   }
 
   .info-box-inline li {
-    margin-bottom: 0.25rem;
+    margin-bottom: var(--space-1);
   }
 
   .info-box-inline p {
@@ -1192,26 +1093,26 @@
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 1rem;
-    padding: 1rem;
+    gap: var(--space-4);
+    padding: var(--space-4);
     background: var(--bg-card);
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
-    margin-bottom: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-4);
   }
 
   .toggle-info {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
   }
 
   .toggle-label {
-    font-weight: 500;
+    font-weight: var(--font-medium);
   }
 
   .toggle-description {
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
 
@@ -1223,7 +1124,7 @@
     border: none;
     border-radius: 13px;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background var(--transition-fast);
     flex-shrink: 0;
   }
 
@@ -1247,7 +1148,7 @@
     height: 20px;
     background: white;
     border-radius: 50%;
-    transition: left 0.2s;
+    transition: left var(--transition-fast);
   }
 
   .toggle-button.on .toggle-slider {
@@ -1260,33 +1161,33 @@
 
   .warning-box {
     background: var(--warning-bg);
-    border: 1px solid var(--warning-border, var(--border-color));
+    border: 1px solid var(--warning-border);
     border-left: 4px solid var(--warning-text);
-    border-radius: 6px;
-    padding: 1rem;
-    margin-bottom: 1rem;
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
   }
 
   .warning-box strong {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
     color: var(--warning-text);
   }
 
   .warning-box p {
-    margin: 0 0 0.75rem 0;
-    font-size: 0.875rem;
+    margin: 0 0 var(--space-3) 0;
+    font-size: var(--text-sm);
     color: var(--text-primary);
   }
 
   .warning-box ol {
     margin: 0;
-    padding-left: 1.25rem;
-    font-size: 0.875rem;
+    padding-left: var(--space-5);
+    font-size: var(--text-sm);
   }
 
   .warning-box li {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
   }
 
   .warning-box a {

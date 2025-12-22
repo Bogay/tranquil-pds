@@ -243,6 +243,10 @@ pub fn app(state: AppState) -> Router {
             post(api::server::update_legacy_login_preference),
         )
         .route(
+            "/xrpc/com.tranquil.account.updateLocale",
+            post(api::server::update_locale),
+        )
+        .route(
             "/xrpc/com.tranquil.account.listTrustedDevices",
             get(api::server::list_trusted_devices),
         )

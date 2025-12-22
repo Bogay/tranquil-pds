@@ -38,7 +38,7 @@ pub fn create_access_token_with_metadata(did: &str, key_bytes: &[u8]) -> Result<
         SCOPE_ACCESS,
         TOKEN_TYPE_ACCESS,
         key_bytes,
-        Duration::minutes(120),
+        Duration::minutes(15),
     )
 }
 
@@ -51,7 +51,7 @@ pub fn create_refresh_token_with_metadata(
         SCOPE_REFRESH,
         TOKEN_TYPE_REFRESH,
         key_bytes,
-        Duration::days(90),
+        Duration::days(14),
     )
 }
 
@@ -156,7 +156,7 @@ pub fn create_access_token_hs256_with_metadata(
         SCOPE_ACCESS,
         TOKEN_TYPE_ACCESS,
         secret,
-        Duration::minutes(120),
+        Duration::minutes(15),
     )
 }
 
@@ -169,7 +169,7 @@ pub fn create_refresh_token_hs256_with_metadata(
         SCOPE_REFRESH,
         TOKEN_TYPE_REFRESH,
         secret,
-        Duration::days(90),
+        Duration::days(14),
     )
 }
 

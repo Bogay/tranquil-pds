@@ -985,6 +985,7 @@ pub async fn create_account(
                 verification_channel,
                 recipient,
                 &verification_code,
+                None,
             )
             .await
         {

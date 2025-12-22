@@ -2,7 +2,10 @@
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { getAuthState } from '../lib/auth.svelte'
+  import { _ } from '../lib/i18n'
+
   const auth = getAuthState()
+
   let email = $state('')
   let token = $state('')
   let newPassword = $state('')
@@ -11,11 +14,13 @@
   let error = $state<string | null>(null)
   let success = $state<string | null>(null)
   let tokenSent = $state(false)
+
   $effect(() => {
     if (auth.session) {
       navigate('/dashboard')
     }
   })
+
   async function handleRequestReset(e: Event) {
     e.preventDefault()
     if (!email) return
@@ -25,22 +30,23 @@
     try {
       await api.requestPasswordReset(email)
       tokenSent = true
-      success = 'Password reset code sent! Check your preferred notification channel.'
+      success = $_('resetPassword.codeSent')
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Failed to send reset code'
     } finally {
       submitting = false
     }
   }
+
   async function handleReset(e: Event) {
     e.preventDefault()
     if (!token || !newPassword || !confirmPassword) return
     if (newPassword !== confirmPassword) {
-      error = 'Passwords do not match'
+      error = $_('resetPassword.passwordsMismatch')
       return
     }
     if (newPassword.length < 8) {
-      error = 'Password must be at least 8 characters'
+      error = $_('resetPassword.passwordLength')
       return
     }
     submitting = true
@@ -48,7 +54,7 @@
     success = null
     try {
       await api.resetPassword(token, newPassword)
-      success = 'Password reset successfully!'
+      success = $_('resetPassword.success')
       setTimeout(() => navigate('/login'), 2000)
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Failed to reset password'
@@ -57,167 +63,117 @@
     }
   }
 </script>
-<div class="reset-container">
+
+<div class="reset-page">
   {#if error}
     <div class="message error">{error}</div>
   {/if}
   {#if success}
     <div class="message success">{success}</div>
   {/if}
+
   {#if tokenSent}
-    <h1>Reset Password</h1>
-    <p class="subtitle">Enter the code you received and choose a new password.</p>
+    <h1>{$_('resetPassword.title')}</h1>
+    <p class="subtitle">{$_('resetPassword.subtitle')}</p>
+
     <form onsubmit={handleReset}>
       <div class="field">
-        <label for="token">Reset Code</label>
+        <label for="token">{$_('resetPassword.code')}</label>
         <input
           id="token"
           type="text"
           bind:value={token}
-          placeholder="Enter reset code"
+          placeholder={$_('resetPassword.codePlaceholder')}
           disabled={submitting}
           required
         />
       </div>
       <div class="field">
-        <label for="new-password">New Password</label>
+        <label for="new-password">{$_('resetPassword.newPassword')}</label>
         <input
           id="new-password"
           type="password"
           bind:value={newPassword}
-          placeholder="At least 8 characters"
+          placeholder={$_('resetPassword.newPasswordPlaceholder')}
           disabled={submitting}
           required
           minlength="8"
         />
       </div>
       <div class="field">
-        <label for="confirm-password">Confirm Password</label>
+        <label for="confirm-password">{$_('resetPassword.confirmPassword')}</label>
         <input
           id="confirm-password"
           type="password"
           bind:value={confirmPassword}
-          placeholder="Confirm new password"
+          placeholder={$_('resetPassword.confirmPasswordPlaceholder')}
           disabled={submitting}
           required
         />
       </div>
       <button type="submit" disabled={submitting || !token || !newPassword || !confirmPassword}>
-        {submitting ? 'Resetting...' : 'Reset Password'}
+        {submitting ? $_('resetPassword.resetting') : $_('resetPassword.resetButton')}
       </button>
       <button type="button" class="secondary" onclick={() => { tokenSent = false; token = ''; newPassword = ''; confirmPassword = '' }}>
-        Request New Code
+        {$_('resetPassword.requestNewCode')}
       </button>
     </form>
   {:else}
-    <h1>Forgot Password</h1>
-    <p class="subtitle">Enter your handle or email and we'll send you a code to reset your password.</p>
+    <h1>{$_('resetPassword.forgotTitle')}</h1>
+    <p class="subtitle">{$_('resetPassword.forgotSubtitle')}</p>
+
     <form onsubmit={handleRequestReset}>
       <div class="field">
-        <label for="email">Handle or Email</label>
+        <label for="email">{$_('resetPassword.handleOrEmail')}</label>
         <input
           id="email"
           type="text"
           bind:value={email}
-          placeholder="handle or you@example.com"
+          placeholder={$_('resetPassword.emailPlaceholder')}
           disabled={submitting}
           required
         />
       </div>
       <button type="submit" disabled={submitting || !email}>
-        {submitting ? 'Sending...' : 'Send Reset Code'}
+        {submitting ? $_('resetPassword.sending') : $_('resetPassword.sendCode')}
       </button>
     </form>
   {/if}
-  <p class="back-link">
-    <a href="#/login">Back to Sign In</a>
+
+  <p class="link-text">
+    <a href="#/login">{$_('resetPassword.backToLogin')}</a>
   </p>
 </div>
+
 <style>
-  .reset-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
+  .reset-page {
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
   }
+
   h1 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-3) 0;
   }
+
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 var(--space-7) 0;
   }
+
   form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-4);
   }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  label {
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-  input {
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
-    background: var(--bg-input);
-    color: var(--text-primary);
-  }
-  input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  button {
-    padding: 0.75rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    margin-top: 0.5rem;
-  }
-  button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  button.secondary {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color-light);
-  }
-  button.secondary:hover:not(:disabled) {
-    background: var(--bg-secondary);
-  }
-  .message {
-    padding: 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
-  }
-  .message.success {
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
-    color: var(--success-text);
-  }
-  .message.error {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
-  .back-link {
+
+  .link-text {
     text-align: center;
-    margin-top: 1.5rem;
+    margin-top: var(--space-6);
     color: var(--text-secondary);
   }
-  .back-link a {
+
+  .link-text a {
     color: var(--accent);
   }
 </style>

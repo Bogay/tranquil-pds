@@ -83,8 +83,8 @@ async fn test_frontend_client_metadata_correct_values() {
     );
     assert_eq!(
         body["dpop_bound_access_tokens"].as_bool(),
-        Some(false),
-        "Should not require DPoP"
+        Some(true),
+        "AT Protocol requires DPoP-bound access tokens"
     );
     let scope = body["scope"].as_str().unwrap();
     assert!(scope.contains("atproto"), "Scope should include atproto");

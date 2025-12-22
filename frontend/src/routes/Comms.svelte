@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { getAuthState } from '../lib/auth.svelte'
+  import { getAuthState, refreshSession } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
+  import { _ } from '../lib/i18n'
+  import { formatDateTime } from '../lib/date'
   const auth = getAuthState()
   let loading = $state(true)
   let saving = $state(false)
@@ -21,7 +23,7 @@
   let verificationSuccess = $state<string | null>(null)
   let historyLoading = $state(false)
   let historyError = $state<string | null>(null)
-  let notifications = $state<Array<{
+  let messages = $state<Array<{
     createdAt: string
     channel: string
     notificationType: string
@@ -73,7 +75,8 @@
         telegramUsername: telegramUsername || undefined,
         signalNumber: signalNumber || undefined,
       })
-      success = 'Notification preferences saved'
+      await refreshSession()
+      success = $_('comms.preferencesSaved')
       await loadPrefs()
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Failed to save preferences'
@@ -87,7 +90,8 @@
     verificationSuccess = null
     try {
       await api.confirmChannelVerification(auth.session.accessJwt, channel, verificationCode)
-      verificationSuccess = `${channel} verified successfully`
+      await refreshSession()
+      verificationSuccess = $_('comms.verifiedSuccess', { values: { channel } })
       verificationCode = ''
       verifyingChannel = null
       await loadPrefs()
@@ -101,7 +105,7 @@
     historyError = null
     try {
       const result = await api.getNotificationHistory(auth.session.accessJwt)
-      notifications = result.notifications
+      messages = result.notifications
       showHistory = true
     } catch (e) {
       historyError = e instanceof ApiError ? e.message : 'Failed to load notification history'
@@ -110,14 +114,27 @@
     }
   }
   function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleString()
+    return formatDateTime(dateStr)
   }
-  const channels = [
-    { id: 'email', name: 'Email', description: 'Receive notifications via email' },
-    { id: 'discord', name: 'Discord', description: 'Receive notifications via Discord DM' },
-    { id: 'telegram', name: 'Telegram', description: 'Receive notifications via Telegram' },
-    { id: 'signal', name: 'Signal', description: 'Receive notifications via Signal' },
-  ]
+  const channels = ['email', 'discord', 'telegram', 'signal']
+  function getChannelName(id: string): string {
+    switch (id) {
+      case 'email': return $_('register.email')
+      case 'discord': return $_('register.discord')
+      case 'telegram': return $_('register.telegram')
+      case 'signal': return $_('register.signal')
+      default: return id
+    }
+  }
+  function getChannelDescription(id: string): string {
+    switch (id) {
+      case 'email': return $_('comms.emailVia')
+      case 'discord': return $_('comms.discordVia')
+      case 'telegram': return $_('comms.telegramVia')
+      case 'signal': return $_('comms.signalVia')
+      default: return ''
+    }
+  }
   function canSelectChannel(channelId: string): boolean {
     if (channelId === 'email') return true
     if (channelId === 'discord') return !!discordId
@@ -134,15 +151,14 @@
 </script>
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">&larr; Dashboard</a>
-    <h1>Notification Preferences</h1>
+    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <h1>{$_('comms.title')}</h1>
   </header>
   <p class="description">
-    Choose how you want to receive important notifications like password resets,
-    security alerts, and account updates.
+    {$_('comms.description')}
   </p>
   {#if loading}
-    <p class="loading">Loading...</p>
+    <p class="loading">{$_('common.loading')}</p>
   {:else}
     {#if error}
       <div class="message error">{error}</div>
@@ -152,25 +168,25 @@
     {/if}
     <form onsubmit={handleSave}>
       <section>
-        <h2>Preferred Channel</h2>
+        <h2>{$_('comms.preferredChannel')}</h2>
         <p class="section-description">
-          Select your preferred way to receive notifications. You must configure a channel before you can select it.
+          {$_('comms.preferredChannelDescription')}
         </p>
         <div class="channel-options">
-          {#each channels as channel}
-            <label class="channel-option" class:disabled={!canSelectChannel(channel.id)}>
+          {#each channels as channelId}
+            <label class="channel-option" class:disabled={!canSelectChannel(channelId)}>
               <input
                 type="radio"
                 name="preferredChannel"
-                value={channel.id}
+                value={channelId}
                 bind:group={preferredChannel}
-                disabled={!canSelectChannel(channel.id) || saving}
+                disabled={!canSelectChannel(channelId) || saving}
               />
               <div class="channel-info">
-                <span class="channel-name">{channel.name}</span>
-                <span class="channel-description">{channel.description}</span>
-                {#if channel.id !== 'email' && !canSelectChannel(channel.id)}
-                  <span class="channel-hint">Configure below to enable</span>
+                <span class="channel-name">{getChannelName(channelId)}</span>
+                <span class="channel-description">{getChannelDescription(channelId)}</span>
+                {#if channelId !== 'email' && !canSelectChannel(channelId)}
+                  <span class="channel-hint">{$_('comms.configureToEnable')}</span>
                 {/if}
               </div>
             </label>
@@ -178,10 +194,10 @@
         </div>
       </section>
       <section>
-        <h2>Channel Configuration</h2>
+        <h2>{$_('comms.channelConfiguration')}</h2>
         <div class="channel-config">
           <div class="config-item">
-            <label for="email">Email</label>
+            <label for="email">{$_('register.email')}</label>
             <div class="config-input">
               <input
                 id="email"
@@ -190,106 +206,106 @@
                 disabled
                 class="readonly"
               />
-              <span class="status verified">Primary</span>
+              <span class="status verified">{$_('comms.primary')}</span>
             </div>
-            <p class="config-hint">Your email is managed in Account Settings</p>
+            <p class="config-hint">{$_('comms.emailManagedInSettings')}</p>
           </div>
           <div class="config-item">
-            <label for="discord">Discord User ID</label>
+            <label for="discord">{$_('register.discordId')}</label>
             <div class="config-input">
               <input
                 id="discord"
                 type="text"
                 bind:value={discordId}
-                placeholder="e.g., 123456789012345678"
+                placeholder={$_('register.discordIdPlaceholder')}
                 disabled={saving}
               />
               {#if discordId}
                 {#if discordVerified}
-                  <span class="status verified">Verified</span>
+                  <span class="status verified">{$_('comms.verified')}</span>
                 {:else}
-                  <span class="status unverified">Not verified</span>
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'discord'}>Verify</button>
+                  <span class="status unverified">{$_('comms.notVerified')}</span>
+                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'discord'}>{$_('comms.verifyButton')}</button>
                 {/if}
               {/if}
             </div>
-            <p class="config-hint">Your Discord user ID (not username). Enable Developer Mode in Discord to copy it.</p>
+            <p class="config-hint">{$_('comms.discordIdHint')}</p>
             {#if verifyingChannel === 'discord'}
               <div class="verify-form">
                 <input
                   type="text"
                   bind:value={verificationCode}
-                  placeholder="Enter verification code"
+                  placeholder={$_('comms.verifyCodePlaceholder')}
                   maxlength="6"
                 />
-                <button type="button" onclick={() => handleVerify('discord')}>Submit</button>
-                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>Cancel</button>
+                <button type="button" onclick={() => handleVerify('discord')}>{$_('comms.submit')}</button>
+                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
               </div>
             {/if}
           </div>
           <div class="config-item">
-            <label for="telegram">Telegram Username</label>
+            <label for="telegram">{$_('register.telegramUsername')}</label>
             <div class="config-input">
               <input
                 id="telegram"
                 type="text"
                 bind:value={telegramUsername}
-                placeholder="e.g., username"
+                placeholder={$_('register.telegramUsernamePlaceholder')}
                 disabled={saving}
               />
               {#if telegramUsername}
                 {#if telegramVerified}
-                  <span class="status verified">Verified</span>
+                  <span class="status verified">{$_('comms.verified')}</span>
                 {:else}
-                  <span class="status unverified">Not verified</span>
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'telegram'}>Verify</button>
+                  <span class="status unverified">{$_('comms.notVerified')}</span>
+                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'telegram'}>{$_('comms.verifyButton')}</button>
                 {/if}
               {/if}
             </div>
-            <p class="config-hint">Your Telegram username without the @ symbol</p>
+            <p class="config-hint">{$_('comms.telegramHint')}</p>
             {#if verifyingChannel === 'telegram'}
               <div class="verify-form">
                 <input
                   type="text"
                   bind:value={verificationCode}
-                  placeholder="Enter verification code"
+                  placeholder={$_('comms.verifyCodePlaceholder')}
                   maxlength="6"
                 />
-                <button type="button" onclick={() => handleVerify('telegram')}>Submit</button>
-                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>Cancel</button>
+                <button type="button" onclick={() => handleVerify('telegram')}>{$_('comms.submit')}</button>
+                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
               </div>
             {/if}
           </div>
           <div class="config-item">
-            <label for="signal">Signal Phone Number</label>
+            <label for="signal">{$_('register.signalNumber')}</label>
             <div class="config-input">
               <input
                 id="signal"
                 type="tel"
                 bind:value={signalNumber}
-                placeholder="e.g., +1234567890"
+                placeholder={$_('register.signalNumberPlaceholder')}
                 disabled={saving}
               />
               {#if signalNumber}
                 {#if signalVerified}
-                  <span class="status verified">Verified</span>
+                  <span class="status verified">{$_('comms.verified')}</span>
                 {:else}
-                  <span class="status unverified">Not verified</span>
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>Verify</button>
+                  <span class="status unverified">{$_('comms.notVerified')}</span>
+                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>{$_('comms.verifyButton')}</button>
                 {/if}
               {/if}
             </div>
-            <p class="config-hint">Your Signal phone number with country code</p>
+            <p class="config-hint">{$_('comms.signalHint')}</p>
             {#if verifyingChannel === 'signal'}
               <div class="verify-form">
                 <input
                   type="text"
                   bind:value={verificationCode}
-                  placeholder="Enter verification code"
+                  placeholder={$_('comms.verifyCodePlaceholder')}
                   maxlength="6"
                 />
-                <button type="button" onclick={() => handleVerify('signal')}>Submit</button>
-                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>Cancel</button>
+                <button type="button" onclick={() => handleVerify('signal')}>{$_('comms.submit')}</button>
+                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
               </div>
             {/if}
           </div>
@@ -303,37 +319,37 @@
       </section>
       <div class="actions">
         <button type="submit" disabled={saving}>
-          {saving ? 'Saving...' : 'Save Preferences'}
+          {saving ? $_('comms.saving') : $_('comms.savePreferences')}
         </button>
       </div>
     </form>
     <section class="history-section">
-      <h2>Notification History</h2>
-      <p class="section-description">View recent notifications sent to your account.</p>
+      <h2>{$_('comms.messageHistory')}</h2>
+      <p class="section-description">{$_('comms.historyDescription')}</p>
       {#if !showHistory}
         <button class="load-history" onclick={loadHistory} disabled={historyLoading}>
-          {historyLoading ? 'Loading...' : 'Load History'}
+          {historyLoading ? $_('common.loading') : $_('comms.loadHistory')}
         </button>
       {:else}
-        <button class="load-history" onclick={() => showHistory = false}>Hide History</button>
+        <button class="load-history" onclick={() => showHistory = false}>{$_('comms.hideHistory')}</button>
         {#if historyError}
           <div class="message error">{historyError}</div>
-        {:else if notifications.length === 0}
-          <p class="no-notifications">No notifications found.</p>
+        {:else if messages.length === 0}
+          <p class="no-messages">{$_('comms.noMessages')}</p>
         {:else}
-          <div class="notification-list">
-            {#each notifications as notification}
-              <div class="notification-item">
-                <div class="notification-header">
-                  <span class="notification-type">{notification.notificationType}</span>
-                  <span class="notification-channel">{notification.channel}</span>
-                  <span class="notification-status" class:sent={notification.status === 'sent'} class:failed={notification.status === 'failed'}>{notification.status}</span>
+          <div class="message-list">
+            {#each messages as msg}
+              <div class="message-item">
+                <div class="message-header">
+                  <span class="message-type">{msg.notificationType}</span>
+                  <span class="message-channel">{msg.channel}</span>
+                  <span class="message-status" class:sent={msg.status === 'sent'} class:failed={msg.status === 'failed'}>{msg.status}</span>
                 </div>
-                {#if notification.subject}
-                  <div class="notification-subject">{notification.subject}</div>
+                {#if msg.subject}
+                  <div class="message-subject">{msg.subject}</div>
                 {/if}
-                <div class="notification-body">{notification.body}</div>
-                <div class="notification-date">{formatDate(notification.createdAt)}</div>
+                <div class="message-body">{msg.body}</div>
+                <div class="message-date">{formatDate(msg.createdAt)}</div>
               </div>
             {/each}
           </div>
@@ -344,318 +360,332 @@
 </div>
 <style>
   .page {
-    max-width: 600px;
+    max-width: var(--width-md);
     margin: 0 auto;
-    padding: 2rem;
+    padding: var(--space-7);
   }
+
   header {
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
+
   .back {
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .back:hover {
     color: var(--accent);
   }
+
   h1 {
-    margin: 0.5rem 0 0 0;
+    margin: var(--space-2) 0 0 0;
   }
+
   .description {
     color: var(--text-secondary);
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
+
   .loading {
     text-align: center;
     color: var(--text-secondary);
-    padding: 2rem;
+    padding: var(--space-7);
   }
-  .message {
-    padding: 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
-  }
-  .message.error {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
-  .message.success {
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
-    color: var(--success-text);
-  }
+
   section {
     background: var(--bg-secondary);
-    padding: 1.5rem;
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+    padding: var(--space-6);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-6);
   }
+
   section h2 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.125rem;
+    margin: 0 0 var(--space-2) 0;
+    font-size: var(--text-lg);
   }
+
   .section-description {
     color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin: 0 0 1rem 0;
+    font-size: var(--text-sm);
+    margin: 0 0 var(--space-4) 0;
   }
+
   .channel-options {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-2);
   }
+
   .channel-option {
     display: flex;
     align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.75rem;
+    gap: var(--space-3);
+    padding: var(--space-3);
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
-    transition: border-color 0.15s;
+    transition: border-color var(--transition-fast);
   }
+
   .channel-option:hover:not(.disabled) {
     border-color: var(--accent);
   }
+
   .channel-option.disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
-  .channel-option input {
-    margin-top: 0.25rem;
+
+  .channel-option input[type="radio"] {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
   }
+
   .channel-info {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.125rem;
+    gap: 2px;
   }
+
   .channel-name {
-    font-weight: 500;
+    font-weight: var(--font-medium);
   }
+
   .channel-description {
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
+
   .channel-hint {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     font-style: italic;
   }
+
   .channel-config {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: var(--space-5);
   }
+
   .config-item {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
   }
+
   .config-item label {
-    font-size: 0.875rem;
-    font-weight: 500;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
   }
+
   .config-input {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
   }
+
   .config-input input {
     flex: 1;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
-    background: var(--bg-input);
-    color: var(--text-primary);
   }
-  .config-input input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
+
   .config-input input.readonly {
     background: var(--bg-input-disabled);
     color: var(--text-secondary);
   }
+
   .status {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
     white-space: nowrap;
   }
+
   .status.verified {
     background: var(--success-bg);
     color: var(--success-text);
   }
+
   .status.unverified {
     background: var(--warning-bg);
     color: var(--warning-text);
   }
+
   .config-hint {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
     margin: 0;
   }
+
   .actions {
     display: flex;
     justify-content: flex-end;
   }
-  .actions button {
-    padding: 0.75rem 2rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-  }
-  .actions button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-  .actions button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+
   .verify-btn {
-    padding: 0.25rem 0.5rem;
+    padding: var(--space-1) var(--space-2);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
     cursor: pointer;
   }
+
   .verify-btn:hover {
     background: var(--accent-hover);
   }
+
   .verify-form {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
     align-items: center;
   }
+
   .verify-form input {
-    padding: 0.5rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 0.875rem;
+    padding: var(--space-2);
+    font-size: var(--text-sm);
     width: 150px;
-    background: var(--bg-input);
-    color: var(--text-primary);
   }
+
   .verify-form button {
-    padding: 0.5rem 0.75rem;
+    padding: var(--space-2) var(--space-3);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
-    border-radius: 4px;
-    font-size: 0.875rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
     cursor: pointer;
   }
+
   .verify-form button:hover {
     background: var(--accent-hover);
   }
+
   .verify-form button.cancel {
     background: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
   }
+
   .verify-form button.cancel:hover {
     background: var(--bg-secondary);
   }
+
   .history-section {
     background: var(--bg-secondary);
-    padding: 1.5rem;
-    border-radius: 8px;
-    margin-top: 1.5rem;
+    padding: var(--space-6);
+    border-radius: var(--radius-xl);
+    margin-top: var(--space-6);
   }
+
   .history-section h2 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.125rem;
+    margin: 0 0 var(--space-2) 0;
+    font-size: var(--text-lg);
   }
+
   .load-history {
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: transparent;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     color: var(--text-primary);
-    margin-top: 0.5rem;
+    margin-top: var(--space-2);
   }
+
   .load-history:hover:not(:disabled) {
     background: var(--bg-card);
     border-color: var(--accent);
   }
+
   .load-history:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
-  .no-notifications {
+
+  .no-messages {
     color: var(--text-secondary);
     font-style: italic;
-    margin-top: 1rem;
+    margin-top: var(--space-4);
   }
-  .notification-list {
+
+  .message-list {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    margin-top: 1rem;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
   }
-  .notification-item {
+
+  .message-item {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    padding: 0.75rem;
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
   }
-  .notification-header {
+
+  .message-header {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
     flex-wrap: wrap;
     align-items: center;
   }
-  .notification-type {
-    font-weight: 500;
-    font-size: 0.875rem;
+
+  .message-type {
+    font-weight: var(--font-medium);
+    font-size: var(--text-sm);
   }
-  .notification-channel {
-    font-size: 0.75rem;
-    padding: 0.125rem 0.375rem;
+
+  .message-channel {
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
     background: var(--bg-secondary);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     color: var(--text-secondary);
   }
-  .notification-status {
-    font-size: 0.75rem;
-    padding: 0.125rem 0.375rem;
-    border-radius: 4px;
+
+  .message-status {
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-md);
     margin-left: auto;
   }
-  .notification-status.sent {
+
+  .message-status.sent {
     background: var(--success-bg);
     color: var(--success-text);
   }
-  .notification-status.failed {
+
+  .message-status.failed {
     background: var(--error-bg);
     color: var(--error-text);
   }
-  .notification-subject {
-    font-weight: 500;
-    font-size: 0.875rem;
-    margin-bottom: 0.25rem;
+
+  .message-subject {
+    font-weight: var(--font-medium);
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-1);
   }
-  .notification-body {
-    font-size: 0.875rem;
+
+  .message-body {
+    font-size: var(--text-sm);
     color: var(--text-secondary);
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .notification-date {
-    font-size: 0.75rem;
+
+  .message-date {
+    font-size: var(--text-xs);
     color: var(--text-muted);
-    margin-top: 0.5rem;
+    margin-top: var(--space-2);
   }
 </style>

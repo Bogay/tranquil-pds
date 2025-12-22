@@ -1,5 +1,6 @@
 <script lang="ts">
   import { navigate } from '../lib/router.svelte'
+  import { _ } from '../lib/i18n'
 
   let code = $state('')
   let submitting = $state(false)
@@ -19,7 +20,7 @@
     e.preventDefault()
     const requestUri = getRequestUri()
     if (!requestUri) {
-      error = 'Missing request_uri parameter'
+      error = $_('oauth.twoFactorCode.errors.missingRequestUri')
       return
     }
 
@@ -42,7 +43,7 @@
       const data = await response.json()
 
       if (!response.ok) {
-        error = data.error_description || data.error || 'Verification failed'
+        error = data.error_description || data.error || $_('oauth.twoFactorCode.errors.verificationFailed')
         submitting = false
         return
       }
@@ -52,10 +53,10 @@
         return
       }
 
-      error = 'Unexpected response from server'
+      error = $_('oauth.twoFactorCode.errors.unexpectedResponse')
       submitting = false
     } catch {
-      error = 'Failed to connect to server'
+      error = $_('oauth.twoFactorCode.errors.connectionFailed')
       submitting = false
     }
   }
@@ -73,10 +74,9 @@
 </script>
 
 <div class="oauth-2fa-container">
-  <h1>Two-Factor Authentication</h1>
+  <h1>{$_('oauth.twoFactorCode.title')}</h1>
   <p class="subtitle">
-    A verification code has been sent to your {channel}.
-    Enter the code below to continue.
+    {$_('oauth.twoFactorCode.subtitle', { values: { channel } })}
   </p>
 
   {#if error}
@@ -85,12 +85,12 @@
 
   <form onsubmit={handleSubmit}>
     <div class="field">
-      <label for="code">Verification Code</label>
+      <label for="code">{$_('oauth.twoFactorCode.codeLabel')}</label>
       <input
         id="code"
         type="text"
         bind:value={code}
-        placeholder="Enter 6-digit code"
+        placeholder={$_('oauth.twoFactorCode.codePlaceholder')}
         disabled={submitting}
         required
         maxlength="6"
@@ -102,10 +102,10 @@
 
     <div class="actions">
       <button type="button" class="cancel-btn" onclick={handleCancel} disabled={submitting}>
-        Cancel
+        {$_('common.cancel')}
       </button>
       <button type="submit" class="submit-btn" disabled={submitting || code.trim().length !== 6}>
-        {submitting ? 'Verifying...' : 'Verify'}
+        {submitting ? $_('oauth.twoFactorCode.verifying') : $_('oauth.twoFactorCode.verify')}
       </button>
     </div>
   </form>
@@ -113,42 +113,42 @@
 
 <style>
   .oauth-2fa-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
   }
 
   h1 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-2) 0;
   }
 
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 var(--space-7) 0;
   }
 
   form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-4);
   }
 
   .field {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
   }
 
   label {
-    font-size: 0.875rem;
-    font-weight: 500;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
   }
 
   input {
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1.5rem;
+    padding: var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xl);
     letter-spacing: 0.5em;
     text-align: center;
     background: var(--bg-input);
@@ -161,28 +161,28 @@
   }
 
   .error {
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--error-bg);
     border: 1px solid var(--error-border);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     color: var(--error-text);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
   .actions {
     display: flex;
-    gap: 1rem;
-    margin-top: 0.5rem;
+    gap: var(--space-4);
+    margin-top: var(--space-2);
   }
 
   .actions button {
     flex: 1;
-    padding: 0.75rem;
+    padding: var(--space-3);
     border: none;
-    border-radius: 4px;
-    font-size: 1rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     cursor: pointer;
-    transition: background-color 0.15s;
+    transition: background-color var(--transition-fast);
   }
 
   .actions button:disabled {
@@ -204,7 +204,7 @@
 
   .submit-btn {
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
   }
 
   .submit-btn:hover:not(:disabled) {

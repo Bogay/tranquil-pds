@@ -1,5 +1,6 @@
 <script lang="ts">
   import { navigate } from '../lib/router.svelte'
+  import { _ } from '../lib/i18n'
 
   let username = $state('')
   let password = $state('')
@@ -97,7 +98,7 @@
   async function handlePasskeyLogin() {
     const requestUri = getRequestUri()
     if (!requestUri || !username) {
-      error = 'Missing required parameters'
+      error = $_('common.error')
       return
     }
 
@@ -131,7 +132,7 @@
       }) as PublicKeyCredential | null
 
       if (!credential) {
-        error = 'Passkey authentication was cancelled'
+        error = $_('common.error')
         submitting = false
         return
       }
@@ -184,14 +185,14 @@
         return
       }
 
-      error = 'Unexpected response from server'
+      error = $_('common.error')
       submitting = false
     } catch (e) {
       console.error('Passkey login error:', e)
       if (e instanceof DOMException && e.name === 'NotAllowedError') {
-        error = 'Passkey authentication was cancelled'
+        error = $_('common.error')
       } else {
-        error = `Failed to authenticate with passkey: ${e instanceof Error ? e.message : String(e)}`
+        error = `${$_('common.error')}: ${e instanceof Error ? e.message : String(e)}`
       }
       submitting = false
     }
@@ -232,7 +233,7 @@
     e.preventDefault()
     const requestUri = getRequestUri()
     if (!requestUri) {
-      error = 'Missing request_uri parameter'
+      error = $_('common.error')
       return
     }
 
@@ -277,10 +278,10 @@
         return
       }
 
-      error = 'Unexpected response from server'
+      error = $_('common.error')
       submitting = false
     } catch {
-      error = 'Failed to connect to server'
+      error = $_('common.error')
       submitting = false
     }
   }
@@ -314,12 +315,12 @@
 </script>
 
 <div class="oauth-login-container">
-  <h1>Sign In</h1>
+  <h1>{$_('oauth.login.title')}</h1>
   <p class="subtitle">
     {#if clientName}
-      Sign in to continue to <strong>{clientName}</strong>
+      {$_('oauth.login.subtitle')} <strong>{clientName}</strong>
     {:else}
-      Sign in to continue to the application
+      {$_('oauth.login.subtitle')}
     {/if}
   </p>
 
@@ -329,12 +330,12 @@
 
   <form onsubmit={handleSubmit}>
     <div class="field">
-      <label for="username">Handle or Email</label>
+      <label for="username">{$_('register.handle')}</label>
       <input
         id="username"
         type="text"
         bind:value={username}
-        placeholder="you@example.com or handle"
+        placeholder={$_('register.emailPlaceholder')}
         disabled={submitting}
         required
         autocomplete="username"
@@ -348,7 +349,7 @@
         class:passkey-unavailable={!hasPasskeys || checkingSecurityStatus || !securityStatusChecked}
         onclick={handlePasskeyLogin}
         disabled={submitting || !hasPasskeys || !username || checkingSecurityStatus || !securityStatusChecked}
-        title={checkingSecurityStatus ? 'Checking passkey status...' : hasPasskeys ? 'Sign in with your passkey' : 'No passkeys registered for this account'}
+        title={checkingSecurityStatus ? $_('oauth.login.passkeyHintChecking') : hasPasskeys ? $_('oauth.login.passkeyHintAvailable') : $_('oauth.login.passkeyHintNotAvailable')}
       >
         <svg class="passkey-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M15 7a4 4 0 1 0-8 0 4 4 0 0 0 8 0z" />
@@ -357,24 +358,24 @@
         </svg>
         <span class="passkey-text">
           {#if submitting}
-            Authenticating...
+            {$_('oauth.login.authenticating')}
           {:else if checkingSecurityStatus || !securityStatusChecked}
-            Checking passkey...
+            {$_('oauth.login.checkingPasskey')}
           {:else if hasPasskeys}
-            Sign in with passkey
+            {$_('oauth.login.signInWithPasskey')}
           {:else}
-            Passkey not set up
+            {$_('oauth.login.passkeyNotSetUp')}
           {/if}
         </span>
       </button>
 
       <div class="auth-divider">
-        <span>or use password</span>
+        <span>{$_('oauth.login.orUsePassword')}</span>
       </div>
     {/if}
 
     <div class="field">
-      <label for="password">Password</label>
+      <label for="password">{$_('oauth.login.password')}</label>
       <input
         id="password"
         type="password"
@@ -387,29 +388,29 @@
 
     <label class="remember-device">
       <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
-      <span>Remember this device</span>
+      <span>{$_('oauth.login.rememberDevice')}</span>
     </label>
 
     <div class="actions">
       <button type="button" class="cancel-btn" onclick={handleCancel} disabled={submitting}>
-        Cancel
+        {$_('common.cancel')}
       </button>
       <button type="submit" class="submit-btn" disabled={submitting || !username || !password}>
-        {submitting ? 'Signing in...' : 'Sign In'}
+        {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
       </button>
     </div>
   </form>
 
   <p class="help-links">
-    <a href="#/reset-password">Forgot password?</a> &middot; <a href="#/request-passkey-recovery">Lost passkey?</a>
+    <a href="#/reset-password">{$_('login.forgotPassword')}</a> &middot; <a href="#/request-passkey-recovery">{$_('login.lostPasskey')}</a>
   </p>
 </div>
 
 <style>
   .help-links {
     text-align: center;
-    margin-top: 1rem;
-    font-size: 0.875rem;
+    margin-top: var(--space-4);
+    font-size: var(--text-sm);
   }
 
   .help-links a {
@@ -422,43 +423,43 @@
   }
 
   .oauth-login-container {
-    max-width: 400px;
-    margin: 4rem auto;
-    padding: 2rem;
+    max-width: var(--width-sm);
+    margin: var(--space-9) auto;
+    padding: var(--space-7);
   }
 
   h1 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 var(--space-2) 0;
   }
 
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 var(--space-7) 0;
   }
 
   form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-4);
   }
 
   .field {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
   }
 
   label {
-    font-size: 0.875rem;
-    font-weight: 500;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
   }
 
   input[type="text"],
   input[type="password"] {
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
+    padding: var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     background: var(--bg-input);
     color: var(--text-primary);
   }
@@ -471,10 +472,10 @@
   .remember-device {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .remember-device input {
@@ -483,28 +484,28 @@
   }
 
   .error {
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--error-bg);
     border: 1px solid var(--error-border);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     color: var(--error-text);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
   .actions {
     display: flex;
-    gap: 1rem;
-    margin-top: 0.5rem;
+    gap: var(--space-4);
+    margin-top: var(--space-2);
   }
 
   .actions button {
     flex: 1;
-    padding: 0.75rem;
+    padding: var(--space-3);
     border: none;
-    border-radius: 4px;
-    font-size: 1rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     cursor: pointer;
-    transition: background-color 0.15s;
+    transition: background-color var(--transition-fast);
   }
 
   .actions button:disabled {
@@ -526,7 +527,7 @@
 
   .submit-btn {
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
   }
 
   .submit-btn:hover:not(:disabled) {
@@ -536,8 +537,8 @@
   .auth-divider {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    margin: 0.5rem 0;
+    gap: var(--space-4);
+    margin: var(--space-2) 0;
   }
 
   .auth-divider::before,
@@ -545,28 +546,28 @@
     content: '';
     flex: 1;
     height: 1px;
-    background: var(--border-color-light);
+    background: var(--border-color);
   }
 
   .auth-divider span {
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .passkey-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     width: 100%;
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: 1px solid var(--accent);
-    border-radius: 4px;
-    font-size: 1rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     cursor: pointer;
-    transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
   }
 
   .passkey-btn:hover:not(:disabled) {

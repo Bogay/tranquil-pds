@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
   import { api, ApiError } from '../lib/api'
+  import { _ } from '../lib/i18n'
 
   interface Props {
     show: boolean

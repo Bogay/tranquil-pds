@@ -1,5 +1,6 @@
 <script lang="ts">
   import { navigate } from '../lib/router.svelte'
+  import { _ } from '../lib/i18n'
 
   interface ScopeInfo {
     scope: string
@@ -36,7 +37,7 @@
   async function fetchConsentData() {
     const requestUri = getRequestUri()
     if (!requestUri) {
-      error = 'Missing request_uri parameter'
+      error = $_('oauth.error.genericError')
       loading = false
       return
     }
@@ -45,7 +46,7 @@
       const response = await fetch(`/oauth/authorize/consent?request_uri=${encodeURIComponent(requestUri)}`)
       if (!response.ok) {
         const data = await response.json()
-        error = data.error_description || data.error || 'Failed to load consent data'
+        error = data.error_description || data.error || $_('oauth.error.genericError')
         loading = false
         return
       }
@@ -66,7 +67,7 @@
         await submitConsent()
       }
     } catch {
-      error = 'Failed to connect to server'
+      error = $_('oauth.error.genericError')
     } finally {
       loading = false
     }
@@ -93,7 +94,7 @@
 
       if (!response.ok) {
         const data = await response.json()
-        error = data.error_description || data.error || 'Authorization failed'
+        error = data.error_description || data.error || $_('oauth.error.genericError')
         submitting = false
         return
       }
@@ -103,7 +104,7 @@
         window.location.href = data.redirect_uri
       }
     } catch {
-      error = 'Failed to complete authorization'
+      error = $_('oauth.error.genericError')
       submitting = false
     }
   }
@@ -123,7 +124,7 @@
         window.location.href = response.url
       }
     } catch {
-      error = 'Failed to deny authorization'
+      error = $_('oauth.error.genericError')
       submitting = false
     }
   }
@@ -155,14 +156,14 @@
 <div class="consent-container">
   {#if loading}
     <div class="loading">
-      <p>Loading...</p>
+      <p>{$_('common.loading')}</p>
     </div>
   {:else if error}
     <div class="error-container">
-      <h1>Authorization Error</h1>
+      <h1>{$_('oauth.error.title')}</h1>
       <div class="error">{error}</div>
       <button type="button" onclick={() => navigate('/login')}>
-        Return to Login
+        {$_('verify.backToLogin')}
       </button>
     </div>
   {:else if consentData}
@@ -170,8 +171,8 @@
       {#if consentData.logo_uri}
         <img src={consentData.logo_uri} alt="" class="client-logo" />
       {/if}
-      <h1>{consentData.client_name || 'Application'}</h1>
-      <p class="subtitle">wants to access your account</p>
+      <h1>{consentData.client_name || $_('oauth.consent.title')}</h1>
+      <p class="subtitle">{$_('oauth.consent.appWantsAccess', { values: { app: '' } })}</p>
       {#if consentData.client_uri}
         <a href={consentData.client_uri} target="_blank" rel="noopener noreferrer" class="client-link">
           {consentData.client_uri}
@@ -180,12 +181,12 @@
     </div>
 
     <div class="account-info">
-      <span class="label">Signing in as:</span>
+      <span class="label">{$_('oauth.consent.signingInAs')}</span>
       <span class="did">{consentData.did}</span>
     </div>
 
     <div class="scopes-section">
-      <h2>Permissions Requested</h2>
+      <h2>{$_('oauth.consent.permissionsRequested')}</h2>
       {#each Object.entries(scopeGroups) as [category, scopes]}
         <div class="scope-group">
           <h3 class="category-title">{category}</h3>
@@ -201,7 +202,7 @@
                 <span class="scope-name">{scope.display_name}</span>
                 <span class="scope-description">{scope.description}</span>
                 {#if scope.required}
-                  <span class="required-badge">Required</span>
+                  <span class="required-badge">{$_('oauth.consent.required')}</span>
                 {/if}
               </div>
             </label>
@@ -212,15 +213,15 @@
 
     <label class="remember-choice">
       <input type="checkbox" bind:checked={rememberChoice} disabled={submitting} />
-      <span>Remember my choice for this application</span>
+      <span>{$_('oauth.consent.rememberChoiceLabel')}</span>
     </label>
 
     <div class="actions">
       <button type="button" class="deny-btn" onclick={handleDeny} disabled={submitting}>
-        Deny
+        {$_('oauth.consent.deny')}
       </button>
       <button type="button" class="approve-btn" onclick={submitConsent} disabled={submitting}>
-        {submitting ? 'Authorizing...' : 'Authorize'}
+        {submitting ? $_('oauth.consent.authorizing') : $_('oauth.consent.authorize')}
       </button>
     </div>
   {/if}
@@ -229,8 +230,8 @@
 <style>
   .consent-container {
     max-width: 480px;
-    margin: 2rem auto;
-    padding: 2rem;
+    margin: var(--space-7) auto;
+    padding: var(--space-7);
   }
 
   .loading {
@@ -246,29 +247,29 @@
   }
 
   .error {
-    padding: 0.75rem;
+    padding: var(--space-3);
     background: var(--error-bg);
     border: 1px solid var(--error-border);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     color: var(--error-text);
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
   .client-info {
     text-align: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-6);
   }
 
   .client-logo {
     width: 64px;
     height: 64px;
-    border-radius: 12px;
-    margin-bottom: 1rem;
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-4);
   }
 
   .client-info h1 {
-    margin: 0 0 0.25rem 0;
-    font-size: 1.5rem;
+    margin: 0 0 var(--space-1) 0;
+    font-size: var(--text-xl);
   }
 
   .subtitle {
@@ -278,8 +279,8 @@
 
   .client-link {
     display: inline-block;
-    margin-top: 0.5rem;
-    font-size: 0.875rem;
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
     color: var(--accent);
     text-decoration: none;
   }
@@ -291,15 +292,15 @@
   .account-info {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    padding: 1rem;
+    gap: var(--space-1);
+    padding: var(--space-4);
     background: var(--bg-secondary);
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-6);
   }
 
   .account-info .label {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -307,44 +308,44 @@
 
   .account-info .did {
     font-family: monospace;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-primary);
     word-break: break-all;
   }
 
   .scopes-section {
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-6);
   }
 
   .scopes-section h2 {
-    font-size: 1rem;
-    margin: 0 0 1rem 0;
+    font-size: var(--text-base);
+    margin: 0 0 var(--space-4) 0;
     color: var(--text-secondary);
   }
 
   .scope-group {
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
 
   .category-title {
-    font-size: 0.875rem;
-    font-weight: 600;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
     color: var(--text-primary);
-    margin: 0 0 0.5rem 0;
-    padding-bottom: 0.25rem;
+    margin: 0 0 var(--space-2) 0;
+    padding-bottom: var(--space-1);
     border-bottom: 1px solid var(--border-color);
   }
 
   .scope-item {
     display: flex;
-    gap: 0.75rem;
-    padding: 0.75rem;
+    gap: var(--space-3);
+    padding: var(--space-3);
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
-    margin-bottom: 0.5rem;
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-2);
     cursor: pointer;
-    transition: border-color 0.15s;
+    transition: border-color var(--transition-fast);
   }
 
   .scope-item:hover:not(.required) {
@@ -366,40 +367,40 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 0.125rem;
+    gap: 2px;
   }
 
   .scope-name {
-    font-weight: 500;
+    font-weight: var(--font-medium);
     color: var(--text-primary);
   }
 
   .scope-description {
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
 
   .required-badge {
     display: inline-block;
     font-size: 0.625rem;
-    padding: 0.125rem 0.375rem;
+    padding: 2px var(--space-2);
     background: var(--warning-bg);
     color: var(--warning-text);
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-top: 0.25rem;
+    margin-top: var(--space-1);
     width: fit-content;
   }
 
   .remember-choice {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-6);
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .remember-choice input {
@@ -409,18 +410,18 @@
 
   .actions {
     display: flex;
-    gap: 1rem;
+    gap: var(--space-4);
   }
 
   .actions button {
     flex: 1;
-    padding: 0.875rem;
+    padding: var(--space-3);
     border: none;
-    border-radius: 6px;
-    font-size: 1rem;
-    font-weight: 500;
+    border-radius: var(--radius-lg);
+    font-size: var(--text-base);
+    font-weight: var(--font-medium);
     cursor: pointer;
-    transition: background-color 0.15s;
+    transition: background-color var(--transition-fast);
   }
 
   .actions button:disabled {
@@ -442,7 +443,7 @@
 
   .approve-btn {
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
   }
 
   .approve-btn:hover:not(:disabled) {

@@ -1,5 +1,12 @@
 import { api, type Session, type CreateAccountParams, type CreateAccountResult, ApiError } from './api'
 import { startOAuthLogin, handleOAuthCallback, checkForOAuthCallback, clearOAuthCallbackParams, refreshOAuthToken } from './oauth'
+import { setLocale, type SupportedLocale } from './i18n'
+
+function applyLocaleFromSession(sessionInfo: { preferredLocale?: string | null }) {
+  if (sessionInfo.preferredLocale) {
+    setLocale(sessionInfo.preferredLocale as SupportedLocale)
+  }
+}
 
 const STORAGE_KEY = 'tranquil_pds_session'
 const ACCOUNTS_KEY = 'tranquil_pds_accounts'
@@ -104,6 +111,7 @@ export async function initAuth() {
       state.session = session
       saveSession(session)
       addOrUpdateSavedAccount(session)
+      applyLocaleFromSession(sessionInfo)
       state.loading = false
       return
     } catch (e) {
@@ -116,9 +124,10 @@ export async function initAuth() {
   const stored = loadSession()
   if (stored) {
     try {
-      const session = await api.getSession(stored.accessJwt)
-      state.session = { ...session, accessJwt: stored.accessJwt, refreshJwt: stored.refreshJwt }
+      const sessionInfo = await api.getSession(stored.accessJwt)
+      state.session = { ...sessionInfo, accessJwt: stored.accessJwt, refreshJwt: stored.refreshJwt }
       addOrUpdateSavedAccount(state.session)
+      applyLocaleFromSession(sessionInfo)
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         try {
@@ -132,6 +141,7 @@ export async function initAuth() {
           state.session = session
           saveSession(session)
           addOrUpdateSavedAccount(session)
+          applyLocaleFromSession(sessionInfo)
         } catch {
           saveSession(null)
           state.session = null
@@ -289,6 +299,22 @@ export function forgetAccount(did: string): void {
 
 export function getAuthState() {
   return state
+}
+
+export async function refreshSession(): Promise<void> {
+  if (!state.session) return
+  try {
+    const sessionInfo = await api.getSession(state.session.accessJwt)
+    state.session = {
+      ...sessionInfo,
+      accessJwt: state.session.accessJwt,
+      refreshJwt: state.session.refreshJwt,
+    }
+    saveSession(state.session)
+    addOrUpdateSavedAccount(state.session)
+  } catch (e) {
+    console.error('Failed to refresh session:', e)
+  }
 }
 
 export function getToken(): string | null {

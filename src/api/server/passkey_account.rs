@@ -637,6 +637,7 @@ pub async fn create_passkey_account(
         verification_channel,
         &verification_recipient,
         &verification_code,
+        None,
     )
     .await
     {

@@ -7,7 +7,7 @@ use hmac::Mac;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
-const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 3600;
+const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 300;
 
 pub struct TokenClaims {
     pub jti: String,

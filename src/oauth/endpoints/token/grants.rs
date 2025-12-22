@@ -12,8 +12,9 @@ use axum::Json;
 use axum::http::HeaderMap;
 use chrono::{Duration, Utc};
 
-const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 3600;
-const REFRESH_TOKEN_EXPIRY_DAYS: i64 = 60;
+const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 300;
+const REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL: i64 = 60;
+const REFRESH_TOKEN_EXPIRY_DAYS_PUBLIC: i64 = 14;
 
 pub async fn handle_authorization_code_grant(
     state: AppState,
@@ -111,14 +112,20 @@ pub async fn handle_authorization_code_grant(
         dpop_jkt.as_deref(),
         auth_request.parameters.scope.as_deref(),
     )?;
+    let stored_client_auth = auth_request.client_auth.unwrap_or(ClientAuth::None);
+    let refresh_expiry_days = if matches!(stored_client_auth, ClientAuth::None) {
+        REFRESH_TOKEN_EXPIRY_DAYS_PUBLIC
+    } else {
+        REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL
+    };
     let token_data = TokenData {
         did: did.clone(),
         token_id: token_id.0.clone(),
         created_at: now,
         updated_at: now,
-        expires_at: now + Duration::days(REFRESH_TOKEN_EXPIRY_DAYS),
+        expires_at: now + Duration::days(refresh_expiry_days),
         client_id: auth_request.client_id.clone(),
-        client_auth: auth_request.client_auth.unwrap_or(ClientAuth::None),
+        client_auth: stored_client_auth,
         device_id: auth_request.device_id,
         parameters: auth_request.parameters.clone(),
         details: None,
@@ -206,7 +213,12 @@ pub async fn handle_refresh_token_grant(
     };
     let new_token_id = TokenId::generate();
     let new_refresh_token = RefreshToken::generate();
-    let new_expires_at = Utc::now() + Duration::days(REFRESH_TOKEN_EXPIRY_DAYS);
+    let refresh_expiry_days = if matches!(token_data.client_auth, ClientAuth::None) {
+        REFRESH_TOKEN_EXPIRY_DAYS_PUBLIC
+    } else {
+        REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL
+    };
+    let new_expires_at = Utc::now() + Duration::days(refresh_expiry_days);
     db::rotate_token(
         &state.db,
         db_id,

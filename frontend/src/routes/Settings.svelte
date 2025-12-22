@@ -1,8 +1,23 @@
 <script lang="ts">
-  import { getAuthState, logout } from '../lib/auth.svelte'
+  import { getAuthState, logout, refreshSession } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
+  import { locale, setLocale, getSupportedLocales, localeNames, _, type SupportedLocale } from '../lib/i18n'
   const auth = getAuthState()
+  const supportedLocales = getSupportedLocales()
+  let localeLoading = $state(false)
+  async function handleLocaleChange(newLocale: SupportedLocale) {
+    if (!auth.session) return
+    setLocale(newLocale)
+    localeLoading = true
+    try {
+      await api.updateLocale(auth.session.accessJwt, newLocale)
+    } catch (e) {
+      console.error('Failed to save locale preference:', e)
+    } finally {
+      localeLoading = false
+    }
+  }
   let message = $state<{ type: 'success' | 'error'; text: string } | null>(null)
   let emailLoading = $state(false)
   let newEmail = $state('')
@@ -40,14 +55,15 @@
       const result = await api.requestEmailUpdate(auth.session.accessJwt, newEmail)
       emailTokenRequired = result.tokenRequired
       if (emailTokenRequired) {
-        showMessage('success', 'Verification code sent to your current email')
+        showMessage('success', $_('settings.messages.verificationCodeSent'))
       } else {
         await api.updateEmail(auth.session.accessJwt, newEmail)
-        showMessage('success', 'Email updated successfully')
+        await refreshSession()
+        showMessage('success', $_('settings.messages.emailUpdated'))
         newEmail = ''
       }
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to update email')
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
     } finally {
       emailLoading = false
     }
@@ -59,12 +75,13 @@
     message = null
     try {
       await api.updateEmail(auth.session.accessJwt, newEmail, emailToken)
-      showMessage('success', 'Email updated successfully')
+      await refreshSession()
+      showMessage('success', $_('settings.messages.emailUpdated'))
       newEmail = ''
       emailToken = ''
       emailTokenRequired = false
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to update email')
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
     } finally {
       emailLoading = false
     }
@@ -75,11 +92,15 @@
     handleLoading = true
     message = null
     try {
-      await api.updateHandle(auth.session.accessJwt, newHandle)
-      showMessage('success', 'Handle updated successfully')
+      const fullHandle = showBYOHandle
+        ? newHandle
+        : `${newHandle}.${window.location.hostname}`
+      await api.updateHandle(auth.session.accessJwt, fullHandle)
+      await refreshSession()
+      showMessage('success', $_('settings.messages.handleUpdated'))
       newHandle = ''
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to update handle')
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.handleUpdateFailed'))
     } finally {
       handleLoading = false
     }
@@ -91,9 +112,9 @@
     try {
       await api.requestAccountDelete(auth.session.accessJwt)
       deleteTokenSent = true
-      showMessage('success', 'Deletion confirmation sent to your email')
+      showMessage('success', $_('settings.messages.deletionConfirmationSent'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to request deletion')
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.deletionRequestFailed'))
     } finally {
       deleteLoading = false
     }
@@ -101,7 +122,7 @@
   async function handleConfirmDelete(e: Event) {
     e.preventDefault()
     if (!auth.session || !deletePassword || !deleteToken) return
-    if (!confirm('Are you absolutely sure you want to delete your account? This cannot be undone.')) {
+    if (!confirm($_('settings.messages.deleteConfirmation'))) {
       return
     }
     deleteLoading = true
@@ -111,7 +132,7 @@
       await logout()
       navigate('/login')
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to delete account')
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.deletionFailed'))
     } finally {
       deleteLoading = false
     }
@@ -139,9 +160,9 @@
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      showMessage('success', 'Repository exported successfully')
+      showMessage('success', $_('settings.messages.repoExported'))
     } catch (e) {
-      showMessage('error', e instanceof Error ? e.message : 'Failed to export repository')
+      showMessage('error', e instanceof Error ? e.message : $_('settings.messages.exportFailed'))
     } finally {
       exportLoading = false
     }
@@ -150,23 +171,23 @@
     e.preventDefault()
     if (!auth.session || !currentPassword || !newPassword || !confirmNewPassword) return
     if (newPassword !== confirmNewPassword) {
-      showMessage('error', 'Passwords do not match')
+      showMessage('error', $_('settings.messages.passwordsDoNotMatch'))
       return
     }
     if (newPassword.length < 8) {
-      showMessage('error', 'Password must be at least 8 characters')
+      showMessage('error', $_('settings.messages.passwordTooShort'))
       return
     }
     passwordLoading = true
     message = null
     try {
       await api.changePassword(auth.session.accessJwt, currentPassword, newPassword)
-      showMessage('success', 'Password changed successfully')
+      showMessage('success', $_('settings.messages.passwordChanged'))
       currentPassword = ''
       newPassword = ''
       confirmNewPassword = ''
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to change password')
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.passwordChangeFailed'))
     } finally {
       passwordLoading = false
     }
@@ -174,62 +195,76 @@
 </script>
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">&larr; Dashboard</a>
-    <h1>Account Settings</h1>
+    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <h1>{$_('settings.title')}</h1>
   </header>
   {#if message}
     <div class="message {message.type}">{message.text}</div>
   {/if}
   <section>
-    <h2>Change Email</h2>
+    <h2>{$_('settings.language')}</h2>
+    <p class="description">{$_('settings.languageDescription')}</p>
+    <select
+      class="language-select"
+      value={$locale}
+      disabled={localeLoading}
+      onchange={(e) => handleLocaleChange(e.currentTarget.value as SupportedLocale)}
+    >
+      {#each supportedLocales as loc}
+        <option value={loc}>{localeNames[loc]}</option>
+      {/each}
+    </select>
+  </section>
+  <section>
+    <h2>{$_('settings.changeEmail')}</h2>
     {#if auth.session?.email}
-      <p class="current">Current: {auth.session.email}</p>
+      <p class="current">{$_('settings.currentEmail', { values: { email: auth.session.email } })}</p>
     {/if}
     {#if emailTokenRequired}
       <form onsubmit={handleConfirmEmailUpdate}>
         <div class="field">
-          <label for="email-token">Verification Code</label>
+          <label for="email-token">{$_('settings.verificationCode')}</label>
           <input
             id="email-token"
             type="text"
             bind:value={emailToken}
-            placeholder="Enter code from email"
+            placeholder={$_('settings.verificationCodePlaceholder')}
             disabled={emailLoading}
             required
           />
         </div>
         <div class="actions">
           <button type="submit" disabled={emailLoading || !emailToken}>
-            {emailLoading ? 'Updating...' : 'Confirm Email Change'}
+            {emailLoading ? $_('settings.updating') : $_('settings.confirmEmailChange')}
           </button>
           <button type="button" class="secondary" onclick={() => { emailTokenRequired = false; emailToken = '' }}>
-            Cancel
+            {$_('common.cancel')}
           </button>
         </div>
       </form>
     {:else}
       <form onsubmit={handleRequestEmailUpdate}>
         <div class="field">
-          <label for="new-email">New Email</label>
+          <label for="new-email">{$_('settings.newEmail')}</label>
           <input
             id="new-email"
             type="email"
             bind:value={newEmail}
-            placeholder="new@example.com"
+            placeholder={$_('settings.newEmailPlaceholder')}
             disabled={emailLoading}
             required
           />
         </div>
         <button type="submit" disabled={emailLoading || !newEmail}>
-          {emailLoading ? 'Requesting...' : 'Change Email'}
+          {emailLoading ? $_('settings.requesting') : $_('settings.changeEmailButton')}
         </button>
       </form>
     {/if}
   </section>
   <section>
-    <h2>Change Handle</h2>
+    <h2>{$_('settings.changeHandle')}</h2>
     {#if auth.session}
-      <p class="current">Current: @{auth.session.handle}</p>
+      <p class="current">{$_('settings.currentHandle', { values: { handle: auth.session.handle } })}</p>
     {/if}
     <div class="tabs">
       <button
@@ -238,7 +273,7 @@
         class:active={!showBYOHandle}
         onclick={() => showBYOHandle = false}
       >
-        PDS Handle
+        {$_('settings.pdsHandle')}
       </button>
       <button
         type="button"
@@ -246,346 +281,347 @@
         class:active={showBYOHandle}
         onclick={() => showBYOHandle = true}
       >
-        Custom Domain
+        {$_('settings.customDomain')}
       </button>
     </div>
     {#if showBYOHandle}
       <div class="byo-handle">
-        <p class="description">Use your own domain as your handle. You need to verify domain ownership first.</p>
+        <p class="description">{$_('settings.customDomainDescription')}</p>
         {#if auth.session}
           <div class="verification-info">
-            <h3>Setup Instructions</h3>
-            <p>Choose one of these verification methods:</p>
+            <h3>{$_('settings.setupInstructions')}</h3>
+            <p>{$_('settings.setupMethodsIntro')}</p>
             <div class="method">
-              <h4>Option 1: DNS TXT Record (Recommended)</h4>
-              <p>Add this TXT record to your domain:</p>
+              <h4>{$_('settings.dnsMethod')}</h4>
+              <p>{$_('settings.dnsMethodDesc')}</p>
               <code class="record">_atproto.{newHandle || 'yourdomain.com'} TXT "did={auth.session.did}"</code>
             </div>
             <div class="method">
-              <h4>Option 2: HTTP Well-Known File</h4>
-              <p>Serve your DID at this URL:</p>
+              <h4>{$_('settings.httpMethod')}</h4>
+              <p>{$_('settings.httpMethodDesc')}</p>
               <code class="record">https://{newHandle || 'yourdomain.com'}/.well-known/atproto-did</code>
-              <p>The file should contain only:</p>
+              <p>{$_('settings.httpMethodContent')}</p>
               <code class="record">{auth.session.did}</code>
             </div>
           </div>
         {/if}
         <form onsubmit={handleUpdateHandle}>
           <div class="field">
-            <label for="new-handle-byo">Your Domain</label>
+            <label for="new-handle-byo">{$_('settings.yourDomain')}</label>
             <input
               id="new-handle-byo"
               type="text"
               bind:value={newHandle}
-              placeholder="example.com"
+              placeholder={$_('settings.yourDomainPlaceholder')}
               disabled={handleLoading}
               required
             />
           </div>
           <button type="submit" disabled={handleLoading || !newHandle}>
-            {handleLoading ? 'Verifying...' : 'Verify & Update Handle'}
+            {handleLoading ? $_('settings.verifying') : $_('settings.verifyAndUpdate')}
           </button>
         </form>
       </div>
     {:else}
       <form onsubmit={handleUpdateHandle}>
         <div class="field">
-          <label for="new-handle">New Handle</label>
-          <input
-            id="new-handle"
-            type="text"
-            bind:value={newHandle}
-            placeholder="yourhandle"
-            disabled={handleLoading}
-            required
-          />
+          <label for="new-handle">{$_('settings.newHandle')}</label>
+          <div class="handle-input-wrapper">
+            <input
+              id="new-handle"
+              type="text"
+              bind:value={newHandle}
+              placeholder={$_('settings.newHandlePlaceholder')}
+              disabled={handleLoading}
+              required
+            />
+            <span class="handle-suffix">.{window.location.hostname}</span>
+          </div>
         </div>
         <button type="submit" disabled={handleLoading || !newHandle}>
-          {handleLoading ? 'Updating...' : 'Change Handle'}
+          {handleLoading ? $_('settings.updating') : $_('settings.changeHandleButton')}
         </button>
       </form>
     {/if}
   </section>
   <section>
-    <h2>Change Password</h2>
+    <h2>{$_('settings.changePassword')}</h2>
     <form onsubmit={handleChangePassword}>
       <div class="field">
-        <label for="current-password">Current Password</label>
+        <label for="current-password">{$_('settings.currentPassword')}</label>
         <input
           id="current-password"
           type="password"
           bind:value={currentPassword}
-          placeholder="Enter current password"
+          placeholder={$_('settings.currentPasswordPlaceholder')}
           disabled={passwordLoading}
           required
         />
       </div>
       <div class="field">
-        <label for="new-password">New Password</label>
+        <label for="new-password">{$_('settings.newPassword')}</label>
         <input
           id="new-password"
           type="password"
           bind:value={newPassword}
-          placeholder="At least 8 characters"
+          placeholder={$_('settings.newPasswordPlaceholder')}
           disabled={passwordLoading}
           required
           minlength="8"
         />
       </div>
       <div class="field">
-        <label for="confirm-new-password">Confirm New Password</label>
+        <label for="confirm-new-password">{$_('settings.confirmNewPassword')}</label>
         <input
           id="confirm-new-password"
           type="password"
           bind:value={confirmNewPassword}
-          placeholder="Confirm new password"
+          placeholder={$_('settings.confirmNewPasswordPlaceholder')}
           disabled={passwordLoading}
           required
         />
       </div>
       <button type="submit" disabled={passwordLoading || !currentPassword || !newPassword || !confirmNewPassword}>
-        {passwordLoading ? 'Changing...' : 'Change Password'}
+        {passwordLoading ? $_('settings.changing') : $_('settings.changePasswordButton')}
       </button>
     </form>
   </section>
   <section>
-    <h2>Export Data</h2>
-    <p class="description">Download your entire repository as a CAR (Content Addressable Archive) file. This includes all your posts, likes, follows, and other data.</p>
+    <h2>{$_('settings.exportData')}</h2>
+    <p class="description">{$_('settings.exportDataDescription')}</p>
     <button onclick={handleExportRepo} disabled={exportLoading}>
-      {exportLoading ? 'Exporting...' : 'Download Repository'}
+      {exportLoading ? $_('settings.exporting') : $_('settings.downloadRepo')}
     </button>
   </section>
   <section class="danger-zone">
-    <h2>Delete Account</h2>
-    <p class="warning">This action is irreversible. All your data will be permanently deleted.</p>
+    <h2>{$_('settings.deleteAccount')}</h2>
+    <p class="warning">{$_('settings.deleteWarning')}</p>
     {#if deleteTokenSent}
       <form onsubmit={handleConfirmDelete}>
         <div class="field">
-          <label for="delete-token">Confirmation Code (from email)</label>
+          <label for="delete-token">{$_('settings.confirmationCode')}</label>
           <input
             id="delete-token"
             type="text"
             bind:value={deleteToken}
-            placeholder="Enter confirmation code"
+            placeholder={$_('settings.confirmationCodePlaceholder')}
             disabled={deleteLoading}
             required
           />
         </div>
         <div class="field">
-          <label for="delete-password">Your Password</label>
+          <label for="delete-password">{$_('settings.yourPassword')}</label>
           <input
             id="delete-password"
             type="password"
             bind:value={deletePassword}
-            placeholder="Enter your password"
+            placeholder={$_('settings.yourPasswordPlaceholder')}
             disabled={deleteLoading}
             required
           />
         </div>
         <div class="actions">
           <button type="submit" class="danger" disabled={deleteLoading || !deleteToken || !deletePassword}>
-            {deleteLoading ? 'Deleting...' : 'Permanently Delete Account'}
+            {deleteLoading ? $_('settings.deleting') : $_('settings.permanentlyDelete')}
           </button>
           <button type="button" class="secondary" onclick={() => { deleteTokenSent = false; deleteToken = ''; deletePassword = '' }}>
-            Cancel
+            {$_('common.cancel')}
           </button>
         </div>
       </form>
     {:else}
       <button class="danger" onclick={handleRequestDelete} disabled={deleteLoading}>
-        {deleteLoading ? 'Requesting...' : 'Request Account Deletion'}
+        {deleteLoading ? $_('settings.requesting') : $_('settings.requestDeletion')}
       </button>
     {/if}
   </section>
 </div>
 <style>
   .page {
-    max-width: 600px;
+    max-width: var(--width-md);
     margin: 0 auto;
-    padding: 2rem;
+    padding: var(--space-7);
   }
+
   header {
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
+
   .back {
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .back:hover {
     color: var(--accent);
   }
+
   h1 {
-    margin: 0.5rem 0 0 0;
+    margin: var(--space-2) 0 0 0;
   }
-  .message {
-    padding: 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
-  }
-  .message.success {
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
-    color: var(--success-text);
-  }
-  .message.error {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
+
   section {
-    padding: 1.5rem;
+    padding: var(--space-6);
     background: var(--bg-secondary);
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-6);
   }
+
   section h2 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1.125rem;
+    margin: 0 0 var(--space-2) 0;
+    font-size: var(--text-lg);
   }
-  .current, .description {
+
+  .current,
+  .description {
     color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin-bottom: 1rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
   }
-  .field {
-    margin-bottom: 1rem;
-  }
-  label {
-    display: block;
-    font-size: 0.875rem;
-    font-weight: 500;
-    margin-bottom: 0.25rem;
-  }
-  input {
+
+  .language-select {
     width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color-light);
-    border-radius: 4px;
-    font-size: 1rem;
-    box-sizing: border-box;
-    background: var(--bg-input);
-    color: var(--text-primary);
   }
-  input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  button {
-    padding: 0.75rem 1.5rem;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-  }
-  button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  button.secondary {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color-light);
-  }
-  button.secondary:hover:not(:disabled) {
-    background: var(--bg-secondary);
-  }
-  button.danger {
-    background: var(--error-text);
-  }
-  button.danger:hover:not(:disabled) {
-    background: #900;
-  }
+
   .actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
   }
+
   .danger-zone {
     background: var(--error-bg);
     border: 1px solid var(--error-border);
   }
+
   .danger-zone h2 {
     color: var(--error-text);
   }
+
   .warning {
     color: var(--error-text);
-    font-size: 0.875rem;
-    margin-bottom: 1rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
   }
+
   .tabs {
     display: flex;
-    gap: 0.25rem;
-    margin-bottom: 1rem;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4);
   }
+
   .tab {
     flex: 1;
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: transparent;
-    border: 1px solid var(--border-color-light);
+    border: 1px solid var(--border-color);
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
+
   .tab:first-child {
-    border-radius: 4px 0 0 4px;
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
   }
+
   .tab:last-child {
-    border-radius: 0 4px 4px 0;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
   }
+
   .tab.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: white;
+    color: var(--text-inverse);
   }
+
   .tab:hover:not(.active) {
     background: var(--bg-card);
   }
+
   .byo-handle .description {
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
+
   .verification-info {
     background: var(--bg-card);
-    border: 1px solid var(--border-color-light);
-    border-radius: 6px;
-    padding: 1rem;
-    margin-bottom: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
   }
+
   .verification-info h3 {
-    margin: 0 0 0.5rem 0;
-    font-size: 1rem;
+    margin: 0 0 var(--space-2) 0;
+    font-size: var(--text-base);
   }
+
   .verification-info h4 {
-    margin: 0.75rem 0 0.25rem 0;
-    font-size: 0.875rem;
+    margin: var(--space-3) 0 var(--space-1) 0;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
+
   .verification-info p {
-    margin: 0.25rem 0;
-    font-size: 0.8rem;
+    margin: var(--space-1) 0;
+    font-size: var(--text-xs);
     color: var(--text-secondary);
   }
+
   .method {
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--border-color-light);
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border-color);
   }
+
   .method:first-of-type {
-    margin-top: 0.5rem;
+    margin-top: var(--space-2);
     padding-top: 0;
     border-top: none;
   }
+
   code.record {
     display: block;
     background: var(--bg-input);
-    padding: 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    padding: var(--space-2);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
     word-break: break-all;
-    margin: 0.25rem 0;
+    margin: var(--space-1) 0;
+  }
+
+  .handle-input-wrapper {
+    display: flex;
+    align-items: center;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .handle-input-wrapper input {
+    flex: 1;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    min-width: 0;
+  }
+
+  .handle-input-wrapper input:focus {
+    outline: none;
+    box-shadow: none;
+  }
+
+  .handle-input-wrapper:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-muted);
+  }
+
+  .handle-suffix {
+    padding: 0 var(--space-3);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-card);
   }
 </style>

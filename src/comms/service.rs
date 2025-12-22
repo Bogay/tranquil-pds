@@ -9,6 +9,7 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use super::locale::{format_message, get_strings};
 use super::sender::{CommsSender, SendError};
 use super::types::{CommsChannel, CommsStatus, NewComms, QueuedComms};
 
@@ -257,6 +258,7 @@ pub struct UserCommsPrefs {
     pub channel: CommsChannel,
     pub email: Option<String>,
     pub handle: String,
+    pub locale: String,
 }
 
 pub async fn get_user_comms_prefs(
@@ -268,7 +270,8 @@ pub async fn get_user_comms_prefs(
         SELECT
             email,
             handle,
-            preferred_comms_channel as "channel: CommsChannel"
+            preferred_comms_channel as "channel: CommsChannel",
+            preferred_locale
         FROM users
         WHERE id = $1
         "#,
@@ -280,6 +283,7 @@ pub async fn get_user_comms_prefs(
         channel: row.channel,
         email: row.email,
         handle: row.handle,
+        locale: row.preferred_locale.unwrap_or_else(|| "en".to_string()),
     })
 }
 
@@ -289,10 +293,12 @@ pub async fn enqueue_welcome(
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
-    let body = format!(
-        "Welcome to {}!\n\nYour handle is: @{}\n\nThank you for joining us.",
-        hostname, prefs.handle
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.welcome_body,
+        &[("hostname", hostname), ("handle", &prefs.handle)],
     );
+    let subject = format_message(strings.welcome_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::new(
@@ -300,7 +306,7 @@ pub async fn enqueue_welcome(
             prefs.channel,
             super::types::CommsType::Welcome,
             prefs.email.clone().unwrap_or_default(),
-            Some(format!("Welcome to {}", hostname)),
+            Some(subject),
             body,
         ),
     )
@@ -315,17 +321,20 @@ pub async fn enqueue_email_verification(
     code: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let body = format!(
-        "Hello @{},\n\nYour email verification code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this email.",
-        handle, code
+    let prefs = get_user_comms_prefs(db, user_id).await?;
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.email_verification_body,
+        &[("handle", handle), ("code", code)],
     );
+    let subject = format_message(strings.email_verification_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::email(
             user_id,
             super::types::CommsType::EmailVerification,
             email.to_string(),
-            format!("Verify your email - {}", hostname),
+            subject,
             body,
         ),
     )
@@ -339,10 +348,12 @@ pub async fn enqueue_password_reset(
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
-    let body = format!(
-        "Hello @{},\n\nYour password reset code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this message.",
-        prefs.handle, code
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.password_reset_body,
+        &[("handle", &prefs.handle), ("code", code)],
     );
+    let subject = format_message(strings.password_reset_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::new(
@@ -350,7 +361,7 @@ pub async fn enqueue_password_reset(
             prefs.channel,
             super::types::CommsType::PasswordReset,
             prefs.email.clone().unwrap_or_default(),
-            Some(format!("Password Reset - {}", hostname)),
+            Some(subject),
             body,
         ),
     )
@@ -365,17 +376,20 @@ pub async fn enqueue_email_update(
     code: &str,
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    let body = format!(
-        "Hello @{},\n\nYour email update confirmation code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please ignore this email.",
-        handle, code
+    let prefs = get_user_comms_prefs(db, user_id).await?;
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.email_update_body,
+        &[("handle", handle), ("code", code)],
     );
+    let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::email(
             user_id,
             super::types::CommsType::EmailUpdate,
             new_email.to_string(),
-            format!("Confirm your new email - {}", hostname),
+            subject,
             body,
         ),
     )
@@ -389,10 +403,12 @@ pub async fn enqueue_account_deletion(
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
-    let body = format!(
-        "Hello @{},\n\nYour account deletion confirmation code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please secure your account immediately.",
-        prefs.handle, code
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.account_deletion_body,
+        &[("handle", &prefs.handle), ("code", code)],
     );
+    let subject = format_message(strings.account_deletion_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::new(
@@ -400,7 +416,7 @@ pub async fn enqueue_account_deletion(
             prefs.channel,
             super::types::CommsType::AccountDeletion,
             prefs.email.clone().unwrap_or_default(),
-            Some(format!("Account Deletion Request - {}", hostname)),
+            Some(subject),
             body,
         ),
     )
@@ -414,10 +430,12 @@ pub async fn enqueue_plc_operation(
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
-    let body = format!(
-        "Hello @{},\n\nYou requested to sign a PLC operation for your account.\n\nYour verification token is: {}\n\nThis token will expire in 10 minutes.\n\nIf you did not request this, you can safely ignore this message.",
-        prefs.handle, token
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.plc_operation_body,
+        &[("handle", &prefs.handle), ("token", token)],
     );
+    let subject = format_message(strings.plc_operation_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::new(
@@ -425,7 +443,7 @@ pub async fn enqueue_plc_operation(
             prefs.channel,
             super::types::CommsType::PlcOperation,
             prefs.email.clone().unwrap_or_default(),
-            Some(format!("{} - PLC Operation Token", hostname)),
+            Some(subject),
             body,
         ),
     )
@@ -439,10 +457,12 @@ pub async fn enqueue_2fa_code(
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
-    let body = format!(
-        "Hello @{},\n\nYour sign-in verification code is: {}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this, please secure your account immediately.",
-        prefs.handle, code
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.two_factor_code_body,
+        &[("handle", &prefs.handle), ("code", code)],
     );
+    let subject = format_message(strings.two_factor_code_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::new(
@@ -450,7 +470,7 @@ pub async fn enqueue_2fa_code(
             prefs.channel,
             super::types::CommsType::TwoFactorCode,
             prefs.email.clone().unwrap_or_default(),
-            Some(format!("Sign-in Verification - {}", hostname)),
+            Some(subject),
             body,
         ),
     )
@@ -464,10 +484,12 @@ pub async fn enqueue_passkey_recovery(
     hostname: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
-    let body = format!(
-        "Hello @{},\n\nYou requested to recover your passkey-only account.\n\nClick the link below to set a temporary password and regain access:\n{}\n\nThis link will expire in 1 hour.\n\nIf you did not request this, please ignore this message. Your account remains secure.",
-        prefs.handle, recovery_url
+    let strings = get_strings(&prefs.locale);
+    let body = format_message(
+        strings.passkey_recovery_body,
+        &[("handle", &prefs.handle), ("url", recovery_url)],
     );
+    let subject = format_message(strings.passkey_recovery_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::new(
@@ -475,7 +497,7 @@ pub async fn enqueue_passkey_recovery(
             prefs.channel,
             super::types::CommsType::PasskeyRecovery,
             prefs.email.clone().unwrap_or_default(),
-            Some(format!("Account Recovery - {}", hostname)),
+            Some(subject),
             body,
         ),
     )
@@ -497,6 +519,7 @@ pub async fn enqueue_signup_verification(
     channel: &str,
     recipient: &str,
     code: &str,
+    locale: Option<&str>,
 ) -> Result<Uuid, sqlx::Error> {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let comms_channel = match channel {
@@ -506,12 +529,15 @@ pub async fn enqueue_signup_verification(
         "signal" => CommsChannel::Signal,
         _ => CommsChannel::Email,
     };
-    let body = format!(
-        "Welcome! Your account verification code is: {}\n\nThis code will expire in 30 minutes.\n\nEnter this code to complete your registration on {}.",
-        code, hostname
+    let strings = get_strings(locale.unwrap_or("en"));
+    let body = format_message(
+        strings.signup_verification_body,
+        &[("code", code), ("hostname", &hostname)],
     );
     let subject = match comms_channel {
-        CommsChannel::Email => Some(format!("Verify your account - {}", hostname)),
+        CommsChannel::Email => {
+            Some(format_message(strings.signup_verification_subject, &[("hostname", &hostname)]))
+        }
         _ => None,
     };
     enqueue_comms(
@@ -536,22 +562,18 @@ pub async fn queue_legacy_login_notification(
     channel: CommsChannel,
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
-    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
-    let body = format!(
-        "Hello @{},\n\n\
-        A login to your account was detected using a legacy app (like Bluesky) that doesn't support TOTP verification.\n\n\
-        Details:\n\
-        - Time: {}\n\
-        - IP Address: {}\n\n\
-        Your TOTP protection was bypassed for this login. The session has limited permissions for sensitive operations.\n\n\
-        If this wasn't you, please:\n\
-        1. Change your password immediately\n\
-        2. Review your active sessions\n\
-        3. Consider disabling legacy app logins in your security settings\n\n\
-        Stay safe,\n\
-        {}",
-        prefs.handle, timestamp, client_ip, hostname
+    let strings = get_strings(&prefs.locale);
+    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    let body = format_message(
+        strings.legacy_login_body,
+        &[
+            ("handle", &prefs.handle),
+            ("timestamp", &timestamp),
+            ("ip", client_ip),
+            ("hostname", hostname),
+        ],
     );
+    let subject = format_message(strings.legacy_login_subject, &[("hostname", hostname)]);
     enqueue_comms(
         db,
         NewComms::new(
@@ -559,7 +581,7 @@ pub async fn queue_legacy_login_notification(
             channel,
             super::types::CommsType::LegacyLoginAlert,
             prefs.email.clone().unwrap_or_default(),
-            Some(format!("Security Alert: Legacy Login Detected - {}", hostname)),
+            Some(subject),
             body,
         ),
     )

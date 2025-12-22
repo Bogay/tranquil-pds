@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte'
-import Notifications from '../routes/Notifications.svelte'
+import Comms from '../routes/Comms.svelte'
 import {
   setupFetchMock,
   mockEndpoint,
@@ -11,7 +11,7 @@ import {
   setupAuthenticatedUser,
   setupUnauthenticatedUser,
 } from './mocks'
-describe('Notifications', () => {
+describe('Comms', () => {
   beforeEach(() => {
     clearMocks()
     setupFetchMock()
@@ -19,7 +19,7 @@ describe('Notifications', () => {
   describe('authentication guard', () => {
     it('redirects to login when not authenticated', async () => {
       setupUnauthenticatedUser()
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(window.location.hash).toBe('#/login')
       })
@@ -33,7 +33,7 @@ describe('Notifications', () => {
       )
     })
     it('displays all page elements and sections', async () => {
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /notification preferences/i, level: 1 })).toBeInTheDocument()
         expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute('href', '#/dashboard')
@@ -52,7 +52,7 @@ describe('Notifications', () => {
         await new Promise(resolve => setTimeout(resolve, 100))
         return jsonResponse(mockData.notificationPrefs())
       })
-      render(Notifications)
+      render(Comms)
       expect(screen.getByText(/loading/i)).toBeInTheDocument()
     })
   })
@@ -64,7 +64,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('radio', { name: /email/i })).toBeInTheDocument()
         expect(screen.getByRole('radio', { name: /discord/i })).toBeInTheDocument()
@@ -76,7 +76,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         const emailRadio = screen.getByRole('radio', { name: /email/i })
         expect(emailRadio).not.toBeDisabled()
@@ -86,7 +86,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({ discordId: null }))
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         const discordRadio = screen.getByRole('radio', { name: /discord/i })
         expect(discordRadio).toBeDisabled()
@@ -96,7 +96,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({ discordId: '123456789' }))
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         const discordRadio = screen.getByRole('radio', { name: /discord/i })
         expect(discordRadio).not.toBeDisabled()
@@ -106,7 +106,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getAllByText(/configure below to enable/i).length).toBeGreaterThan(0)
       })
@@ -115,7 +115,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs({ preferredChannel: 'email' }))
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         const emailRadio = screen.getByRole('radio', { name: /email/i }) as HTMLInputElement
         expect(emailRadio.checked).toBe(true)
@@ -130,7 +130,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         const emailInput = screen.getByLabelText(/^email$/i) as HTMLInputElement
         expect(emailInput).toBeDisabled()
@@ -145,7 +145,7 @@ describe('Notifications', () => {
           signalNumber: '+1234567890',
         }))
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect((screen.getByLabelText(/discord user id/i) as HTMLInputElement).value).toBe('123456789')
         expect((screen.getByLabelText(/telegram username/i) as HTMLInputElement).value).toBe('testuser')
@@ -161,7 +161,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByText('Primary')).toBeInTheDocument()
       })
@@ -173,7 +173,7 @@ describe('Notifications', () => {
           discordVerified: true,
         }))
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         const verifiedBadges = screen.getAllByText('Verified')
         expect(verifiedBadges.length).toBeGreaterThan(0)
@@ -186,7 +186,7 @@ describe('Notifications', () => {
           discordVerified: false,
         }))
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByText('Not verified')).toBeInTheDocument()
       })
@@ -195,7 +195,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByText('Primary')).toBeInTheDocument()
         expect(screen.queryByText('Not verified')).not.toBeInTheDocument()
@@ -215,7 +215,7 @@ describe('Notifications', () => {
         capturedBody = JSON.parse((options?.body as string) || '{}')
         return jsonResponse({ success: true })
       })
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByLabelText(/discord user id/i)).toBeInTheDocument()
       })
@@ -235,7 +235,7 @@ describe('Notifications', () => {
         await new Promise(resolve => setTimeout(resolve, 100))
         return jsonResponse({ success: true })
       })
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /save preferences/i })).toBeInTheDocument()
       })
@@ -250,7 +250,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.updateNotificationPrefs', () =>
         jsonResponse({ success: true })
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /save preferences/i })).toBeInTheDocument()
       })
@@ -266,7 +266,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.updateNotificationPrefs', () =>
         errorResponse('InvalidRequest', 'Invalid channel configuration', 400)
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /save preferences/i })).toBeInTheDocument()
       })
@@ -285,7 +285,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.updateNotificationPrefs', () =>
         jsonResponse({ success: true })
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /save preferences/i })).toBeInTheDocument()
       })
@@ -304,7 +304,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         jsonResponse(mockData.notificationPrefs())
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('radio', { name: /discord/i })).toBeDisabled()
       })
@@ -320,7 +320,7 @@ describe('Notifications', () => {
           discordVerified: true,
         }))
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByRole('radio', { name: /discord/i })).not.toBeDisabled()
       })
@@ -337,7 +337,7 @@ describe('Notifications', () => {
       mockEndpoint('com.tranquil.account.getNotificationPrefs', () =>
         errorResponse('InternalError', 'Database connection failed', 500)
       )
-      render(Notifications)
+      render(Comms)
       await waitFor(() => {
         expect(screen.getByText(/database connection failed/i)).toBeInTheDocument()
       })

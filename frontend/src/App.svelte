@@ -1,6 +1,8 @@
 <script lang="ts">
   import { getCurrentPath } from './lib/router.svelte'
   import { initAuth, getAuthState } from './lib/auth.svelte'
+  import { initI18n, _ } from './lib/i18n'
+  import { isLoading as i18nLoading } from 'svelte-i18n'
   import Login from './routes/Login.svelte'
   import Register from './routes/Register.svelte'
   import RegisterPasskey from './routes/RegisterPasskey.svelte'
@@ -13,7 +15,7 @@
   import InviteCodes from './routes/InviteCodes.svelte'
   import Settings from './routes/Settings.svelte'
   import Sessions from './routes/Sessions.svelte'
-  import Notifications from './routes/Notifications.svelte'
+  import Comms from './routes/Comms.svelte'
   import RepoExplorer from './routes/RepoExplorer.svelte'
   import Admin from './routes/Admin.svelte'
   import OAuthConsent from './routes/OAuthConsent.svelte'
@@ -25,6 +27,9 @@
   import OAuthError from './routes/OAuthError.svelte'
   import Security from './routes/Security.svelte'
   import TrustedDevices from './routes/TrustedDevices.svelte'
+  import Home from './routes/Home.svelte'
+
+  initI18n()
 
   const auth = getAuthState()
 
@@ -58,8 +63,8 @@
         return Settings
       case '/sessions':
         return Sessions
-      case '/notifications':
-        return Notifications
+      case '/comms':
+        return Comms
       case '/repo':
         return RepoExplorer
       case '/admin':
@@ -83,7 +88,7 @@
       case '/trusted-devices':
         return TrustedDevices
       default:
-        return auth.session ? Dashboard : Login
+        return Home
     }
   }
 
@@ -92,7 +97,7 @@
 </script>
 
 <main>
-  {#if auth.loading}
+  {#if auth.loading || $i18nLoading}
     <div class="loading">
       <p>Loading...</p>
     </div>
@@ -102,69 +107,8 @@
 </main>
 
 <style>
-  :global(:root) {
-    --bg-primary: #fafafa;
-    --bg-secondary: #f9f9f9;
-    --bg-card: #ffffff;
-    --bg-input: #ffffff;
-    --bg-input-disabled: #f5f5f5;
-    --text-primary: #333333;
-    --text-secondary: #666666;
-    --text-muted: #999999;
-    --border-color: #dddddd;
-    --border-color-light: #cccccc;
-    --accent: #0066cc;
-    --accent-hover: #0052a3;
-    --success-bg: #dfd;
-    --success-border: #8c8;
-    --success-text: #060;
-    --error-bg: #fee;
-    --error-border: #fcc;
-    --error-text: #c00;
-    --warning-bg: #ffd;
-    --warning-text: #660;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :global(:root) {
-      --bg-primary: #1a1a1a;
-      --bg-secondary: #242424;
-      --bg-card: #2a2a2a;
-      --bg-input: #333333;
-      --bg-input-disabled: #2a2a2a;
-      --text-primary: #e0e0e0;
-      --text-secondary: #a0a0a0;
-      --text-muted: #707070;
-      --border-color: #404040;
-      --border-color-light: #505050;
-      --accent: #4da6ff;
-      --accent-hover: #7abbff;
-      --success-bg: #1a3d1a;
-      --success-border: #2d5a2d;
-      --success-text: #7bc67b;
-      --error-bg: #3d1a1a;
-      --error-border: #5a2d2d;
-      --error-text: #ff7b7b;
-      --warning-bg: #3d3d1a;
-      --warning-text: #c6c67b;
-    }
-  }
-
-  :global(body) {
-    margin: 0;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    line-height: 1.5;
-    color: var(--text-primary);
-    background: var(--bg-primary);
-  }
-
-  :global(*) {
-    box-sizing: border-box;
-  }
-
   main {
     min-height: 100vh;
-    background: var(--bg-primary);
   }
 
   .loading {

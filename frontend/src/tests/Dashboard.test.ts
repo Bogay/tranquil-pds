@@ -60,7 +60,7 @@ describe('Dashboard', () => {
           { name: /app passwords/i, href: '#/app-passwords' },
           { name: /invite codes/i, href: '#/invite-codes' },
           { name: /account settings/i, href: '#/settings' },
-          { name: /notification preferences/i, href: '#/notifications' },
+          { name: /communication preferences/i, href: '#/comms' },
           { name: /repository explorer/i, href: '#/repo' },
         ]
         for (const { name, href } of navCards) {

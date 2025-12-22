@@ -39,6 +39,8 @@ pub struct AuthorizationServerMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_pushed_authorization_requests: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub require_request_uri_registration: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dpop_signing_alg_values_supported: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authorization_response_iss_parameter_supported: Option<bool>,
@@ -110,6 +112,7 @@ pub async fn oauth_authorization_server(
         code_challenge_methods_supported: Some(vec!["S256".to_string()]),
         pushed_authorization_request_endpoint: Some(format!("{}/oauth/par", issuer)),
         require_pushed_authorization_requests: Some(true),
+        require_request_uri_registration: Some(true),
         dpop_signing_alg_values_supported: Some(vec![
             "ES256".to_string(),
             "ES384".to_string(),
@@ -172,6 +175,6 @@ pub async fn frontend_client_metadata(
         scope: "atproto transition:generic".to_string(),
         token_endpoint_auth_method: "none".to_string(),
         application_type: "web".to_string(),
-        dpop_bound_access_tokens: false,
+        dpop_bound_access_tokens: true,
     })
 }

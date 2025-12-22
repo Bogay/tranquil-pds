@@ -2,6 +2,8 @@
   import { getAuthState } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
+  import { _ } from '../lib/i18n'
+  import { formatDate, formatDateTime } from '../lib/date'
   const auth = getAuthState()
   let loading = $state(true)
   let error = $state<string | null>(null)
@@ -123,7 +125,7 @@
   }
   async function disableInvite(code: string) {
     if (!auth.session) return
-    if (!confirm(`Disable invite code ${code}?`)) return
+    if (!confirm($_('admin.disableInviteConfirm', { values: { code } }))) return
     try {
       await api.disableInviteCodes(auth.session.accessJwt, [code])
       invites = invites.map(inv => inv.code === code ? { ...inv, disabled: true } : inv)
@@ -164,7 +166,7 @@
   }
   async function deleteUser() {
     if (!auth.session || !selectedUser) return
-    if (!confirm(`Delete account @${selectedUser.handle}? This cannot be undone.`)) return
+    if (!confirm($_('admin.deleteConfirm', { values: { handle: selectedUser.handle } }))) return
     userActionLoading = true
     try {
       await api.adminDeleteAccount(auth.session.accessJwt, selectedUser.did)
@@ -267,7 +269,7 @@
                           <span class="badge unverified">Unverified</span>
                         {/if}
                       </td>
-                      <td class="date">{new Date(user.indexedAt).toLocaleDateString()}</td>
+                      <td class="date">{formatDate(user.indexedAt)}</td>
                     </tr>
                   {/each}
                 </tbody>
@@ -322,7 +324,7 @@
                           <span class="badge verified">Active</span>
                         {/if}
                       </td>
-                      <td class="date">{new Date(invite.createdAt).toLocaleDateString()}</td>
+                      <td class="date">{formatDate(invite.createdAt)}</td>
                       <td>
                         {#if !invite.disabled}
                           <button class="action-btn danger" onclick={() => disableInvite(invite.code)}>
@@ -376,7 +378,7 @@
                 {/if}
               </dd>
               <dt>Created</dt>
-              <dd>{new Date(selectedUser.indexedAt).toLocaleString()}</dd>
+              <dd>{formatDateTime(selectedUser.indexedAt)}</dd>
               <dt>Invites</dt>
               <dd>
                 {#if selectedUser.invitesDisabled}
@@ -412,243 +414,293 @@
 {/if}
 <style>
   .page {
-    max-width: 800px;
+    max-width: var(--width-lg);
     margin: 0 auto;
-    padding: 2rem;
+    padding: var(--space-7);
   }
+
   header {
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-7);
   }
+
   .back {
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .back:hover {
     color: var(--accent);
   }
+
   h1 {
-    margin: 0.5rem 0 0 0;
+    margin: var(--space-2) 0 0 0;
   }
+
   .loading {
     text-align: center;
     color: var(--text-secondary);
-    padding: 2rem;
+    padding: var(--space-7);
   }
+
   .message {
-    padding: 0.75rem;
-    border-radius: 4px;
-    margin-bottom: 1rem;
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
   }
+
   .message.error {
     background: var(--error-bg);
     border: 1px solid var(--error-border);
     color: var(--error-text);
   }
+
   section {
     background: var(--bg-secondary);
-    padding: 1.5rem;
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+    padding: var(--space-6);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-6);
   }
+
   section h2 {
-    margin: 0 0 1rem 0;
-    font-size: 1.25rem;
+    margin: 0 0 var(--space-4) 0;
+    font-size: var(--text-lg);
   }
+
   .stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
-    margin-bottom: 1rem;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
   }
+
   .stat-card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 1rem;
+    border-radius: var(--radius-xl);
+    padding: var(--space-4);
     text-align: center;
   }
+
   .stat-value {
-    font-size: 1.5rem;
-    font-weight: 600;
+    font-size: var(--text-xl);
+    font-weight: var(--font-semibold);
     color: var(--accent);
   }
+
   .stat-label {
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
-    margin-top: 0.25rem;
+    margin-top: var(--space-1);
   }
+
   .refresh-btn {
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: transparent;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     color: var(--text-primary);
   }
+
   .refresh-btn:hover {
     background: var(--bg-card);
     border-color: var(--accent);
   }
+
   .search-form {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
   }
+
   .search-form input {
     flex: 1;
-    padding: 0.5rem 0.75rem;
+    padding: var(--space-2) var(--space-3);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 0.875rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
     background: var(--bg-input);
     color: var(--text-primary);
   }
+
   .search-form input:focus {
     outline: none;
     border-color: var(--accent);
   }
+
   .search-form button {
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .search-form button:hover:not(:disabled) {
     background: var(--accent-hover);
   }
+
   .search-form button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
+
   .user-list {
-    margin-top: 1rem;
+    margin-top: var(--space-4);
   }
+
   .no-results {
     color: var(--text-secondary);
     text-align: center;
-    padding: 1rem;
+    padding: var(--space-4);
   }
+
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   th, td {
-    padding: 0.75rem 0.5rem;
+    padding: var(--space-3) var(--space-2);
     text-align: left;
     border-bottom: 1px solid var(--border-color);
   }
+
   th {
-    font-weight: 600;
+    font-weight: var(--font-semibold);
     color: var(--text-secondary);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
+
   .handle {
-    font-weight: 500;
+    font-weight: var(--font-medium);
   }
+
   .email {
     color: var(--text-secondary);
   }
+
   .date {
     color: var(--text-secondary);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
   }
+
   .badge {
     display: inline-block;
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
   }
+
   .badge.verified {
     background: var(--success-bg);
     color: var(--success-text);
   }
+
   .badge.unverified {
     background: var(--warning-bg);
     color: var(--warning-text);
   }
+
   .badge.deactivated {
     background: var(--error-bg);
     color: var(--error-text);
   }
+
   .load-more {
     display: block;
     width: 100%;
-    padding: 0.75rem;
-    margin-top: 1rem;
+    padding: var(--space-3);
+    margin-top: var(--space-4);
     background: transparent;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     color: var(--text-primary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .load-more:hover:not(:disabled) {
     background: var(--bg-card);
     border-color: var(--accent);
   }
+
   .load-more:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
+
   .section-actions {
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
   }
+
   .section-actions button {
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
+
   .section-actions button:hover:not(:disabled) {
     background: var(--accent-hover);
   }
+
   .section-actions button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
+
   .invite-list {
-    margin-top: 1rem;
+    margin-top: var(--space-4);
   }
+
   .code {
     font-family: monospace;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
   }
+
   .disabled-row {
     opacity: 0.5;
   }
+
   .action-btn {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
   }
+
   .action-btn.danger {
     background: var(--error-text);
-    color: white;
+    color: var(--text-inverse);
   }
+
   .action-btn.danger:hover {
     background: #900;
   }
+
   .muted {
     color: var(--text-muted);
   }
+
   .clickable {
     cursor: pointer;
   }
+
   .clickable:hover {
     background: var(--bg-card);
   }
+
   .modal-overlay {
     position: fixed;
     top: 0;
@@ -661,83 +713,99 @@
     justify-content: center;
     z-index: 1000;
   }
+
   .modal {
     background: var(--bg-card);
-    border-radius: 8px;
+    border-radius: var(--radius-xl);
     max-width: 500px;
     width: 90%;
     max-height: 90vh;
     overflow-y: auto;
   }
+
   .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem 1.5rem;
+    padding: var(--space-4) var(--space-6);
     border-bottom: 1px solid var(--border-color);
   }
+
   .modal-header h2 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: var(--text-lg);
   }
+
   .close-btn {
     background: none;
     border: none;
-    font-size: 1.5rem;
+    font-size: var(--text-xl);
     cursor: pointer;
     color: var(--text-secondary);
     padding: 0;
     line-height: 1;
   }
+
   .close-btn:hover {
     color: var(--text-primary);
   }
+
   .modal-body {
-    padding: 1.5rem;
+    padding: var(--space-6);
   }
+
   .user-details {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: 0.5rem 1rem;
-    margin: 0 0 1.5rem 0;
+    gap: var(--space-2) var(--space-4);
+    margin: 0 0 var(--space-6) 0;
   }
+
   .user-details dt {
-    font-weight: 500;
+    font-weight: var(--font-medium);
     color: var(--text-secondary);
   }
+
   .user-details dd {
     margin: 0;
   }
+
   .mono {
     font-family: monospace;
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     word-break: break-all;
   }
+
   .modal-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
   }
+
   .modal-actions .action-btn {
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     background: transparent;
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     color: var(--text-primary);
   }
+
   .modal-actions .action-btn:hover:not(:disabled) {
     background: var(--bg-secondary);
   }
+
   .modal-actions .action-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
+
   .modal-actions .action-btn.danger {
     border-color: var(--error-text);
     color: var(--error-text);
   }
+
   .modal-actions .action-btn.danger:hover:not(:disabled) {
     background: var(--error-bg);
   }
