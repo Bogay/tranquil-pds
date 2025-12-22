@@ -4,10 +4,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
+use std::borrow::Cow;
 
 #[derive(Debug, Serialize)]
-struct ErrorBody {
-    error: &'static str,
+struct ErrorBody<'a> {
+    error: Cow<'a, str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
 }
@@ -90,41 +91,43 @@ impl ApiError {
             | Self::InvalidSwap => StatusCode::BAD_REQUEST,
         }
     }
-    fn error_name(&self) -> &'static str {
+    fn error_name(&self) -> Cow<'static, str> {
         match self {
-            Self::InternalError | Self::DatabaseError => "InternalError",
-            Self::UpstreamFailure | Self::UpstreamUnavailable(_) => "UpstreamFailure",
-            Self::UpstreamTimeout => "UpstreamTimeout",
+            Self::InternalError | Self::DatabaseError => Cow::Borrowed("InternalError"),
+            Self::UpstreamFailure | Self::UpstreamUnavailable(_) => Cow::Borrowed("UpstreamFailure"),
+            Self::UpstreamTimeout => Cow::Borrowed("UpstreamTimeout"),
             Self::UpstreamError { error, .. } => {
                 if let Some(e) = error {
-                    return Box::leak(e.clone().into_boxed_str());
+                    return Cow::Owned(e.clone());
                 }
-                "UpstreamError"
+                Cow::Borrowed("UpstreamError")
             }
-            Self::AuthenticationRequired => "AuthenticationRequired",
-            Self::AuthenticationFailed | Self::AuthenticationFailedMsg(_) => "AuthenticationFailed",
-            Self::InvalidToken => "InvalidToken",
-            Self::ExpiredToken | Self::ExpiredTokenMsg(_) => "ExpiredToken",
-            Self::TokenRequired => "TokenRequired",
-            Self::AccountDeactivated => "AccountDeactivated",
-            Self::AccountTakedown => "AccountTakedown",
-            Self::Forbidden => "Forbidden",
-            Self::InvitesDisabled => "InvitesDisabled",
-            Self::AccountNotFound => "AccountNotFound",
-            Self::RepoNotFound | Self::RepoNotFoundMsg(_) => "RepoNotFound",
-            Self::RecordNotFound => "RecordNotFound",
-            Self::BlobNotFound => "BlobNotFound",
-            Self::AppPasswordNotFound => "AppPasswordNotFound",
-            Self::InvalidRequest(_) => "InvalidRequest",
-            Self::InvalidHandle => "InvalidHandle",
-            Self::HandleNotAvailable => "HandleNotAvailable",
-            Self::HandleTaken => "HandleTaken",
-            Self::InvalidEmail => "InvalidEmail",
-            Self::EmailTaken => "EmailTaken",
-            Self::InvalidInviteCode => "InvalidInviteCode",
-            Self::DuplicateCreate => "DuplicateCreate",
-            Self::DuplicateAppPassword => "DuplicateAppPassword",
-            Self::InvalidSwap => "InvalidSwap",
+            Self::AuthenticationRequired => Cow::Borrowed("AuthenticationRequired"),
+            Self::AuthenticationFailed | Self::AuthenticationFailedMsg(_) => {
+                Cow::Borrowed("AuthenticationFailed")
+            }
+            Self::InvalidToken => Cow::Borrowed("InvalidToken"),
+            Self::ExpiredToken | Self::ExpiredTokenMsg(_) => Cow::Borrowed("ExpiredToken"),
+            Self::TokenRequired => Cow::Borrowed("TokenRequired"),
+            Self::AccountDeactivated => Cow::Borrowed("AccountDeactivated"),
+            Self::AccountTakedown => Cow::Borrowed("AccountTakedown"),
+            Self::Forbidden => Cow::Borrowed("Forbidden"),
+            Self::InvitesDisabled => Cow::Borrowed("InvitesDisabled"),
+            Self::AccountNotFound => Cow::Borrowed("AccountNotFound"),
+            Self::RepoNotFound | Self::RepoNotFoundMsg(_) => Cow::Borrowed("RepoNotFound"),
+            Self::RecordNotFound => Cow::Borrowed("RecordNotFound"),
+            Self::BlobNotFound => Cow::Borrowed("BlobNotFound"),
+            Self::AppPasswordNotFound => Cow::Borrowed("AppPasswordNotFound"),
+            Self::InvalidRequest(_) => Cow::Borrowed("InvalidRequest"),
+            Self::InvalidHandle => Cow::Borrowed("InvalidHandle"),
+            Self::HandleNotAvailable => Cow::Borrowed("HandleNotAvailable"),
+            Self::HandleTaken => Cow::Borrowed("HandleTaken"),
+            Self::InvalidEmail => Cow::Borrowed("InvalidEmail"),
+            Self::EmailTaken => Cow::Borrowed("EmailTaken"),
+            Self::InvalidInviteCode => Cow::Borrowed("InvalidInviteCode"),
+            Self::DuplicateCreate => Cow::Borrowed("DuplicateCreate"),
+            Self::DuplicateAppPassword => Cow::Borrowed("DuplicateAppPassword"),
+            Self::InvalidSwap => Cow::Borrowed("InvalidSwap"),
         }
     }
     fn message(&self) -> Option<String> {

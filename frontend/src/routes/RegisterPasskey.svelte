@@ -31,12 +31,6 @@
   let resendMessage = $state<string | null>(null)
 
   $effect(() => {
-    if (auth.session) {
-      navigate('/dashboard')
-    }
-  })
-
-  $effect(() => {
     if (!serverInfoLoaded) {
       serverInfoLoaded = true
       loadServerInfo()

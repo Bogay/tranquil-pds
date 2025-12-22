@@ -341,7 +341,22 @@ pub async fn update_passkey_counter(
     pool: &PgPool,
     credential_id: &[u8],
     new_counter: u32,
-) -> Result<(), sqlx::Error> {
+) -> Result<bool, sqlx::Error> {
+    let stored = get_passkey_by_credential_id(pool, credential_id).await?;
+    let Some(stored) = stored else {
+        return Err(sqlx::Error::RowNotFound);
+    };
+
+    if new_counter > 0 && new_counter <= stored.sign_count as u32 {
+        tracing::warn!(
+            credential_id = ?credential_id,
+            stored_counter = stored.sign_count,
+            new_counter = new_counter,
+            "Passkey counter did not increment - possible cloned key!"
+        );
+        return Ok(false);
+    }
+
     sqlx::query!(
         "UPDATE passkeys SET sign_count = $1, last_used = NOW() WHERE credential_id = $2",
         new_counter as i32,
@@ -349,7 +364,7 @@ pub async fn update_passkey_counter(
     )
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(true)
 }
 
 pub async fn delete_passkey(pool: &PgPool, id: Uuid, did: &str) -> Result<bool, sqlx::Error> {

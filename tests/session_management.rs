@@ -47,7 +47,7 @@ async fn test_list_sessions_multiple_sessions() {
     let ts = chrono::Utc::now().timestamp_millis();
     let handle = format!("multi-list-{}.test", ts);
     let email = format!("multi-list-{}@test.com", ts);
-    let password = "test-password-123";
+    let password = "Testpass123!";
     let create_payload = json!({
         "handle": handle,
         "email": email,
@@ -122,7 +122,7 @@ async fn test_revoke_session_success() {
     let ts = chrono::Utc::now().timestamp_millis();
     let handle = format!("revoke-sess-{}.test", ts);
     let email = format!("revoke-sess-{}@test.com", ts);
-    let password = "test-password-123";
+    let password = "Testpass123!";
     let create_payload = json!({
         "handle": handle,
         "email": email,

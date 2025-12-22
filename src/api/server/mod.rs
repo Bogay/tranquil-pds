@@ -33,13 +33,15 @@ pub use password::{
     change_password, get_password_status, remove_password, request_password_reset, reset_password,
 };
 pub use reauth::{
-    check_reauth_required, get_reauth_status, reauth_passkey_finish, reauth_passkey_start,
-    reauth_password, reauth_required_response, reauth_totp,
+    check_legacy_session_mfa, check_reauth_required, get_reauth_status, legacy_mfa_required_response,
+    reauth_passkey_finish, reauth_passkey_start, reauth_password, reauth_required_response,
+    reauth_totp, update_mfa_verified,
 };
 pub use service_auth::get_service_auth;
 pub use session::{
-    confirm_signup, create_session, delete_session, get_session, list_sessions, refresh_session,
-    resend_verification, revoke_session,
+    confirm_signup, create_session, delete_session, get_legacy_login_preference, get_session,
+    list_sessions, refresh_session, resend_verification, revoke_all_sessions, revoke_session,
+    update_legacy_login_preference,
 };
 pub use signing_key::reserve_signing_key;
 pub use totp::{

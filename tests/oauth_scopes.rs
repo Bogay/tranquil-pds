@@ -61,7 +61,7 @@ async fn create_user_and_oauth_session_with_scope(
     let ts = Utc::now().timestamp_millis();
     let handle = format!("{}-{}", handle_prefix, ts);
     let email = format!("{}-{}@example.com", handle_prefix, ts);
-    let password = format!("{}-password", handle_prefix);
+    let password = format!("{}Pass123!", handle_prefix);
 
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -383,7 +383,7 @@ async fn test_consent_endpoint_returns_scope_info() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("consent-test-{}", ts);
     let email = format!("consent-{}@example.com", ts);
-    let password = "consent-password";
+    let password = "Consent123!";
     let redirect_uri = "https://consent-test.example.com/callback";
 
     let create_res = http_client
@@ -479,7 +479,7 @@ async fn test_consent_post_generates_code() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("consent-post-{}", ts);
     let email = format!("consent-post-{}@example.com", ts);
-    let password = "consent-post-password";
+    let password = "ConsentPost123!";
     let redirect_uri = "https://consent-post.example.com/callback";
 
     let create_res = http_client
@@ -593,7 +593,7 @@ async fn test_consent_post_requires_atproto_scope() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("consent-req-{}", ts);
     let email = format!("consent-req-{}@example.com", ts);
-    let password = "consent-req-password";
+    let password = "ConsentReq123!";
     let redirect_uri = "https://consent-req.example.com/callback";
 
     let create_res = http_client

@@ -92,7 +92,10 @@ pub async fn create_session(
         r#"SELECT
             u.id, u.did, u.handle, u.password_hash,
             u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,
-            k.key_bytes, k.encryption_version
+            u.allow_legacy_login,
+            u.preferred_comms_channel as "preferred_comms_channel: crate::comms::CommsChannel",
+            k.key_bytes, k.encryption_version,
+            (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled
         FROM users u
         JOIN user_keys k ON u.id = k.user_id
         WHERE u.handle = $1 OR u.email = $1 OR u.did = $1"#,
@@ -161,6 +164,23 @@ pub async fn create_session(
         )
             .into_response();
     }
+    let has_totp = row.totp_enabled.unwrap_or(false);
+    let is_legacy_login = has_totp;
+    if has_totp && !row.allow_legacy_login {
+        warn!(
+            "Legacy login blocked for TOTP-enabled account: {}",
+            row.did
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "MfaRequired",
+                "message": "This account requires MFA. Please use an OAuth client that supports TOTP verification.",
+                "did": row.did
+            })),
+        )
+            .into_response();
+    }
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
@@ -176,18 +196,39 @@ pub async fn create_session(
         }
     };
     if let Err(e) = sqlx::query!(
-        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         row.did,
         access_meta.jti,
         refresh_meta.jti,
         access_meta.expires_at,
-        refresh_meta.expires_at
+        refresh_meta.expires_at,
+        is_legacy_login,
+        false
     )
     .execute(&state.db)
     .await
     {
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError.into_response();
+    }
+    if is_legacy_login {
+        warn!(
+            did = %row.did,
+            ip = %client_ip,
+            "Legacy login on TOTP-enabled account - sending notification"
+        );
+        let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        if let Err(e) = crate::comms::queue_legacy_login_notification(
+            &state.db,
+            row.id,
+            &hostname,
+            &client_ip,
+            row.preferred_comms_channel,
+        )
+        .await
+        {
+            error!("Failed to queue legacy login notification: {:?}", e);
+        }
     }
     let handle = full_handle(&row.handle, &pds_hostname);
     Json(CreateSessionOutput {
@@ -617,12 +658,14 @@ pub async fn confirm_signup(
         }
     };
     if let Err(e) = sqlx::query!(
-        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         row.did,
         access_meta.jti,
         refresh_meta.jti,
         access_meta.expires_at,
-        refresh_meta.expires_at
+        refresh_meta.expires_at,
+        false,
+        false
     )
     .execute(&state.db)
     .await
@@ -746,6 +789,8 @@ pub async fn resend_verification(
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: String,
+    pub session_type: String,
+    pub client_name: Option<String>,
     pub created_at: String,
     pub expires_at: String,
     pub is_current: bool,
@@ -767,7 +812,10 @@ pub async fn list_sessions(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .and_then(|token| crate::auth::get_jti_from_token(token).ok());
-    let result = sqlx::query_as::<
+
+    let mut sessions: Vec<SessionInfo> = Vec::new();
+
+    let jwt_result = sqlx::query_as::<
         _,
         (
             i32,
@@ -786,27 +834,89 @@ pub async fn list_sessions(
     .bind(&auth.0.did)
     .fetch_all(&state.db)
     .await;
-    match result {
+
+    match jwt_result {
         Ok(rows) => {
-            let sessions: Vec<SessionInfo> = rows
-                .into_iter()
-                .map(|(id, access_jti, created_at, expires_at)| SessionInfo {
-                    id: id.to_string(),
+            for (id, access_jti, created_at, expires_at) in rows {
+                sessions.push(SessionInfo {
+                    id: format!("jwt:{}", id),
+                    session_type: "legacy".to_string(),
+                    client_name: None,
                     created_at: created_at.to_rfc3339(),
                     expires_at: expires_at.to_rfc3339(),
                     is_current: current_jti.as_ref() == Some(&access_jti),
-                })
-                .collect();
-            (StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response()
+                });
+            }
         }
         Err(e) => {
-            error!("DB error in list_sessions: {:?}", e);
-            (
+            error!("DB error fetching JWT sessions: {:?}", e);
+            return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
             )
-                .into_response()
+                .into_response();
         }
+    }
+
+    let oauth_result = sqlx::query_as::<
+        _,
+        (
+            i32,
+            String,
+            chrono::DateTime<chrono::Utc>,
+            chrono::DateTime<chrono::Utc>,
+            String,
+        ),
+    >(
+        r#"
+        SELECT id, token_id, created_at, expires_at, client_id
+        FROM oauth_token
+        WHERE did = $1 AND expires_at > NOW()
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(&auth.0.did)
+    .fetch_all(&state.db)
+    .await;
+
+    match oauth_result {
+        Ok(rows) => {
+            for (id, token_id, created_at, expires_at, client_id) in rows {
+                let client_name = extract_client_name(&client_id);
+                let is_current_oauth = auth.0.is_oauth
+                    && current_jti.as_ref() == Some(&token_id);
+                sessions.push(SessionInfo {
+                    id: format!("oauth:{}", id),
+                    session_type: "oauth".to_string(),
+                    client_name: Some(client_name),
+                    created_at: created_at.to_rfc3339(),
+                    expires_at: expires_at.to_rfc3339(),
+                    is_current: is_current_oauth,
+                });
+            }
+        }
+        Err(e) => {
+            error!("DB error fetching OAuth sessions: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
+        }
+    }
+
+    sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    (StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response()
+}
+
+fn extract_client_name(client_id: &str) -> String {
+    if client_id.starts_with("http://localhost") || client_id.starts_with("http://127.0.0.1") {
+        "Localhost App".to_string()
+    } else if let Ok(parsed) = reqwest::Url::parse(client_id) {
+        parsed.host_str().unwrap_or("Unknown App").to_string()
+    } else {
+        client_id.to_string()
     }
 }
 
@@ -821,57 +931,277 @@ pub async fn revoke_session(
     auth: BearerAuth,
     Json(input): Json<RevokeSessionInput>,
 ) -> Response {
-    let session_id: i32 = match input.session_id.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "Invalid session ID"})),
-            )
-                .into_response();
-        }
-    };
-    let session = sqlx::query_as::<_, (String,)>(
-        "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
-    )
-    .bind(session_id)
-    .bind(&auth.0.did)
-    .fetch_optional(&state.db)
-    .await;
-    let access_jti = match session {
-        Ok(Some((jti,))) => jti,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "SessionNotFound", "message": "Session not found"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in revoke_session: {:?}", e);
+    if let Some(jwt_id) = input.session_id.strip_prefix("jwt:") {
+        let session_id: i32 = match jwt_id.parse() {
+            Ok(id) => id,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidRequest", "message": "Invalid session ID"})),
+                )
+                    .into_response();
+            }
+        };
+        let session = sqlx::query_as::<_, (String,)>(
+            "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
+        )
+        .bind(session_id)
+        .bind(&auth.0.did)
+        .fetch_optional(&state.db)
+        .await;
+        let access_jti = match session {
+            Ok(Some((jti,))) => jti,
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "SessionNotFound", "message": "Session not found"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                error!("DB error in revoke_session: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
+        if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE id = $1")
+            .bind(session_id)
+            .execute(&state.db)
+            .await
+        {
+            error!("DB error deleting session: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
             )
                 .into_response();
         }
-    };
-    if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE id = $1")
-        .bind(session_id)
-        .execute(&state.db)
-        .await
-    {
-        error!("DB error deleting session: {:?}", e);
+        let cache_key = format!("auth:session:{}:{}", auth.0.did, access_jti);
+        if let Err(e) = state.cache.delete(&cache_key).await {
+            warn!("Failed to invalidate session cache: {:?}", e);
+        }
+        info!(did = %auth.0.did, session_id = %session_id, "JWT session revoked");
+    } else if let Some(oauth_id) = input.session_id.strip_prefix("oauth:") {
+        let session_id: i32 = match oauth_id.parse() {
+            Ok(id) => id,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidRequest", "message": "Invalid session ID"})),
+                )
+                    .into_response();
+            }
+        };
+        let result = sqlx::query("DELETE FROM oauth_token WHERE id = $1 AND did = $2")
+            .bind(session_id)
+            .bind(&auth.0.did)
+            .execute(&state.db)
+            .await;
+        match result {
+            Ok(r) if r.rows_affected() == 0 => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "SessionNotFound", "message": "Session not found"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                error!("DB error deleting OAuth session: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            _ => {}
+        }
+        info!(did = %auth.0.did, session_id = %session_id, "OAuth session revoked");
+    } else {
         return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "Invalid session ID format"})),
         )
             .into_response();
     }
-    let cache_key = format!("auth:session:{}:{}", auth.0.did, access_jti);
-    if let Err(e) = state.cache.delete(&cache_key).await {
-        warn!("Failed to invalidate session cache: {:?}", e);
-    }
-    info!(did = %auth.0.did, session_id = %session_id, "Session revoked");
     (StatusCode::OK, Json(json!({}))).into_response()
+}
+
+pub async fn revoke_all_sessions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    auth: BearerAuth,
+) -> Response {
+    let current_jti = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(|token| crate::auth::get_jti_from_token(token).ok());
+
+    if let Some(ref jti) = current_jti {
+        if auth.0.is_oauth {
+            if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE did = $1")
+                .bind(&auth.0.did)
+                .execute(&state.db)
+                .await
+            {
+                error!("DB error revoking JWT sessions: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1 AND token_id != $2")
+                .bind(&auth.0.did)
+                .bind(jti)
+                .execute(&state.db)
+                .await
+            {
+                error!("DB error revoking OAuth sessions: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        } else {
+            if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2")
+                .bind(&auth.0.did)
+                .bind(jti)
+                .execute(&state.db)
+                .await
+            {
+                error!("DB error revoking JWT sessions: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1")
+                .bind(&auth.0.did)
+                .execute(&state.db)
+                .await
+            {
+                error!("DB error revoking OAuth sessions: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidToken", "message": "Could not identify current session"})),
+        )
+            .into_response();
+    }
+
+    info!(did = %auth.0.did, "All other sessions revoked");
+    (StatusCode::OK, Json(json!({"success": true}))).into_response()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyLoginPreferenceOutput {
+    pub allow_legacy_login: bool,
+    pub has_mfa: bool,
+}
+
+pub async fn get_legacy_login_preference(
+    State(state): State<AppState>,
+    auth: BearerAuth,
+) -> Response {
+    let result = sqlx::query!(
+        r#"SELECT
+            u.allow_legacy_login,
+            (EXISTS(SELECT 1 FROM user_totp t WHERE t.did = u.did AND t.verified = TRUE) OR
+             EXISTS(SELECT 1 FROM passkeys p WHERE p.did = u.did)) as "has_mfa!"
+        FROM users u WHERE u.did = $1"#,
+        auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    match result {
+        Ok(Some(row)) => Json(LegacyLoginPreferenceOutput {
+            allow_legacy_login: row.allow_legacy_login,
+            has_mfa: row.has_mfa,
+        })
+        .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "AccountNotFound"})),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLegacyLoginInput {
+    pub allow_legacy_login: bool,
+}
+
+pub async fn update_legacy_login_preference(
+    State(state): State<AppState>,
+    auth: BearerAuth,
+    Json(input): Json<UpdateLegacyLoginInput>,
+) -> Response {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+            .await;
+    }
+
+    if crate::api::server::reauth::check_reauth_required(&state.db, &auth.0.did).await {
+        return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
+    }
+
+    let result = sqlx::query!(
+        "UPDATE users SET allow_legacy_login = $1 WHERE did = $2 RETURNING did",
+        input.allow_legacy_login,
+        auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    match result {
+        Ok(Some(_)) => {
+            info!(
+                did = %auth.0.did,
+                allow_legacy_login = input.allow_legacy_login,
+                "Legacy login preference updated"
+            );
+            Json(json!({
+                "allowLegacyLogin": input.allow_legacy_login
+            }))
+            .into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "AccountNotFound"})),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response()
+        }
+    }
 }

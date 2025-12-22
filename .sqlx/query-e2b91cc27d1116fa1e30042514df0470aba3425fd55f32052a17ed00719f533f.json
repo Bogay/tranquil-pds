@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE session_tokens SET last_reauth_at = $1 WHERE did = $2",
+  "query": "UPDATE session_tokens SET last_reauth_at = $1, mfa_verified = TRUE WHERE did = $2",
   "describe": {
     "columns": [],
     "parameters": {
@@ -11,5 +11,5 @@
     },
     "nullable": []
   },
-  "hash": "8290c8ec5798a827bab64a17c3d4bf34bd0b88971b0658d191ed57badbbfd979"
+  "hash": "e2b91cc27d1116fa1e30042514df0470aba3425fd55f32052a17ed00719f533f"
 }

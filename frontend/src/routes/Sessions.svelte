@@ -7,6 +7,8 @@
   let error = $state<string | null>(null)
   let sessions = $state<Array<{
     id: string
+    sessionType: string
+    clientName: string | null
     createdAt: string
     expiresAt: string
     isCurrent: boolean
@@ -51,6 +53,21 @@
       error = e instanceof ApiError ? e.message : 'Failed to revoke session'
     }
   }
+  async function revokeAllSessions() {
+    if (!auth.session) return
+    const otherCount = sessions.filter(s => !s.isCurrent).length
+    if (otherCount === 0) {
+      error = 'No other sessions to revoke'
+      return
+    }
+    if (!confirm(`This will revoke ${otherCount} other session${otherCount > 1 ? 's' : ''}. Continue?`)) return
+    try {
+      await api.revokeAllSessions(auth.session.accessJwt)
+      sessions = sessions.filter(s => s.isCurrent)
+    } catch (e) {
+      error = e instanceof ApiError ? e.message : 'Failed to revoke sessions'
+    }
+  }
   function formatDate(dateStr: string): string {
     return new Date(dateStr).toLocaleString()
   }
@@ -87,9 +104,13 @@
             <div class="session-info">
               <div class="session-header">
                 {#if session.isCurrent}
-                  <span class="badge current">Current Session</span>
-                {:else}
-                  <span class="session-label">Session</span>
+                  <span class="badge current">Current</span>
+                {/if}
+                <span class="badge type" class:oauth={session.sessionType === 'oauth'}>
+                  {session.sessionType === 'oauth' ? 'OAuth' : 'Session'}
+                </span>
+                {#if session.clientName}
+                  <span class="client-name">{session.clientName}</span>
                 {/if}
               </div>
               <div class="session-details">
@@ -115,7 +136,12 @@
           </div>
         {/each}
       </div>
-      <button class="refresh-btn" onclick={loadSessions}>Refresh</button>
+      <div class="actions-bar">
+        <button class="refresh-btn" onclick={loadSessions}>Refresh</button>
+        {#if sessions.filter(s => !s.isCurrent).length > 0}
+          <button class="revoke-all-btn" onclick={revokeAllSessions}>Revoke All Other Sessions</button>
+        {/if}
+      </div>
     {/if}
   {/if}
 </div>
@@ -174,10 +200,14 @@
   }
   .session-header {
     margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
-  .session-label {
+  .client-name {
     font-weight: 500;
-    color: var(--text-secondary);
+    color: var(--text-primary);
   }
   .badge {
     display: inline-block;
@@ -189,6 +219,16 @@
   .badge.current {
     background: var(--accent);
     color: white;
+  }
+  .badge.type {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+  }
+  .badge.type.oauth {
+    background: #e6f4ea;
+    color: #1e7e34;
+    border-color: #b8d9c5;
   }
   .session-details {
     display: flex;
@@ -224,8 +264,13 @@
   .revoke-btn.danger:hover {
     background: var(--error-bg);
   }
-  .refresh-btn {
+  .actions-bar {
     margin-top: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .refresh-btn {
     padding: 0.5rem 1rem;
     background: transparent;
     border: 1px solid var(--border-color);
@@ -236,5 +281,16 @@
   .refresh-btn:hover {
     background: var(--bg-card);
     border-color: var(--accent);
+  }
+  .revoke-all-btn {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid var(--error-text);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--error-text);
+  }
+  .revoke-all-btn:hover {
+    background: var(--error-bg);
   }
 </style>

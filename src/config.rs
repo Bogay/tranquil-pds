@@ -19,6 +19,7 @@ pub struct AuthConfig {
     pub signing_key_x: String,
     pub signing_key_y: String,
     key_encryption_key: [u8; 32],
+    device_cookie_key: [u8; 32],
 }
 
 impl AuthConfig {
@@ -112,6 +113,10 @@ impl AuthConfig {
             hk.expand(b"tranquil-pds-user-key-encryption", &mut key_encryption_key)
                 .expect("HKDF expansion failed");
 
+            let mut device_cookie_key = [0u8; 32];
+            hk.expand(b"tranquil-pds-device-cookie-signing", &mut device_cookie_key)
+                .expect("HKDF expansion failed");
+
             AuthConfig {
                 jwt_secret,
                 dpop_secret,
@@ -120,6 +125,7 @@ impl AuthConfig {
                 signing_key_x,
                 signing_key_y,
                 key_encryption_key,
+                device_cookie_key,
             }
         })
     }
@@ -136,6 +142,67 @@ impl AuthConfig {
 
     pub fn dpop_secret(&self) -> &str {
         &self.dpop_secret
+    }
+
+    pub fn sign_device_cookie(&self, device_id: &str) -> String {
+        use hmac::Mac;
+        type HmacSha256 = hmac::Hmac<Sha256>;
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let message = format!("{}:{}", device_id, timestamp);
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(&self.device_cookie_key)
+            .expect("HMAC key size is valid");
+        mac.update(message.as_bytes());
+        let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        format!("{}.{}.{}", device_id, timestamp, signature)
+    }
+
+    pub fn verify_device_cookie(&self, cookie_value: &str) -> Option<String> {
+        use hmac::Mac;
+        type HmacSha256 = hmac::Hmac<Sha256>;
+
+        let parts: Vec<&str> = cookie_value.splitn(3, '.').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+
+        let device_id = parts[0];
+        let timestamp_str = parts[1];
+        let provided_signature = parts[2];
+
+        let timestamp: u64 = timestamp_str.parse().ok()?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let max_age_days = 400;
+        if now.saturating_sub(timestamp) > max_age_days * 24 * 60 * 60 {
+            return None;
+        }
+
+        let message = format!("{}:{}", device_id, timestamp);
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(&self.device_cookie_key)
+            .expect("HMAC key size is valid");
+        mac.update(message.as_bytes());
+        let expected_signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        use subtle::ConstantTimeEq;
+        if provided_signature
+            .as_bytes()
+            .ct_eq(expected_signature.as_bytes())
+            .into()
+        {
+            Some(device_id.to_string())
+        } else {
+            None
+        }
     }
 
     pub fn encrypt_user_key(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {

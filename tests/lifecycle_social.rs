@@ -176,7 +176,7 @@ async fn test_account_to_post_full_lifecycle() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("fullcycle-{}.test", ts);
     let email = format!("fullcycle-{}@test.com", ts);
-    let password = "fullcycle-password";
+    let password = "Fullcycle123!";
     let create_account_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",

@@ -304,7 +304,7 @@ pub async fn request_account_delete(
         "https://{}/xrpc/com.atproto.server.requestAccountDelete",
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
-    let did = match crate::auth::validate_token_with_dpop(
+    let validated = match crate::auth::validate_token_with_dpop(
         &state.db,
         &extracted.token,
         extracted.is_dpop,
@@ -315,9 +315,15 @@ pub async fn request_account_delete(
     )
     .await
     {
-        Ok(user) => user.did,
+        Ok(user) => user,
         Err(e) => return ApiError::from(e).into_response(),
     };
+    let did = validated.did.clone();
+
+    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &did).await;
+    }
+
     let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await

@@ -12,7 +12,7 @@ async fn test_create_self_hosted_did_web() {
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
-        "password": "password",
+        "password": "Testpass123!",
         "didType": "web"
     });
     let res = client
@@ -139,7 +139,7 @@ async fn test_external_did_web_no_local_doc() {
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
-        "password": "password",
+        "password": "Testpass123!",
         "didType": "web-external",
         "did": did,
         "signingKey": signing_key
@@ -181,7 +181,7 @@ async fn test_plc_operations_blocked_for_did_web() {
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
-        "password": "password",
+        "password": "Testpass123!",
         "didType": "web"
     });
     let res = client
@@ -246,7 +246,7 @@ async fn test_get_recommended_did_credentials_no_rotation_keys_for_did_web() {
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
-        "password": "password",
+        "password": "Testpass123!",
         "didType": "web"
     });
     let res = client
@@ -295,7 +295,7 @@ async fn test_did_plc_still_works_with_did_type_param() {
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
-        "password": "password",
+        "password": "Testpass123!",
         "didType": "plc"
     });
     let res = client
@@ -324,7 +324,7 @@ async fn test_external_did_web_requires_did_field() {
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
-        "password": "password",
+        "password": "Testpass123!",
         "didType": "web-external"
     });
     let res = client

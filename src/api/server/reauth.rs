@@ -11,7 +11,7 @@ use sqlx::PgPool;
 use tracing::{error, info, warn};
 
 use crate::auth::BearerAuth;
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 
 const REAUTH_WINDOW_SECONDS: i64 = 300;
 
@@ -155,6 +155,21 @@ pub async fn reauth_totp(
     auth: BearerAuth,
     Json(input): Json<TotpReauthInput>,
 ) -> Response {
+    if !state
+        .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
+        .await
+    {
+        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many verification attempts. Please try again in a few minutes."
+            })),
+        )
+            .into_response();
+    }
+
     let valid =
         crate::api::server::totp::verify_totp_or_backup_for_user(&state, &auth.0.did, &input.code)
             .await;
@@ -352,14 +367,29 @@ pub async fn reauth_passkey_finish(
     };
 
     let cred_id_bytes = auth_result.cred_id().as_ref();
-    if let Err(e) = crate::auth::webauthn::update_passkey_counter(
+    match crate::auth::webauthn::update_passkey_counter(
         &state.db,
         cred_id_bytes,
         auth_result.counter(),
     )
     .await
     {
-        error!("Failed to update passkey counter: {:?}", e);
+        Ok(false) => {
+            warn!(did = %auth.0.did, "Passkey counter anomaly detected - possible cloned key");
+            let _ = crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "error": "PasskeyCounterAnomaly",
+                    "message": "Authentication failed: security key counter anomaly detected. This may indicate a cloned key."
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("Failed to update passkey counter: {:?}", e);
+        }
+        Ok(true) => {}
     }
 
     let _ = crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
@@ -383,7 +413,7 @@ pub async fn reauth_passkey_finish(
 async fn update_last_reauth(db: &PgPool, did: &str) -> Result<DateTime<Utc>, sqlx::Error> {
     let now = Utc::now();
     sqlx::query!(
-        "UPDATE session_tokens SET last_reauth_at = $1 WHERE did = $2",
+        "UPDATE session_tokens SET last_reauth_at = $1, mfa_verified = TRUE WHERE did = $2",
         now,
         did
     )
@@ -416,20 +446,6 @@ async fn get_available_reauth_methods(db: &PgPool, did: &str) -> Vec<String> {
     .unwrap_or(Some(false));
 
     if has_password == Some(true) {
-        methods.push("password".to_string());
-    }
-
-    let has_app_password = sqlx::query_scalar!(
-        "SELECT 1 as one FROM app_passwords ap JOIN users u ON ap.user_id = u.id WHERE u.did = $1 LIMIT 1",
-        did
-    )
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten()
-    .is_some();
-
-    if has_app_password && !methods.contains(&"password".to_string()) {
         methods.push("password".to_string());
     }
 
@@ -477,6 +493,57 @@ pub async fn reauth_required_response(db: &PgPool, did: &str) -> Response {
             message: "Re-authentication required for this action".to_string(),
             reauth_methods: methods,
         }),
+    )
+        .into_response()
+}
+
+pub async fn check_legacy_session_mfa(db: &PgPool, did: &str) -> bool {
+    let session = sqlx::query!(
+        "SELECT legacy_login, mfa_verified, last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
+        did
+    )
+    .fetch_optional(db)
+    .await;
+
+    match session {
+        Ok(Some(row)) => {
+            if !row.legacy_login {
+                return true;
+            }
+            if row.mfa_verified {
+                return true;
+            }
+            if let Some(last_reauth) = row.last_reauth_at {
+                let elapsed = chrono::Utc::now().signed_duration_since(last_reauth);
+                if elapsed.num_seconds() <= REAUTH_WINDOW_SECONDS {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => true,
+    }
+}
+
+pub async fn update_mfa_verified(db: &PgPool, did: &str) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        "UPDATE session_tokens SET mfa_verified = TRUE, last_reauth_at = NOW() WHERE did = $1",
+        did
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+pub async fn legacy_mfa_required_response(db: &PgPool, did: &str) -> Response {
+    let methods = get_available_reauth_methods(db, did).await;
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "error": "MfaVerificationRequired",
+            "message": "This sensitive operation requires MFA verification. Your session was created via a legacy app that doesn't support MFA during login.",
+            "reauthMethods": methods
+        })),
     )
         .into_response()
 }

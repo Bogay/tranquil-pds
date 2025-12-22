@@ -44,6 +44,11 @@
   let showRemovePasswordForm = $state(false)
   let removePasswordLoading = $state(false)
 
+  let allowLegacyLogin = $state(true)
+  let hasMfa = $state(false)
+  let legacyLoginLoading = $state(true)
+  let legacyLoginUpdating = $state(false)
+
   let showReauthModal = $state(false)
   let reauthMethods = $state<string[]>(['password'])
   let pendingAction = $state<(() => Promise<void>) | null>(null)
@@ -59,6 +64,7 @@
       loadTotpStatus()
       loadPasskeys()
       loadPasswordStatus()
+      loadLegacyLoginPreference()
     }
   })
 
@@ -72,6 +78,47 @@
       hasPassword = true
     } finally {
       passwordLoading = false
+    }
+  }
+
+  async function loadLegacyLoginPreference() {
+    if (!auth.session) return
+    legacyLoginLoading = true
+    try {
+      const pref = await api.getLegacyLoginPreference(auth.session.accessJwt)
+      allowLegacyLogin = pref.allowLegacyLogin
+      hasMfa = pref.hasMfa
+    } catch {
+      allowLegacyLogin = true
+      hasMfa = false
+    } finally {
+      legacyLoginLoading = false
+    }
+  }
+
+  async function handleToggleLegacyLogin() {
+    if (!auth.session) return
+    legacyLoginUpdating = true
+    try {
+      const result = await api.updateLegacyLoginPreference(auth.session.accessJwt, !allowLegacyLogin)
+      allowLegacyLogin = result.allowLegacyLogin
+      showMessage('success', allowLegacyLogin
+        ? 'Legacy app login enabled'
+        : 'Legacy app login disabled - only OAuth apps can sign in')
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.error === 'ReauthRequired' || e.error === 'MfaVerificationRequired') {
+          reauthMethods = e.reauthMethods || ['password']
+          pendingAction = handleToggleLegacyLogin
+          showReauthModal = true
+        } else {
+          showMessage('error', e.message)
+        }
+      } else {
+        showMessage('error', 'Failed to update preference')
+      }
+    } finally {
+      legacyLoginUpdating = false
     }
   }
 
@@ -572,9 +619,11 @@
                     <button type="button" class="small secondary" onclick={() => startEditPasskey(passkey)}>
                       Rename
                     </button>
-                    <button type="button" class="small danger-outline" onclick={() => handleDeletePasskey(passkey.id)}>
-                      Delete
-                    </button>
+                    {#if hasPassword || passkeys.length > 1}
+                      <button type="button" class="small danger-outline" onclick={() => handleDeletePasskey(passkey.id)}>
+                        Delete
+                      </button>
+                    {/if}
                   </div>
                 {/if}
               </div>
@@ -670,6 +719,63 @@
         Manage Trusted Devices &rarr;
       </a>
     </section>
+
+    {#if hasMfa}
+      <section>
+        <h2>App Compatibility</h2>
+        <p class="description">
+          Control whether apps that don't support modern authentication (like the official Bluesky app) can sign in to your account.
+        </p>
+
+        {#if legacyLoginLoading}
+          <div class="loading">Loading...</div>
+        {:else}
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <span class="toggle-label">Allow legacy app login</span>
+              <span class="toggle-description">
+                {#if allowLegacyLogin}
+                  Legacy apps can sign in with just your password, but sensitive actions (like changing your password) will require MFA verification.
+                {:else}
+                  Only OAuth-compatible apps can sign in. Legacy apps will be blocked.
+                {/if}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="toggle-button {allowLegacyLogin ? 'on' : 'off'}"
+              onclick={handleToggleLegacyLogin}
+              disabled={legacyLoginUpdating}
+            >
+              <span class="toggle-slider"></span>
+            </button>
+          </div>
+
+          {#if totpEnabled}
+            <div class="warning-box">
+              <strong>Important: Password changes in Bluesky app will fail</strong>
+              <p>
+                With TOTP enabled, changing your password from the Bluesky app (or other legacy apps) will be blocked.
+                To change your password, you have two options:
+              </p>
+              <ol>
+                <li><strong>Change it here:</strong> Use this website's <a href="#/settings">Settings page</a> where you can verify with your authenticator app.</li>
+                <li><strong>Verify your session first:</strong> Use the <a href="#/settings">re-authenticate option</a> to verify your Bluesky session with TOTP, then password changes will work temporarily.</li>
+              </ol>
+            </div>
+          {/if}
+
+          <div class="info-box-inline">
+            <strong>What are legacy apps?</strong>
+            <p>
+              Some apps (like the official Bluesky app) use older authentication that only requires your password.
+              When you have MFA enabled, these apps bypass your second factor.
+              Disabling legacy login forces all apps to use OAuth, which properly enforces MFA.
+            </p>
+          </div>
+        {/if}
+      </section>
+    {/if}
   {/if}
 </div>
 
@@ -1075,5 +1181,115 @@
 
   .info-box-inline li {
     margin-bottom: 0.25rem;
+  }
+
+  .info-box-inline p {
+    margin: 0;
+    color: var(--text-secondary);
+  }
+
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color-light);
+    border-radius: 6px;
+    margin-bottom: 1rem;
+  }
+
+  .toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .toggle-label {
+    font-weight: 500;
+  }
+
+  .toggle-description {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+
+  .toggle-button {
+    position: relative;
+    width: 50px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 13px;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+
+  .toggle-button.on {
+    background: var(--success-text);
+  }
+
+  .toggle-button.off {
+    background: var(--text-secondary);
+  }
+
+  .toggle-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .toggle-slider {
+    position: absolute;
+    top: 3px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: left 0.2s;
+  }
+
+  .toggle-button.on .toggle-slider {
+    left: 27px;
+  }
+
+  .toggle-button.off .toggle-slider {
+    left: 3px;
+  }
+
+  .warning-box {
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border, var(--border-color));
+    border-left: 4px solid var(--warning-text);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .warning-box strong {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--warning-text);
+  }
+
+  .warning-box p {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+  }
+
+  .warning-box ol {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.875rem;
+  }
+
+  .warning-box li {
+    margin-bottom: 0.5rem;
+  }
+
+  .warning-box a {
+    color: var(--accent);
   }
 </style>

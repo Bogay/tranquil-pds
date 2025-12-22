@@ -4,7 +4,7 @@ use crate::auth::totp::{
     generate_totp_secret, generate_totp_uri, hash_backup_code, is_backup_code_format,
     verify_backup_code, verify_totp_code,
 };
-use crate::state::AppState;
+use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
     extract::State,
@@ -149,6 +149,21 @@ pub async fn enable_totp(
     auth: BearerAuth,
     Json(input): Json<EnableTotpInput>,
 ) -> Response {
+    if !state
+        .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
+        .await
+    {
+        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many verification attempts. Please try again in a few minutes."
+            })),
+        )
+            .into_response();
+    }
+
     let totp_row = sqlx::query!(
         "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
         auth.0.did
@@ -309,6 +324,26 @@ pub async fn disable_totp(
     auth: BearerAuth,
     Json(input): Json<DisableTotpInput>,
 ) -> Response {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+            .await;
+    }
+
+    if !state
+        .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
+        .await
+    {
+        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many verification attempts. Please try again in a few minutes."
+            })),
+        )
+            .into_response();
+    }
+
     let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", auth.0.did)
         .fetch_optional(&state.db)
         .await;
@@ -516,6 +551,21 @@ pub async fn regenerate_backup_codes(
     auth: BearerAuth,
     Json(input): Json<RegenerateBackupCodesInput>,
 ) -> Response {
+    if !state
+        .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
+        .await
+    {
+        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many verification attempts. Please try again in a few minutes."
+            })),
+        )
+            .into_response();
+    }
+
     let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", auth.0.did)
         .fetch_optional(&state.db)
         .await;

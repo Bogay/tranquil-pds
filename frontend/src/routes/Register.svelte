@@ -28,12 +28,6 @@
   const auth = getAuthState()
 
   $effect(() => {
-    if (auth.session) {
-      navigate('/dashboard')
-    }
-  })
-
-  $effect(() => {
     if (!serverInfoLoaded) {
       serverInfoLoaded = true
       loadServerInfo()

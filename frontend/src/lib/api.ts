@@ -37,7 +37,7 @@ async function xrpc<T>(method: string, options?: {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown', message: res.statusText }))
-    throw new ApiError(res.status, err.error, err.message, err.did, err.reauth_methods)
+    throw new ApiError(res.status, err.error, err.message, err.did, err.reauthMethods)
   }
   return res.json()
 }
@@ -331,9 +331,23 @@ export const api = {
     return xrpc('com.tranquil.account.getPasswordStatus', { token })
   },
 
+  async getLegacyLoginPreference(token: string): Promise<{ allowLegacyLogin: boolean; hasMfa: boolean }> {
+    return xrpc('com.tranquil.account.getLegacyLoginPreference', { token })
+  },
+
+  async updateLegacyLoginPreference(token: string, allowLegacyLogin: boolean): Promise<{ allowLegacyLogin: boolean }> {
+    return xrpc('com.tranquil.account.updateLegacyLoginPreference', {
+      method: 'POST',
+      token,
+      body: { allowLegacyLogin },
+    })
+  },
+
   async listSessions(token: string): Promise<{
     sessions: Array<{
       id: string
+      sessionType: string
+      clientName: string | null
       createdAt: string
       expiresAt: string
       isCurrent: boolean
@@ -347,6 +361,13 @@ export const api = {
       method: 'POST',
       token,
       body: { sessionId },
+    })
+  },
+
+  async revokeAllSessions(token: string): Promise<{ revokedCount: number }> {
+    return xrpc('com.tranquil.account.revokeAllSessions', {
+      method: 'POST',
+      token,
     })
   },
 

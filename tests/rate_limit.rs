@@ -93,7 +93,7 @@ async fn test_account_creation_rate_limiting() {
         let payload = json!({
             "handle": format!("ratelimit_{}_{}", i, unique_id),
             "email": format!("ratelimit_{}_{}@example.com", i, unique_id),
-            "password": "testpassword123"
+            "password": "Testpass123!"
         });
         let res = client
             .post(&url)

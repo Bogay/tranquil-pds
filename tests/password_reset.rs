@@ -24,7 +24,7 @@ async fn test_request_password_reset_creates_code() {
     let payload = json!({
         "handle": handle,
         "email": email,
-        "password": "oldpassword"
+        "password": "Oldpass123!"
     });
     let res = client
         .post(format!(
@@ -83,8 +83,8 @@ async fn test_reset_password_with_valid_token() {
     let pool = get_pool().await;
     let handle = format!("pwreset2_{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
-    let old_password = "oldpassword";
-    let new_password = "newpassword123";
+    let old_password = "Oldpass123!";
+    let new_password = "Newpass456!";
     let payload = json!({
         "handle": handle,
         "email": email,
@@ -182,7 +182,7 @@ async fn test_reset_password_with_invalid_token() {
         ))
         .json(&json!({
             "token": "invalid-token",
-            "password": "newpassword"
+            "password": "Newpass123!"
         }))
         .send()
         .await
@@ -202,7 +202,7 @@ async fn test_reset_password_with_expired_token() {
     let payload = json!({
         "handle": handle,
         "email": email,
-        "password": "oldpassword"
+        "password": "Oldpass123!"
     });
     let res = client
         .post(format!(
@@ -246,7 +246,7 @@ async fn test_reset_password_with_expired_token() {
         ))
         .json(&json!({
             "token": token,
-            "password": "newpassword"
+            "password": "Newpass123!"
         }))
         .send()
         .await
@@ -266,7 +266,7 @@ async fn test_reset_password_invalidates_sessions() {
     let payload = json!({
         "handle": handle,
         "email": email,
-        "password": "oldpassword"
+        "password": "Oldpass123!"
     });
     let res = client
         .post(format!(
@@ -313,7 +313,7 @@ async fn test_reset_password_invalidates_sessions() {
         ))
         .json(&json!({
             "token": token,
-            "password": "newpassword123"
+            "password": "Newpass123!"
         }))
         .send()
         .await
@@ -356,7 +356,7 @@ async fn test_reset_password_creates_notification() {
     let payload = json!({
         "handle": handle,
         "email": email,
-        "password": "oldpassword"
+        "password": "Oldpass123!"
     });
     let res = client
         .post(format!(

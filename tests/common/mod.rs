@@ -418,7 +418,7 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
         let payload = json!({
             "handle": handle,
             "email": format!("{}@example.com", handle),
-            "password": "password"
+            "password": "Testpass123!"
         });
         let res = match client
             .post(format!(

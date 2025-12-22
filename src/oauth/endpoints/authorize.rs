@@ -39,7 +39,7 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
             for cookie in cookie_str.split(';') {
                 let cookie = cookie.trim();
                 if let Some(value) = cookie.strip_prefix(&format!("{}=", DEVICE_COOKIE_NAME)) {
-                    return Some(value.to_string());
+                    return crate::config::AuthConfig::get().verify_device_cookie(value);
                 }
             }
             None
@@ -69,9 +69,10 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
 }
 
 fn make_device_cookie(device_id: &str) -> String {
+    let signed_value = crate::config::AuthConfig::get().sign_device_cookie(device_id);
     format!(
         "{}={}; Path=/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000",
-        DEVICE_COOKIE_NAME, device_id
+        DEVICE_COOKIE_NAME, signed_value
     )
 }
 
@@ -1511,6 +1512,17 @@ pub async fn authorize_2fa_post(
             "No 2FA challenge found. Please start over.",
         );
     }
+    if !state
+        .check_rate_limit(RateLimitKind::TotpVerify, &did)
+        .await
+    {
+        tracing::warn!(did = %did, "TOTP verification rate limit exceeded");
+        return json_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "RateLimitExceeded",
+            "Too many verification attempts. Please try again in a few minutes.",
+        );
+    }
     let totp_valid =
         crate::api::server::verify_totp_or_backup_for_user(&state, &did, &form.code).await;
     if !totp_valid {
@@ -2067,15 +2079,30 @@ pub async fn passkey_finish(
         tracing::warn!(error = %e, "Failed to delete authentication state");
     }
 
-    if auth_result.needs_update()
-        && let Err(e) = crate::auth::webauthn::update_passkey_counter(
+    if auth_result.needs_update() {
+        match crate::auth::webauthn::update_passkey_counter(
             &state.db,
             auth_result.cred_id(),
             auth_result.counter(),
         )
         .await
-    {
-        tracing::warn!(error = %e, "Failed to update passkey counter");
+        {
+            Ok(false) => {
+                tracing::warn!(did = %did, "Passkey counter anomaly detected - possible cloned key");
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "error": "access_denied",
+                        "error_description": "Security key counter anomaly detected. This may indicate a cloned key."
+                    })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to update passkey counter");
+            }
+            Ok(true) => {}
+        }
     }
 
     tracing::info!(did = %did, "Passkey authentication successful");
@@ -2469,14 +2496,28 @@ pub async fn authorize_passkey_finish(
 
     let _ = crate::auth::webauthn::delete_authentication_state(&state.db, &did).await;
 
-    if let Err(e) = crate::auth::webauthn::update_passkey_counter(
+    match crate::auth::webauthn::update_passkey_counter(
         &state.db,
         credential.id.as_ref(),
         auth_result.counter(),
     )
     .await
     {
-        tracing::warn!("Failed to update passkey counter: {:?}", e);
+        Ok(false) => {
+            tracing::warn!(did = %did, "Passkey counter anomaly detected - possible cloned key");
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Security key counter anomaly detected. This may indicate a cloned key."
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::warn!("Failed to update passkey counter: {:?}", e);
+        }
+        Ok(true) => {}
     }
 
     let has_totp = crate::api::server::has_totp_enabled_db(&state.db, &did).await;

@@ -29,6 +29,7 @@ pub struct RateLimiters {
     pub oauth_introspect: Arc<KeyedRateLimiter>,
     pub app_password: Arc<KeyedRateLimiter>,
     pub email_update: Arc<KeyedRateLimiter>,
+    pub totp_verify: Arc<KeyedRateLimiter>,
 }
 
 impl Default for RateLimiters {
@@ -73,6 +74,10 @@ impl RateLimiters {
             email_update: Arc::new(RateLimiter::keyed(Quota::per_hour(
                 NonZeroU32::new(5).unwrap(),
             ))),
+            totp_verify: Arc::new(RateLimiter::keyed(Quota::with_period(std::time::Duration::from_secs(60))
+                .unwrap()
+                .allow_burst(NonZeroU32::new(5).unwrap()),
+            )),
         }
     }
 

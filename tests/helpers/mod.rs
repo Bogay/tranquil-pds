@@ -10,7 +10,7 @@ pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("{}-{}.test", handle_prefix, ts);
     let email = format!("{}-{}@test.com", handle_prefix, ts);
-    let password = "e2e-password-123";
+    let password = "E2epass123!";
     let create_account_payload = json!({
         "handle": handle,
         "email": email,

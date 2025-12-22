@@ -26,7 +26,7 @@ async fn create_verified_account(
         .json(&json!({
             "handle": handle,
             "email": email,
-            "password": "password"
+            "password": "Testpass123!"
         }))
         .send()
         .await

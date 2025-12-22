@@ -183,7 +183,7 @@ async fn test_create_account_with_reserved_signing_key() {
         .json(&json!({
             "handle": handle,
             "email": format!("{}@example.com", handle),
-            "password": "password",
+            "password": "Testpass123!",
             "signingKey": signing_key
         }))
         .send()
@@ -221,7 +221,7 @@ async fn test_create_account_with_invalid_signing_key() {
         .json(&json!({
             "handle": handle,
             "email": format!("{}@example.com", handle),
-            "password": "password",
+            "password": "Testpass123!",
             "signingKey": "did:key:zNonExistentKey12345"
         }))
         .send()
@@ -257,7 +257,7 @@ async fn test_create_account_cannot_reuse_signing_key() {
         .json(&json!({
             "handle": handle1,
             "email": format!("{}@example.com", handle1),
-            "password": "password",
+            "password": "Testpass123!",
             "signingKey": signing_key
         }))
         .send()
@@ -273,7 +273,7 @@ async fn test_create_account_cannot_reuse_signing_key() {
         .json(&json!({
             "handle": handle2,
             "email": format!("{}@example.com", handle2),
-            "password": "password",
+            "password": "Testpass123!",
             "signingKey": signing_key
         }))
         .send()
@@ -310,7 +310,7 @@ async fn test_reserved_key_tokens_work() {
         .json(&json!({
             "handle": handle,
             "email": format!("{}@example.com", handle),
-            "password": "password",
+            "password": "Testpass123!",
             "signingKey": signing_key
         }))
         .send()

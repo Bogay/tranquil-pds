@@ -33,6 +33,7 @@ pub enum CommsType {
     PlcOperation,
     TwoFactorCode,
     PasskeyRecovery,
+    LegacyLoginAlert,
 }
 
 #[derive(Debug, Clone, FromRow)]

@@ -409,6 +409,74 @@ pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError>
     Ok(())
 }
 
+#[derive(Debug)]
+pub struct PasswordValidationError {
+    pub errors: Vec<String>,
+}
+
+impl std::fmt::Display for PasswordValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.errors.join("; "))
+    }
+}
+
+impl std::error::Error for PasswordValidationError {}
+
+pub fn validate_password(password: &str) -> Result<(), PasswordValidationError> {
+    let mut errors = Vec::new();
+
+    if password.len() < 8 {
+        errors.push("Password must be at least 8 characters".to_string());
+    }
+
+    if password.len() > 256 {
+        errors.push("Password must be at most 256 characters".to_string());
+    }
+
+    if !password.chars().any(|c| c.is_ascii_lowercase()) {
+        errors.push("Password must contain at least one lowercase letter".to_string());
+    }
+
+    if !password.chars().any(|c| c.is_ascii_uppercase()) {
+        errors.push("Password must contain at least one uppercase letter".to_string());
+    }
+
+    if !password.chars().any(|c| c.is_ascii_digit()) {
+        errors.push("Password must contain at least one number".to_string());
+    }
+
+    if is_common_password(password) {
+        errors.push("Password is too common, please choose a different one".to_string());
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(PasswordValidationError { errors })
+    }
+}
+
+fn is_common_password(password: &str) -> bool {
+    const COMMON_PASSWORDS: &[&str] = &[
+        "password", "Password1", "Password123", "Passw0rd", "Passw0rd!",
+        "12345678", "123456789", "1234567890",
+        "qwerty123", "Qwerty123", "qwertyui", "Qwertyui",
+        "letmein1", "Letmein1", "welcome1", "Welcome1",
+        "admin123", "Admin123", "password1", "Password1!",
+        "iloveyou", "Iloveyou1", "monkey123", "Monkey123",
+        "dragon12", "Dragon123", "master12", "Master123",
+        "login123", "Login123", "abc12345", "Abc12345",
+        "football", "Football1", "baseball", "Baseball1",
+        "trustno1", "Trustno1", "sunshine", "Sunshine1",
+        "princess", "Princess1", "computer", "Computer1",
+        "whatever", "Whatever1", "nintendo", "Nintendo1",
+        "bluesky1", "Bluesky1", "Bluesky123",
+    ];
+
+    let lower = password.to_lowercase();
+    COMMON_PASSWORDS.iter().any(|p| p.to_lowercase() == lower)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

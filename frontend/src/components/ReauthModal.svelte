@@ -29,6 +29,9 @@
         activeMethod = 'totp'
       } else if (availableMethods.includes('passkey')) {
         activeMethod = 'passkey'
+        if (availableMethods.length === 1) {
+          handlePasskeyAuth()
+        }
       }
     }
   })

@@ -11,8 +11,8 @@ async fn test_change_password_success() {
     let ts = chrono::Utc::now().timestamp_millis();
     let handle = format!("change-pw-{}.test", ts);
     let email = format!("change-pw-{}@test.com", ts);
-    let old_password = "old-password-123";
-    let new_password = "new-password-456";
+    let old_password = "Oldpass123!";
+    let new_password = "Newpass456!";
     let create_payload = json!({
         "handle": handle,
         "email": email,
@@ -92,8 +92,8 @@ async fn test_change_password_wrong_current() {
         ))
         .bearer_auth(&jwt)
         .json(&json!({
-            "currentPassword": "wrong-password",
-            "newPassword": "new-password-123"
+            "currentPassword": "Wrongpass999!",
+            "newPassword": "Newpass123!"
         }))
         .send()
         .await
@@ -109,7 +109,7 @@ async fn test_change_password_too_short() {
     let ts = chrono::Utc::now().timestamp_millis();
     let handle = format!("change-pw-short-{}.test", ts);
     let email = format!("change-pw-short-{}@test.com", ts);
-    let password = "correct-password";
+    let password = "Correct123!";
     let create_payload = json!({
         "handle": handle,
         "email": email,
@@ -158,7 +158,7 @@ async fn test_change_password_empty_current() {
         .bearer_auth(&jwt)
         .json(&json!({
             "currentPassword": "",
-            "newPassword": "new-password-123"
+            "newPassword": "Newpass123!"
         }))
         .send()
         .await
@@ -177,7 +177,7 @@ async fn test_change_password_empty_new() {
         ))
         .bearer_auth(&jwt)
         .json(&json!({
-            "currentPassword": "e2e-password-123",
+            "currentPassword": "E2epass123!",
             "newPassword": ""
         }))
         .send()
@@ -195,8 +195,8 @@ async fn test_change_password_requires_auth() {
             base_url().await
         ))
         .json(&json!({
-            "currentPassword": "old",
-            "newPassword": "new-password-123"
+            "currentPassword": "Oldpass123!",
+            "newPassword": "Newpass123!"
         }))
         .send()
         .await

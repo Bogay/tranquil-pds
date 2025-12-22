@@ -44,7 +44,7 @@ async fn get_oauth_tokens(http_client: &reqwest::Client, url: &str) -> (String, 
     let ts = Utc::now().timestamp_millis();
     let handle = format!("sec-test-{}", ts);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "security-test-password" }))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Security123!" }))
         .send().await.unwrap();
     let account: Value = create_res.json().await.unwrap();
     let did = account["did"].as_str().unwrap();
@@ -72,7 +72,7 @@ async fn get_oauth_tokens(http_client: &reqwest::Client, url: &str) -> (String, 
     let auth_res = http_client.post(format!("{}/oauth/authorize", url))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .json(&json!({"request_uri": request_uri, "username": &handle, "password": "security-test-password", "remember_device": false}))
+        .json(&json!({"request_uri": request_uri, "username": &handle, "password": "Security123!", "remember_device": false}))
         .send().await.unwrap();
     let auth_body: Value = auth_res.json().await.unwrap();
     let mut location = auth_body["redirect_uri"].as_str().unwrap().to_string();
@@ -258,7 +258,7 @@ async fn test_pkce_security() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("pkce-attack-{}", ts);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "pkce-password" }))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Pkce123pass!" }))
         .send().await.unwrap();
     let account: Value = create_res.json().await.unwrap();
     verify_new_account(&http_client, account["did"].as_str().unwrap()).await;
@@ -283,7 +283,7 @@ async fn test_pkce_security() {
     let auth_res = http_client.post(format!("{}/oauth/authorize", url))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .json(&json!({"request_uri": request_uri, "username": &handle, "password": "pkce-password", "remember_device": false}))
+        .json(&json!({"request_uri": request_uri, "username": &handle, "password": "Pkce123pass!", "remember_device": false}))
         .send().await.unwrap();
     assert_eq!(auth_res.status(), StatusCode::OK);
     let auth_body: Value = auth_res.json().await.unwrap();
@@ -329,7 +329,7 @@ async fn test_replay_attacks() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("replay-{}", ts);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "replay-password" }))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Replay123pass!" }))
         .send().await.unwrap();
     let account: Value = create_res.json().await.unwrap();
     verify_new_account(&http_client, account["did"].as_str().unwrap()).await;
@@ -356,7 +356,7 @@ async fn test_replay_attacks() {
     let auth_res = http_client.post(format!("{}/oauth/authorize", url))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .json(&json!({"request_uri": request_uri, "username": &handle, "password": "replay-password", "remember_device": false}))
+        .json(&json!({"request_uri": request_uri, "username": &handle, "password": "Replay123pass!", "remember_device": false}))
         .send().await.unwrap();
     assert_eq!(auth_res.status(), StatusCode::OK);
     let auth_body: Value = auth_res.json().await.unwrap();
@@ -495,7 +495,7 @@ async fn test_oauth_security_boundaries() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("deact-{}", ts);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "deact-password" }))
+        .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Deact123pass!" }))
         .send().await.unwrap();
     let account: Value = create_res.json().await.unwrap();
     let access_jwt = verify_new_account(&http_client, account["did"].as_str().unwrap()).await;
@@ -524,7 +524,7 @@ async fn test_oauth_security_boundaries() {
     let auth_res = http_client.post(format!("{}/oauth/authorize", url))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .json(&json!({"request_uri": deact_par["request_uri"].as_str().unwrap(), "username": &handle, "password": "deact-password", "remember_device": false}))
+        .json(&json!({"request_uri": deact_par["request_uri"].as_str().unwrap(), "username": &handle, "password": "Deact123pass!", "remember_device": false}))
         .send().await.unwrap();
     assert_eq!(
         auth_res.status(),
@@ -539,7 +539,7 @@ async fn test_oauth_security_boundaries() {
     let ts2 = Utc::now().timestamp_millis();
     let handle2 = format!("cross-{}", ts2);
     let create_res2 = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({ "handle": handle2, "email": format!("{}@example.com", handle2), "password": "cross-password" }))
+        .json(&json!({ "handle": handle2, "email": format!("{}@example.com", handle2), "password": "Cross123pass!" }))
         .send().await.unwrap();
     let account2: Value = create_res2.json().await.unwrap();
     verify_new_account(&http_client, account2["did"].as_str().unwrap()).await;
@@ -563,7 +563,7 @@ async fn test_oauth_security_boundaries() {
     let auth_a = http_client.post(format!("{}/oauth/authorize", url))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .json(&json!({"request_uri": request_uri_a, "username": &handle2, "password": "cross-password", "remember_device": false}))
+        .json(&json!({"request_uri": request_uri_a, "username": &handle2, "password": "Cross123pass!", "remember_device": false}))
         .send().await.unwrap();
     assert_eq!(auth_a.status(), StatusCode::OK);
     let auth_body_a: Value = auth_a.json().await.unwrap();

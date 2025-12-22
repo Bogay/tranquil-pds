@@ -36,7 +36,7 @@ async fn test_session_lifecycle_multiple_sessions() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("multi-session-{}.test", ts);
     let email = format!("multi-session-{}@test.com", ts);
-    let password = "multi-session-pw";
+    let password = "Multisession123!";
     let create_payload = json!({
         "handle": handle,
         "email": email,
@@ -112,7 +112,7 @@ async fn test_session_lifecycle_refresh_invalidates_old() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("refresh-inv-{}.test", ts);
     let email = format!("refresh-inv-{}@test.com", ts);
-    let password = "refresh-inv-pw";
+    let password = "Refresh123inv!";
     let create_payload = json!({
         "handle": handle,
         "email": email,
@@ -180,7 +180,7 @@ async fn test_app_password_lifecycle() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("apppass-{}.test", ts);
     let email = format!("apppass-{}@test.com", ts);
-    let password = "apppass-password";
+    let password = "Apppass123!";
     let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
@@ -291,7 +291,7 @@ async fn test_account_deactivation_lifecycle() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("deactivate-{}.test", ts);
     let email = format!("deactivate-{}@test.com", ts);
-    let password = "deactivate-password";
+    let password = "Deactivate123!";
     let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",

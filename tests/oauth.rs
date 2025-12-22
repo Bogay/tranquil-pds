@@ -194,7 +194,7 @@ async fn test_full_oauth_flow() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("oauth-test-{}", ts);
     let email = format!("oauth-test-{}@example.com", ts);
-    let password = "oauth-test-password";
+    let password = "Oauthtest123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": password }))
@@ -354,7 +354,7 @@ async fn test_oauth_error_cases() {
     let email = format!("wrong-creds-{}@example.com", ts);
     http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({ "handle": handle, "email": email, "password": "correct-password" }))
+        .json(&json!({ "handle": handle, "email": email, "password": "Correct123!" }))
         .send()
         .await
         .unwrap();
@@ -438,7 +438,7 @@ async fn test_oauth_2fa_flow() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("2fa-test-{}", ts);
     let email = format!("2fa-test-{}@example.com", ts);
-    let password = "2fa-test-password";
+    let password = "Twofa123test!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": password }))
@@ -565,7 +565,7 @@ async fn test_oauth_2fa_lockout() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("2fa-lockout-{}", ts);
     let email = format!("2fa-lockout-{}@example.com", ts);
-    let password = "2fa-test-password";
+    let password = "Twofa123test!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": password }))
@@ -662,7 +662,7 @@ async fn test_account_selector_with_2fa() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("selector-2fa-{}", ts);
     let email = format!("selector-2fa-{}@example.com", ts);
-    let password = "selector-2fa-password";
+    let password = "Selector2fa123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": password }))
@@ -853,7 +853,7 @@ async fn test_oauth_state_encoding() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("state-special-{}", ts);
     let email = format!("state-special-{}@example.com", ts);
-    let password = "state-special-password";
+    let password = "State123special!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": password }))
@@ -932,7 +932,7 @@ async fn get_oauth_token_with_scope(scope: &str) -> (String, String, String) {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("scope-test-{}", ts);
     let email = format!("scope-test-{}@example.com", ts);
-    let password = "scope-test-password";
+    let password = "Scopetest123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": password }))

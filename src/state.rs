@@ -35,6 +35,7 @@ pub enum RateLimitKind {
     OAuthIntrospect,
     AppPassword,
     EmailUpdate,
+    TotpVerify,
 }
 
 impl RateLimitKind {
@@ -51,6 +52,7 @@ impl RateLimitKind {
             Self::OAuthIntrospect => "oauth_introspect",
             Self::AppPassword => "app_password",
             Self::EmailUpdate => "email_update",
+            Self::TotpVerify => "totp_verify",
         }
     }
 
@@ -67,6 +69,7 @@ impl RateLimitKind {
             Self::OAuthIntrospect => (30, 60_000),
             Self::AppPassword => (10, 60_000),
             Self::EmailUpdate => (5, 3_600_000),
+            Self::TotpVerify => (5, 300_000),
         }
     }
 }
@@ -142,6 +145,7 @@ impl AppState {
             RateLimitKind::OAuthIntrospect => &self.rate_limiters.oauth_introspect,
             RateLimitKind::AppPassword => &self.rate_limiters.app_password,
             RateLimitKind::EmailUpdate => &self.rate_limiters.email_update,
+            RateLimitKind::TotpVerify => &self.rate_limiters.totp_verify,
         };
 
         let ok = limiter.check_key(&client_ip.to_string()).is_ok();

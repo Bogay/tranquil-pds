@@ -1,5 +1,6 @@
 use crate::auth::BearerAuth;
 use crate::state::{AppState, RateLimitKind};
+use crate::validation::validate_password;
 use axum::{
     Json,
     extract::State,
@@ -161,6 +162,16 @@ pub async fn reset_password(
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidRequest", "message": "password is required"})),
+        )
+            .into_response();
+    }
+    if let Err(e) = validate_password(password) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "InvalidPassword",
+                "message": e.to_string()
+            })),
         )
             .into_response();
     }
@@ -326,6 +337,11 @@ pub async fn change_password(
     auth: BearerAuth,
     Json(input): Json<ChangePasswordInput>,
 ) -> Response {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+            .await;
+    }
+
     let current_password = &input.current_password;
     let new_password = &input.new_password;
     if current_password.is_empty() {
@@ -342,10 +358,13 @@ pub async fn change_password(
         )
             .into_response();
     }
-    if new_password.len() < 8 {
+    if let Err(e) = validate_password(new_password) {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Password must be at least 8 characters"})),
+            Json(json!({
+                "error": "InvalidPassword",
+                "message": e.to_string()
+            })),
         )
             .into_response();
     }
@@ -447,6 +466,11 @@ pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth
 }
 
 pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) -> Response {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+            .await;
+    }
+
     if crate::api::server::reauth::check_reauth_required(&state.db, &auth.0.did).await {
         return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
     }

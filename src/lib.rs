@@ -60,6 +60,10 @@ pub fn app(state: AppState) -> Router {
             post(api::server::revoke_session),
         )
         .route(
+            "/xrpc/com.tranquil.account.revokeAllSessions",
+            post(api::server::revoke_all_sessions),
+        )
+        .route(
             "/xrpc/com.atproto.server.deleteSession",
             post(api::server::delete_session),
         )
@@ -229,6 +233,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.tranquil.account.reauthPasskeyFinish",
             post(api::server::reauth_passkey_finish),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.getLegacyLoginPreference",
+            get(api::server::get_legacy_login_preference),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.updateLegacyLoginPreference",
+            post(api::server::update_legacy_login_preference),
         )
         .route(
             "/xrpc/com.tranquil.account.listTrustedDevices",

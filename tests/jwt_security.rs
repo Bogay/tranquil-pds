@@ -675,7 +675,7 @@ async fn test_refresh_token_replay_protection() {
 
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
-        .json(&json!({ "handle": handle, "email": email, "password": "test-password-123" }))
+        .json(&json!({ "handle": handle, "email": email, "password": "Testpass123!" }))
         .send()
         .await
         .unwrap();

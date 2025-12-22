@@ -57,7 +57,7 @@ async fn create_user_and_oauth_session(
     let ts = Utc::now().timestamp_millis();
     let handle = format!("{}-{}", handle_prefix, ts);
     let email = format!("{}-{}@example.com", handle_prefix, ts);
-    let password = format!("{}-password", handle_prefix);
+    let password = format!("{}Pass123!", handle_prefix);
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({
@@ -577,7 +577,7 @@ async fn test_oauth_multiple_clients_same_user() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("multi-client-{}", ts);
     let email = format!("multi-client-{}@example.com", ts);
-    let password = "multi-client-password";
+    let password = "MultiClient123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({

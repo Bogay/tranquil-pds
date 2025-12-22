@@ -9,21 +9,6 @@ So like... make the thing unique, make it cool.
 - [ ] Unique "brand" style both unauthed and authed
 - [ ] Better documentation on how to sub out the entire frontend for whatever the users want
 
-### Passkeys and 2FA
-Modern passwordless authentication using WebAuthn/FIDO2, plus TOTP for defense in depth.
-
-- [x] passkeys table (id, did, credential_id, public_key, sign_count, created_at, last_used, friendly_name)
-- [x] user_totp table (did, secret_encrypted, verified, created_at, last_used)
-- [x] WebAuthn registration challenge generation and attestation verification
-- [x] TOTP secret generation with QR code setup flow
-- [x] Backup codes (hashed, one-time use) with recovery flow
-- [x] OAuth authorize flow: password -> 2FA (if enabled) -> passkey (as alternative)
-- [ ] Passkey-only account creation (no password)
-- [x] Settings UI for managing passkeys, TOTP, backup codes
-- [ ] Trusted devices option (remember this browser)
-- [x] Rate limit 2FA attempts
-- [ ] Re-auth for sensitive actions (email change, adding new auth methods)
-
 ### Delegated accounts
 Accounts controlled by other accounts rather than having their own password. When logging in as a delegated account, OAuth asks you to authenticate with a linked controller account. Uses OAuth scopes as the permission model.
 
@@ -103,3 +88,5 @@ Infrastructure: Sequencer with cursor replay, postgres repo storage with atomic 
 Web UI: OAuth login, registration, email verification, password reset, multi-account selector, dashboard, sessions, app passwords, invites, notification preferences, repo browser, CAR export, admin panel, OAuth consent screen with scope selection.
 
 Auth: ES256K + HS256 dual support, JTI-only token storage, refresh token family tracking, encrypted signing keys (AES-256-GCM), DPoP replay protection, constant-time comparisons.
+
+Passkeys and 2FA: WebAuthn/FIDO2 passkey registration and authentication, TOTP with QR setup, backup codes (hashed, one-time use), passkey-only account creation, trusted devices (remember this browser), re-auth for sensitive actions, rate-limited 2FA attempts, settings UI for managing all auth methods.

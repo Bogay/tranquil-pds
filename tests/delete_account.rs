@@ -49,7 +49,7 @@ async fn test_delete_account_full_flow() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("delete-test-{}.test", ts);
     let email = format!("delete-test-{}@test.com", ts);
-    let password = "delete-password-123";
+    let password = "Delete123pass!";
     let (did, jwt) = create_verified_account(&client, &base_url, &handle, &email, password).await;
     let request_delete_res = client
         .post(format!(
@@ -106,7 +106,7 @@ async fn test_delete_account_wrong_password() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("delete-wrongpw-{}.test", ts);
     let email = format!("delete-wrongpw-{}@test.com", ts);
-    let password = "correct-password";
+    let password = "Correct123!";
     let (did, jwt) = create_verified_account(&client, &base_url, &handle, &email, password).await;
     let request_delete_res = client
         .post(format!(
@@ -153,7 +153,7 @@ async fn test_delete_account_invalid_token() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("delete-badtoken-{}.test", ts);
     let email = format!("delete-badtoken-{}@test.com", ts);
-    let password = "delete-password";
+    let password = "Delete123!";
     let create_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
@@ -196,7 +196,7 @@ async fn test_delete_account_expired_token() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("delete-expired-{}.test", ts);
     let email = format!("delete-expired-{}@test.com", ts);
-    let password = "delete-password";
+    let password = "Delete123!";
     let (did, jwt) = create_verified_account(&client, &base_url, &handle, &email, password).await;
     let request_delete_res = client
         .post(format!(
@@ -250,12 +250,12 @@ async fn test_delete_account_token_mismatch() {
     let ts = Utc::now().timestamp_millis();
     let handle1 = format!("delete-user1-{}.test", ts);
     let email1 = format!("delete-user1-{}@test.com", ts);
-    let password1 = "user1-password";
+    let password1 = "User1pass123!";
     let (did1, jwt1) =
         create_verified_account(&client, &base_url, &handle1, &email1, password1).await;
     let handle2 = format!("delete-user2-{}.test", ts);
     let email2 = format!("delete-user2-{}@test.com", ts);
-    let password2 = "user2-password";
+    let password2 = "User2pass123!";
     let (did2, _) = create_verified_account(&client, &base_url, &handle2, &email2, password2).await;
     let request_delete_res = client
         .post(format!(
@@ -302,7 +302,7 @@ async fn test_delete_account_with_app_password() {
     let ts = Utc::now().timestamp_millis();
     let handle = format!("delete-apppw-{}.test", ts);
     let email = format!("delete-apppw-{}@test.com", ts);
-    let main_password = "main-password-123";
+    let main_password = "Mainpass123!";
     let (did, jwt) =
         create_verified_account(&client, &base_url, &handle, &email, main_password).await;
     let app_password_res = client

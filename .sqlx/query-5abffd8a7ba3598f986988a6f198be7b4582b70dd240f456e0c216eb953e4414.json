@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n            u.allow_legacy_login,\n            (EXISTS(SELECT 1 FROM user_totp t WHERE t.did = u.did AND t.verified = TRUE) OR\n             EXISTS(SELECT 1 FROM passkeys p WHERE p.did = u.did)) as \"has_mfa!\"\n        FROM users u WHERE u.did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "allow_legacy_login",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "has_mfa!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "5abffd8a7ba3598f986988a6f198be7b4582b70dd240f456e0c216eb953e4414"
+}

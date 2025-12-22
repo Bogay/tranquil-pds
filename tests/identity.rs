@@ -12,7 +12,7 @@ async fn test_resolve_handle_success() {
     let payload = json!({
         "handle": short_handle,
         "email": format!("{}@example.com", short_handle),
-        "password": "password"
+        "password": "Testpass123!"
     });
     let res = client
         .post(format!(
@@ -142,7 +142,7 @@ async fn test_create_did_web_account_and_resolve() {
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
-        "password": "password",
+        "password": "Testpass123!",
         "did": did,
         "signingKey": signing_key
     });
@@ -188,7 +188,7 @@ async fn test_create_account_duplicate_handle() {
     let payload = json!({
         "handle": handle,
         "email": email,
-        "password": "password"
+        "password": "Testpass123!"
     });
     let res = client
         .post(format!(
@@ -266,7 +266,7 @@ async fn test_did_web_lifecycle() {
     let create_payload = json!({
         "handle": handle,
         "email": email,
-        "password": "password",
+        "password": "Testpass123!",
         "did": did,
         "signingKey": signing_key
     });

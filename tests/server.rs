@@ -27,7 +27,7 @@ async fn test_account_and_session_lifecycle() {
     let client = client();
     let base = base_url().await;
     let handle = format!("user_{}", uuid::Uuid::new_v4());
-    let payload = json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "password" });
+    let payload = json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Testpass123!" });
     let create_res = client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
@@ -40,7 +40,7 @@ async fn test_account_and_session_lifecycle() {
     let _ = verify_new_account(&client, did).await;
     let login = client
         .post(format!("{}/xrpc/com.atproto.server.createSession", base))
-        .json(&json!({ "identifier": handle, "password": "password" }))
+        .json(&json!({ "identifier": handle, "password": "Testpass123!" }))
         .send()
         .await
         .unwrap();
@@ -61,7 +61,7 @@ async fn test_account_and_session_lifecycle() {
     assert_ne!(refresh_body["refreshJwt"].as_str().unwrap(), refresh_jwt);
     let missing_id = client
         .post(format!("{}/xrpc/com.atproto.server.createSession", base))
-        .json(&json!({ "password": "password" }))
+        .json(&json!({ "password": "Testpass123!" }))
         .send()
         .await
         .unwrap();
@@ -70,7 +70,7 @@ async fn test_account_and_session_lifecycle() {
             || missing_id.status() == StatusCode::UNPROCESSABLE_ENTITY
     );
     let invalid_handle = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base))
-        .json(&json!({ "handle": "invalid!handle.com", "email": "test@example.com", "password": "password" }))
+        .json(&json!({ "handle": "invalid!handle.com", "email": "test@example.com", "password": "Testpass123!" }))
         .send().await.unwrap();
     assert_eq!(invalid_handle.status(), StatusCode::BAD_REQUEST);
     let unauth_session = client

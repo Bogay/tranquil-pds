@@ -63,7 +63,7 @@ async fn test_search_accounts_with_handle_filter() {
     let create_payload = serde_json::json!({
         "handle": unique_handle,
         "email": format!("unique-{}@searchtest.com", ts),
-        "password": "test-password-123"
+        "password": "Testpass123!"
     });
     let create_res = client
         .post(format!(

@@ -527,3 +527,41 @@ pub async fn enqueue_signup_verification(
     )
     .await
 }
+
+pub async fn queue_legacy_login_notification(
+    db: &PgPool,
+    user_id: Uuid,
+    hostname: &str,
+    client_ip: &str,
+    channel: CommsChannel,
+) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_comms_prefs(db, user_id).await?;
+    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let body = format!(
+        "Hello @{},\n\n\
+        A login to your account was detected using a legacy app (like Bluesky) that doesn't support TOTP verification.\n\n\
+        Details:\n\
+        - Time: {}\n\
+        - IP Address: {}\n\n\
+        Your TOTP protection was bypassed for this login. The session has limited permissions for sensitive operations.\n\n\
+        If this wasn't you, please:\n\
+        1. Change your password immediately\n\
+        2. Review your active sessions\n\
+        3. Consider disabling legacy app logins in your security settings\n\n\
+        Stay safe,\n\
+        {}",
+        prefs.handle, timestamp, client_ip, hostname
+    );
+    enqueue_comms(
+        db,
+        NewComms::new(
+            user_id,
+            channel,
+            super::types::CommsType::LegacyLoginAlert,
+            prefs.email.clone().unwrap_or_default(),
+            Some(format!("Security Alert: Legacy Login Detected - {}", hostname)),
+            body,
+        ),
+    )
+    .await
+}

@@ -2,6 +2,7 @@ use super::did::verify_did_web;
 use crate::auth::{ServiceTokenVerifier, extract_bearer_token_from_header, is_service_token};
 use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::state::{AppState, RateLimitKind};
+use crate::validation::validate_password;
 use axum::{
     Json,
     extract::State,
@@ -124,19 +125,20 @@ pub async fn create_account(
             .unwrap_or(false);
 
     if is_migration {
-        let migration_did = input.did.as_ref().unwrap();
-        let auth_did = migration_auth.as_ref().unwrap();
-        if migration_did != auth_did {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "error": "AuthorizationError",
-                    "message": format!("Service token issuer {} does not match DID {}", auth_did, migration_did)
-                })),
-            )
-                .into_response();
+        if let (Some(migration_did), Some(auth_did)) = (input.did.as_ref(), migration_auth.as_ref())
+        {
+            if migration_did != auth_did {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "AuthorizationError",
+                        "message": format!("Service token issuer {} does not match DID {}", auth_did, migration_did)
+                    })),
+                )
+                    .into_response();
+            }
+            info!(did = %migration_did, "Processing account migration");
         }
-        info!(did = %migration_did, "Processing account migration");
     }
 
     let hostname_for_validation =
@@ -670,6 +672,17 @@ pub async fn create_account(
             }
         }
     }
+    if let Err(e) = validate_password(&input.password) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "InvalidPassword",
+                "message": e.to_string()
+            })),
+        )
+            .into_response();
+    }
+
     let password_hash = match hash(&input.password, DEFAULT_COST) {
         Ok(h) => h,
         Err(e) => {

@@ -16,6 +16,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::state::{AppState, RateLimitKind};
+use crate::validation::validate_password;
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
@@ -1108,10 +1109,13 @@ pub async fn recover_passkey_account(
     State(state): State<AppState>,
     Json(input): Json<RecoverPasskeyAccountInput>,
 ) -> Response {
-    if input.new_password.len() < 8 {
+    if let Err(e) = validate_password(&input.new_password) {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "WeakPassword", "message": "Password must be at least 8 characters"})),
+            Json(json!({
+                "error": "InvalidPassword",
+                "message": e.to_string()
+            })),
         )
             .into_response();
     }
