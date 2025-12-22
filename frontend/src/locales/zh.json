@@ -306,6 +306,8 @@
     "legacyLoginDescription": "允许使用用户名/密码直接登录（传统模式）。禁用后必须使用 OAuth + 双重验证。",
     "legacyLoginOn": "传统登录已启用",
     "legacyLoginOff": "传统登录已禁用",
+    "enableLegacyLogin": "启用传统登录",
+    "disableLegacyLogin": "禁用传统登录",
     "legacyLoginWarning": "警告：启用传统登录会绕过双重身份验证。仅在需要兼容旧版应用时启用。",
     "totpPasswordWarning": "启用 TOTP 后，将无法从 Bluesky 应用（或其他旧版应用）更改密码。要更改密码，您有两个选择：",
     "totpPasswordOption1Label": "在这里更改：",

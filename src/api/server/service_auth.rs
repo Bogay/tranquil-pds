@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::error;
+use tracing::{error, info, warn};
 
 const HOUR_SECS: i64 = 3600;
 const MINUTE_SECS: i64 = 60;
@@ -49,24 +49,125 @@ pub async fn get_service_auth(
     headers: axum::http::HeaderMap,
     Query(params): Query<GetServiceAuthParams>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
+    let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    info!(
+        has_auth_header = auth_header.is_some(),
+        has_dpop_proof = dpop_proof.is_some(),
+        aud = %params.aud,
+        lxm = ?params.lxm,
+        "getServiceAuth called"
+    );
+    let auth_header = match auth_header {
+        Some(h) => h.trim(),
+        None => {
+            warn!("getServiceAuth: no Authorization header");
+            return ApiError::AuthenticationRequired.into_response();
+        }
     };
-    let auth_user =
+
+    let (token, is_dpop) = if auth_header.len() >= 7 && auth_header[..7].eq_ignore_ascii_case("bearer ") {
+        (auth_header[7..].trim().to_string(), false)
+    } else if auth_header.len() >= 5 && auth_header[..5].eq_ignore_ascii_case("dpop ") {
+        (auth_header[5..].trim().to_string(), true)
+    } else {
+        warn!(auth_scheme = ?auth_header.split_whitespace().next(), "getServiceAuth: invalid auth scheme");
+        return ApiError::AuthenticationRequired.into_response();
+    };
+
+    let auth_user = if is_dpop {
+        match crate::oauth::verify::verify_oauth_access_token(
+            &state.db,
+            &token,
+            dpop_proof,
+            "GET",
+            &format!("/xrpc/com.atproto.server.getServiceAuth?aud={}&lxm={}",
+                     params.aud,
+                     params.lxm.as_deref().unwrap_or("")),
+        ).await {
+            Ok(result) => crate::auth::AuthenticatedUser {
+                did: result.did,
+                is_oauth: true,
+                is_admin: false,
+                scope: result.scope,
+                key_bytes: None,
+            },
+            Err(crate::oauth::OAuthError::UseDpopNonce(nonce)) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    [("DPoP-Nonce", nonce)],
+                    Json(json!({
+                        "error": "use_dpop_nonce",
+                        "message": "DPoP nonce required"
+                    })),
+                ).into_response();
+            }
+            Err(e) => {
+                warn!(error = ?e, "getServiceAuth DPoP auth validation failed");
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({
+                        "error": "AuthenticationFailed",
+                        "message": format!("{:?}", e)
+                    })),
+                ).into_response();
+            }
+        }
+    } else {
         match crate::auth::validate_bearer_token_for_service_auth(&state.db, &token).await {
             Ok(user) => user,
-            Err(e) => return ApiError::from(e).into_response(),
-        };
+            Err(e) => {
+                warn!(error = ?e, "getServiceAuth auth validation failed");
+                return ApiError::from(e).into_response();
+            }
+        }
+    };
+    info!(
+        did = %auth_user.did,
+        is_oauth = auth_user.is_oauth,
+        has_key = auth_user.key_bytes.is_some(),
+        "getServiceAuth auth validated"
+    );
     let key_bytes = match &auth_user.key_bytes {
         Some(kb) => kb.clone(),
         None => {
-            return ApiError::AuthenticationFailedMsg(
-                "OAuth tokens cannot create service auth".into(),
+            warn!(did = %auth_user.did, "getServiceAuth: OAuth token has no key_bytes, fetching from DB");
+            match sqlx::query_as::<_, (Vec<u8>, Option<i32>)>(
+                "SELECT k.key_bytes, k.encryption_version
+                 FROM users u
+                 JOIN user_keys k ON u.id = k.user_id
+                 WHERE u.did = $1"
             )
-            .into_response();
+            .bind(&auth_user.did)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some((key_bytes_enc, encryption_version))) => {
+                    match crate::config::decrypt_key(&key_bytes_enc, encryption_version) {
+                        Ok(key) => key,
+                        Err(e) => {
+                            error!(error = ?e, "Failed to decrypt user key for service auth");
+                            return ApiError::AuthenticationFailedMsg(
+                                "Failed to get signing key".into(),
+                            )
+                            .into_response();
+                        }
+                    }
+                }
+                Ok(None) => {
+                    return ApiError::AuthenticationFailedMsg(
+                        "User has no signing key".into(),
+                    )
+                    .into_response();
+                }
+                Err(e) => {
+                    error!(error = ?e, "DB error fetching user key");
+                    return ApiError::AuthenticationFailedMsg(
+                        "Failed to get signing key".into(),
+                    )
+                    .into_response();
+                }
+            }
         }
     };
 

@@ -350,8 +350,8 @@
     {/if}
   </div>
   {#if selectedUser}
-    <div class="modal-overlay" onclick={closeUserDetail} role="presentation">
-      <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <div class="modal-overlay" onclick={closeUserDetail} onkeydown={(e) => e.key === 'Escape' && closeUserDetail()} role="presentation">
+      <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
         <div class="modal-header">
           <h2>User Details</h2>
           <button class="close-btn" onclick={closeUserDetail}>&times;</button>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getAuthState } from '../lib/auth.svelte'
+  import { getAuthState, getValidToken } from '../lib/auth.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
 
@@ -74,7 +74,12 @@
     loading = true
     error = ''
     try {
-      await api.reauthPassword(auth.session.accessJwt, password)
+      const token = await getValidToken()
+      if (!token) {
+        error = 'Session expired. Please log in again.'
+        return
+      }
+      await api.reauthPassword(token, password)
       show = false
       onSuccess()
     } catch (e) {
@@ -90,7 +95,12 @@
     loading = true
     error = ''
     try {
-      await api.reauthTotp(auth.session.accessJwt, totpCode)
+      const token = await getValidToken()
+      if (!token) {
+        error = 'Session expired. Please log in again.'
+        return
+      }
+      await api.reauthTotp(token, totpCode)
       show = false
       onSuccess()
     } catch (e) {
@@ -109,7 +119,12 @@
     loading = true
     error = ''
     try {
-      const { options } = await api.reauthPasskeyStart(auth.session.accessJwt)
+      const token = await getValidToken()
+      if (!token) {
+        error = 'Session expired. Please log in again.'
+        return
+      }
+      const { options } = await api.reauthPasskeyStart(token)
       const publicKeyOptions = prepareAuthOptions(options)
       const credential = await navigator.credentials.get({
         publicKey: publicKeyOptions
@@ -131,7 +146,7 @@
           userHandle: response.userHandle ? arrayBufferToBase64Url(response.userHandle) : null,
         },
       }
-      await api.reauthPasskeyFinish(auth.session.accessJwt, credentialResponse)
+      await api.reauthPasskeyFinish(token, credentialResponse)
       show = false
       onSuccess()
     } catch (e) {
@@ -152,8 +167,8 @@
 </script>
 
 {#if show}
-  <div class="modal-backdrop" onclick={handleClose} role="presentation">
-    <div class="modal" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+  <div class="modal-backdrop" onclick={handleClose} onkeydown={(e) => e.key === 'Escape' && handleClose()} role="presentation">
+    <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
         <h2>Re-authentication Required</h2>
         <button class="close-btn" onclick={handleClose} aria-label="Close">&times;</button>

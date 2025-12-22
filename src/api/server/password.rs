@@ -471,7 +471,7 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
             .await;
     }
 
-    if crate::api::server::reauth::check_reauth_required(&state.db, &auth.0.did).await {
+    if crate::api::server::reauth::check_reauth_required_cached(&state.db, &state.cache, &auth.0.did).await {
         return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
     }
 

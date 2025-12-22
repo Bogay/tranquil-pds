@@ -306,6 +306,8 @@
     "legacyLoginDescription": "ユーザー名/パスワードでの直接ログイン（レガシーモード）を許可します。無効にすると、MFA 付きの OAuth を使用する必要があります。",
     "legacyLoginOn": "レガシーログインは有効です",
     "legacyLoginOff": "レガシーログインは無効です",
+    "enableLegacyLogin": "レガシーログインを有効にする",
+    "disableLegacyLogin": "レガシーログインを無効にする",
     "legacyLoginWarning": "警告: レガシーログインを有効にすると、直接パスワードログインの MFA がバイパスされます。アプリの互換性が必要な場合にのみ有効にしてください。",
     "totpPasswordWarning": "TOTP が有効な場合、Bluesky アプリ（または他のレガシーアプリ）からパスワードを変更することはできません。パスワードを変更するには、2つの方法があります：",
     "totpPasswordOption1Label": "ここで変更する：",

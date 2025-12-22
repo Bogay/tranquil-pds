@@ -1,5 +1,5 @@
 pub const DEFAULT_LOCALE: &str = "en";
-pub const VALID_LOCALES: &[&str] = &["en", "zh", "ja", "ko"];
+pub const VALID_LOCALES: &[&str] = &["en", "zh", "ja", "ko", "sv", "fi"];
 
 pub fn validate_locale(locale: &str) -> &str {
     if VALID_LOCALES.contains(&locale) {
@@ -37,6 +37,8 @@ pub fn get_strings(locale: &str) -> &'static NotificationStrings {
         "zh" => &STRINGS_ZH,
         "ja" => &STRINGS_JA,
         "ko" => &STRINGS_KO,
+        "sv" => &STRINGS_SV,
+        "fi" => &STRINGS_FI,
         _ => &STRINGS_EN,
     }
 }
@@ -131,6 +133,52 @@ static STRINGS_KO: NotificationStrings = NotificationStrings {
     signup_verification_body: "환영합니다! 계정 인증 코드는: {code}\n\n이 코드는 30분 후에 만료됩니다.\n\n{hostname}에서 등록을 완료하려면 이 코드를 입력하세요.",
     legacy_login_subject: "보안 알림: 레거시 로그인 감지 - {hostname}",
     legacy_login_body: "안녕하세요 @{handle}님,\n\nTOTP 인증을 지원하지 않는 레거시 앱(예: Bluesky)을 사용한 로그인이 감지되었습니다.\n\n세부 정보:\n- 시간: {timestamp}\n- IP 주소: {ip}\n\n이 로그인에서 TOTP 보호가 우회되었습니다. 이 세션은 민감한 작업에 대한 권한이 제한됩니다.\n\n본인이 아닌 경우:\n1. 즉시 비밀번호를 변경하세요\n2. 활성 세션을 검토하세요\n3. 보안 설정에서 레거시 앱 로그인 비활성화를 고려하세요\n\n{hostname} 드림",
+};
+
+static STRINGS_SV: NotificationStrings = NotificationStrings {
+    welcome_subject: "Välkommen till {hostname}",
+    welcome_body: "Välkommen till {hostname}!\n\nDitt användarnamn är: @{handle}\n\nTack för att du gick med.",
+    email_verification_subject: "Verifiera din e-post - {hostname}",
+    email_verification_body: "Hej @{handle},\n\nDin e-postverifieringskod är: {code}\n\nDenna kod upphör om 10 minuter.\n\nOm du inte begärde detta kan du ignorera detta meddelande.",
+    password_reset_subject: "Lösenordsåterställning - {hostname}",
+    password_reset_body: "Hej @{handle},\n\nDin kod för lösenordsåterställning är: {code}\n\nDenna kod upphör om 10 minuter.\n\nOm du inte begärde detta kan du ignorera detta meddelande.",
+    email_update_subject: "Bekräfta din nya e-post - {hostname}",
+    email_update_body: "Hej @{handle},\n\nDin bekräftelsekod för e-postuppdatering är: {code}\n\nDenna kod upphör om 10 minuter.\n\nOm du inte begärde detta kan du ignorera detta meddelande.",
+    account_deletion_subject: "Begäran om kontoradering - {hostname}",
+    account_deletion_body: "Hej @{handle},\n\nDin bekräftelsekod för kontoradering är: {code}\n\nDenna kod upphör om 10 minuter.\n\nOm du inte begärde detta, skydda ditt konto omedelbart.",
+    plc_operation_subject: "{hostname} - PLC-operationstoken",
+    plc_operation_body: "Hej @{handle},\n\nDu begärde att signera en PLC-operation för ditt konto.\n\nDin verifieringstoken är: {token}\n\nDenna token upphör om 10 minuter.\n\nOm du inte begärde detta kan du säkert ignorera detta meddelande.",
+    two_factor_code_subject: "Inloggningsverifiering - {hostname}",
+    two_factor_code_body: "Hej @{handle},\n\nDin inloggningsverifieringskod är: {code}\n\nDenna kod upphör om 10 minuter.\n\nOm du inte begärde detta, skydda ditt konto omedelbart.",
+    passkey_recovery_subject: "Kontoåterställning - {hostname}",
+    passkey_recovery_body: "Hej @{handle},\n\nDu begärde att återställa ditt endast nyckelkonto.\n\nKlicka på länken nedan för att ställa in ett tillfälligt lösenord och återfå åtkomst:\n{url}\n\nDenna länk upphör om 1 timme.\n\nOm du inte begärde detta kan du ignorera detta meddelande. Ditt konto förblir säkert.",
+    signup_verification_subject: "Verifiera ditt konto - {hostname}",
+    signup_verification_body: "Välkommen! Din kontoverifieringskod är: {code}\n\nDenna kod upphör om 30 minuter.\n\nAnge denna kod för att slutföra din registrering på {hostname}.",
+    legacy_login_subject: "Säkerhetsvarning: Äldre inloggning upptäckt - {hostname}",
+    legacy_login_body: "Hej @{handle},\n\nEn inloggning till ditt konto upptäcktes med en äldre app (som Bluesky) som inte stöder TOTP-verifiering.\n\nDetaljer:\n- Tid: {timestamp}\n- IP-adress: {ip}\n\nDitt TOTP-skydd kringgicks för denna inloggning. Sessionen har begränsade behörigheter för känsliga operationer.\n\nOm detta inte var du:\n1. Ändra ditt lösenord omedelbart\n2. Granska dina aktiva sessioner\n3. Överväg att inaktivera äldre appinloggningar i dina säkerhetsinställningar\n\nVar försiktig,\n{hostname}",
+};
+
+static STRINGS_FI: NotificationStrings = NotificationStrings {
+    welcome_subject: "Tervetuloa palveluun {hostname}",
+    welcome_body: "Tervetuloa palveluun {hostname}!\n\nKäyttäjänimesi on: @{handle}\n\nKiitos liittymisestä.",
+    email_verification_subject: "Vahvista sähköpostisi - {hostname}",
+    email_verification_body: "Hei @{handle},\n\nSähköpostin vahvistuskoodisi on: {code}\n\nTämä koodi vanhenee 10 minuutissa.\n\nJos et pyytänyt tätä, voit jättää tämän viestin huomiotta.",
+    password_reset_subject: "Salasanan palautus - {hostname}",
+    password_reset_body: "Hei @{handle},\n\nSalasanan palautuskoodisi on: {code}\n\nTämä koodi vanhenee 10 minuutissa.\n\nJos et pyytänyt tätä, voit jättää tämän viestin huomiotta.",
+    email_update_subject: "Vahvista uusi sähköpostiosoitteesi - {hostname}",
+    email_update_body: "Hei @{handle},\n\nSähköpostin päivityksen vahvistuskoodisi on: {code}\n\nTämä koodi vanhenee 10 minuutissa.\n\nJos et pyytänyt tätä, voit jättää tämän viestin huomiotta.",
+    account_deletion_subject: "Tilin poistopyyntö - {hostname}",
+    account_deletion_body: "Hei @{handle},\n\nTilin poiston vahvistuskoodisi on: {code}\n\nTämä koodi vanhenee 10 minuutissa.\n\nJos et pyytänyt tätä, suojaa tilisi välittömästi.",
+    plc_operation_subject: "{hostname} - PLC-toimintotunniste",
+    plc_operation_body: "Hei @{handle},\n\nPyysit allekirjoittamaan PLC-toiminnon tilillesi.\n\nVahvistustunnisteesi on: {token}\n\nTämä tunniste vanhenee 10 minuutissa.\n\nJos et pyytänyt tätä, voit turvallisesti jättää tämän viestin huomiotta.",
+    two_factor_code_subject: "Kirjautumisen vahvistus - {hostname}",
+    two_factor_code_body: "Hei @{handle},\n\nKirjautumisen vahvistuskoodisi on: {code}\n\nTämä koodi vanhenee 10 minuutissa.\n\nJos et pyytänyt tätä, suojaa tilisi välittömästi.",
+    passkey_recovery_subject: "Tilin palautus - {hostname}",
+    passkey_recovery_body: "Hei @{handle},\n\nPyysit palauttamaan vain pääsyavaintilisi.\n\nKlikkaa alla olevaa linkkiä asettaaksesi väliaikaisen salasanan ja saadaksesi pääsyn takaisin:\n{url}\n\nTämä linkki vanhenee tunnissa.\n\nJos et pyytänyt tätä, voit jättää tämän viestin huomiotta. Tilisi pysyy turvassa.",
+    signup_verification_subject: "Vahvista tilisi - {hostname}",
+    signup_verification_body: "Tervetuloa! Tilin vahvistuskoodisi on: {code}\n\nTämä koodi vanhenee 30 minuutissa.\n\nSyötä tämä koodi viimeistelläksesi rekisteröintisi palveluun {hostname}.",
+    legacy_login_subject: "Turvallisuushälytys: Vanha kirjautuminen havaittu - {hostname}",
+    legacy_login_body: "Hei @{handle},\n\nTilillesi havaittiin kirjautuminen vanhalla sovelluksella (kuten Bluesky), joka ei tue TOTP-vahvistusta.\n\nTiedot:\n- Aika: {timestamp}\n- IP-osoite: {ip}\n\nTOTP-suojauksesi ohitettiin tässä kirjautumisessa. Istunnolla on rajoitetut oikeudet arkaluontoisiin toimintoihin.\n\nJos tämä et ollut sinä:\n1. Vaihda salasanasi välittömästi\n2. Tarkista aktiiviset istuntosi\n3. Harkitse vanhojen sovellusten kirjautumisen poistamista käytöstä turvallisuusasetuksissa\n\nOle varovainen,\n{hostname}",
 };
 
 pub fn format_message(template: &str, vars: &[(&str, &str)]) -> String {

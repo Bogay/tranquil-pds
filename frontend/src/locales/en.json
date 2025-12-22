@@ -306,6 +306,8 @@
     "legacyLoginDescription": "Allow signing in with username/password directly (legacy mode). When disabled, you must use OAuth with MFA.",
     "legacyLoginOn": "Legacy login is enabled",
     "legacyLoginOff": "Legacy login is disabled",
+    "enableLegacyLogin": "Enable legacy login",
+    "disableLegacyLogin": "Disable legacy login",
     "legacyLoginWarning": "Warning: Enabling legacy login bypasses MFA for direct password logins. Only enable if needed for app compatibility.",
     "totpPasswordWarning": "With TOTP enabled, changing your password from the Bluesky app (or other legacy apps) will be blocked. To change your password, you have two options:",
     "totpPasswordOption1Label": "Change it here:",

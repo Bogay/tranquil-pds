@@ -1,4 +1,4 @@
-mod locale;
+pub mod locale;
 mod sender;
 mod service;
 mod types;

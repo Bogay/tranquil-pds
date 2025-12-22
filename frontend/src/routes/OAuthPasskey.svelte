@@ -294,10 +294,4 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
-
-  .help-text {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    margin: 0;
-  }
 </style>

@@ -128,7 +128,7 @@ pub async fn reauth_password(
         }
     }
 
-    match update_last_reauth(&state.db, &auth.0.did).await {
+    match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
             info!(did = %auth.0.did, "Re-auth successful via password");
             Json(ReauthResponse { reauthed_at }).into_response()
@@ -186,7 +186,7 @@ pub async fn reauth_totp(
             .into_response();
     }
 
-    match update_last_reauth(&state.db, &auth.0.did).await {
+    match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
             info!(did = %auth.0.did, "Re-auth successful via TOTP");
             Json(ReauthResponse { reauthed_at }).into_response()
@@ -394,7 +394,7 @@ pub async fn reauth_passkey_finish(
 
     let _ = crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
 
-    match update_last_reauth(&state.db, &auth.0.did).await {
+    match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
             info!(did = %auth.0.did, "Re-auth successful via passkey");
             Json(ReauthResponse { reauthed_at }).into_response()
@@ -410,7 +410,11 @@ pub async fn reauth_passkey_finish(
     }
 }
 
-async fn update_last_reauth(db: &PgPool, did: &str) -> Result<DateTime<Utc>, sqlx::Error> {
+pub async fn update_last_reauth_cached(
+    db: &PgPool,
+    cache: &std::sync::Arc<dyn crate::cache::Cache>,
+    did: &str,
+) -> Result<DateTime<Utc>, sqlx::Error> {
     let now = Utc::now();
     sqlx::query!(
         "UPDATE session_tokens SET last_reauth_at = $1, mfa_verified = TRUE WHERE did = $2",
@@ -419,6 +423,14 @@ async fn update_last_reauth(db: &PgPool, did: &str) -> Result<DateTime<Utc>, sql
     )
     .execute(db)
     .await?;
+    let cache_key = format!("reauth:{}", did);
+    let _ = cache
+        .set(
+            &cache_key,
+            &now.timestamp().to_string(),
+            std::time::Duration::from_secs(REAUTH_WINDOW_SECONDS as u64),
+        )
+        .await;
     Ok(now)
 }
 
@@ -463,6 +475,36 @@ async fn get_available_reauth_methods(db: &PgPool, did: &str) -> Vec<String> {
 }
 
 pub async fn check_reauth_required(db: &PgPool, did: &str) -> bool {
+    let session = sqlx::query!(
+        "SELECT last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
+        did
+    )
+    .fetch_optional(db)
+    .await;
+
+    match session {
+        Ok(Some(row)) => is_reauth_required(row.last_reauth_at),
+        _ => true,
+    }
+}
+
+pub async fn check_reauth_required_cached(
+    db: &PgPool,
+    cache: &std::sync::Arc<dyn crate::cache::Cache>,
+    did: &str,
+) -> bool {
+    let cache_key = format!("reauth:{}", did);
+    if let Some(timestamp_str) = cache.get(&cache_key).await {
+        if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+            let reauth_time = chrono::DateTime::from_timestamp(timestamp, 0);
+            if let Some(t) = reauth_time {
+                let elapsed = Utc::now().signed_duration_since(t);
+                if elapsed.num_seconds() <= REAUTH_WINDOW_SECONDS {
+                    return false;
+                }
+            }
+        }
+    }
     let session = sqlx::query!(
         "SELECT last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
         did

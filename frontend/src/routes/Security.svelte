@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getAuthState } from '../lib/auth.svelte'
+  import { getAuthState, getValidToken } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import ReauthModal from '../components/ReauthModal.svelte'
@@ -128,7 +128,12 @@
     if (!auth.session) return
     removePasswordLoading = true
     try {
-      await api.removePassword(auth.session.accessJwt)
+      const token = await getValidToken()
+      if (!token) {
+        showMessage('error', 'Session expired. Please log in again.')
+        return
+      }
+      await api.removePassword(token)
       hasPassword = false
       showRemovePasswordForm = false
       showMessage('success', $_('security.passwordRemoved'))
@@ -747,6 +752,7 @@
               class="toggle-button {allowLegacyLogin ? 'on' : 'off'}"
               onclick={handleToggleLegacyLogin}
               disabled={legacyLoginUpdating}
+              aria-label={allowLegacyLogin ? $_('security.disableLegacyLogin') : $_('security.enableLegacyLogin')}
             >
               <span class="toggle-slider"></span>
             </button>

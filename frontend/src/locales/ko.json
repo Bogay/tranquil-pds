@@ -306,6 +306,8 @@
     "legacyLoginDescription": "사용자 이름/비밀번호로 직접 로그인(레거시 모드)을 허용합니다. 비활성화하면 MFA가 있는 OAuth를 사용해야 합니다.",
     "legacyLoginOn": "레거시 로그인이 활성화되었습니다",
     "legacyLoginOff": "레거시 로그인이 비활성화되었습니다",
+    "enableLegacyLogin": "레거시 로그인 활성화",
+    "disableLegacyLogin": "레거시 로그인 비활성화",
     "legacyLoginWarning": "경고: 레거시 로그인을 활성화하면 직접 비밀번호 로그인에 대한 MFA가 우회됩니다. 앱 호환성이 필요한 경우에만 활성화하세요.",
     "totpPasswordWarning": "TOTP가 활성화되면 Bluesky 앱(또는 기타 레거시 앱)에서 비밀번호를 변경할 수 없습니다. 비밀번호를 변경하려면 두 가지 방법이 있습니다:",
     "totpPasswordOption1Label": "여기에서 변경:",

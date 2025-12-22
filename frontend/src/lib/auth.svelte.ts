@@ -1,4 +1,4 @@
-import { api, type Session, type CreateAccountParams, type CreateAccountResult, ApiError } from './api'
+import { api, setTokenRefreshCallback, type Session, type CreateAccountParams, type CreateAccountResult, ApiError } from './api'
 import { startOAuthLogin, handleOAuthCallback, checkForOAuthCallback, clearOAuthCallbackParams, refreshOAuthToken } from './oauth'
 import { setLocale, type SupportedLocale } from './i18n'
 
@@ -92,7 +92,27 @@ function removeSavedAccount(did: string) {
   state.savedAccounts = accounts
 }
 
+async function tryRefreshToken(): Promise<string | null> {
+  if (!state.session) return null
+  try {
+    const tokens = await refreshOAuthToken(state.session.refreshJwt)
+    const sessionInfo = await api.getSession(tokens.access_token)
+    const session: Session = {
+      ...sessionInfo,
+      accessJwt: tokens.access_token,
+      refreshJwt: tokens.refresh_token || state.session.refreshJwt,
+    }
+    state.session = session
+    saveSession(session)
+    addOrUpdateSavedAccount(session)
+    return session.accessJwt
+  } catch {
+    return null
+  }
+}
+
 export async function initAuth() {
+  setTokenRefreshCallback(tryRefreshToken)
   state.loading = true
   state.error = null
   state.savedAccounts = loadSavedAccounts()
@@ -142,11 +162,13 @@ export async function initAuth() {
           saveSession(session)
           addOrUpdateSavedAccount(session)
           applyLocaleFromSession(sessionInfo)
-        } catch {
+        } catch (refreshError) {
+          console.error('Token refresh failed during init:', refreshError)
           saveSession(null)
           state.session = null
         }
       } else {
+        console.error('Non-401 error during getSession:', e)
         saveSession(null)
         state.session = null
       }
@@ -319,6 +341,33 @@ export async function refreshSession(): Promise<void> {
 
 export function getToken(): string | null {
   return state.session?.accessJwt ?? null
+}
+
+export async function getValidToken(): Promise<string | null> {
+  if (!state.session) return null
+  try {
+    await api.getSession(state.session.accessJwt)
+    return state.session.accessJwt
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
+      try {
+        const tokens = await refreshOAuthToken(state.session.refreshJwt)
+        const sessionInfo = await api.getSession(tokens.access_token)
+        const session: Session = {
+          ...sessionInfo,
+          accessJwt: tokens.access_token,
+          refreshJwt: tokens.refresh_token || state.session.refreshJwt,
+        }
+        state.session = session
+        saveSession(session)
+        addOrUpdateSavedAccount(session)
+        return session.accessJwt
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
 }
 
 export function isAuthenticated(): boolean {

@@ -169,7 +169,16 @@ pub async fn handle_refresh_token_grant(
     let refresh_token_str = request
         .refresh_token
         .ok_or_else(|| OAuthError::InvalidRequest("refresh_token is required".to_string()))?;
+    tracing::info!(
+        refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
+        has_dpop = dpop_proof.is_some(),
+        "Refresh token grant requested"
+    );
     if let Some(token_id) = db::check_refresh_token_used(&state.db, &refresh_token_str).await? {
+        tracing::warn!(
+            refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
+            "Refresh token reuse detected, revoking token family"
+        );
         db::delete_token_family(&state.db, token_id).await?;
         return Err(OAuthError::InvalidGrant(
             "Refresh token reuse detected, token family revoked".to_string(),
@@ -177,8 +186,19 @@ pub async fn handle_refresh_token_grant(
     }
     let (db_id, token_data) = db::get_token_by_refresh_token(&state.db, &refresh_token_str)
         .await?
-        .ok_or_else(|| OAuthError::InvalidGrant("Invalid refresh token".to_string()))?;
+        .ok_or_else(|| {
+            tracing::warn!(
+                refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
+                "Refresh token not found in database"
+            );
+            OAuthError::InvalidGrant("Invalid refresh token".to_string())
+        })?;
     if token_data.expires_at < Utc::now() {
+        tracing::warn!(
+            did = %token_data.did,
+            expired_at = %token_data.expires_at,
+            "Refresh token has expired"
+        );
         db::delete_token_family(&state.db, db_id).await?;
         return Err(OAuthError::InvalidGrant(
             "Refresh token has expired".to_string(),
@@ -227,6 +247,11 @@ pub async fn handle_refresh_token_grant(
         new_expires_at,
     )
     .await?;
+    tracing::info!(
+        did = %token_data.did,
+        new_expires_at = %new_expires_at,
+        "Refresh token rotated successfully"
+    );
     let access_token = create_access_token(
         &new_token_id.0,
         &token_data.did,

@@ -1209,7 +1209,7 @@ pub async fn update_legacy_login_preference(
     }
 }
 
-const VALID_LOCALES: &[&str] = &["en", "zh", "ja", "ko"];
+use crate::comms::locale::VALID_LOCALES;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

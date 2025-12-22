@@ -11,13 +11,20 @@ export class ApiError extends Error {
   }
 }
 
+let tokenRefreshCallback: (() => Promise<string | null>) | null = null
+
+export function setTokenRefreshCallback(callback: () => Promise<string | null>) {
+  tokenRefreshCallback = callback
+}
+
 async function xrpc<T>(method: string, options?: {
   method?: 'GET' | 'POST'
   params?: Record<string, string>
   body?: unknown
   token?: string
+  skipRetry?: boolean
 }): Promise<T> {
-  const { method: httpMethod = 'GET', params, body, token } = options ?? {}
+  const { method: httpMethod = 'GET', params, body, token, skipRetry } = options ?? {}
   let url = `${API_BASE}/${method}`
   if (params) {
     const searchParams = new URLSearchParams(params)
@@ -37,6 +44,12 @@ async function xrpc<T>(method: string, options?: {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown', message: res.statusText }))
+    if (res.status === 401 && err.error === 'AuthenticationFailed' && token && tokenRefreshCallback && !skipRetry) {
+      const newToken = await tokenRefreshCallback()
+      if (newToken && newToken !== token) {
+        return xrpc(method, { ...options, token: newToken, skipRetry: true })
+      }
+    }
     throw new ApiError(res.status, err.error, err.message, err.did, err.reauthMethods)
   }
   return res.json()
