@@ -1,5 +1,7 @@
 /target
 .env
+.direnv
+.result
 reference-pds-hailey/
 reference-pds-bsky/
 reference-relay-indigo/
