@@ -111,7 +111,7 @@ async function tryRefreshToken(): Promise<string | null> {
   }
 }
 
-export async function initAuth() {
+export async function initAuth(): Promise<{ oauthLoginCompleted: boolean }> {
   setTokenRefreshCallback(tryRefreshToken)
   state.loading = true
   state.error = null
@@ -133,11 +133,11 @@ export async function initAuth() {
       addOrUpdateSavedAccount(session)
       applyLocaleFromSession(sessionInfo)
       state.loading = false
-      return
+      return { oauthLoginCompleted: true }
     } catch (e) {
       state.error = e instanceof Error ? e.message : 'OAuth login failed'
       state.loading = false
-      return
+      return { oauthLoginCompleted: false }
     }
   }
 
@@ -175,6 +175,7 @@ export async function initAuth() {
     }
   }
   state.loading = false
+  return { oauthLoginCompleted: false }
 }
 
 export async function login(identifier: string, password: string): Promise<void> {

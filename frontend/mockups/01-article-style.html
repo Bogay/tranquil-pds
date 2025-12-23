@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tranquil</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1.7;
+      background: #2c00ff;
+      color: #ffffff;
+      min-height: 100vh;
+      position: relative;
+    }
+
+    .pattern-container {
+      position: fixed;
+      top: -32px;
+      left: -32px;
+      right: -32px;
+      bottom: -32px;
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+    }
+
+    .pattern {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: calc(100% + 500px);
+      height: 100%;
+      animation: drift 80s linear infinite;
+    }
+
+    .dot {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 50%;
+      transition: transform 0.04s linear;
+    }
+
+    .pattern-fade {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, transparent 50%, #2c00ff 75%);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    @keyframes drift {
+      0% { transform: translateX(-500px); }
+      100% { transform: translateX(0); }
+    }
+
+    nav { z-index: 100; }
+    main { position: relative; z-index: 10; }
+    .site-footer { position: relative; z-index: 10; }
+
+    a { color: #ff2400; text-decoration: none; }
+    a:hover { color: #ff5533; }
+
+    nav {
+      position: fixed;
+      top: 12px;
+      left: 32px;
+      right: 32px;
+      background: #1a00a3;
+      padding: 10px 18px;
+      z-index: 100;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    nav .brand {
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: 0.08em;
+      color: #ffffff;
+      text-transform: uppercase;
+    }
+
+    nav .nav-meta {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.7);
+      letter-spacing: 0.05em;
+    }
+
+    main {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 80px 32px 80px;
+    }
+
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 32px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .category {
+      color: #ff2400;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 4px 10px;
+      border-radius: 4px;
+    }
+
+    .read-time {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    h1 {
+      font-size: 2.75rem;
+      font-weight: 600;
+      line-height: 1.15;
+      color: #ffffff;
+      margin-bottom: 32px;
+      letter-spacing: -0.02em;
+    }
+
+    .byline {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 24px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      margin-bottom: 48px;
+    }
+
+    .avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ff2400 0%, #ff6b4a 100%);
+    }
+
+    .author-info {
+      flex: 1;
+    }
+
+    .author {
+      display: block;
+      font-weight: 500;
+      color: #ffffff;
+      font-size: 1rem;
+    }
+
+    .author-handle {
+      display: block;
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.8);
+      margin-top: 2px;
+    }
+
+    .verification {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.85);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .placeholder-image {
+      aspect-ratio: 16 / 9;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    figcaption {
+      margin-top: 12px;
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.75);
+      text-align: center;
+    }
+
+    .carousel {
+      margin: 64px 0 0;
+    }
+
+    .carousel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .carousel-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #ffffff;
+    }
+
+    .carousel-nav {
+      display: flex;
+      gap: 8px;
+    }
+
+    .carousel-nav button {
+      font-family: 'JetBrains Mono', monospace;
+      width: 36px;
+      height: 36px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      color: #ffffff;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-size: 1rem;
+    }
+
+    .carousel-nav button:hover {
+      background: rgba(255, 36, 0, 0.15);
+      border-color: #ff2400;
+    }
+
+    .carousel-track {
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      padding-bottom: 8px;
+      -webkit-overflow-scrolling: touch;
+      user-select: none;
+    }
+
+    .carousel-track::-webkit-scrollbar {
+      display: none;
+    }
+
+    .carousel-slide {
+      flex: 0 0 70%;
+      scroll-snap-align: start;
+    }
+
+    .carousel-slide .placeholder-image {
+      aspect-ratio: 16 / 10;
+    }
+
+    .carousel-label {
+      margin-top: 12px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.85);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .content {
+      font-size: 1.05rem;
+      font-weight: 400;
+    }
+
+    .content p {
+      margin-bottom: 28px;
+    }
+
+    .lede {
+      font-size: 1.3rem;
+      font-weight: 500;
+      color: #ffffff;
+      line-height: 1.5;
+    }
+
+    .content h2 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #ffffff;
+      margin: 56px 0 24px;
+    }
+
+    blockquote {
+      margin: 40px 0;
+      padding: 32px;
+      background: rgba(255, 255, 255, 0.05);
+      border-left: 2px solid #ff2400;
+      border-radius: 0 8px 8px 0;
+    }
+
+    blockquote p {
+      font-size: 1.15rem;
+      color: #ffffff;
+      font-style: italic;
+      margin-bottom: 16px !important;
+    }
+
+    blockquote cite {
+      font-size: 0.8rem;
+      color: rgba(255, 255, 255, 0.8);
+      font-style: normal;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .context-panel {
+      margin: 40px 0;
+      padding: 24px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .context-panel h3 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #ffffff;
+      margin-bottom: 16px;
+    }
+
+    .context-panel ul {
+      list-style: none;
+    }
+
+    .context-panel li {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .context-panel li:last-child {
+      border-bottom: none;
+    }
+
+    .context-panel a {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: #ff2400;
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+
+    .context-panel a:hover {
+      color: #ff5533;
+    }
+
+    .article-footer {
+      margin-top: 64px;
+      padding-top: 32px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .actions button {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 14px 24px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      color: #ffffff;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .actions button:hover {
+      background: rgba(255, 36, 0, 0.15);
+      border-color: #ff2400;
+      color: #ffffff;
+    }
+
+    .attestation-info {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      font-size: 0.8rem;
+      color: rgba(255, 255, 255, 0.7);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .site-footer {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 48px 32px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: rgba(255, 255, 255, 0.65);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    ::selection {
+      background: rgba(255, 36, 0, 0.4);
+    }
+  </style>
+</head>
+<body>
+
+<div class="pattern-container">
+  <div class="pattern"></div>
+</div>
+<div class="pattern-fade"></div>
+
+<nav>
+  <span class="brand">Tranquil</span>
+  <span class="nav-meta">0.1.0</span>
+</nav>
+
+<main>
+  <article>
+    <div class="meta">
+      <span class="category">Landing page</span>
+      <span class="read-time">1 min read</span>
+    </div>
+
+    <h1>Lorem Ipsum Dolor Sit Amet Consectetur</h1>
+
+    <div class="byline">
+      <div class="avatar"></div>
+      <div class="author-info">
+        <span class="author">Mysterious benefactor</span>
+        <span class="author-handle">@lewis.moe</span>
+      </div>
+      <div class="verification">47 attestations</div>
+    </div>
+
+    <div class="content">
+      <blockquote>
+        <p>"Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."</p>
+        <cite>Cicero, De Finibus Bonorum et Malorum</cite>
+      </blockquote>
+
+      <p class="lede">Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit.</p>
+
+      <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.</p>
+
+      <p>Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.</p>
+
+      <h2>Neque Porro Quisquam</h2>
+
+      <p>Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem.</p>
+
+      <p>Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur.</p>
+
+      <h2>Quis Autem Vel Eum</h2>
+
+      <p>Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur.</p>
+
+      <p>At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.</p>
+
+      <p>Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio.</p>
+
+      <p>Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus.</p>
+
+      <p>Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.</p>
+
+      <div class="carousel">
+        <div class="carousel-header">
+          <span class="carousel-title">Interface</span>
+          <div class="carousel-nav">
+            <button class="carousel-prev">←</button>
+            <button class="carousel-next">→</button>
+          </div>
+        </div>
+        <div class="carousel-track">
+          <div class="carousel-slide">
+            <div class="placeholder-image">Dashboard goes here</div>
+            <div class="carousel-label">Dashboard</div>
+          </div>
+          <div class="carousel-slide">
+            <div class="placeholder-image">Profile Settings go here</div>
+            <div class="carousel-label">Profile Settings</div>
+          </div>
+          <div class="carousel-slide">
+            <div class="placeholder-image">Account Security goes here</div>
+            <div class="carousel-label">Account Security</div>
+          </div>
+          <div class="carousel-slide">
+            <div class="placeholder-image">Repository Browser goes here</div>
+            <div class="carousel-label">Repository Browser</div>
+          </div>
+          <div class="carousel-slide">
+            <div class="placeholder-image">OAuth Applications go here</div>
+            <div class="carousel-label">OAuth Applications</div>
+          </div>
+          <div class="carousel-slide">
+            <div class="placeholder-image">Invite Codes go here</div>
+            <div class="carousel-label">Invite Codes</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="article-footer">
+      <div class="actions">
+        <button>Propagate</button>
+        <button>Annotate</button>
+        <button>Verify Source</button>
+      </div>
+
+      <div class="attestation-info">
+        <span>hash: 7f3a9c...</span>
+        <span>signed: 2847.12.03</span>
+        <span>nodes: 12,847</span>
+      </div>
+    </footer>
+  </article>
+</main>
+
+<footer class="site-footer">
+  <div>Mesh Commons License</div>
+  <div>node: local-7f3a</div>
+</footer>
+
+<script>
+const pattern = document.querySelector('.pattern');
+const spacing = 32;
+const cols = Math.ceil((window.innerWidth + 600) / spacing);
+const rows = Math.ceil((window.innerHeight + 100) / spacing);
+const dots = [];
+
+for (let y = 0; y < rows; y++) {
+  for (let x = 0; x < cols; x++) {
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.style.left = (x * spacing) + 'px';
+    dot.style.top = (y * spacing) + 'px';
+    pattern.appendChild(dot);
+    dots.push({ el: dot, x: x * spacing, y: y * spacing });
+  }
+}
+
+let mouseX = -1000, mouseY = -1000;
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+
+function updateDots() {
+  const patternRect = pattern.getBoundingClientRect();
+  dots.forEach(dot => {
+    const dotX = patternRect.left + dot.x + 5;
+    const dotY = patternRect.top + dot.y + 5;
+    const dist = Math.hypot(mouseX - dotX, mouseY - dotY);
+    const maxDist = 120;
+    const scale = Math.min(1, Math.max(0.1, dist / maxDist));
+    dot.el.style.transform = `scale(${scale})`;
+  });
+  requestAnimationFrame(updateDots);
+}
+updateDots();
+
+const track = document.querySelector('.carousel-track');
+const prevBtn = document.querySelector('.carousel-prev');
+const nextBtn = document.querySelector('.carousel-next');
+const slideWidth = track?.querySelector('.carousel-slide')?.offsetWidth + 16;
+
+prevBtn?.addEventListener('click', () => {
+  track.scrollBy({ left: -slideWidth, behavior: 'smooth' });
+});
+nextBtn?.addEventListener('click', () => {
+  track.scrollBy({ left: slideWidth, behavior: 'smooth' });
+});
+
+let isDragging = false;
+let startX, scrollLeft;
+
+track?.addEventListener('mousedown', e => {
+  isDragging = true;
+  track.style.cursor = 'grabbing';
+  track.style.scrollSnapType = 'none';
+  startX = e.pageX - track.offsetLeft;
+  scrollLeft = track.scrollLeft;
+});
+
+track?.addEventListener('mouseleave', () => {
+  isDragging = false;
+  track.style.cursor = 'grab';
+  track.style.scrollSnapType = 'x mandatory';
+});
+
+function snapTo(target, duration = 120) {
+  const start = track.scrollLeft;
+  const distance = target - start;
+  const startTime = performance.now();
+  function step(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const ease = 1 - Math.pow(1 - progress, 3);
+    track.scrollLeft = start + distance * ease;
+    if (progress < 1) requestAnimationFrame(step);
+    else track.style.scrollSnapType = 'x mandatory';
+  }
+  requestAnimationFrame(step);
+}
+
+track?.addEventListener('mouseup', () => {
+  isDragging = false;
+  track.style.cursor = 'grab';
+  const slideW = track.querySelector('.carousel-slide').offsetWidth + 16;
+  const targetIndex = Math.round(track.scrollLeft / slideW);
+  snapTo(targetIndex * slideW);
+});
+
+track?.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  e.preventDefault();
+  const x = e.pageX - track.offsetLeft;
+  const walk = (x - startX) * 1.5;
+  track.scrollLeft = scrollLeft - walk;
+});
+
+if (track) track.style.cursor = 'grab';
+</script>
+</body>
+</html>

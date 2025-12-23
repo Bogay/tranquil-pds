@@ -1,146 +1,397 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { _ } from '../lib/i18n'
   import { getAuthState } from '../lib/auth.svelte'
+
   const auth = getAuthState()
+  const sourceUrl = 'https://tangled.org/lewis.moe/bspds-sandbox'
+
+  onMount(() => {
+    const pattern = document.getElementById('dotPattern')
+    if (!pattern) return
+
+    const spacing = 32
+    const cols = Math.ceil((window.innerWidth + 600) / spacing)
+    const rows = Math.ceil((window.innerHeight + 100) / spacing)
+    const dots: { el: HTMLElement; x: number; y: number }[] = []
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const dot = document.createElement('div')
+        dot.className = 'dot'
+        dot.style.left = (x * spacing) + 'px'
+        dot.style.top = (y * spacing) + 'px'
+        pattern.appendChild(dot)
+        dots.push({ el: dot, x: x * spacing, y: y * spacing })
+      }
+    }
+
+    let mouseX = -1000
+    let mouseY = -1000
+
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseX = e.clientX
+      mouseY = e.clientY
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+
+    let animationId: number
+
+    function updateDots() {
+      const patternRect = pattern.getBoundingClientRect()
+      dots.forEach(dot => {
+        const dotX = patternRect.left + dot.x + 5
+        const dotY = patternRect.top + dot.y + 5
+        const dist = Math.hypot(mouseX - dotX, mouseY - dotY)
+        const maxDist = 120
+        const scale = Math.min(1, Math.max(0.1, dist / maxDist))
+        dot.el.style.transform = `scale(${scale})`
+      })
+      animationId = requestAnimationFrame(updateDots)
+    }
+    updateDots()
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      cancelAnimationFrame(animationId)
+    }
+  })
 </script>
+
+<div class="pattern-container">
+  <div class="pattern" id="dotPattern"></div>
+</div>
+<div class="pattern-fade"></div>
+
+<nav>
+  <span class="brand">Tranquil PDS</span>
+  <span class="nav-meta">0.1.0</span>
+</nav>
+
 <div class="home">
-  <header class="hero">
-    <h1>Tranquil PDS</h1>
-    <p class="tagline">A Personal Data Server for the AT Protocol</p>
-  </header>
-  <section>
-    <h2>What is a PDS?</h2>
-    <p>
-      Bluesky runs on a federated protocol called AT Protocol. Your account lives on a PDS,
-      a server that stores your posts, profile, follows, and cryptographic keys. Bluesky hosts
-      one for you at bsky.social, but you can run your own. Self-hosting means you control your
-      data; you're not dependent on any company's servers, and your account + data is actually yours.
-    </p>
+  <section class="hero">
+    <h1>A home for your ATProto account</h1>
+
+    <p class="lede">Tranquil PDS is a Personal Data Server, the thing that stores your posts, profile, and keys. Bluesky runs one for you, but you can run your own.</p>
+
+    <div class="actions">
+      {#if auth.session}
+        <a href="#/dashboard" class="btn primary">@{auth.session.handle}</a>
+      {:else}
+        <a href="#/register" class="btn primary">Join This Server</a>
+        <a href={sourceUrl} class="btn secondary" target="_blank" rel="noopener">Run Your Own</a>
+      {/if}
+    </div>
+
+    <blockquote>
+      <p>"Nature does not hurry, yet everything is accomplished."</p>
+      <cite>Lao Tzu</cite>
+    </blockquote>
   </section>
-  <section>
-    <h2>What's different about Tranquil?</h2>
-    <p>
-      This software isn't an afterthought by a company with limited resources.
-      It is a superset of the reference PDS, including:
-    </p>
-    <ul>
-      <li>Passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices)</li>
-      <li>did:web support (PDS-hosted subdomains or bring-your-own)</li>
-      <li>Multi-channel notifications (email, discord, telegram, signal)</li>
-      <li>Granular OAuth scopes with a consent UI</li>
-      <li>Built-in web UI for account management, repo browsing, and admin</li>
-    </ul>
-    <p>
-      Full compatibility with Bluesky's reference PDS: same endpoints, same behavior,
-      same client compatibility. Everything works.
-    </p>
+
+  <section class="content">
+    <h2>What you get</h2>
+
+    <div class="features">
+      <div class="feature">
+        <h3>Real security</h3>
+        <p>Sign in with passkeys, add two-factor authentication, set up backup codes, and mark devices you trust. Your account stays yours.</p>
+      </div>
+
+      <div class="feature">
+        <h3>Your own identity</h3>
+        <p>Use your own domain as your handle, or get a subdomain on ours. Either way, your identity moves with you if you ever leave.</p>
+      </div>
+
+      <div class="feature">
+        <h3>Stay in the loop</h3>
+        <p>Get important alerts where you actually see them: email, Discord, Telegram, or Signal.</p>
+      </div>
+
+      <div class="feature">
+        <h3>You decide what apps can do</h3>
+        <p>When an app asks for access, you'll see exactly what it wants in plain language. Grant what makes sense, deny what doesn't.</p>
+      </div>
+    </div>
+
+    <h2>Everything in one place</h2>
+
+    <p>Manage your profile, security settings, connected apps, and more from a clean dashboard. No command line or 3rd party apps required.</p>
+
+    <h2>Works with everything</h2>
+
+    <p>Use any ATProto app you already like. Tranquil PDS speaks the same language as Bluesky's servers, so all your favorite clients, tools, and bots just work.</p>
+
+    <h2>Ready to try it?</h2>
+
+    <p>Join this server, or grab the source and run your own. Either way, you can migrate an existing account over and your followers, posts, and identity come with you.</p>
+
+    <div class="actions">
+      {#if auth.session}
+        <a href="#/dashboard" class="btn primary">@{auth.session.handle}</a>
+      {:else}
+        <a href="#/register" class="btn primary">Join This Server</a>
+        <a href={sourceUrl} class="btn secondary" target="_blank" rel="noopener">View Source</a>
+      {/if}
+    </div>
   </section>
-  <div class="cta">
-    {#if auth.session}
-      <a href="#/dashboard" class="btn">@{auth.session.handle}</a>
-    {:else}
-      <a href="#/login" class="btn">{$_('login.button')}</a>
-      <a href="#/register" class="btn secondary">{$_('login.createAccount')}</a>
-    {/if}
-  </div>
-  <footer>
-    <a href="https://tangled.org/lewis.moe/bspds-sandbox" target="_blank" rel="noopener">Source code</a>
+
+  <footer class="site-footer">
+    <span>Open Source</span>
+    <span>Made with care</span>
   </footer>
 </div>
+
 <style>
+  .pattern-container {
+    position: fixed;
+    top: -32px;
+    left: -32px;
+    right: -32px;
+    bottom: -32px;
+    pointer-events: none;
+    z-index: 1;
+    overflow: hidden;
+  }
+
+  .pattern {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: calc(100% + 500px);
+    height: 100%;
+    animation: drift 80s linear infinite;
+  }
+
+  .pattern :global(.dot) {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 50%;
+    transition: transform 0.04s linear;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .pattern :global(.dot) {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  }
+
+  .pattern-fade {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, transparent 50%, var(--bg-primary) 75%);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  @keyframes drift {
+    0% { transform: translateX(-500px); }
+    100% { transform: translateX(0); }
+  }
+
+  nav {
+    position: fixed;
+    top: 12px;
+    left: 32px;
+    right: 32px;
+    background: var(--accent);
+    padding: 10px 18px;
+    z-index: 100;
+    border-radius: var(--radius-xl);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .brand {
+    font-weight: var(--font-semibold);
+    font-size: var(--text-base);
+    letter-spacing: 0.08em;
+    color: var(--text-inverse);
+    text-transform: uppercase;
+  }
+
+  .nav-meta {
+    font-size: var(--text-sm);
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: 0.05em;
+  }
+
   .home {
-    max-width: var(--width-md);
+    position: relative;
+    z-index: 10;
+    max-width: var(--width-xl);
     margin: 0 auto;
-    padding: var(--space-7);
+    padding: 72px 32px 32px;
   }
 
   .hero {
-    text-align: center;
+    padding: var(--space-7) 0 var(--space-8);
+    border-bottom: 1px solid var(--border-color);
     margin-bottom: var(--space-8);
-    padding-top: var(--space-7);
   }
 
-  .hero h1 {
+  h1 {
     font-size: var(--text-4xl);
-    margin-bottom: var(--space-3);
+    font-weight: var(--font-semibold);
+    line-height: var(--leading-tight);
+    margin-bottom: var(--space-6);
+    letter-spacing: -0.02em;
   }
 
-  .tagline {
-    color: var(--text-secondary);
+  .lede {
     font-size: var(--text-xl);
-  }
-
-  section {
-    margin-bottom: var(--space-7);
-  }
-
-  h2 {
-    margin-bottom: var(--space-4);
-  }
-
-  p {
-    color: var(--text-secondary);
-    margin-bottom: var(--space-4);
-  }
-
-  ul {
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-4) 0;
-    padding-left: var(--space-6);
+    font-weight: var(--font-medium);
+    color: var(--text-primary);
     line-height: var(--leading-relaxed);
+    margin-bottom: 0;
   }
 
-  li {
-    margin-bottom: var(--space-2);
-  }
-
-  .cta {
+  .actions {
     display: flex;
     gap: var(--space-4);
-    justify-content: center;
-    margin: var(--space-8) 0;
+    margin-top: var(--space-7);
   }
 
   .btn {
-    display: inline-block;
-    padding: var(--space-4) var(--space-7);
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     font-weight: var(--font-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: var(--space-4) var(--space-6);
+    border-radius: var(--radius-lg);
     text-decoration: none;
-    transition: background var(--transition-normal), border-color var(--transition-normal);
-    background: var(--accent);
-    color: var(--text-inverse);
+    transition: all var(--transition-normal);
+    border: 1px solid transparent;
   }
 
-  .btn:hover {
-    background: var(--accent-hover);
-    text-decoration: none;
+  .btn.primary {
+    background: var(--secondary);
+    color: var(--text-inverse);
+    border-color: var(--secondary);
+  }
+
+  .btn.primary:hover {
+    background: var(--secondary-hover);
+    border-color: var(--secondary-hover);
   }
 
   .btn.secondary {
     background: transparent;
-    color: var(--accent);
-    border: 1px solid var(--accent);
+    color: var(--text-primary);
+    border-color: var(--border-color);
   }
 
   .btn.secondary:hover {
-    background: var(--accent);
-    color: var(--text-inverse);
+    background: var(--secondary-muted);
+    border-color: var(--secondary);
+    color: var(--secondary);
   }
 
-  footer {
-    text-align: center;
-    padding-top: var(--space-7);
-    border-top: 1px solid var(--border-color);
+  blockquote {
+    margin: var(--space-8) 0 0 0;
+    padding: var(--space-6);
+    background: var(--accent-muted);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
   }
 
-  footer a {
-    color: var(--text-muted);
+  blockquote p {
+    font-size: var(--text-lg);
+    color: var(--text-primary);
+    font-style: italic;
+    margin-bottom: var(--space-3);
+  }
+
+  blockquote cite {
     font-size: var(--text-sm);
+    color: var(--text-secondary);
+    font-style: normal;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
-  footer a:hover {
+  .content h2 {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
     color: var(--accent);
+    margin: var(--space-8) 0 var(--space-5);
+  }
+
+  .content h2:first-child {
+    margin-top: 0;
+  }
+
+  .content > p {
+    font-size: var(--text-base);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-5);
+    line-height: var(--leading-relaxed);
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-6);
+    margin: var(--space-6) 0 var(--space-8);
+  }
+
+  .feature {
+    padding: var(--space-5);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--border-color);
+  }
+
+  .feature h3 {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    color: var(--text-primary);
+    margin-bottom: var(--space-3);
+  }
+
+  .feature p {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: var(--leading-relaxed);
+  }
+
+  @media (max-width: 700px) {
+    .features {
+      grid-template-columns: 1fr;
+    }
+
+    h1 {
+      font-size: var(--text-3xl);
+    }
+
+    .actions {
+      flex-direction: column;
+    }
+
+    .btn {
+      text-align: center;
+    }
+  }
+
+  .site-footer {
+    margin-top: var(--space-9);
+    padding-top: var(--space-7);
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-top: 1px solid var(--border-color);
   }
 </style>

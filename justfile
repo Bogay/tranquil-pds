@@ -45,14 +45,14 @@ db-reset:
     DATABASE_URL="postgres://postgres:postgres@localhost:5432/pds" sqlx database drop -y
     DATABASE_URL="postgres://postgres:postgres@localhost:5432/pds" sqlx database create
     DATABASE_URL="postgres://postgres:postgres@localhost:5432/pds" sqlx migrate run
-docker-up:
-    docker compose up -d
-docker-down:
-    docker compose down
-docker-logs:
-    docker compose logs -f
-docker-build:
-    docker compose build
+podman-up:
+    podman compose up -d
+podman-down:
+    podman compose down
+podman-logs:
+    podman compose logs -f
+podman-build:
+    podman compose build
 # Frontend commands (Deno)
 frontend-dev:
     . ~/.deno/env && cd frontend && deno task dev

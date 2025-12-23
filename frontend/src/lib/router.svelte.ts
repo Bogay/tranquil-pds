@@ -10,6 +10,7 @@ window.addEventListener('hashchange', () => {
 })
 
 export function navigate(path: string) {
+  currentPath = path
   window.location.hash = path
 }
 

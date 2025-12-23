@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getCurrentPath } from './lib/router.svelte'
+  import { getCurrentPath, navigate } from './lib/router.svelte'
   import { initAuth, getAuthState } from './lib/auth.svelte'
   import { initI18n, _ } from './lib/i18n'
   import { isLoading as i18nLoading } from 'svelte-i18n'
@@ -33,8 +33,20 @@
 
   const auth = getAuthState()
 
+  let oauthCallbackPending = $state(hasOAuthCallback())
+
+  function hasOAuthCallback(): boolean {
+    const params = new URLSearchParams(window.location.search)
+    return !!(params.get('code') && params.get('state'))
+  }
+
   $effect(() => {
-    initAuth()
+    initAuth().then(({ oauthLoginCompleted }) => {
+      if (oauthLoginCompleted) {
+        navigate('/dashboard')
+      }
+      oauthCallbackPending = false
+    })
   })
 
   function getComponent(path: string) {
@@ -97,7 +109,7 @@
 </script>
 
 <main>
-  {#if auth.loading || $i18nLoading}
+  {#if auth.loading || $i18nLoading || oauthCallbackPending}
     <div class="loading">
       <p>Loading...</p>
     </div>

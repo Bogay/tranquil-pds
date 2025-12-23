@@ -88,7 +88,8 @@ impl ClientMetadataCache {
 
     fn is_loopback_client(client_id: &str) -> bool {
         if let Ok(url) = reqwest::Url::parse(client_id) {
-            url.scheme() == "http" && url.host_str() == Some("localhost") && url.port().is_none()
+            url.scheme() == "http"
+                && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
         } else {
             false
         }
@@ -310,19 +311,7 @@ impl ClientMetadataCache {
             let is_loopback_redirect = req_url.scheme() == "http"
                 && (req_host == "localhost" || req_host == "127.0.0.1" || req_host == "[::1]");
             if is_loopback_redirect {
-                for registered in &metadata.redirect_uris {
-                    if let Ok(reg_url) = reqwest::Url::parse(registered) {
-                        let reg_host = reg_url.host_str().unwrap_or("");
-                        let hosts_match = (req_host == "localhost" && reg_host == "localhost")
-                            || (req_host == "127.0.0.1" && reg_host == "127.0.0.1")
-                            || (req_host == "[::1]" && reg_host == "[::1]")
-                            || (req_host == "localhost" && reg_host == "127.0.0.1")
-                            || (req_host == "127.0.0.1" && reg_host == "localhost");
-                        if hosts_match && req_url.path() == reg_url.path() {
-                            return Ok(());
-                        }
-                    }
-                }
+                return Ok(());
             }
         }
         Err(OAuthError::InvalidRequest(

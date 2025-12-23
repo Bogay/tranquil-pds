@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tranquil</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --primary: #2c00ff;
+      --primary-dark: #1a00a3;
+      --primary-light: #4d33ff;
+      --primary-muted: #e8e5ff;
+      --secondary: #ff2400;
+      --secondary-hover: #ff5533;
+      --bg: #ffffff;
+      --bg-subtle: #f8f8fa;
+      --text: #1a1a1a;
+      --text-muted: #666666;
+      --text-light: #999999;
+      --border: #e5e5e5;
+      --border-light: #f0f0f0;
+    }
+
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1.7;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      position: relative;
+    }
+
+    .pattern-container {
+      position: fixed;
+      top: -32px;
+      left: -32px;
+      right: -32px;
+      bottom: -32px;
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+    }
+
+    .pattern {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: calc(100% + 500px);
+      height: 100%;
+      animation: drift 80s linear infinite;
+    }
+
+    .dot {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: rgba(0, 0, 0, 0.06);
+      border-radius: 50%;
+      transition: transform 0.04s linear;
+    }
+
+    .pattern-fade {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, transparent 50%, var(--bg) 75%);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    @keyframes drift {
+      0% { transform: translateX(-500px); }
+      100% { transform: translateX(0); }
+    }
+
+    nav { z-index: 100; }
+    main { position: relative; z-index: 10; }
+    .site-footer { position: relative; z-index: 10; }
+
+    a { color: var(--secondary); text-decoration: none; }
+    a:hover { color: var(--secondary-hover); }
+
+    nav {
+      position: fixed;
+      top: 12px;
+      left: 32px;
+      right: 32px;
+      background: var(--primary);
+      padding: 10px 18px;
+      z-index: 100;
+      border-radius: 8px;
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    nav .brand {
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: 0.08em;
+      color: #ffffff;
+      text-transform: uppercase;
+    }
+
+    nav .nav-meta {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.7);
+      letter-spacing: 0.05em;
+    }
+
+    main {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 72px 32px 80px;
+    }
+
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 32px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .category {
+      color: #ffffff;
+      background: var(--primary);
+      padding: 4px 10px;
+      border-radius: 4px;
+    }
+
+    .read-time {
+      color: var(--text-muted);
+    }
+
+    h1 {
+      font-size: 2.75rem;
+      font-weight: 600;
+      line-height: 1.15;
+      color: var(--text);
+      margin-bottom: 32px;
+      letter-spacing: -0.02em;
+    }
+
+    .byline {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 24px 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 48px;
+    }
+
+    .avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--secondary) 0%, #ff6b4a 100%);
+    }
+
+    .author-info {
+      flex: 1;
+    }
+
+    .author {
+      display: block;
+      font-weight: 500;
+      color: var(--text);
+      font-size: 1rem;
+    }
+
+    .author-handle {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .verification {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .placeholder-image {
+      aspect-ratio: 16 / 9;
+      background: var(--bg-subtle);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      border: 1px solid var(--border);
+    }
+
+    figcaption {
+      margin-top: 12px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    .carousel {
+      margin: 64px 0 0;
+    }
+
+    .carousel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .carousel-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text);
+    }
+
+    .carousel-nav {
+      display: flex;
+      gap: 8px;
+    }
+
+    .carousel-nav button {
+      font-family: 'JetBrains Mono', monospace;
+      width: 36px;
+      height: 36px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-size: 1rem;
+    }
+
+    .carousel-nav button:hover {
+      background: rgba(255, 36, 0, 0.08);
+      border-color: var(--secondary);
+      color: var(--secondary);
+    }
+
+    .carousel-track {
+      display: flex;
+      gap: 16px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      padding-bottom: 8px;
+      -webkit-overflow-scrolling: touch;
+      user-select: none;
+    }
+
+    .carousel-track::-webkit-scrollbar {
+      display: none;
+    }
+
+    .carousel-slide {
+      flex: 0 0 70%;
+      scroll-snap-align: start;
+    }
+
+    .carousel-slide .placeholder-image {
+      aspect-ratio: 16 / 10;
+    }
+
+    .carousel-label {
+      margin-top: 12px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .content {
+      font-size: 1.05rem;
+      font-weight: 400;
+    }
+
+    .content p {
+      margin-bottom: 28px;
+    }
+
+    .lede {
+      font-size: 1.3rem;
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .hero {
+      padding: 32px 0 40px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 40px;
+    }
+
+    .content h2 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--primary-dark);
+      margin: 56px 0 24px;
+    }
+
+    .content h2:first-child {
+      margin-top: 0;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 32px;
+      margin: 32px 0 56px;
+    }
+
+    .feature {
+      padding: 24px;
+      background: var(--bg-subtle);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .feature h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .feature p {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 700px) {
+      .features {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    blockquote {
+      margin: 40px 0;
+      padding: 32px;
+      background: var(--primary-muted);
+      border-left: 3px solid var(--primary);
+      border-radius: 0 8px 8px 0;
+    }
+
+    blockquote p {
+      font-size: 1.15rem;
+      color: var(--primary-dark);
+      font-style: italic;
+      margin-bottom: 16px !important;
+    }
+
+    blockquote cite {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-style: normal;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .context-panel {
+      margin: 40px 0;
+      padding: 24px;
+      background: var(--bg-subtle);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .context-panel h3 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text);
+      margin-bottom: 16px;
+    }
+
+    .context-panel ul {
+      list-style: none;
+    }
+
+    .context-panel li {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .context-panel li:last-child {
+      border-bottom: none;
+    }
+
+    .context-panel a {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: var(--secondary);
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+
+    .context-panel a:hover {
+      color: var(--secondary-hover);
+    }
+
+    .article-footer {
+      margin-top: 64px;
+      padding-top: 32px;
+      border-top: 1px solid var(--border);
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .actions button {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 14px 24px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .actions button:hover {
+      background: rgba(255, 36, 0, 0.08);
+      border-color: var(--secondary);
+      color: var(--secondary);
+    }
+
+    .actions button:first-child {
+      background: var(--secondary);
+      border-color: var(--secondary);
+      color: #ffffff;
+    }
+
+    .actions button:first-child:hover {
+      background: #cc1d00;
+      border-color: #cc1d00;
+    }
+
+    .attestation-info {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      font-size: 0.8rem;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .site-footer {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 48px 32px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-top: 1px solid var(--border);
+    }
+
+    ::selection {
+      background: rgba(255, 36, 0, 0.2);
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+
+<div class="pattern-container">
+  <div class="pattern"></div>
+</div>
+<div class="pattern-fade"></div>
+
+<nav>
+  <span class="brand">Tranquil PDS</span>
+  <span class="nav-meta">0.1.0</span>
+</nav>
+
+<main>
+  <section class="hero">
+    <h1>A home for your ATProto account</h1>
+
+    <p class="lede">Tranquil PDS is a Personal Data Server, the thing that stores your posts, profile, and keys. Bluesky runs one for you, but you can run your own.</p>
+
+    <div class="actions" style="margin-top: 40px; margin-bottom: 0;">
+      <button>Join This Server</button>
+      <button>Run Your Own</button>
+    </div>
+    <blockquote>
+      <p>"Nature does not hurry, yet everything is accomplished."</p>
+      <cite>Lao Tzu</cite>
+    </blockquote>
+  </section>
+
+  <section class="content">
+    <h2>What you get</h2>
+
+    <div class="features">
+      <div class="feature">
+        <h3>Real security</h3>
+        <p>Sign in with passkeys, add two-factor authentication, set up backup codes, and mark devices you trust. Your account stays yours.</p>
+      </div>
+
+      <div class="feature">
+        <h3>Your own identity</h3>
+        <p>Use your own domain as your handle, or get a subdomain on ours. Either way, your identity moves with you if you ever leave.</p>
+      </div>
+
+      <div class="feature">
+        <h3>Stay in the loop</h3>
+        <p>Get important alerts where you actually see them: email, Discord, Telegram, or Signal.</p>
+      </div>
+
+      <div class="feature">
+        <h3>You decide what apps can do</h3>
+        <p>When an app asks for access, you'll see exactly what it wants in plain language. Grant what makes sense, deny what doesn't.</p>
+      </div>
+    </div>
+
+    <h2>Everything in one place</h2>
+
+    <p>Manage your profile, security settings, connected apps, and more from a clean dashboard. No command line or 3rd party apps required.</p>
+
+    <div class="carousel">
+      <div class="carousel-header">
+        <span class="carousel-title">Interface</span>
+        <div class="carousel-nav">
+          <button class="carousel-prev">←</button>
+          <button class="carousel-next">→</button>
+        </div>
+      </div>
+      <div class="carousel-track">
+        <div class="carousel-slide">
+          <div class="placeholder-image">Dashboard</div>
+          <div class="carousel-label">Dashboard</div>
+        </div>
+        <div class="carousel-slide">
+          <div class="placeholder-image">Profile Settings</div>
+          <div class="carousel-label">Profile Settings</div>
+        </div>
+        <div class="carousel-slide">
+          <div class="placeholder-image">Account Security</div>
+          <div class="carousel-label">Account Security</div>
+        </div>
+        <div class="carousel-slide">
+          <div class="placeholder-image">Connected Apps</div>
+          <div class="carousel-label">Connected Apps</div>
+        </div>
+        <div class="carousel-slide">
+          <div class="placeholder-image">Invite Friends</div>
+          <div class="carousel-label">Invite Friends</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Works with everything</h2>
+
+    <p>Use any ATProto app you already like. Tranquil PDS speaks the same language as Bluesky's servers, so all your favorite clients, tools, and bots just work.</p>
+
+    <h2>Ready to try it?</h2>
+
+    <p>Join this server, or grab the source and run your own. Either way, you can migrate an existing account over and your followers, posts, and identity come with you.</p>
+
+    <div class="actions" style="margin-top: 32px;">
+      <button>Join This Server</button>
+      <button>View Source</button>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div>Open Source</div>
+  <div>Made with care</div>
+</footer>
+
+<script>
+const pattern = document.querySelector('.pattern');
+const spacing = 32;
+const cols = Math.ceil((window.innerWidth + 600) / spacing);
+const rows = Math.ceil((window.innerHeight + 100) / spacing);
+const dots = [];
+
+for (let y = 0; y < rows; y++) {
+  for (let x = 0; x < cols; x++) {
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.style.left = (x * spacing) + 'px';
+    dot.style.top = (y * spacing) + 'px';
+    pattern.appendChild(dot);
+    dots.push({ el: dot, x: x * spacing, y: y * spacing });
+  }
+}
+
+let mouseX = -1000, mouseY = -1000;
+document.addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+});
+
+function updateDots() {
+  const patternRect = pattern.getBoundingClientRect();
+  dots.forEach(dot => {
+    const dotX = patternRect.left + dot.x + 5;
+    const dotY = patternRect.top + dot.y + 5;
+    const dist = Math.hypot(mouseX - dotX, mouseY - dotY);
+    const maxDist = 120;
+    const scale = Math.min(1, Math.max(0.1, dist / maxDist));
+    dot.el.style.transform = `scale(${scale})`;
+  });
+  requestAnimationFrame(updateDots);
+}
+updateDots();
+
+const track = document.querySelector('.carousel-track');
+const prevBtn = document.querySelector('.carousel-prev');
+const nextBtn = document.querySelector('.carousel-next');
+const slideWidth = track?.querySelector('.carousel-slide')?.offsetWidth + 16;
+
+prevBtn?.addEventListener('click', () => {
+  track.scrollBy({ left: -slideWidth, behavior: 'smooth' });
+});
+nextBtn?.addEventListener('click', () => {
+  track.scrollBy({ left: slideWidth, behavior: 'smooth' });
+});
+
+let isDragging = false;
+let startX, scrollLeft;
+
+track?.addEventListener('mousedown', e => {
+  isDragging = true;
+  track.style.cursor = 'grabbing';
+  track.style.scrollSnapType = 'none';
+  startX = e.pageX - track.offsetLeft;
+  scrollLeft = track.scrollLeft;
+});
+
+track?.addEventListener('mouseleave', () => {
+  isDragging = false;
+  track.style.cursor = 'grab';
+  track.style.scrollSnapType = 'x mandatory';
+});
+
+function snapTo(target, duration = 120) {
+  const start = track.scrollLeft;
+  const distance = target - start;
+  const startTime = performance.now();
+  function step(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const ease = 1 - Math.pow(1 - progress, 3);
+    track.scrollLeft = start + distance * ease;
+    if (progress < 1) requestAnimationFrame(step);
+    else track.style.scrollSnapType = 'x mandatory';
+  }
+  requestAnimationFrame(step);
+}
+
+track?.addEventListener('mouseup', () => {
+  isDragging = false;
+  track.style.cursor = 'grab';
+  const slideW = track.querySelector('.carousel-slide').offsetWidth + 16;
+  const targetIndex = Math.round(track.scrollLeft / slideW);
+  snapTo(targetIndex * slideW);
+});
+
+track?.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  e.preventDefault();
+  const x = e.pageX - track.offsetLeft;
+  const walk = (x - startX) * 1.5;
+  track.scrollLeft = scrollLeft - walk;
+});
+
+if (track) track.style.cursor = 'grab';
+</script>
+</body>
+</html>
