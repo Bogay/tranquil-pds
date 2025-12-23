@@ -14,7 +14,9 @@
     "expires": "过期时间",
     "name": "名称",
     "dashboard": "控制台",
-    "backToDashboard": "← 返回控制台"
+    "backToDashboard": "← 返回控制台",
+    "copied": "已复制！",
+    "copyToClipboard": "复制"
   },
   "login": {
     "title": "登录",
@@ -45,6 +47,9 @@
   "register": {
     "title": "创建账户",
     "subtitle": "在此 PDS 上创建新账户",
+    "migrateTitle": "已有 Bluesky 账户？",
+    "migrateDescription": "您可以将现有账户迁移到此 PDS，而无需创建新账户。您的关注者、帖子和身份都会一起迁移。",
+    "migrateLink": "使用 PDS Moover 迁移",
     "handle": "用户名",
     "handlePlaceholder": "您的用户名",
     "handleHint": "您的完整用户名将是：@{handle}",
@@ -226,7 +231,10 @@
     "revoke": "撤销",
     "revoking": "撤销中...",
     "creating": "创建中...",
-    "revokeConfirm": "撤销「{name}」的密码？使用此密码的应用将无法再访问您的账户。"
+    "revokeConfirm": "撤销「{name}」的密码？使用此密码的应用将无法再访问您的账户。",
+    "saveWarningTitle": "重要：请保存此应用专用密码！",
+    "saveWarningMessage": "此密码用于登录不支持通行密钥或 OAuth 的应用。您只能看到一次。",
+    "acknowledgeLabel": "我已将应用专用密码保存在安全的地方"
   },
   "sessions": {
     "title": "登录会话",

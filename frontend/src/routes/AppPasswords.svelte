@@ -11,6 +11,8 @@
   let newPasswordName = $state('')
   let creating = $state(false)
   let createdPassword = $state<{ name: string; password: string } | null>(null)
+  let passwordCopied = $state(false)
+  let passwordAcknowledged = $state(false)
   let revoking = $state<string | null>(null)
   $effect(() => {
     if (!auth.loading && !auth.session) {
@@ -67,8 +69,16 @@
       revoking = null
     }
   }
+  function copyPassword() {
+    if (createdPassword) {
+      navigator.clipboard.writeText(createdPassword.password)
+      passwordCopied = true
+    }
+  }
   function dismissCreated() {
     createdPassword = null
+    passwordCopied = false
+    passwordAcknowledged = false
   }
 </script>
 <div class="page">
@@ -84,13 +94,22 @@
   {/if}
   {#if createdPassword}
     <div class="created-password">
-      <h3>{$_('appPasswords.created')}</h3>
-      <p>{$_('appPasswords.createdMessage')}</p>
-      <div class="password-display">
-        <code>{createdPassword.password}</code>
+      <div class="warning-box">
+        <strong>{$_('appPasswords.saveWarningTitle')}</strong>
+        <p>{$_('appPasswords.saveWarningMessage')}</p>
       </div>
-      <p class="password-name">{$_('common.name')}: {createdPassword.name}</p>
-      <button onclick={dismissCreated}>{$_('common.done')}</button>
+      <div class="password-display">
+        <div class="password-label">{$_('common.name')}: <strong>{createdPassword.name}</strong></div>
+        <code class="password-code">{createdPassword.password}</code>
+        <button type="button" class="copy-btn" onclick={copyPassword}>
+          {passwordCopied ? $_('common.copied') : $_('common.copyToClipboard')}
+        </button>
+      </div>
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={passwordAcknowledged} />
+        <span>{$_('appPasswords.acknowledgeLabel')}</span>
+      </label>
+      <button onclick={dismissCreated} disabled={!passwordAcknowledged}>{$_('common.done')}</button>
     </div>
   {/if}
   <section class="create-section">
@@ -175,35 +194,78 @@
   }
 
   .created-password {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
     padding: var(--space-6);
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     margin-bottom: var(--space-7);
   }
 
-  .created-password h3 {
-    margin: 0 0 var(--space-2) 0;
-    color: var(--success-text);
+  .warning-box {
+    padding: var(--space-5);
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+  }
+
+  .warning-box strong {
+    display: block;
+    margin-bottom: var(--space-2);
+    color: var(--warning-text);
+  }
+
+  .warning-box p {
+    margin: 0;
+    color: var(--warning-text);
   }
 
   .password-display {
     background: var(--bg-card);
-    padding: var(--space-4);
-    border-radius: var(--radius-md);
-    margin: var(--space-4) 0;
+    border: 2px solid var(--accent);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
+    text-align: center;
   }
 
-  .password-display code {
+  .password-label {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-4);
+  }
+
+  .password-code {
+    display: block;
     font-size: var(--text-xl);
     font-family: ui-monospace, monospace;
+    letter-spacing: 0.1em;
+    padding: var(--space-5);
+    background: var(--bg-input);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
+    user-select: all;
     word-break: break-all;
   }
 
-  .password-name {
-    color: var(--text-secondary);
+  .copy-btn {
+    padding: var(--space-3) var(--space-5);
     font-size: var(--text-sm);
-    margin-bottom: var(--space-4);
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    cursor: pointer;
+    font-weight: var(--font-normal);
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: auto;
+    padding: 0;
   }
 
   section {

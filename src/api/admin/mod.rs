@@ -1,4 +1,5 @@
 pub mod account;
+pub mod config;
 pub mod invite;
 pub mod server_stats;
 pub mod status;
@@ -7,6 +8,7 @@ pub use account::{
     delete_account, get_account_info, get_account_infos, search_accounts, send_email,
     update_account_email, update_account_handle, update_account_password,
 };
+pub use config::{get_server_config, update_server_config};
 pub use invite::{
     disable_account_invites, disable_invite_codes, enable_account_invites, get_invite_codes,
 };

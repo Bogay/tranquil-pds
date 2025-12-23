@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
+  import { setServerName as setGlobalServerName, setColors as setGlobalColors, setHasLogo as setGlobalHasLogo } from '../lib/serverConfig.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
@@ -50,6 +51,23 @@
   } | null>(null)
   let userDetailLoading = $state(false)
   let userActionLoading = $state(false)
+  let serverName = $state('')
+  let serverNameInput = $state('')
+  let primaryColor = $state('')
+  let primaryColorInput = $state('')
+  let primaryColorDark = $state('')
+  let primaryColorDarkInput = $state('')
+  let secondaryColor = $state('')
+  let secondaryColorInput = $state('')
+  let secondaryColorDark = $state('')
+  let secondaryColorDarkInput = $state('')
+  let logoCid = $state<string | null>(null)
+  let originalLogoCid = $state<string | null>(null)
+  let logoFile = $state<File | null>(null)
+  let logoPreview = $state<string | null>(null)
+  let serverConfigLoading = $state(false)
+  let serverConfigError = $state<string | null>(null)
+  let serverConfigSuccess = $state(false)
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -60,8 +78,100 @@
   $effect(() => {
     if (auth.session?.isAdmin) {
       loadStats()
+      loadServerConfig()
     }
   })
+  async function loadServerConfig() {
+    try {
+      const config = await api.getServerConfig()
+      serverName = config.serverName
+      serverNameInput = config.serverName
+      primaryColor = config.primaryColor || ''
+      primaryColorInput = config.primaryColor || ''
+      primaryColorDark = config.primaryColorDark || ''
+      primaryColorDarkInput = config.primaryColorDark || ''
+      secondaryColor = config.secondaryColor || ''
+      secondaryColorInput = config.secondaryColor || ''
+      secondaryColorDark = config.secondaryColorDark || ''
+      secondaryColorDarkInput = config.secondaryColorDark || ''
+      logoCid = config.logoCid
+      originalLogoCid = config.logoCid
+      if (config.logoCid) {
+        logoPreview = '/logo'
+      }
+    } catch (e) {
+      serverConfigError = e instanceof ApiError ? e.message : 'Failed to load server config'
+    }
+  }
+  async function saveServerConfig(e: Event) {
+    e.preventDefault()
+    if (!auth.session) return
+    serverConfigLoading = true
+    serverConfigError = null
+    serverConfigSuccess = false
+    try {
+      let newLogoCid = logoCid
+      if (logoFile) {
+        const result = await api.uploadBlob(auth.session.accessJwt, logoFile)
+        newLogoCid = result.blob.ref.$link
+      }
+      await api.updateServerConfig(auth.session.accessJwt, {
+        serverName: serverNameInput,
+        primaryColor: primaryColorInput,
+        primaryColorDark: primaryColorDarkInput,
+        secondaryColor: secondaryColorInput,
+        secondaryColorDark: secondaryColorDarkInput,
+        logoCid: newLogoCid ?? '',
+      })
+      serverName = serverNameInput
+      primaryColor = primaryColorInput
+      primaryColorDark = primaryColorDarkInput
+      secondaryColor = secondaryColorInput
+      secondaryColorDark = secondaryColorDarkInput
+      logoCid = newLogoCid
+      originalLogoCid = newLogoCid
+      logoFile = null
+      setGlobalServerName(serverNameInput)
+      setGlobalColors({
+        primaryColor: primaryColorInput || null,
+        primaryColorDark: primaryColorDarkInput || null,
+        secondaryColor: secondaryColorInput || null,
+        secondaryColorDark: secondaryColorDarkInput || null,
+      })
+      setGlobalHasLogo(!!newLogoCid)
+      serverConfigSuccess = true
+      setTimeout(() => { serverConfigSuccess = false }, 3000)
+    } catch (e) {
+      serverConfigError = e instanceof ApiError ? e.message : 'Failed to save server config'
+    } finally {
+      serverConfigLoading = false
+    }
+  }
+
+  function handleLogoChange(e: Event) {
+    const input = e.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (file) {
+      logoFile = file
+      logoPreview = URL.createObjectURL(file)
+    }
+  }
+
+  function removeLogo() {
+    logoFile = null
+    logoCid = null
+    logoPreview = null
+  }
+
+  function hasConfigChanges(): boolean {
+    const logoChanged = logoFile !== null || logoCid !== originalLogoCid
+    return serverNameInput !== serverName ||
+      primaryColorInput !== primaryColor ||
+      primaryColorDarkInput !== primaryColorDark ||
+      secondaryColorInput !== secondaryColor ||
+      secondaryColorDarkInput !== secondaryColorDark ||
+      logoChanged
+  }
   async function loadStats() {
     if (!auth.session) return
     loading = true
@@ -201,6 +311,128 @@
       {#if error}
         <div class="message error">{error}</div>
       {/if}
+      <section>
+        <h2>Server Configuration</h2>
+        <form class="config-form" onsubmit={saveServerConfig}>
+          <div class="form-group">
+            <label for="serverName">Server Name</label>
+            <input
+              type="text"
+              id="serverName"
+              bind:value={serverNameInput}
+              placeholder="My PDS"
+              maxlength="100"
+              disabled={serverConfigLoading}
+            />
+            <span class="help-text">Displayed in the browser tab and other places</span>
+          </div>
+
+          <div class="form-group">
+            <label for="serverLogo">Server Logo</label>
+            <div class="logo-upload">
+              {#if logoPreview}
+                <div class="logo-preview">
+                  <img src={logoPreview} alt="Logo preview" />
+                  <button type="button" class="remove-logo" onclick={removeLogo} disabled={serverConfigLoading}>Remove</button>
+                </div>
+              {:else}
+                <input
+                  type="file"
+                  id="serverLogo"
+                  accept="image/*"
+                  onchange={handleLogoChange}
+                  disabled={serverConfigLoading}
+                />
+              {/if}
+            </div>
+            <span class="help-text">Used as favicon and shown in the navbar</span>
+          </div>
+
+          <h3 class="subsection-title">Theme Colors</h3>
+          <p class="theme-hint">Leave blank to use default colors.</p>
+
+          <div class="color-grid">
+            <div class="color-group">
+              <label for="primaryColor">Primary (Light Mode)</label>
+              <div class="color-input-row">
+                <input
+                  type="color"
+                  bind:value={primaryColorInput}
+                  disabled={serverConfigLoading}
+                />
+                <input
+                  type="text"
+                  id="primaryColor"
+                  bind:value={primaryColorInput}
+                  placeholder="#2c00ff (default)"
+                  disabled={serverConfigLoading}
+                />
+              </div>
+            </div>
+            <div class="color-group">
+              <label for="primaryColorDark">Primary (Dark Mode)</label>
+              <div class="color-input-row">
+                <input
+                  type="color"
+                  bind:value={primaryColorDarkInput}
+                  disabled={serverConfigLoading}
+                />
+                <input
+                  type="text"
+                  id="primaryColorDark"
+                  bind:value={primaryColorDarkInput}
+                  placeholder="#7b6bff (default)"
+                  disabled={serverConfigLoading}
+                />
+              </div>
+            </div>
+            <div class="color-group">
+              <label for="secondaryColor">Secondary (Light Mode)</label>
+              <div class="color-input-row">
+                <input
+                  type="color"
+                  bind:value={secondaryColorInput}
+                  disabled={serverConfigLoading}
+                />
+                <input
+                  type="text"
+                  id="secondaryColor"
+                  bind:value={secondaryColorInput}
+                  placeholder="#ff2400 (default)"
+                  disabled={serverConfigLoading}
+                />
+              </div>
+            </div>
+            <div class="color-group">
+              <label for="secondaryColorDark">Secondary (Dark Mode)</label>
+              <div class="color-input-row">
+                <input
+                  type="color"
+                  bind:value={secondaryColorDarkInput}
+                  disabled={serverConfigLoading}
+                />
+                <input
+                  type="text"
+                  id="secondaryColorDark"
+                  bind:value={secondaryColorDarkInput}
+                  placeholder="#ff6b5b (default)"
+                  disabled={serverConfigLoading}
+                />
+              </div>
+            </div>
+          </div>
+
+          {#if serverConfigError}
+            <div class="message error">{serverConfigError}</div>
+          {/if}
+          {#if serverConfigSuccess}
+            <div class="message success">Server configuration saved</div>
+          {/if}
+          <button type="submit" disabled={serverConfigLoading || !hasConfigChanges()}>
+            {serverConfigLoading ? 'Saving...' : 'Save Configuration'}
+          </button>
+        </form>
+      </section>
       {#if stats}
         <section>
           <h2>Server Statistics</h2>
@@ -453,6 +685,139 @@
     background: var(--error-bg);
     border: 1px solid var(--error-border);
     color: var(--error-text);
+  }
+
+  .message.success {
+    background: var(--success-bg);
+    border: 1px solid var(--success-border);
+    color: var(--success-text);
+  }
+
+  .config-form {
+    max-width: 500px;
+  }
+
+  .form-group {
+    margin-bottom: var(--space-4);
+  }
+
+  .form-group label {
+    display: block;
+    font-weight: var(--font-medium);
+    margin-bottom: var(--space-2);
+    font-size: var(--text-sm);
+  }
+
+  .form-group input {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+  }
+
+  .form-group input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .help-text {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    margin-top: var(--space-1);
+  }
+
+  .config-form button {
+    padding: var(--space-2) var(--space-4);
+    background: var(--accent);
+    color: var(--text-inverse);
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: var(--text-sm);
+  }
+
+  .config-form button:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .config-form button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .subsection-title {
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--text-primary);
+    margin: var(--space-5) 0 var(--space-2) 0;
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-color);
+  }
+
+  .theme-hint {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-4);
+  }
+
+  .color-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+  }
+
+  @media (max-width: 500px) {
+    .color-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .color-group label {
+    display: block;
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-1);
+  }
+
+  .color-group input[type="text"] {
+    width: 100%;
+  }
+
+  .logo-upload {
+    margin-top: var(--space-2);
+  }
+
+  .logo-preview {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .logo-preview img {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+  }
+
+  .remove-logo {
+    background: transparent;
+    color: var(--error-text);
+    border: 1px solid var(--error-border);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .remove-logo:hover:not(:disabled) {
+    background: var(--error-bg);
   }
 
   section {

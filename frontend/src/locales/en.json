@@ -14,7 +14,9 @@
     "expires": "Expires",
     "name": "Name",
     "dashboard": "Dashboard",
-    "backToDashboard": "← Dashboard"
+    "backToDashboard": "← Dashboard",
+    "copied": "Copied!",
+    "copyToClipboard": "Copy to Clipboard"
   },
   "login": {
     "title": "Sign In",
@@ -45,6 +47,9 @@
   "register": {
     "title": "Create Account",
     "subtitle": "Create a new account on this PDS",
+    "migrateTitle": "Already have a Bluesky account?",
+    "migrateDescription": "You can migrate your existing account to this PDS instead of creating a new one. Your followers, posts, and identity will come with you.",
+    "migrateLink": "Migrate with PDS Moover",
     "handle": "Handle",
     "handlePlaceholder": "yourname",
     "handleHint": "Your full handle will be: @{handle}",
@@ -226,7 +231,10 @@
     "revoke": "Revoke",
     "revoking": "Revoking...",
     "creating": "Creating...",
-    "revokeConfirm": "Revoke app password \"{name}\"? Apps using this password will no longer be able to access your account."
+    "revokeConfirm": "Revoke app password \"{name}\"? Apps using this password will no longer be able to access your account.",
+    "saveWarningTitle": "Important: Save this app password!",
+    "saveWarningMessage": "This password is required to sign into apps that don't support passkeys or OAuth. You will only see it once.",
+    "acknowledgeLabel": "I have saved my app password in a secure location"
   },
   "sessions": {
     "title": "Active Sessions",

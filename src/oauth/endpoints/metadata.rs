@@ -172,7 +172,7 @@ pub async fn frontend_client_metadata(
             "refresh_token".to_string(),
         ],
         response_types: vec!["code".to_string()],
-        scope: "atproto transition:generic".to_string(),
+        scope: "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*".to_string(),
         token_endpoint_auth_method: "none".to_string(),
         application_type: "web".to_string(),
         dpop_bound_access_tokens: true,

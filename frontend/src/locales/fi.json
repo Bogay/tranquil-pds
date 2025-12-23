@@ -14,7 +14,9 @@
     "expires": "Vanhenee",
     "name": "Nimi",
     "dashboard": "Hallintapaneeli",
-    "backToDashboard": "← Hallintapaneeli"
+    "backToDashboard": "← Hallintapaneeli",
+    "copied": "Kopioitu!",
+    "copyToClipboard": "Kopioi"
   },
   "login": {
     "title": "Kirjaudu sisään",
@@ -45,6 +47,9 @@
   "register": {
     "title": "Luo tili",
     "subtitle": "Luo uusi tili tälle PDS:lle",
+    "migrateTitle": "Onko sinulla jo Bluesky-tili?",
+    "migrateDescription": "Voit siirtää olemassa olevan tilisi tälle PDS:lle uuden luomisen sijaan. Seuraajasi, julkaisusi ja identiteettisi siirtyvät mukana.",
+    "migrateLink": "Siirrä PDS Mooverilla",
     "handle": "Käyttäjänimi",
     "handlePlaceholder": "nimesi",
     "handleHint": "Täydellinen käyttäjänimesi on: @{handle}",
@@ -226,7 +231,10 @@
     "revoke": "Peruuta",
     "revoking": "Peruutetaan...",
     "creating": "Luodaan...",
-    "revokeConfirm": "Peruuta sovelluksen salasana \"{name}\"? Sovellukset, jotka käyttävät tätä salasanaa, eivät enää pääse tilillesi."
+    "revokeConfirm": "Peruuta sovelluksen salasana \"{name}\"? Sovellukset, jotka käyttävät tätä salasanaa, eivät enää pääse tilillesi.",
+    "saveWarningTitle": "Tärkeää: Tallenna tämä sovelluksen salasana!",
+    "saveWarningMessage": "Tämä salasana tarvitaan kirjautumiseen sovelluksiin, jotka eivät tue pääsyavaimia tai OAuthia. Näet sen vain kerran.",
+    "acknowledgeLabel": "Olen tallentanut sovelluksen salasanani turvalliseen paikkaan"
   },
   "sessions": {
     "title": "Aktiiviset istunnot",

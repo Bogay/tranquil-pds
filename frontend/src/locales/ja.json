@@ -14,7 +14,9 @@
     "expires": "有効期限",
     "name": "名前",
     "dashboard": "ダッシュボード",
-    "backToDashboard": "← ダッシュボード"
+    "backToDashboard": "← ダッシュボード",
+    "copied": "コピーしました！",
+    "copyToClipboard": "クリップボードにコピー"
   },
   "login": {
     "title": "サインイン",
@@ -45,6 +47,9 @@
   "register": {
     "title": "アカウント作成",
     "subtitle": "この PDS で新規アカウントを作成",
+    "migrateTitle": "すでにBlueskyアカウントをお持ちですか？",
+    "migrateDescription": "新しいアカウントを作成する代わりに、既存のアカウントをこのPDSに移行できます。フォロワー、投稿、IDも一緒に移行されます。",
+    "migrateLink": "PDS Mooverで移行する",
     "handle": "ハンドル",
     "handlePlaceholder": "あなたの名前",
     "handleHint": "完全なハンドル: @{handle}",
@@ -226,7 +231,10 @@
     "revoke": "取り消す",
     "revoking": "取り消し中...",
     "creating": "作成中...",
-    "revokeConfirm": "アプリパスワード「{name}」を取り消しますか？このパスワードを使用しているアプリはアカウントにアクセスできなくなります。"
+    "revokeConfirm": "アプリパスワード「{name}」を取り消しますか？このパスワードを使用しているアプリはアカウントにアクセスできなくなります。",
+    "saveWarningTitle": "重要: このアプリパスワードを保存してください！",
+    "saveWarningMessage": "このパスワードはパスキーや OAuth をサポートしていないアプリにサインインするために必要です。一度しか表示されません。",
+    "acknowledgeLabel": "アプリパスワードを安全な場所に保存しました"
   },
   "sessions": {
     "title": "アクティブセッション",

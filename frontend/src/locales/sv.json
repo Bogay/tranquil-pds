@@ -14,7 +14,9 @@
     "expires": "Upphör",
     "name": "Namn",
     "dashboard": "Kontrollpanel",
-    "backToDashboard": "← Kontrollpanel"
+    "backToDashboard": "← Kontrollpanel",
+    "copied": "Kopierat!",
+    "copyToClipboard": "Kopiera"
   },
   "login": {
     "title": "Logga in",
@@ -45,6 +47,9 @@
   "register": {
     "title": "Skapa konto",
     "subtitle": "Skapa ett nytt konto på denna PDS",
+    "migrateTitle": "Har du redan ett Bluesky-konto?",
+    "migrateDescription": "Du kan flytta ditt befintliga konto till denna PDS istället för att skapa ett nytt. Dina följare, inlägg och identitet följer med.",
+    "migrateLink": "Flytta med PDS Moover",
     "handle": "Användarnamn",
     "handlePlaceholder": "dittnamn",
     "handleHint": "Ditt fullständiga användarnamn blir: @{handle}",
@@ -226,7 +231,10 @@
     "revoke": "Återkalla",
     "revoking": "Återkallar...",
     "creating": "Skapar...",
-    "revokeConfirm": "Återkalla applösenord \"{name}\"? Appar som använder detta lösenord kommer inte längre att kunna komma åt ditt konto."
+    "revokeConfirm": "Återkalla applösenord \"{name}\"? Appar som använder detta lösenord kommer inte längre att kunna komma åt ditt konto.",
+    "saveWarningTitle": "Viktigt: Spara detta applösenord!",
+    "saveWarningMessage": "Detta lösenord krävs för att logga in i appar som inte stöder passkeys eller OAuth. Du ser det bara en gång.",
+    "acknowledgeLabel": "Jag har sparat mitt applösenord på en säker plats"
   },
   "sessions": {
     "title": "Aktiva sessioner",

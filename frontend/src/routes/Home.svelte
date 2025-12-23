@@ -2,11 +2,31 @@
   import { onMount } from 'svelte'
   import { _ } from '../lib/i18n'
   import { getAuthState } from '../lib/auth.svelte'
+  import { getServerConfigState } from '../lib/serverConfig.svelte'
+  import { api } from '../lib/api'
 
   const auth = getAuthState()
+  const serverConfig = getServerConfigState()
   const sourceUrl = 'https://tangled.org/lewis.moe/bspds-sandbox'
 
+  let pdsHostname = $state<string | null>(null)
+  let pdsVersion = $state<string | null>(null)
+  let userCount = $state<number | null>(null)
+
   onMount(() => {
+    api.describeServer().then(info => {
+      if (info.availableUserDomains?.length) {
+        pdsHostname = info.availableUserDomains[0]
+      }
+      if (info.version) {
+        pdsVersion = info.version
+      }
+    }).catch(() => {})
+
+    api.listRepos(1000).then(data => {
+      userCount = data.repos.length
+    }).catch(() => {})
+
     const pattern = document.getElementById('dotPattern')
     if (!pattern) return
 
@@ -65,8 +85,20 @@
 <div class="pattern-fade"></div>
 
 <nav>
-  <span class="brand">Tranquil PDS</span>
-  <span class="nav-meta">0.1.0</span>
+  <div class="nav-left">
+    {#if serverConfig.hasLogo}
+      <img src="/logo" alt="Logo" class="nav-logo" />
+    {/if}
+    {#if pdsHostname}
+      <span class="hostname">{pdsHostname}</span>
+      {#if userCount !== null}
+        <span class="user-count">{userCount} {userCount === 1 ? 'user' : 'users'}</span>
+      {/if}
+    {:else}
+      <span class="hostname placeholder">loading...</span>
+    {/if}
+  </div>
+  <span class="nav-meta">{pdsVersion || ''}</span>
 </nav>
 
 <div class="home">
@@ -139,7 +171,7 @@
 
   <footer class="site-footer">
     <span>Open Source</span>
-    <span>Made with care</span>
+    <span>Made with patience</span>
   </footer>
 </div>
 
@@ -209,12 +241,37 @@
     align-items: center;
   }
 
-  .brand {
+  .nav-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .nav-logo {
+    height: 28px;
+    width: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+  }
+
+  .hostname {
     font-weight: var(--font-semibold);
     font-size: var(--text-base);
     letter-spacing: 0.08em;
     color: var(--text-inverse);
     text-transform: uppercase;
+  }
+
+  .hostname.placeholder {
+    opacity: 0.4;
+  }
+
+  .user-count {
+    font-size: var(--text-sm);
+    color: rgba(255, 255, 255, 0.85);
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: var(--radius-md);
   }
 
   .nav-meta {
@@ -319,10 +376,10 @@
 
   .content h2 {
     font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
+    font-weight: var(--font-bold);
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: var(--accent);
+    color: var(--accent-light);
     margin: var(--space-8) 0 var(--space-5);
   }
 
@@ -380,6 +437,10 @@
 
     .btn {
       text-align: center;
+    }
+
+    .nav-meta {
+      display: none;
     }
   }
 

@@ -1,5 +1,17 @@
 @import './tokens.css';
 
+@property --accent {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #2c00ff;
+}
+
+@property --secondary {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #ff2400;
+}
+
 *,
 *::before,
 *::after {
@@ -15,6 +27,7 @@ body {
   background: var(--bg-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -34,6 +47,7 @@ p {
 a {
   color: var(--secondary);
   text-decoration: none;
+  transition: color 0.3s ease;
 }
 
 a:hover {

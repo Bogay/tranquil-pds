@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getCurrentPath, navigate } from './lib/router.svelte'
   import { initAuth, getAuthState } from './lib/auth.svelte'
+  import { initServerConfig } from './lib/serverConfig.svelte'
   import { initI18n, _ } from './lib/i18n'
   import { isLoading as i18nLoading } from 'svelte-i18n'
   import Login from './routes/Login.svelte'
@@ -41,6 +42,7 @@
   }
 
   $effect(() => {
+    initServerConfig()
     initAuth().then(({ oauthLoginCompleted }) => {
       if (oauthLoginCompleted) {
         navigate('/dashboard')

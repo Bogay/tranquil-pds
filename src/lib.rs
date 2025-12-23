@@ -35,6 +35,7 @@ pub fn app(state: AppState) -> Router {
         .route("/health", get(api::server::health))
         .route("/xrpc/_health", get(api::server::health))
         .route("/robots.txt", get(api::server::robots_txt))
+        .route("/logo", get(api::server::get_logo))
         .route(
             "/xrpc/com.atproto.server.describeServer",
             get(api::server::describe_server),
@@ -401,6 +402,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.tranquil.admin.getServerStats",
             get(api::admin::get_server_stats),
+        )
+        .route(
+            "/xrpc/com.tranquil.server.getConfig",
+            get(api::admin::get_server_config),
+        )
+        .route(
+            "/xrpc/com.tranquil.admin.updateServerConfig",
+            post(api::admin::update_server_config),
         )
         .route(
             "/xrpc/com.atproto.admin.disableAccountInvites",

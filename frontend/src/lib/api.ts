@@ -265,8 +265,18 @@ export const api = {
     availableUserDomains: string[]
     inviteCodeRequired: boolean
     links?: { privacyPolicy?: string; termsOfService?: string }
+    version?: string
   }> {
     return xrpc('com.atproto.server.describeServer')
+  },
+
+  async listRepos(limit?: number): Promise<{
+    repos: Array<{ did: string; head: string; rev: string }>
+    cursor?: string
+  }> {
+    const params: Record<string, string> = {}
+    if (limit) params.limit = String(limit)
+    return xrpc('com.atproto.sync.listRepos', { params })
   },
 
   async getNotificationPrefs(token: string): Promise<{
@@ -323,6 +333,51 @@ export const api = {
     blobStorageBytes: number
   }> {
     return xrpc('com.tranquil.admin.getServerStats', { token })
+  },
+
+  async getServerConfig(): Promise<{
+    serverName: string
+    primaryColor: string | null
+    primaryColorDark: string | null
+    secondaryColor: string | null
+    secondaryColorDark: string | null
+    logoCid: string | null
+  }> {
+    return xrpc('com.tranquil.server.getConfig')
+  },
+
+  async updateServerConfig(
+    token: string,
+    config: {
+      serverName?: string
+      primaryColor?: string
+      primaryColorDark?: string
+      secondaryColor?: string
+      secondaryColorDark?: string
+      logoCid?: string
+    }
+  ): Promise<{ success: boolean }> {
+    return xrpc('com.tranquil.admin.updateServerConfig', {
+      method: 'POST',
+      token,
+      body: config,
+    })
+  },
+
+  async uploadBlob(token: string, file: File): Promise<{ blob: { $type: string; ref: { $link: string }; mimeType: string; size: number } }> {
+    const res = await fetch('/xrpc/com.atproto.repo.uploadBlob', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': file.type,
+      },
+      body: file,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Unknown', message: res.statusText }))
+      throw new ApiError(res.status, err.error, err.message)
+    }
+    return res.json()
   },
 
   async changePassword(token: string, currentPassword: string, newPassword: string): Promise<void> {

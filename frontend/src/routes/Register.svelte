@@ -132,6 +132,17 @@
 </script>
 
 <div class="register-page">
+  <div class="migrate-callout">
+    <div class="migrate-icon">↗</div>
+    <div class="migrate-content">
+      <strong>{$_('register.migrateTitle')}</strong>
+      <p>{$_('register.migrateDescription')}</p>
+      <a href="https://pdsmoover.com/moover" target="_blank" rel="noopener" class="migrate-link">
+        {$_('register.migrateLink')} →
+      </a>
+    </div>
+  </div>
+
   {#if error}
     <div class="message error">{error}</div>
   {/if}
@@ -343,6 +354,50 @@
     max-width: var(--width-sm);
     margin: var(--space-9) auto;
     padding: var(--space-7);
+  }
+
+  .migrate-callout {
+    display: flex;
+    gap: var(--space-4);
+    padding: var(--space-5);
+    background: var(--accent-muted);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-6);
+  }
+
+  .migrate-icon {
+    font-size: var(--text-2xl);
+    line-height: 1;
+    color: var(--accent);
+  }
+
+  .migrate-content {
+    flex: 1;
+  }
+
+  .migrate-content strong {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: var(--space-2);
+  }
+
+  .migrate-content p {
+    margin: 0 0 var(--space-3) 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: var(--leading-relaxed);
+  }
+
+  .migrate-link {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .migrate-link:hover {
+    text-decoration: underline;
   }
 
   h1 {

@@ -20,7 +20,8 @@ pub async fn describe_server() -> impl IntoResponse {
     Json(json!({
         "availableUserDomains": domains,
         "inviteCodeRequired": invite_code_required,
-        "did": format!("did:web:{}", pds_hostname)
+        "did": format!("did:web:{}", pds_hostname),
+        "version": env!("CARGO_PKG_VERSION")
     }))
 }
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {

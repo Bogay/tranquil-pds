@@ -14,7 +14,9 @@
     "expires": "만료일",
     "name": "이름",
     "dashboard": "대시보드",
-    "backToDashboard": "← 대시보드"
+    "backToDashboard": "← 대시보드",
+    "copied": "복사됨!",
+    "copyToClipboard": "클립보드에 복사"
   },
   "login": {
     "title": "로그인",
@@ -45,6 +47,9 @@
   "register": {
     "title": "계정 만들기",
     "subtitle": "이 PDS에 새 계정을 만듭니다",
+    "migrateTitle": "이미 Bluesky 계정이 있으신가요?",
+    "migrateDescription": "새 계정을 만드는 대신 기존 계정을 이 PDS로 마이그레이션할 수 있습니다. 팔로워, 게시물, ID가 함께 이전됩니다.",
+    "migrateLink": "PDS Moover로 마이그레이션",
     "handle": "핸들",
     "handlePlaceholder": "사용자 이름",
     "handleHint": "전체 핸들: @{handle}",
@@ -226,7 +231,10 @@
     "revoke": "취소",
     "revoking": "취소 중...",
     "creating": "생성 중...",
-    "revokeConfirm": "앱 비밀번호 \"{name}\"을(를) 취소하시겠습니까? 이 비밀번호를 사용하는 앱은 더 이상 계정에 액세스할 수 없습니다."
+    "revokeConfirm": "앱 비밀번호 \"{name}\"을(를) 취소하시겠습니까? 이 비밀번호를 사용하는 앱은 더 이상 계정에 액세스할 수 없습니다.",
+    "saveWarningTitle": "중요: 이 앱 비밀번호를 저장하세요!",
+    "saveWarningMessage": "이 비밀번호는 패스키 또는 OAuth를 지원하지 않는 앱에 로그인하는 데 필요합니다. 한 번만 볼 수 있습니다.",
+    "acknowledgeLabel": "앱 비밀번호를 안전한 곳에 저장했습니다"
   },
   "sessions": {
     "title": "활성 세션",
