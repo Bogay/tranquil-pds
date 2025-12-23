@@ -2,6 +2,21 @@ use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 use tracing::error;
+
+fn get_available_comms_channels() -> Vec<&'static str> {
+    let mut channels = vec!["email"];
+    if std::env::var("DISCORD_WEBHOOK_URL").is_ok() {
+        channels.push("discord");
+    }
+    if std::env::var("TELEGRAM_BOT_TOKEN").is_ok() {
+        channels.push("telegram");
+    }
+    if std::env::var("SIGNAL_CLI_PATH").is_ok() && std::env::var("SIGNAL_SENDER_NUMBER").is_ok() {
+        channels.push("signal");
+    }
+    channels
+}
+
 pub async fn robots_txt() -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -21,7 +36,8 @@ pub async fn describe_server() -> impl IntoResponse {
         "availableUserDomains": domains,
         "inviteCodeRequired": invite_code_required,
         "did": format!("did:web:{}", pds_hostname),
-        "version": env!("CARGO_PKG_VERSION")
+        "version": env!("CARGO_PKG_VERSION"),
+        "availableCommsChannels": get_available_comms_channels()
     }))
 }
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {

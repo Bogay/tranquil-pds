@@ -144,7 +144,7 @@
     </button>
 
     <p class="link-text">
-      {$_('login.noAccount')} <a href="#/register">{$_('login.createAcount')}</a>
+      {$_('login.noAccount')} <a href="#/register">{$_('login.createAccount')}</a>
     </p>
 
   {:else}

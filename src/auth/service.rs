@@ -229,12 +229,12 @@ impl ServiceTokenVerifier {
             .strip_prefix("did:web:")
             .ok_or_else(|| anyhow!("Invalid did:web format"))?;
 
-        let decoded_host = host.replace("%3A", ":");
-        let (host_part, path_part) = if let Some(idx) = decoded_host.find('/') {
-            (&decoded_host[..idx], &decoded_host[idx..])
-        } else {
-            (decoded_host.as_str(), "")
-        };
+        let parts: Vec<&str> = host.split(':').collect();
+        if parts.is_empty() {
+            return Err(anyhow!("Invalid did:web format - no host"));
+        }
+
+        let host_part = parts[0].replace("%3A", ":");
 
         let scheme = if host_part.starts_with("localhost")
             || host_part.starts_with("127.0.0.1")
@@ -245,10 +245,11 @@ impl ServiceTokenVerifier {
             "https"
         };
 
-        let url = if path_part.is_empty() {
+        let url = if parts.len() == 1 {
             format!("{}://{}/.well-known/did.json", scheme, host_part)
         } else {
-            format!("{}://{}{}/did.json", scheme, host_part, path_part)
+            let path = parts[1..].join("/");
+            format!("{}://{}/{}/did.json", scheme, host_part, path)
         };
 
         debug!("Resolving did:web {} via {}", did, url);

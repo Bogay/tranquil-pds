@@ -153,7 +153,7 @@
 
     <h2>Works with everything</h2>
 
-    <p>Use any ATProto app you already like. Tranquil PDS speaks the same language as Bluesky's servers, so all your favorite clients, tools, and bots just work.</p>
+    <p>Use any ATProto app you already like. Tranquil PDS speaks the same language as Bluesky's servers, so all your favorite clients and tools just work.</p>
 
     <h2>Ready to try it?</h2>
 
@@ -170,8 +170,8 @@
   </section>
 
   <footer class="site-footer">
-    <span>Open Source</span>
-    <span>Made with patience</span>
+    <span>Made by people who don't take themselves too seriously</span>
+    <span>Open Source: issues & PRs welcome</span>
   </footer>
 </div>
 

@@ -266,6 +266,7 @@ export const api = {
     inviteCodeRequired: boolean
     links?: { privacyPolicy?: string; termsOfService?: string }
     version?: string
+    availableCommsChannels?: string[]
   }> {
     return xrpc('com.atproto.server.describeServer')
   },

@@ -22,6 +22,7 @@
   let serverInfo = $state<{
     availableUserDomains: string[]
     inviteCodeRequired: boolean
+    availableCommsChannels?: string[]
   } | null>(null)
   let loadingServerInfo = $state(true)
   let serverInfoLoaded = false
@@ -46,6 +47,11 @@
   }
 
   let handleHasDot = $derived(handle.includes('.'))
+
+  function isChannelAvailable(channel: string): boolean {
+    const available = serverInfo?.availableCommsChannels ?? ['email']
+    return available.includes(channel)
+  }
 
   function validateForm(): string | null {
     if (!handle.trim()) return $_('register.validation.handleRequired')
@@ -262,9 +268,15 @@
           <label for="verification-channel">{$_('register.verificationMethod')}</label>
           <select id="verification-channel" bind:value={verificationChannel} disabled={submitting}>
             <option value="email">{$_('register.email')}</option>
-            <option value="discord">{$_('register.discord')}</option>
-            <option value="telegram">{$_('register.telegram')}</option>
-            <option value="signal">{$_('register.signal')}</option>
+            <option value="discord" disabled={!isChannelAvailable('discord')}>
+              {$_('register.discord')}{isChannelAvailable('discord') ? '' : ` (${$_('register.notConfigured')})`}
+            </option>
+            <option value="telegram" disabled={!isChannelAvailable('telegram')}>
+              {$_('register.telegram')}{isChannelAvailable('telegram') ? '' : ` (${$_('register.notConfigured')})`}
+            </option>
+            <option value="signal" disabled={!isChannelAvailable('signal')}>
+              {$_('register.signal')}{isChannelAvailable('signal') ? '' : ` (${$_('register.notConfigured')})`}
+            </option>
           </select>
         </div>
 

@@ -19,7 +19,7 @@
   let passkeyName = $state('')
   let submitting = $state(false)
   let error = $state<string | null>(null)
-  let serverInfo = $state<{ availableUserDomains: string[]; inviteCodeRequired: boolean } | null>(null)
+  let serverInfo = $state<{ availableUserDomains: string[]; inviteCodeRequired: boolean; availableCommsChannels?: string[] } | null>(null)
   let loadingServerInfo = $state(true)
   let serverInfoLoaded = false
 
@@ -289,6 +289,11 @@
     }
   }
 
+  function isChannelAvailable(ch: string): boolean {
+    const available = serverInfo?.availableCommsChannels ?? ['email']
+    return available.includes(ch)
+  }
+
   function goToLogin() {
     navigate('/login')
   }
@@ -363,9 +368,15 @@
           <label for="verification-channel">Verification Method</label>
           <select id="verification-channel" bind:value={verificationChannel} disabled={submitting}>
             <option value="email">Email</option>
-            <option value="discord">Discord</option>
-            <option value="telegram">Telegram</option>
-            <option value="signal">Signal</option>
+            <option value="discord" disabled={!isChannelAvailable('discord')}>
+              Discord{isChannelAvailable('discord') ? '' : ` (${$_('register.notConfigured')})`}
+            </option>
+            <option value="telegram" disabled={!isChannelAvailable('telegram')}>
+              Telegram{isChannelAvailable('telegram') ? '' : ` (${$_('register.notConfigured')})`}
+            </option>
+            <option value="signal" disabled={!isChannelAvailable('signal')}>
+              Signal{isChannelAvailable('signal') ? '' : ` (${$_('register.notConfigured')})`}
+            </option>
           </select>
         </div>
         {#if verificationChannel === 'email'}

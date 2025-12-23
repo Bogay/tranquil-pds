@@ -122,7 +122,14 @@ pub async fn create_account(
         && input
             .did
             .as_ref()
-            .map(|d| d.starts_with("did:plc:"))
+            .map(|d| d.starts_with("did:plc:") || d.starts_with("did:web:"))
+            .unwrap_or(false);
+
+    let is_did_web_byod = migration_auth.is_some()
+        && input
+            .did
+            .as_ref()
+            .map(|d| d.starts_with("did:web:"))
             .unwrap_or(false);
 
     if is_migration {
@@ -138,7 +145,11 @@ pub async fn create_account(
                 )
                     .into_response();
             }
-            info!(did = %migration_did, "Processing account migration");
+            if is_did_web_byod {
+                info!(did = %migration_did, "Processing did:web BYOD account creation");
+            } else {
+                info!(did = %migration_did, "Processing account migration");
+            }
         }
     }
 
@@ -337,14 +348,16 @@ pub async fn create_account(
                 )
                     .into_response();
             }
-            if let Err(e) =
-                verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await
-            {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidDid", "message": e})),
-                )
-                    .into_response();
+            if !is_did_web_byod {
+                if let Err(e) =
+                    verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await
+                {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "InvalidDid", "message": e})),
+                    )
+                        .into_response();
+                }
             }
             info!(did = %d, "Creating external did:web account");
             d.clone()
@@ -355,15 +368,17 @@ pub async fn create_account(
                     info!(did = %d, "Migration with existing did:plc");
                     d.clone()
                 } else if d.starts_with("did:web:") {
-                    if let Err(e) =
-                        verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref())
-                            .await
-                    {
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({"error": "InvalidDid", "message": e})),
-                        )
-                            .into_response();
+                    if !is_did_web_byod {
+                        if let Err(e) =
+                            verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref())
+                                .await
+                        {
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": "InvalidDid", "message": e})),
+                            )
+                                .into_response();
+                        }
                     }
                     d.clone()
                 } else if !d.trim().is_empty() {

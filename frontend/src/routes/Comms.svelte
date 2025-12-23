@@ -10,6 +10,7 @@
   let error = $state<string | null>(null)
   let success = $state<string | null>(null)
   let preferredChannel = $state('email')
+  let availableCommsChannels = $state<string[]>(['email'])
   let email = $state('')
   let discordId = $state('')
   let discordVerified = $state(false)
@@ -47,7 +48,10 @@
     loading = true
     error = null
     try {
-      const prefs = await api.getNotificationPrefs(auth.session.accessJwt)
+      const [prefs, serverInfo] = await Promise.all([
+        api.getNotificationPrefs(auth.session.accessJwt),
+        api.describeServer()
+      ])
       preferredChannel = prefs.preferredChannel
       email = prefs.email
       discordId = prefs.discordId ?? ''
@@ -56,6 +60,7 @@
       telegramVerified = prefs.telegramVerified
       signalNumber = prefs.signalNumber ?? ''
       signalVerified = prefs.signalVerified
+      availableCommsChannels = serverInfo.availableCommsChannels ?? ['email']
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Failed to load notification preferences'
     } finally {
@@ -135,7 +140,11 @@
       default: return ''
     }
   }
+  function isChannelAvailableOnServer(channelId: string): boolean {
+    return availableCommsChannels.includes(channelId)
+  }
   function canSelectChannel(channelId: string): boolean {
+    if (!isChannelAvailableOnServer(channelId)) return false
     if (channelId === 'email') return true
     if (channelId === 'discord') return !!discordId
     if (channelId === 'telegram') return !!telegramUsername
@@ -174,7 +183,7 @@
         </p>
         <div class="channel-options">
           {#each channels as channelId}
-            <label class="channel-option" class:disabled={!canSelectChannel(channelId)}>
+            <label class="channel-option" class:disabled={!canSelectChannel(channelId)} class:unavailable={!isChannelAvailableOnServer(channelId)}>
               <input
                 type="radio"
                 name="preferredChannel"
@@ -185,7 +194,9 @@
               <div class="channel-info">
                 <span class="channel-name">{getChannelName(channelId)}</span>
                 <span class="channel-description">{getChannelDescription(channelId)}</span>
-                {#if channelId !== 'email' && !canSelectChannel(channelId)}
+                {#if !isChannelAvailableOnServer(channelId)}
+                  <span class="channel-hint server-unavailable">{$_('comms.notConfiguredOnServer')}</span>
+                {:else if channelId !== 'email' && !canSelectChannel(channelId)}
                   <span class="channel-hint">{$_('comms.configureToEnable')}</span>
                 {/if}
               </div>
@@ -210,7 +221,7 @@
             </div>
             <p class="config-hint">{$_('comms.emailManagedInSettings')}</p>
           </div>
-          <div class="config-item">
+          <div class="config-item" class:unavailable={!isChannelAvailableOnServer('discord')}>
             <label for="discord">{$_('register.discordId')}</label>
             <div class="config-input">
               <input
@@ -218,9 +229,11 @@
                 type="text"
                 bind:value={discordId}
                 placeholder={$_('register.discordIdPlaceholder')}
-                disabled={saving}
+                disabled={saving || !isChannelAvailableOnServer('discord')}
               />
-              {#if discordId}
+              {#if !isChannelAvailableOnServer('discord')}
+                <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
+              {:else if discordId}
                 {#if discordVerified}
                   <span class="status verified">{$_('comms.verified')}</span>
                 {:else}
@@ -243,7 +256,7 @@
               </div>
             {/if}
           </div>
-          <div class="config-item">
+          <div class="config-item" class:unavailable={!isChannelAvailableOnServer('telegram')}>
             <label for="telegram">{$_('register.telegramUsername')}</label>
             <div class="config-input">
               <input
@@ -251,9 +264,11 @@
                 type="text"
                 bind:value={telegramUsername}
                 placeholder={$_('register.telegramUsernamePlaceholder')}
-                disabled={saving}
+                disabled={saving || !isChannelAvailableOnServer('telegram')}
               />
-              {#if telegramUsername}
+              {#if !isChannelAvailableOnServer('telegram')}
+                <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
+              {:else if telegramUsername}
                 {#if telegramVerified}
                   <span class="status verified">{$_('comms.verified')}</span>
                 {:else}
@@ -276,7 +291,7 @@
               </div>
             {/if}
           </div>
-          <div class="config-item">
+          <div class="config-item" class:unavailable={!isChannelAvailableOnServer('signal')}>
             <label for="signal">{$_('register.signalNumber')}</label>
             <div class="config-input">
               <input
@@ -284,9 +299,11 @@
                 type="tel"
                 bind:value={signalNumber}
                 placeholder={$_('register.signalNumberPlaceholder')}
-                disabled={saving}
+                disabled={saving || !isChannelAvailableOnServer('signal')}
               />
-              {#if signalNumber}
+              {#if !isChannelAvailableOnServer('signal')}
+                <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
+              {:else if signalNumber}
                 {#if signalVerified}
                   <span class="status verified">{$_('comms.verified')}</span>
                 {:else}
@@ -439,6 +456,11 @@
     cursor: not-allowed;
   }
 
+  .channel-option.unavailable {
+    opacity: 0.5;
+    background: var(--bg-input-disabled);
+  }
+
   .channel-option input[type="radio"] {
     flex-shrink: 0;
     width: 16px;
@@ -469,6 +491,10 @@
     font-style: italic;
   }
 
+  .channel-hint.server-unavailable {
+    color: var(--warning-text);
+  }
+
   .channel-config {
     display: flex;
     flex-direction: column;
@@ -479,6 +505,10 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+  }
+
+  .config-item.unavailable {
+    opacity: 0.6;
   }
 
   .config-item label {
@@ -516,6 +546,11 @@
   .status.unverified {
     background: var(--warning-bg);
     color: var(--warning-text);
+  }
+
+  .status.unavailable {
+    background: var(--bg-input-disabled);
+    color: var(--text-muted);
   }
 
   .config-hint {
