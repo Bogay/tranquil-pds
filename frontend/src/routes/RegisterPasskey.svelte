@@ -1,35 +1,25 @@
 <script lang="ts">
   import { navigate } from '../lib/router.svelte'
-  import { api, ApiError, type VerificationChannel, type DidType } from '../lib/api'
-  import { getAuthState, confirmSignup, resendVerification } from '../lib/auth.svelte'
+  import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
+  import {
+    createRegistrationFlow,
+    VerificationStep,
+    KeyChoiceStep,
+    DidDocStep,
+    AppPasswordStep,
+  } from '../lib/registration'
 
-  const auth = getAuthState()
-
-  let step = $state<'info' | 'passkey' | 'app-password' | 'verify' | 'success'>('info')
-  let handle = $state('')
-  let email = $state('')
-  let inviteCode = $state('')
-  let didType = $state<DidType>('plc')
-  let externalDid = $state('')
-  let verificationChannel = $state<VerificationChannel>('email')
-  let discordId = $state('')
-  let telegramUsername = $state('')
-  let signalNumber = $state('')
-  let passkeyName = $state('')
-  let submitting = $state(false)
-  let error = $state<string | null>(null)
-  let serverInfo = $state<{ availableUserDomains: string[]; inviteCodeRequired: boolean; availableCommsChannels?: string[] } | null>(null)
+  let serverInfo = $state<{
+    availableUserDomains: string[]
+    inviteCodeRequired: boolean
+    availableCommsChannels?: string[]
+  } | null>(null)
   let loadingServerInfo = $state(true)
   let serverInfoLoaded = false
 
-  let setupData = $state<{ did: string; handle: string; setupToken: string } | null>(null)
-  let appPasswordResult = $state<{ appPassword: string; appPasswordName: string } | null>(null)
-  let appPasswordAcknowledged = $state(false)
-  let appPasswordCopied = $state(false)
-  let verificationCode = $state('')
-  let resendingCode = $state(false)
-  let resendMessage = $state<string | null>(null)
+  let flow = $state<ReturnType<typeof createRegistrationFlow> | null>(null)
+  let passkeyName = $state('')
 
   $effect(() => {
     if (!serverInfoLoaded) {
@@ -38,9 +28,17 @@
     }
   })
 
+  $effect(() => {
+    if (flow?.state.step === 'redirect-to-dashboard') {
+      navigate('/dashboard')
+    }
+  })
+
   async function loadServerInfo() {
     try {
       serverInfo = await api.describeServer()
+      const hostname = serverInfo?.availableUserDomains?.[0] || window.location.hostname
+      flow = createRegistrationFlow('passkey', hostname)
     } catch (e) {
       console.error('Failed to load server info:', e)
     } finally {
@@ -49,27 +47,29 @@
   }
 
   function validateInfoStep(): string | null {
-    if (!handle.trim()) return 'Handle is required'
-    if (handle.includes('.')) return 'Handle cannot contain dots. You can set up a custom domain handle after creating your account.'
-    if (serverInfo?.inviteCodeRequired && !inviteCode.trim()) {
+    if (!flow) return 'Flow not initialized'
+    const info = flow.info
+    if (!info.handle.trim()) return 'Handle is required'
+    if (info.handle.includes('.')) return 'Handle cannot contain dots. You can set up a custom domain handle after creating your account.'
+    if (serverInfo?.inviteCodeRequired && !info.inviteCode?.trim()) {
       return 'Invite code is required'
     }
-    if (didType === 'web-external') {
-      if (!externalDid.trim()) return 'External did:web is required'
-      if (!externalDid.trim().startsWith('did:web:')) return 'External DID must start with did:web:'
+    if (info.didType === 'web-external') {
+      if (!info.externalDid?.trim()) return 'External did:web is required'
+      if (!info.externalDid.trim().startsWith('did:web:')) return 'External DID must start with did:web:'
     }
-    switch (verificationChannel) {
+    switch (info.verificationChannel) {
       case 'email':
-        if (!email.trim()) return 'Email is required for email verification'
+        if (!info.email.trim()) return 'Email is required for email verification'
         break
       case 'discord':
-        if (!discordId.trim()) return 'Discord ID is required for Discord verification'
+        if (!info.discordId?.trim()) return 'Discord ID is required for Discord verification'
         break
       case 'telegram':
-        if (!telegramUsername.trim()) return 'Telegram username is required for Telegram verification'
+        if (!info.telegramUsername?.trim()) return 'Telegram username is required for Telegram verification'
         break
       case 'signal':
-        if (!signalNumber.trim()) return 'Phone number is required for Signal verification'
+        if (!info.signalNumber?.trim()) return 'Phone number is required for Signal verification'
         break
     }
     return null
@@ -112,63 +112,38 @@
 
   async function handleInfoSubmit(e: Event) {
     e.preventDefault()
+    if (!flow) return
+
     const validationError = validateInfoStep()
     if (validationError) {
-      error = validationError
+      flow.setError(validationError)
       return
     }
 
     if (!window.PublicKeyCredential) {
-      error = 'Passkeys are not supported in this browser. Please use a different browser or register with a password instead.'
+      flow.setError('Passkeys are not supported in this browser. Please use a different browser or register with a password instead.')
       return
     }
 
-    submitting = true
-    error = null
+    flow.clearError()
+    flow.proceedFromInfo()
+  }
 
-    try {
-      const result = await api.createPasskeyAccount({
-        handle: handle.trim(),
-        email: email.trim() || undefined,
-        inviteCode: inviteCode.trim() || undefined,
-        didType,
-        did: didType === 'web-external' ? externalDid.trim() : undefined,
-        verificationChannel,
-        discordId: discordId.trim() || undefined,
-        telegramUsername: telegramUsername.trim() || undefined,
-        signalNumber: signalNumber.trim() || undefined,
-      })
-
-      setupData = {
-        did: result.did,
-        handle: result.handle,
-        setupToken: result.setupToken,
-      }
-
-      step = 'passkey'
-    } catch (err) {
-      if (err instanceof ApiError) {
-        error = err.message || 'Registration failed'
-      } else if (err instanceof Error) {
-        error = err.message || 'Registration failed'
-      } else {
-        error = 'Registration failed'
-      }
-    } finally {
-      submitting = false
-    }
+  async function handleCreateAccount() {
+    if (!flow) return
+    await flow.createPasskeyAccount()
   }
 
   async function handlePasskeyRegistration() {
-    if (!setupData) return
+    if (!flow || !flow.account) return
 
-    submitting = true
-    error = null
+    flow.setSubmitting(true)
+    flow.clearError()
 
     try {
       const { options } = await api.startPasskeyRegistrationForSetup(
-        setupData.did,
-        setupData.setupToken,
+        flow.account.did,
+        flow.account.setupToken!,
         passkeyName || undefined
       )
 
@@ -178,8 +153,8 @@
       })
 
       if (!credential) {
-        error = 'Passkey creation was cancelled'
-        submitting = false
+        flow.setError('Passkey creation was cancelled')
+        flow.setSubmitting(false)
         return
       }
 
@@ -196,87 +171,38 @@
       }
 
       const result = await api.completePasskeySetup(
-        setupData.did,
-        setupData.setupToken,
+        flow.account.did,
+        flow.account.setupToken!,
         credentialResponse,
         passkeyName || undefined
       )
 
-      appPasswordResult = {
-        appPassword: result.appPassword,
-        appPasswordName: result.appPasswordName,
-      }
-
-      step = 'app-password'
+      flow.setPasskeyComplete(result.appPassword, result.appPasswordName)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
-        error = 'Passkey creation was cancelled'
+        flow.setError('Passkey creation was cancelled')
       } else if (err instanceof ApiError) {
-        error = err.message || 'Passkey registration failed'
+        flow.setError(err.message || 'Passkey registration failed')
       } else if (err instanceof Error) {
-        error = err.message || 'Passkey registration failed'
+        flow.setError(err.message || 'Passkey registration failed')
       } else {
-        error = 'Passkey registration failed'
+        flow.setError('Passkey registration failed')
       }
     } finally {
-      submitting = false
+      flow.setSubmitting(false)
     }
   }
 
-  function copyAppPassword() {
-    if (appPasswordResult) {
-      navigator.clipboard.writeText(appPasswordResult.appPassword)
-      appPasswordCopied = true
+  async function handleComplete() {
+    if (flow) {
+      await flow.finalizeSession()
     }
+    navigate('/dashboard')
   }
 
-  function handleFinish() {
-    step = 'verify'
-  }
-
-  async function handleVerification() {
-    if (!setupData || !verificationCode.trim()) return
-
-    submitting = true
-    error = null
-
-    try {
-      await confirmSignup(setupData.did, verificationCode.trim())
-      navigate('/dashboard')
-    } catch (err) {
-      if (err instanceof ApiError) {
-        error = err.message || 'Verification failed'
-      } else if (err instanceof Error) {
-        error = err.message || 'Verification failed'
-      } else {
-        error = 'Verification failed'
-      }
-    } finally {
-      submitting = false
-    }
-  }
-
-  async function handleResendCode() {
-    if (!setupData || resendingCode) return
-
-    resendingCode = true
-    resendMessage = null
-    error = null
-
-    try {
-      await resendVerification(setupData.did)
-      resendMessage = 'Verification code resent!'
-    } catch (err) {
-      if (err instanceof ApiError) {
-        error = err.message || 'Failed to resend code'
-      } else if (err instanceof Error) {
-        error = err.message || 'Failed to resend code'
-      } else {
-        error = 'Failed to resend code'
-      }
-    } finally {
-      resendingCode = false
-    }
+  function isChannelAvailable(ch: string): boolean {
+    const available = serverInfo?.availableCommsChannels ?? ['email']
+    return available.includes(ch)
   }
 
   function channelLabel(ch: string): string {
@@ -289,26 +215,38 @@
     }
   }
 
-  function isChannelAvailable(ch: string): boolean {
-    const available = serverInfo?.availableCommsChannels ?? ['email']
-    return available.includes(ch)
-  }
-
-  function goToLogin() {
-    navigate('/login')
-  }
-
   let fullHandle = $derived(() => {
-    if (!handle.trim()) return ''
-    if (handle.includes('.')) return handle.trim()
+    if (!flow?.info.handle.trim()) return ''
+    if (flow.info.handle.includes('.')) return flow.info.handle.trim()
     const domain = serverInfo?.availableUserDomains?.[0]
-    if (domain) return `${handle.trim()}.${domain}`
-    return handle.trim()
+    if (domain) return `${flow.info.handle.trim()}.${domain}`
+    return flow.info.handle.trim()
   })
+
+  function extractDomain(did: string): string {
+    return did.replace('did:web:', '').replace(/%3A/g, ':')
+  }
+
+  function getSubtitle(): string {
+    if (!flow) return ''
+    switch (flow.state.step) {
+      case 'info': return 'Create an ultra-secure account using a passkey instead of a password.'
+      case 'key-choice': return 'Choose how to set up your external did:web identity.'
+      case 'initial-did-doc': return 'Upload your DID document to continue.'
+      case 'creating': return 'Creating your account...'
+      case 'passkey': return 'Register your passkey to secure your account.'
+      case 'app-password': return 'Save your app password for third-party apps.'
+      case 'verify': return `Verify your ${channelLabel(flow.info.verificationChannel)} to continue.`
+      case 'updated-did-doc': return 'Update your DID document with the PDS signing key.'
+      case 'activating': return 'Activating your account...'
+      case 'complete': return 'Your account has been created successfully!'
+      default: return ''
+    }
+  }
 </script>
 
 <div class="register-page">
-  {#if step === 'info'}
+  {#if flow?.state.step === 'info'}
     <div class="migrate-callout">
       <div class="migrate-icon">↗</div>
       <div class="migrate-content">
@@ -322,39 +260,28 @@
   {/if}
 
   <h1>Create Passkey Account</h1>
-  <p class="subtitle">
-    {#if step === 'info'}
-      Create an ultra-secure account using a passkey instead of a password.
-    {:else if step === 'passkey'}
-      Register your passkey to secure your account.
-    {:else if step === 'app-password'}
-      Save your app password for third-party apps.
-    {:else if step === 'verify'}
-      Verify your {channelLabel(verificationChannel)} to complete registration.
-    {:else}
-      Your account has been created successfully!
-    {/if}
-  </p>
+  <p class="subtitle">{getSubtitle()}</p>
 
-  {#if error}
-    <div class="message error">{error}</div>
+  {#if flow?.state.error}
+    <div class="message error">{flow.state.error}</div>
   {/if}
 
-  {#if loadingServerInfo}
+  {#if loadingServerInfo || !flow}
     <p class="loading">Loading...</p>
-  {:else if step === 'info'}
+
+  {:else if flow.state.step === 'info'}
     <form onsubmit={handleInfoSubmit}>
       <div class="field">
         <label for="handle">Handle</label>
         <input
           id="handle"
           type="text"
-          bind:value={handle}
+          bind:value={flow.info.handle}
           placeholder="yourname"
-          disabled={submitting}
+          disabled={flow.state.submitting}
           required
         />
-        {#if handle.includes('.')}
+        {#if flow.info.handle.includes('.')}
           <p class="hint warning">Custom domain handles can be set up after account creation.</p>
         {:else if fullHandle()}
           <p class="hint">Your full handle will be: @{fullHandle()}</p>
@@ -366,7 +293,7 @@
         <p class="section-hint">Choose how you'd like to verify your account and receive notifications.</p>
         <div class="field">
           <label for="verification-channel">Verification Method</label>
-          <select id="verification-channel" bind:value={verificationChannel} disabled={submitting}>
+          <select id="verification-channel" bind:value={flow.info.verificationChannel} disabled={flow.state.submitting}>
             <option value="email">Email</option>
             <option value="discord" disabled={!isChannelAvailable('discord')}>
               Discord{isChannelAvailable('discord') ? '' : ` (${$_('register.notConfigured')})`}
@@ -379,26 +306,26 @@
             </option>
           </select>
         </div>
-        {#if verificationChannel === 'email'}
+        {#if flow.info.verificationChannel === 'email'}
           <div class="field">
             <label for="email">Email Address</label>
-            <input id="email" type="email" bind:value={email} placeholder="you@example.com" disabled={submitting} required />
+            <input id="email" type="email" bind:value={flow.info.email} placeholder="you@example.com" disabled={flow.state.submitting} required />
           </div>
-        {:else if verificationChannel === 'discord'}
+        {:else if flow.info.verificationChannel === 'discord'}
           <div class="field">
             <label for="discord-id">Discord User ID</label>
-            <input id="discord-id" type="text" bind:value={discordId} placeholder="Your Discord user ID" disabled={submitting} required />
+            <input id="discord-id" type="text" bind:value={flow.info.discordId} placeholder="Your Discord user ID" disabled={flow.state.submitting} required />
             <p class="hint">Your numeric Discord user ID (enable Developer Mode to find it)</p>
           </div>
-        {:else if verificationChannel === 'telegram'}
+        {:else if flow.info.verificationChannel === 'telegram'}
           <div class="field">
             <label for="telegram-username">Telegram Username</label>
-            <input id="telegram-username" type="text" bind:value={telegramUsername} placeholder="@yourusername" disabled={submitting} required />
+            <input id="telegram-username" type="text" bind:value={flow.info.telegramUsername} placeholder="@yourusername" disabled={flow.state.submitting} required />
           </div>
-        {:else if verificationChannel === 'signal'}
+        {:else if flow.info.verificationChannel === 'signal'}
           <div class="field">
             <label for="signal-number">Signal Phone Number</label>
-            <input id="signal-number" type="tel" bind:value={signalNumber} placeholder="+1234567890" disabled={submitting} required />
+            <input id="signal-number" type="tel" bind:value={flow.info.signalNumber} placeholder="+1234567890" disabled={flow.state.submitting} required />
             <p class="hint">Include country code (e.g., +1 for US)</p>
           </div>
         {/if}
@@ -409,28 +336,28 @@
         <p class="section-hint">Choose how your decentralized identity will be managed.</p>
         <div class="radio-group">
           <label class="radio-label">
-            <input type="radio" name="didType" value="plc" bind:group={didType} disabled={submitting} />
+            <input type="radio" name="didType" value="plc" bind:group={flow.info.didType} disabled={flow.state.submitting} />
             <span class="radio-content">
               <strong>did:plc</strong> (Recommended)
               <span class="radio-hint">Portable identity managed by PLC Directory</span>
             </span>
           </label>
           <label class="radio-label">
-            <input type="radio" name="didType" value="web" bind:group={didType} disabled={submitting} />
+            <input type="radio" name="didType" value="web" bind:group={flow.info.didType} disabled={flow.state.submitting} />
             <span class="radio-content">
               <strong>did:web</strong>
               <span class="radio-hint">Identity hosted on this PDS (read warning below)</span>
             </span>
           </label>
           <label class="radio-label">
-            <input type="radio" name="didType" value="web-external" bind:group={didType} disabled={submitting} />
+            <input type="radio" name="didType" value="web-external" bind:group={flow.info.didType} disabled={flow.state.submitting} />
             <span class="radio-content">
               <strong>did:web (BYOD)</strong>
               <span class="radio-hint">Bring your own domain</span>
             </span>
           </label>
         </div>
-        {#if didType === 'web'}
+        {#if flow.info.didType === 'web'}
           <div class="warning-box">
             <strong>Important: Understand the trade-offs</strong>
             <ul>
@@ -441,11 +368,11 @@
             </ul>
           </div>
         {/if}
-        {#if didType === 'web-external'}
+        {#if flow.info.didType === 'web-external'}
           <div class="field">
             <label for="external-did">Your did:web</label>
-            <input id="external-did" type="text" bind:value={externalDid} placeholder="did:web:yourdomain.com" disabled={submitting} required />
-            <p class="hint">Your domain must serve a valid DID document at /.well-known/did.json pointing to this PDS</p>
+            <input id="external-did" type="text" bind:value={flow.info.externalDid} placeholder="did:web:yourdomain.com" disabled={flow.state.submitting} required />
+            <p class="hint">You'll need to serve a DID document at <code>https://{flow.info.externalDid ? extractDomain(flow.info.externalDid) : 'yourdomain.com'}/.well-known/did.json</code></p>
           </div>
         {/if}
       </fieldset>
@@ -453,7 +380,7 @@
       {#if serverInfo?.inviteCodeRequired}
         <div class="field">
           <label for="invite-code">Invite Code <span class="required">*</span></label>
-          <input id="invite-code" type="text" bind:value={inviteCode} placeholder="Enter your invite code" disabled={submitting} required />
+          <input id="invite-code" type="text" bind:value={flow.info.inviteCode} placeholder="Enter your invite code" disabled={flow.state.submitting} required />
         </div>
       {/if}
 
@@ -467,19 +394,36 @@
         </ul>
       </div>
 
-      <button type="submit" disabled={submitting}>
-        {submitting ? 'Creating account...' : 'Continue'}
+      <button type="submit" disabled={flow.state.submitting}>
+        {flow.state.submitting ? 'Creating account...' : 'Continue'}
       </button>
     </form>
 
     <p class="link-text">
       Want a traditional password? <a href="#/register">Register with password</a>
     </p>
-  {:else if step === 'passkey'}
+
+  {:else if flow.state.step === 'key-choice'}
+    <KeyChoiceStep {flow} />
+
+  {:else if flow.state.step === 'initial-did-doc'}
+    <DidDocStep
+      {flow}
+      type="initial"
+      onConfirm={handleCreateAccount}
+      onBack={() => flow?.goBack()}
+    />
+
+  {:else if flow.state.step === 'creating'}
+    {#await flow.createPasskeyAccount()}
+      <p class="loading">Creating your account...</p>
+    {/await}
+
+  {:else if flow.state.step === 'passkey'}
     <div class="step-content">
       <div class="field">
         <label for="passkey-name">Passkey Name (optional)</label>
-        <input id="passkey-name" type="text" bind:value={passkeyName} placeholder="e.g., MacBook Touch ID" disabled={submitting} />
+        <input id="passkey-name" type="text" bind:value={passkeyName} placeholder="e.g., MacBook Touch ID" disabled={flow.state.submitting} />
         <p class="hint">A friendly name to identify this passkey</p>
       </div>
 
@@ -492,69 +436,30 @@
         </ul>
       </div>
 
-      <button onclick={handlePasskeyRegistration} disabled={submitting} class="passkey-btn">
-        {submitting ? 'Creating Passkey...' : 'Create Passkey'}
+      <button onclick={handlePasskeyRegistration} disabled={flow.state.submitting} class="passkey-btn">
+        {flow.state.submitting ? 'Creating Passkey...' : 'Create Passkey'}
       </button>
 
-      <button type="button" class="secondary" onclick={() => step = 'info'} disabled={submitting}>
+      <button type="button" class="secondary" onclick={() => flow?.goBack()} disabled={flow.state.submitting}>
         Back
       </button>
     </div>
-  {:else if step === 'app-password'}
-    <div class="step-content">
-      <div class="warning-box">
-        <strong>Important: Save this app password!</strong>
-        <p>This app password is required to sign into apps that don't support passkeys yet (like bsky.app). You will only see this password once.</p>
-      </div>
 
-      <div class="app-password-display">
-        <div class="app-password-label">App Password for: <strong>{appPasswordResult?.appPasswordName}</strong></div>
-        <code class="app-password-code">{appPasswordResult?.appPassword}</code>
-        <button type="button" class="copy-btn" onclick={copyAppPassword}>
-          {appPasswordCopied ? 'Copied!' : 'Copy to Clipboard'}
-        </button>
-      </div>
+  {:else if flow.state.step === 'app-password'}
+    <AppPasswordStep {flow} />
 
-      <div class="field">
-        <label class="checkbox-label">
-          <input type="checkbox" bind:checked={appPasswordAcknowledged} />
-          <span>I have saved my app password in a secure location</span>
-        </label>
-      </div>
+  {:else if flow.state.step === 'verify'}
+    <VerificationStep {flow} />
 
-      <button onclick={handleFinish} disabled={!appPasswordAcknowledged}>Continue</button>
-    </div>
-  {:else if step === 'verify'}
-    <div class="step-content">
-      <p class="info-text">We've sent a verification code to your {channelLabel(verificationChannel)}. Enter it below to complete your account setup.</p>
+  {:else if flow.state.step === 'updated-did-doc'}
+    <DidDocStep
+      {flow}
+      type="updated"
+      onConfirm={() => flow?.activateAccount()}
+    />
 
-      {#if resendMessage}
-        <div class="message success">{resendMessage}</div>
-      {/if}
-
-      <form onsubmit={(e) => { e.preventDefault(); handleVerification(); }}>
-        <div class="field">
-          <label for="verification-code">Verification Code</label>
-          <input id="verification-code" type="text" bind:value={verificationCode} placeholder="Enter 6-digit code" disabled={submitting} required maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
-        </div>
-
-        <button type="submit" disabled={submitting || !verificationCode.trim()}>
-          {submitting ? 'Verifying...' : 'Verify Account'}
-        </button>
-
-        <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
-          {resendingCode ? 'Resending...' : 'Resend Code'}
-        </button>
-      </form>
-    </div>
-  {:else if step === 'success'}
-    <div class="success-content">
-      <div class="success-icon">&#x2714;</div>
-      <h2>Account Created!</h2>
-      <p>Your passkey-only account has been created successfully.</p>
-      <p class="handle-display">@{setupData?.handle}</p>
-      <button onclick={goToLogin}>Sign In</button>
-    </div>
+  {:else if flow.state.step === 'redirect-to-dashboard'}
+    <p class="loading">Redirecting to dashboard...</p>
   {/if}
 </div>
 
@@ -609,7 +514,7 @@
     text-decoration: underline;
   }
 
-  h1, h2 {
+  h1 {
     margin: 0 0 var(--space-3) 0;
   }
 
@@ -697,11 +602,6 @@
     color: var(--warning-text);
   }
 
-  .warning-box p {
-    margin: 0;
-    color: var(--warning-text);
-  }
-
   .warning-box ul {
     margin: var(--space-4) 0 0 0;
     padding-left: var(--space-5);
@@ -747,77 +647,6 @@
   .passkey-btn {
     padding: var(--space-5);
     font-size: var(--text-lg);
-  }
-
-  .app-password-display {
-    background: var(--bg-card);
-    border: 2px solid var(--accent);
-    border-radius: var(--radius-xl);
-    padding: var(--space-6);
-    text-align: center;
-  }
-
-  .app-password-label {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-4);
-  }
-
-  .app-password-code {
-    display: block;
-    font-size: var(--text-xl);
-    font-family: ui-monospace, monospace;
-    letter-spacing: 0.1em;
-    padding: var(--space-5);
-    background: var(--bg-input);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-4);
-    user-select: all;
-  }
-
-  .copy-btn {
-    margin-top: 0;
-    padding: var(--space-3) var(--space-5);
-    font-size: var(--text-sm);
-  }
-
-  .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    cursor: pointer;
-    font-weight: var(--font-normal);
-  }
-
-  .checkbox-label input[type="checkbox"] {
-    width: auto;
-    padding: 0;
-  }
-
-  .success-content {
-    text-align: center;
-  }
-
-  .success-icon {
-    font-size: var(--text-4xl);
-    color: var(--success-text);
-    margin-bottom: var(--space-4);
-  }
-
-  .success-content p {
-    color: var(--text-secondary);
-  }
-
-  .handle-display {
-    font-size: var(--text-xl);
-    font-weight: var(--font-semibold);
-    color: var(--text-primary);
-    margin: var(--space-4) 0;
-  }
-
-  .info-text {
-    color: var(--text-secondary);
-    margin: 0;
   }
 
   .link-text {

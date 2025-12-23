@@ -95,6 +95,7 @@ export interface CreateAccountParams {
   inviteCode?: string
   didType?: DidType
   did?: string
+  signingKey?: string
   verificationChannel?: VerificationChannel
   discordId?: string
   telegramUsername?: string
@@ -120,22 +121,34 @@ export interface ConfirmSignupResult {
 }
 
 export const api = {
-  async createAccount(params: CreateAccountParams): Promise<CreateAccountResult> {
-    return xrpc('com.atproto.server.createAccount', {
+  async createAccount(params: CreateAccountParams, byodToken?: string): Promise<CreateAccountResult> {
+    const url = `${API_BASE}/com.atproto.server.createAccount`
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (byodToken) {
+      headers['Authorization'] = `Bearer ${byodToken}`
+    }
+    const response = await fetch(url, {
       method: 'POST',
-      body: {
+      headers,
+      body: JSON.stringify({
         handle: params.handle,
         email: params.email,
         password: params.password,
         inviteCode: params.inviteCode,
         didType: params.didType,
         did: params.did,
+        signingKey: params.signingKey,
         verificationChannel: params.verificationChannel,
         discordId: params.discordId,
         telegramUsername: params.telegramUsername,
         signalNumber: params.signalNumber,
-      },
+      }),
     })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new ApiError(data.error, data.message, response.status)
+    }
+    return data
   },
 
   async confirmSignup(did: string, verificationCode: string): Promise<ConfirmSignupResult> {
@@ -750,6 +763,29 @@ export const api = {
     })
   },
 
+  async reserveSigningKey(did?: string): Promise<{ signingKey: string }> {
+    return xrpc('com.atproto.server.reserveSigningKey', {
+      method: 'POST',
+      body: { did },
+    })
+  },
+
+  async getRecommendedDidCredentials(token: string): Promise<{
+    rotationKeys?: string[]
+    alsoKnownAs?: string[]
+    verificationMethods?: { atproto?: string }
+    services?: { atproto_pds?: { type: string; endpoint: string } }
+  }> {
+    return xrpc('com.atproto.identity.getRecommendedDidCredentials', { token })
+  },
+
+  async activateAccount(token: string): Promise<void> {
+    await xrpc('com.atproto.server.activateAccount', {
+      method: 'POST',
+      token,
+    })
+  },
+
   async createPasskeyAccount(params: {
     handle: string
     email?: string
@@ -761,16 +797,29 @@ export const api = {
     discordId?: string
     telegramUsername?: string
     signalNumber?: string
-  }): Promise<{
+  }, byodToken?: string): Promise<{
     did: string
     handle: string
     setupToken: string
     setupExpiresAt: string
   }> {
-    return xrpc('com.tranquil.account.createPasskeyAccount', {
+    const url = `${API_BASE}/com.tranquil.account.createPasskeyAccount`
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    }
+    if (byodToken) {
+      headers['Authorization'] = `Bearer ${byodToken}`
+    }
+    const res = await fetch(url, {
       method: 'POST',
-      body: params,
+      headers,
+      body: JSON.stringify(params),
     })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Unknown', message: res.statusText }))
+      throw new ApiError(res.status, err.error, err.message)
+    }
+    return res.json()
   },
 
   async startPasskeyRegistrationForSetup(did: string, setupToken: string, friendlyName?: string): Promise<{ options: unknown }> {

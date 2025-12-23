@@ -1,0 +1,103 @@
+<script lang="ts">
+  import { api, ApiError } from '../api'
+  import type { RegistrationFlow } from './flow.svelte'
+
+  interface Props {
+    flow: RegistrationFlow
+  }
+
+  let { flow }: Props = $props()
+
+  let verificationCode = $state('')
+  let resending = $state(false)
+  let resendMessage = $state<string | null>(null)
+
+  function channelLabel(ch: string): string {
+    switch (ch) {
+      case 'email': return 'email'
+      case 'discord': return 'Discord'
+      case 'telegram': return 'Telegram'
+      case 'signal': return 'Signal'
+      default: return ch
+    }
+  }
+
+  async function handleSubmit(e: Event) {
+    e.preventDefault()
+    if (!verificationCode.trim()) return
+    resendMessage = null
+    await flow.verifyAccount(verificationCode)
+  }
+
+  async function handleResend() {
+    if (resending || !flow.account) return
+    resending = true
+    resendMessage = null
+    flow.clearError()
+
+    try {
+      const { resendVerification } = await import('../auth.svelte')
+      await resendVerification(flow.account.did)
+      resendMessage = 'Verification code resent!'
+    } catch (err) {
+      if (err instanceof ApiError) {
+        flow.setError(err.message || 'Failed to resend code')
+      } else if (err instanceof Error) {
+        flow.setError(err.message || 'Failed to resend code')
+      } else {
+        flow.setError('Failed to resend code')
+      }
+    } finally {
+      resending = false
+    }
+  }
+</script>
+
+<div class="verification-step">
+  <p class="info-text">
+    We've sent a verification code to your {channelLabel(flow.info.verificationChannel)}.
+    Enter it below to continue.
+  </p>
+
+  {#if resendMessage}
+    <div class="message success">{resendMessage}</div>
+  {/if}
+
+  <form onsubmit={handleSubmit}>
+    <div class="field">
+      <label for="verification-code">Verification Code</label>
+      <input
+        id="verification-code"
+        type="text"
+        bind:value={verificationCode}
+        placeholder="Enter 6-digit code"
+        disabled={flow.state.submitting}
+        required
+        maxlength="6"
+        inputmode="numeric"
+        autocomplete="one-time-code"
+      />
+    </div>
+
+    <button type="submit" disabled={flow.state.submitting || !verificationCode.trim()}>
+      {flow.state.submitting ? 'Verifying...' : 'Verify'}
+    </button>
+
+    <button type="button" class="secondary" onclick={handleResend} disabled={resending}>
+      {resending ? 'Resending...' : 'Resend Code'}
+    </button>
+  </form>
+</div>
+
+<style>
+  .verification-step {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .info-text {
+    color: var(--text-secondary);
+    margin: 0;
+  }
+</style>

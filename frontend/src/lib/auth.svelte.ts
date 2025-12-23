@@ -265,6 +265,18 @@ export async function resendVerification(did: string): Promise<void> {
   }
 }
 
+export function setSession(session: { did: string; handle: string; accessJwt: string; refreshJwt: string }): void {
+  const newSession: Session = {
+    did: session.did,
+    handle: session.handle,
+    accessJwt: session.accessJwt,
+    refreshJwt: session.refreshJwt,
+  }
+  state.session = newSession
+  saveSession(newSession)
+  addOrUpdateSavedAccount(newSession)
+}
+
 export async function logout(): Promise<void> {
   if (state.session) {
     try {

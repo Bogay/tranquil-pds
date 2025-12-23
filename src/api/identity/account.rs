@@ -118,13 +118,6 @@ pub async fn create_account(
         None
     };
 
-    let is_migration = migration_auth.is_some()
-        && input
-            .did
-            .as_ref()
-            .map(|d| d.starts_with("did:plc:") || d.starts_with("did:web:"))
-            .unwrap_or(false);
-
     let is_did_web_byod = migration_auth.is_some()
         && input
             .did
@@ -132,23 +125,30 @@ pub async fn create_account(
             .map(|d| d.starts_with("did:web:"))
             .unwrap_or(false);
 
-    if is_migration {
-        if let (Some(migration_did), Some(auth_did)) = (input.did.as_ref(), migration_auth.as_ref())
+    let is_migration = migration_auth.is_some()
+        && input
+            .did
+            .as_ref()
+            .map(|d| d.starts_with("did:plc:"))
+            .unwrap_or(false);
+
+    if is_migration || is_did_web_byod {
+        if let (Some(provided_did), Some(auth_did)) = (input.did.as_ref(), migration_auth.as_ref())
         {
-            if migration_did != auth_did {
+            if provided_did != auth_did {
                 return (
                     StatusCode::FORBIDDEN,
                     Json(json!({
                         "error": "AuthorizationError",
-                        "message": format!("Service token issuer {} does not match DID {}", auth_did, migration_did)
+                        "message": format!("Service token issuer {} does not match DID {}", auth_did, provided_did)
                     })),
                 )
                     .into_response();
             }
             if is_did_web_byod {
-                info!(did = %migration_did, "Processing did:web BYOD account creation");
+                info!(did = %provided_did, "Processing did:web BYOD account creation");
             } else {
-                info!(did = %migration_did, "Processing account migration");
+                info!(did = %provided_did, "Processing account migration");
             }
         }
     }
@@ -717,7 +717,7 @@ pub async fn create_account(
         .await
         .map(|c| c.unwrap_or(0) == 0)
         .unwrap_or(false);
-    let deactivated_at: Option<chrono::DateTime<chrono::Utc>> = if is_migration {
+    let deactivated_at: Option<chrono::DateTime<chrono::Utc>> = if is_migration || is_did_web_byod {
         Some(chrono::Utc::now())
     } else {
         None
@@ -946,7 +946,7 @@ pub async fn create_account(
         )
             .into_response();
     }
-    if !is_migration {
+    if !is_migration && !is_did_web_byod {
         if let Err(e) =
             crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
         {
@@ -972,6 +972,8 @@ pub async fn create_account(
         {
             warn!("Failed to create default profile for {}: {}", did, e);
         }
+    }
+    if !is_migration {
         if let Some(ref recipient) = verification_recipient
             && let Err(e) = crate::comms::enqueue_signup_verification(
                 &state.db,

@@ -12,10 +12,11 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::api::repo::record::utils::create_signed_commit;
+use crate::auth::{ServiceTokenVerifier, extract_bearer_token_from_header, is_service_token};
 use crate::state::{AppState, RateLimitKind};
 use crate::validation::validate_password;
 
@@ -105,6 +106,45 @@ pub async fn create_passkey_account(
         )
             .into_response();
     }
+
+    let byod_auth = if let Some(token) =
+        extract_bearer_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
+    {
+        if is_service_token(&token) {
+            let verifier = ServiceTokenVerifier::new();
+            match verifier
+                .verify_service_token(&token, Some("com.atproto.server.createAccount"))
+                .await
+            {
+                Ok(claims) => {
+                    debug!("Service token verified for BYOD did:web: iss={}", claims.iss);
+                    Some(claims.iss)
+                }
+                Err(e) => {
+                    error!("Service token verification failed: {:?}", e);
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "error": "AuthenticationFailed",
+                            "message": format!("Service token verification failed: {}", e)
+                        })),
+                    )
+                        .into_response();
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let is_byod_did_web = byod_auth.is_some()
+        && input
+            .did
+            .as_ref()
+            .map(|d| d.starts_with("did:web:"))
+            .unwrap_or(false);
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_suffix = format!(".{}", hostname);
@@ -301,21 +341,37 @@ pub async fn create_passkey_account(
                 )
                     .into_response();
             }
-            if let Err(e) = crate::api::identity::did::verify_did_web(
-                d,
-                &hostname,
-                &input.handle,
-                input.signing_key.as_deref(),
-            )
-            .await
-            {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidDid", "message": e})),
+            if is_byod_did_web {
+                if let Some(ref auth_did) = byod_auth {
+                    if d != auth_did {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(json!({
+                                "error": "AuthorizationError",
+                                "message": format!("Service token issuer {} does not match DID {}", auth_did, d)
+                            })),
+                        )
+                            .into_response();
+                    }
+                }
+                info!(did = %d, "Creating external did:web passkey account (BYOD key)");
+            } else {
+                if let Err(e) = crate::api::identity::did::verify_did_web(
+                    d,
+                    &hostname,
+                    &input.handle,
+                    input.signing_key.as_deref(),
                 )
-                    .into_response();
+                .await
+                {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "InvalidDid", "message": e})),
+                    )
+                        .into_response();
+                }
+                info!(did = %d, "Creating external did:web passkey account (reserved key)");
             }
-            info!(did = %d, "Creating external did:web passkey account");
             d.to_string()
         }
         _ => {
@@ -398,14 +454,20 @@ pub async fn create_passkey_account(
         .map(|c| c.unwrap_or(0) == 0)
         .unwrap_or(false);
 
+    let deactivated_at: Option<chrono::DateTime<Utc>> = if is_byod_did_web {
+        Some(Utc::now())
+    } else {
+        None
+    };
+
     let user_insert: Result<(Uuid,), _> = sqlx::query_as(
         r#"INSERT INTO users (
             handle, email, did, password_hash, password_required,
             preferred_comms_channel,
             discord_id, telegram_username, signal_number,
             recovery_token, recovery_token_expires_at,
-            is_admin
-        ) VALUES ($1, $2, $3, NULL, FALSE, $4::comms_channel, $5, $6, $7, $8, $9, $10) RETURNING id"#,
+            is_admin, deactivated_at
+        ) VALUES ($1, $2, $3, NULL, FALSE, $4::comms_channel, $5, $6, $7, $8, $9, $10, $11) RETURNING id"#,
     )
     .bind(&handle)
     .bind(&email)
@@ -435,6 +497,7 @@ pub async fn create_passkey_account(
     .bind(&setup_token_hash)
     .bind(setup_expires_at)
     .bind(is_first_user)
+    .bind(deactivated_at)
     .fetch_one(&mut *tx)
     .await;
 
@@ -612,30 +675,32 @@ pub async fn create_passkey_account(
             .into_response();
     }
 
-    if let Err(e) =
-        crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
-    {
-        warn!("Failed to sequence identity event for {}: {}", did, e);
-    }
-    if let Err(e) =
-        crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
-    {
-        warn!("Failed to sequence account event for {}: {}", did, e);
-    }
-    let profile_record = serde_json::json!({
-        "$type": "app.bsky.actor.profile",
-        "displayName": handle
-    });
-    if let Err(e) = crate::api::repo::record::create_record_internal(
-        &state,
-        &did,
-        "app.bsky.actor.profile",
-        "self",
-        &profile_record,
-    )
-    .await
-    {
-        warn!("Failed to create default profile for {}: {}", did, e);
+    if !is_byod_did_web {
+        if let Err(e) =
+            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
+        {
+            warn!("Failed to sequence identity event for {}: {}", did, e);
+        }
+        if let Err(e) =
+            crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+        {
+            warn!("Failed to sequence account event for {}: {}", did, e);
+        }
+        let profile_record = serde_json::json!({
+            "$type": "app.bsky.actor.profile",
+            "displayName": handle
+        });
+        if let Err(e) = crate::api::repo::record::create_record_internal(
+            &state,
+            &did,
+            "app.bsky.actor.profile",
+            "self",
+            &profile_record,
+        )
+        .await
+        {
+            warn!("Failed to create default profile for {}: {}", did, e);
+        }
     }
 
     if let Err(e) = crate::comms::enqueue_signup_verification(
