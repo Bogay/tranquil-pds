@@ -90,6 +90,7 @@ impl ClientMetadataCache {
         if let Ok(url) = reqwest::Url::parse(client_id) {
             url.scheme() == "http"
                 && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
+                && url.query().is_some()
         } else {
             false
         }

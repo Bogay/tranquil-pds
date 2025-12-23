@@ -6,8 +6,8 @@ use axum::{
 };
 use bcrypt::{DEFAULT_COST, hash};
 use chrono::{Duration, Utc};
-use jacquard::types::{did::Did, integer::LimitedU32, string::Tid};
-use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
+use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_repo::{mst::Mst, storage::BlockStore};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::api::repo::record::utils::create_signed_commit;
 use crate::state::{AppState, RateLimitKind};
 use crate::validation::validate_password;
 
@@ -391,13 +392,20 @@ pub async fn create_passkey_account(
         }
     };
 
+    let is_first_user = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
+        .fetch_one(&mut *tx)
+        .await
+        .map(|c| c.unwrap_or(0) == 0)
+        .unwrap_or(false);
+
     let user_insert: Result<(Uuid,), _> = sqlx::query_as(
         r#"INSERT INTO users (
             handle, email, did, password_hash, password_required,
             preferred_comms_channel,
             discord_id, telegram_username, signal_number,
-            recovery_token, recovery_token_expires_at
-        ) VALUES ($1, $2, $3, NULL, FALSE, $4::comms_channel, $5, $6, $7, $8, $9) RETURNING id"#,
+            recovery_token, recovery_token_expires_at,
+            is_admin
+        ) VALUES ($1, $2, $3, NULL, FALSE, $4::comms_channel, $5, $6, $7, $8, $9, $10) RETURNING id"#,
     )
     .bind(&handle)
     .bind(&email)
@@ -426,6 +434,7 @@ pub async fn create_passkey_account(
     )
     .bind(&setup_token_hash)
     .bind(setup_expires_at)
+    .bind(is_first_user)
     .fetch_one(&mut *tx)
     .await;
 
@@ -518,33 +527,11 @@ pub async fn create_passkey_account(
                 .into_response();
         }
     };
-    let did_obj = match Did::new(&did) {
-        Ok(d) => d,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid DID"})),
-            )
-                .into_response();
-        }
-    };
     let rev = Tid::now(LimitedU32::MIN);
-    let unsigned_commit = Commit::new_unsigned(did_obj, mst_root, rev, None);
-    let signed_commit = match unsigned_commit.sign(&secret_key) {
-        Ok(c) => c,
+    let (commit_bytes, _sig) = match create_signed_commit(&did, mst_root, &rev.to_string(), None, &secret_key) {
+        Ok(result) => result,
         Err(e) => {
-            error!("Error signing genesis commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
-    let commit_bytes = match signed_commit.to_cbor() {
-        Ok(b) => b,
-        Err(e) => {
-            error!("Error serializing genesis commit: {:?}", e);
+            error!("Error creating genesis commit: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -629,6 +616,26 @@ pub async fn create_passkey_account(
         crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
     {
         warn!("Failed to sequence identity event for {}: {}", did, e);
+    }
+    if let Err(e) =
+        crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+    {
+        warn!("Failed to sequence account event for {}: {}", did, e);
+    }
+    let profile_record = serde_json::json!({
+        "$type": "app.bsky.actor.profile",
+        "displayName": handle
+    });
+    if let Err(e) = crate::api::repo::record::create_record_internal(
+        &state,
+        &did,
+        "app.bsky.actor.profile",
+        "self",
+        &profile_record,
+    )
+    .await
+    {
+        warn!("Failed to create default profile for {}: {}", did, e);
     }
 
     if let Err(e) = crate::comms::enqueue_signup_verification(

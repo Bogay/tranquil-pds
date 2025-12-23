@@ -1,4 +1,5 @@
 use super::did::verify_did_web;
+use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{ServiceTokenVerifier, extract_bearer_token_from_header, is_service_token};
 use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::state::{AppState, RateLimitKind};
@@ -10,8 +11,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash};
-use jacquard::types::{did::Did, integer::LimitedU32, string::Tid};
-use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
+use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_repo::{mst::Mst, storage::BlockStore};
 use k256::{SecretKey, ecdsa::SigningKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -864,33 +865,11 @@ pub async fn create_account(
                 .into_response();
         }
     };
-    let did_obj = match Did::new(&did) {
-        Ok(d) => d,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid DID"})),
-            )
-                .into_response();
-        }
-    };
     let rev = Tid::now(LimitedU32::MIN);
-    let unsigned_commit = Commit::new_unsigned(did_obj, mst_root, rev, None);
-    let signed_commit = match unsigned_commit.sign(&signing_key) {
-        Ok(c) => c,
+    let (commit_bytes, _sig) = match create_signed_commit(&did, mst_root, &rev.to_string(), None, &signing_key) {
+        Ok(result) => result,
         Err(e) => {
-            error!("Error signing genesis commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
-    let commit_bytes = match signed_commit.to_cbor() {
-        Ok(b) => b,
-        Err(e) => {
-            error!("Error serializing genesis commit: {:?}", e);
+            error!("Error creating genesis commit: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),

@@ -5,9 +5,9 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 async-trait = "0.1.89"
-aws-config = "1.8.11"
-aws-sdk-s3 = "1.116.0"
-axum = { version = "0.8.7", features = ["ws", "macros"] }
+aws-config = "1.8.12"
+aws-sdk-s3 = "1.118.0"
+axum = { version = "0.8.8", features = ["ws", "macros"] }
 base32 = "0.5"
 base64 = "0.22.1"
 bcrypt = "0.17.1"
@@ -20,20 +20,20 @@ governor = "0.10"
 hkdf = "0.12"
 hmac = "0.12"
 aes-gcm = "0.10"
-jacquard = { version = "0.9.3", default-features = false, features = ["api", "api_bluesky", "api_full", "derive", "dns"] }
-jacquard-axum = "0.9.2"
-jacquard-repo = "0.9.2"
+jacquard = { version = "0.9.5", default-features = false, features = ["api", "api_bluesky", "api_full", "derive", "dns"] }
+jacquard-axum = "0.9.6"
+jacquard-repo = "0.9.6"
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 k256 = { version = "0.13.3", features = ["ecdsa", "pem", "pkcs8"] }
 multibase = "0.9.1"
 multihash = "0.19.3"
 rand = "0.8.5"
-reqwest = { version = "0.12.24", features = ["json"] }
+reqwest = { version = "0.12.28", features = ["json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_bytes = "0.11.14"
 serde_ipld_dagcbor = "0.6.4"
 ipld-core = "0.4.2"
-serde_json = "1.0.145"
+serde_json = "1.0.146"
 serde_urlencoded = "0.7"
 sha2 = "0.10.9"
 subtle = "2.5"
@@ -49,21 +49,21 @@ tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 urlencoding = "2.1"
 uuid = { version = "1.19.0", features = ["v4", "v5", "fast-rng"] }
 iroh-car = "0.5.1"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
-tower-http = { version = "0.6", features = ["fs", "cors"] }
+image = { version = "0.25.9", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+redis = { version = "1.0.1", features = ["tokio-comp", "connection-manager"] }
+tower-http = { version = "0.6.8", features = ["fs", "cors"] }
 hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
-metrics = "0.24"
+metrics = "0.24.3"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 bs58 = "0.5.1"
 totp-rs = { version = "5", features = ["qr"] }
-webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
+webauthn-rs = { version = "0.5.4", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
 webauthn-rs-proto = "0.5.4"
 [features]
 external-infra = []
 [dev-dependencies]
 ctor = "0.6.3"
-testcontainers = "0.26.0"
+testcontainers = "0.26.2"
 testcontainers-modules = { version = "0.14.0", features = ["postgres"] }
 wiremock = "0.6.5"
 # urlencoding is also in dependencies, but tests use it directly

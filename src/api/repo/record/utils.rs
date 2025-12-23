@@ -3,23 +3,23 @@ use bytes::Bytes;
 use cid::Cid;
 use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::storage::BlockStore;
-use k256::ecdsa::{Signature, SigningKey, signature::Signer};
+use k256::ecdsa::{signature::Signer, Signature, SigningKey};
 use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
+
 /*
- * Why am I making custom commit objects instead of jacquard's Commit::sign(), you ask?
+ * Why custom commit signing instead of jacquard's Commit::sign()?
  *
- * At time of writing, jacquard has a bug in how it creates unsigned bytes for signing.
- * Jacquard sets sig to empty bytes and serializes (6-field CBOR map)
- * Indigo/ATProto creates a struct *without* the sig field (5-field CBOR map)
+ * Jacquard previously had a bug in how it created unsigned bytes for signing:
+ * it set sig to empty bytes and serialized (6-field CBOR map), while the
+ * ATProto spec creates a struct *without* the sig field (5-field CBOR map).
+ * These produce different CBOR bytes, so signatures didn't verify with relays.
  *
- * These produce different CBOR bytes, so signatures created with jacquard
- * don't verify with the relay's algorithm. The relay silently rejects commits
- * with invalid signatures.
- *
- * If you have it downloaded, see: reference-relay-indigo/atproto/repo/commit.go UnsignedBytes()
+ * The bug has been fixed in jacquard, but the fix is untested here.
+ * TODO: Switch back to jacquard's Commit::sign() and verify it works.
  */
+
 #[derive(Serialize)]
 struct UnsignedCommit<'a> {
     data: Cid,
@@ -29,7 +29,7 @@ struct UnsignedCommit<'a> {
     version: i64,
 }
 
-fn create_signed_commit(
+pub fn create_signed_commit(
     did: &str,
     data: Cid,
     rev: &str,
