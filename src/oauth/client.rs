@@ -89,8 +89,9 @@ impl ClientMetadataCache {
     fn is_loopback_client(client_id: &str) -> bool {
         if let Ok(url) = reqwest::Url::parse(client_id) {
             url.scheme() == "http"
-                && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
-                && url.query().is_some()
+                && url.host_str() == Some("localhost")
+                && url.port().is_none()
+                && url.path().is_empty()
         } else {
             false
         }
@@ -98,35 +99,43 @@ impl ClientMetadataCache {
 
     fn build_loopback_metadata(client_id: &str) -> Result<ClientMetadata, OAuthError> {
         let url = reqwest::Url::parse(client_id)
-            .map_err(|_| OAuthError::InvalidClient("Invalid loopback client_id URL".to_string()))?;
-        let mut redirect_uris = Vec::new();
+            .map_err(|_| OAuthError::InvalidClient("Invalid loopback client_id URL".into()))?;
+        let mut redirect_uris = Vec::<String>::new();
+        let mut scope: Option<String> = None;
         for (key, value) in url.query_pairs() {
             if key == "redirect_uri" {
                 redirect_uris.push(value.to_string());
+                break;
+            }
+            if key == "scope" {
+                scope = Some(value.into());
+                break;
             }
         }
         if redirect_uris.is_empty() {
-            redirect_uris.push("http://127.0.0.1/callback".to_string());
-            redirect_uris.push("http://localhost/callback".to_string());
+            redirect_uris.push("http://127.0.0.1/".into());
+            redirect_uris.push("http://[::1]/".into());
         }
-        let scope = Some("atproto transition:generic transition:chat.bsky".to_string());
+        if scope.is_none() {
+            scope = Some("atproto".into());
+        }
         Ok(ClientMetadata {
-            client_id: client_id.to_string(),
-            client_name: Some("Loopback Client".to_string()),
+            client_id: client_id.into(),
+            client_name: Some("Loopback Client".into()),
             client_uri: None,
             logo_uri: None,
             redirect_uris,
             grant_types: vec![
-                "authorization_code".to_string(),
-                "refresh_token".to_string(),
+                "authorization_code".into(),
+                "refresh_token".into(),
             ],
-            response_types: vec!["code".to_string()],
+            response_types: vec!["code".into()],
             scope,
-            token_endpoint_auth_method: Some("none".to_string()),
+            token_endpoint_auth_method: Some("none".into()),
             dpop_bound_access_tokens: Some(false),
             jwks: None,
             jwks_uri: None,
-            application_type: Some("native".to_string()),
+            application_type: Some("native".into()),
         })
     }
 

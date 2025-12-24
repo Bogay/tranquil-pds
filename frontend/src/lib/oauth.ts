@@ -1,5 +1,16 @@
 const OAUTH_STATE_KEY = 'tranquil_pds_oauth_state'
 const OAUTH_VERIFIER_KEY = 'tranquil_pds_oauth_verifier'
+const SCOPES = [
+    'atproto',
+    'repo:*?action=create',
+    'repo:*?action=update',
+    'repo:*?action=delete',
+    'blob:*/*',
+].join(' ')
+const CLIENT_ID = !(import.meta.env.DEV)
+    ? `${window.location.origin}/oauth/client-metadata.json`
+    : `http://localhost/oauth/client-metadata.json?scope=${SCOPES}`
+const REDIRECT_URI = `${window.location.origin}/`
 
 interface OAuthState {
   state: string
@@ -65,23 +76,14 @@ export async function startOAuthLogin(): Promise<void> {
 
   saveOAuthState({ state, codeVerifier })
 
-  const clientId = `${window.location.origin}/oauth/client-metadata.json`
-  const redirectUri = `${window.location.origin}/`
-
   const parResponse = await fetch('/oauth/par', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT_URI,
       response_type: 'code',
-      scope: [
-        'atproto',
-        'repo:*?action=create',
-        'repo:*?action=update',
-        'repo:*?action=delete',
-        'blob:*/*',
-      ].join(' '),
+      scope: SCOPES,
       state: state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
@@ -96,7 +98,7 @@ export async function startOAuthLogin(): Promise<void> {
   const { request_uri } = await parResponse.json()
 
   const authorizeUrl = new URL('/oauth/authorize', window.location.origin)
-  authorizeUrl.searchParams.set('client_id', clientId)
+  authorizeUrl.searchParams.set('client_id', CLIENT_ID)
   authorizeUrl.searchParams.set('request_uri', request_uri)
 
   window.location.href = authorizeUrl.toString()
@@ -122,17 +124,14 @@ export async function handleOAuthCallback(code: string, state: string): Promise<
     throw new Error('OAuth state mismatch. Please try logging in again.')
   }
 
-  const clientId = `${window.location.origin}/oauth/client-metadata.json`
-  const redirectUri = `${window.location.origin}/`
-
   const tokenResponse = await fetch('/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'authorization_code',
-      client_id: clientId,
+      client_id: CLIENT_ID,
       code: code,
-      redirect_uri: redirectUri,
+      redirect_uri: REDIRECT_URI,
       code_verifier: savedState.codeVerifier,
     }),
   })
@@ -148,14 +147,12 @@ export async function handleOAuthCallback(code: string, state: string): Promise<
 }
 
 export async function refreshOAuthToken(refreshToken: string): Promise<OAuthTokens> {
-  const clientId = `${window.location.origin}/oauth/client-metadata.json`
-
   const tokenResponse = await fetch('/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
-      client_id: clientId,
+      client_id: CLIENT_ID,
       refresh_token: refreshToken,
     }),
   })
