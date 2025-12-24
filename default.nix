@@ -16,9 +16,9 @@ in rustPlatform.buildRustPackage {
         ./Cargo.toml
         ./Cargo.lock
         ./src
-	./.sqlx
-	./migrations
-	./frontend
+      	./.sqlx
+      	./migrations
+	      ./frontend
       ]
     );
   };

@@ -15,6 +15,8 @@
 
   # frontend tooling
   deno,
+  svelte-language-server,
+  typescript-language-server,
 }: let
   defaultPackage = callPackage ./default.nix { };
 in mkShell {
@@ -34,5 +36,8 @@ in mkShell {
     rust-analyzer
 
     deno
+    svelte-language-server
+    typescript-language-server
   ];
 }
+
