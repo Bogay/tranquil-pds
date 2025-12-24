@@ -376,7 +376,8 @@ pub async fn reauth_passkey_finish(
     {
         Ok(false) => {
             warn!(did = %auth.0.did, "Passkey counter anomaly detected - possible cloned key");
-            let _ = crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
+            let _ =
+                crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(json!({
@@ -494,14 +495,14 @@ pub async fn check_reauth_required_cached(
     did: &str,
 ) -> bool {
     let cache_key = format!("reauth:{}", did);
-    if let Some(timestamp_str) = cache.get(&cache_key).await {
-        if let Ok(timestamp) = timestamp_str.parse::<i64>() {
-            let reauth_time = chrono::DateTime::from_timestamp(timestamp, 0);
-            if let Some(t) = reauth_time {
-                let elapsed = Utc::now().signed_duration_since(t);
-                if elapsed.num_seconds() <= REAUTH_WINDOW_SECONDS {
-                    return false;
-                }
+    if let Some(timestamp_str) = cache.get(&cache_key).await
+        && let Ok(timestamp) = timestamp_str.parse::<i64>()
+    {
+        let reauth_time = chrono::DateTime::from_timestamp(timestamp, 0);
+        if let Some(t) = reauth_time {
+            let elapsed = Utc::now().signed_duration_since(t);
+            if elapsed.num_seconds() <= REAUTH_WINDOW_SECONDS {
+                return false;
             }
         }
     }

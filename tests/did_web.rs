@@ -1,6 +1,6 @@
 mod common;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use common::*;
 use k256::ecdsa::{SigningKey, signature::Signer};
 use reqwest::StatusCode;
@@ -387,13 +387,14 @@ async fn test_did_web_byod_flow() {
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
     let unique_id = uuid::Uuid::new_v4().to_string().replace("-", "");
-    let did = format!("did:web:{}:byod:{}", mock_addr.replace(":", "%3A"), unique_id);
+    let did = format!(
+        "did:web:{}:byod:{}",
+        mock_addr.replace(":", "%3A"),
+        unique_id
+    );
     let handle = format!("byod_{}", uuid::Uuid::new_v4());
     let pds_endpoint = base_url().await.replace("http://", "https://");
-    let pds_did = format!(
-        "did:web:{}",
-        pds_endpoint.trim_start_matches("https://")
-    );
+    let pds_did = format!("did:web:{}", pds_endpoint.trim_start_matches("https://"));
 
     let temp_key = SigningKey::random(&mut rand::thread_rng());
     let public_key_multibase = signing_key_to_multibase(&temp_key);
@@ -443,16 +444,19 @@ async fn test_did_web_byod_flow() {
     let body: Value = res.json().await.expect("Response was not JSON");
     let returned_did = body["did"].as_str().expect("No DID in response");
     assert_eq!(returned_did, did, "Returned DID should match requested DID");
-    let access_jwt = body["accessJwt"]
-        .as_str()
-        .expect("No accessJwt in response");
+    assert_eq!(
+        body["verificationRequired"], true,
+        "BYOD accounts should require verification"
+    );
+
+    let access_jwt = common::verify_new_account(&client, returned_did).await;
 
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.server.checkAccountStatus",
             base_url().await
         ))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .send()
         .await
         .expect("Failed to check account status");
@@ -468,7 +472,7 @@ async fn test_did_web_byod_flow() {
             "{}/xrpc/com.atproto.identity.getRecommendedDidCredentials",
             base_url().await
         ))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .send()
         .await
         .expect("Failed to get recommended credentials");
@@ -491,7 +495,7 @@ async fn test_did_web_byod_flow() {
             "{}/xrpc/com.atproto.server.activateAccount",
             base_url().await
         ))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .send()
         .await
         .expect("Failed to activate account");
@@ -506,7 +510,7 @@ async fn test_did_web_byod_flow() {
             "{}/xrpc/com.atproto.server.checkAccountStatus",
             base_url().await
         ))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .send()
         .await
         .expect("Failed to check account status");
@@ -522,7 +526,7 @@ async fn test_did_web_byod_flow() {
             "{}/xrpc/com.atproto.repo.createRecord",
             base_url().await
         ))
-        .bearer_auth(access_jwt)
+        .bearer_auth(&access_jwt)
         .json(&json!({
             "repo": did,
             "collection": "app.bsky.feed.post",

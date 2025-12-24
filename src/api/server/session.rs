@@ -8,7 +8,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::verify;
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -167,10 +166,7 @@ pub async fn create_session(
     let has_totp = row.totp_enabled.unwrap_or(false);
     let is_legacy_login = has_totp;
     if has_totp && !row.allow_legacy_login {
-        warn!(
-            "Legacy login blocked for TOTP-enabled account: {}",
-            row.did
-        );
+        warn!("Legacy login blocked for TOTP-enabled account: {}", row.did);
         return (
             StatusCode::FORBIDDEN,
             Json(json!({
@@ -556,6 +552,7 @@ pub async fn confirm_signup(
         r#"SELECT
             u.id, u.did, u.handle, u.email,
             u.preferred_comms_channel as "channel: crate::comms::CommsChannel",
+            u.discord_id, u.telegram_username, u.signal_number,
             k.key_bytes, k.encryption_version
         FROM users u
         JOIN user_keys k ON u.id = k.user_id
@@ -577,38 +574,46 @@ pub async fn confirm_signup(
         }
     };
 
-    let channel_str = match row.channel {
-        crate::comms::CommsChannel::Email => "email",
-        crate::comms::CommsChannel::Discord => "discord",
-        crate::comms::CommsChannel::Telegram => "telegram",
-        crate::comms::CommsChannel::Signal => "signal",
-    };
-    let verification = match sqlx::query!(
-        "SELECT code, expires_at FROM channel_verifications WHERE user_id = $1 AND channel = $2::comms_channel",
-        row.id,
-        channel_str as _
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(v)) => v,
-        Ok(None) => {
-            warn!("No verification code found for user: {}", input.did);
-            return ApiError::InvalidRequest("No pending verification".into()).into_response();
+    let (channel_str, identifier) = match row.channel {
+        crate::comms::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
+        crate::comms::CommsChannel::Discord => {
+            ("discord", row.discord_id.clone().unwrap_or_default())
         }
-        Err(e) => {
-            error!("Database error fetching verification: {:?}", e);
-            return ApiError::InternalError.into_response();
+        crate::comms::CommsChannel::Telegram => (
+            "telegram",
+            row.telegram_username.clone().unwrap_or_default(),
+        ),
+        crate::comms::CommsChannel::Signal => {
+            ("signal", row.signal_number.clone().unwrap_or_default())
         }
     };
 
-    if verification.code != input.verification_code {
-        warn!("Invalid verification code for user: {}", input.did);
-        return ApiError::InvalidRequest("Invalid verification code".into()).into_response();
-    }
-    if verification.expires_at < Utc::now() {
-        warn!("Verification code expired for user: {}", input.did);
-        return ApiError::ExpiredTokenMsg("Verification code has expired".into()).into_response();
+    let normalized_token =
+        crate::auth::verification_token::normalize_token_input(&input.verification_code);
+    match crate::auth::verification_token::verify_signup_token(
+        &normalized_token,
+        channel_str,
+        &identifier,
+    ) {
+        Ok(token_data) => {
+            if token_data.did != input.did {
+                warn!(
+                    "Token DID mismatch for confirm_signup: expected {}, got {}",
+                    input.did, token_data.did
+                );
+                return ApiError::InvalidRequest("Invalid verification code".into())
+                    .into_response();
+            }
+        }
+        Err(crate::auth::verification_token::VerifyError::Expired) => {
+            warn!("Verification code expired for user: {}", input.did);
+            return ApiError::ExpiredTokenMsg("Verification code has expired".into())
+                .into_response();
+        }
+        Err(e) => {
+            warn!("Invalid verification code for user {}: {:?}", input.did, e);
+            return ApiError::InvalidRequest("Invalid verification code".into()).into_response();
+        }
     }
 
     let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
@@ -632,17 +637,6 @@ pub async fn confirm_signup(
     {
         error!("Failed to update verification status: {:?}", e);
         return ApiError::InternalError.into_response();
-    }
-
-    if let Err(e) = sqlx::query!(
-        "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = $2::comms_channel",
-        row.id,
-        channel_str as _
-    )
-    .execute(&state.db)
-    .await
-    {
-        error!("Failed to delete verification record: {:?}", e);
     }
 
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
@@ -737,8 +731,6 @@ pub async fn resend_verification(
     if is_verified {
         return ApiError::InvalidRequest("Account is already verified".into()).into_response();
     }
-    let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
-    let code_expires_at = Utc::now() + chrono::Duration::minutes(30);
 
     let (channel_str, recipient) = match row.channel {
         crate::comms::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
@@ -754,31 +746,17 @@ pub async fn resend_verification(
         }
     };
 
-    if let Err(e) = sqlx::query!(
-        r#"
-        INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at)
-        VALUES ($1, $2::comms_channel, $3, $4, $5)
-        ON CONFLICT (user_id, channel) DO UPDATE
-        SET code = $3, pending_identifier = $4, expires_at = $5, created_at = NOW()
-        "#,
-        row.id,
-        channel_str as _,
-        verification_code,
-        recipient,
-        code_expires_at
-    )
-    .execute(&state.db)
-    .await
-    {
-        error!("Failed to update verification code: {:?}", e);
-        return ApiError::InternalError.into_response();
-    }
+    let verification_token =
+        crate::auth::verification_token::generate_signup_token(&input.did, channel_str, &recipient);
+    let formatted_token =
+        crate::auth::verification_token::format_token_for_display(&verification_token);
+
     if let Err(e) = crate::comms::enqueue_signup_verification(
         &state.db,
         row.id,
         channel_str,
         &recipient,
-        &verification_code,
+        &formatted_token,
         None,
     )
     .await
@@ -886,8 +864,7 @@ pub async fn list_sessions(
         Ok(rows) => {
             for (id, token_id, created_at, expires_at, client_id) in rows {
                 let client_name = extract_client_name(&client_id);
-                let is_current_oauth = auth.0.is_oauth
-                    && current_jti.as_ref() == Some(&token_id);
+                let is_current_oauth = auth.0.is_oauth && current_jti.as_ref() == Some(&token_id);
                 sessions.push(SessionInfo {
                     id: format!("oauth:{}", id),
                     session_type: "oauth".to_string(),
@@ -1071,11 +1048,12 @@ pub async fn revoke_all_sessions(
                     .into_response();
             }
         } else {
-            if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2")
-                .bind(&auth.0.did)
-                .bind(jti)
-                .execute(&state.db)
-                .await
+            if let Err(e) =
+                sqlx::query("DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2")
+                    .bind(&auth.0.did)
+                    .bind(jti)
+                    .execute(&state.db)
+                    .await
             {
                 error!("DB error revoking JWT sessions: {:?}", e);
                 return (

@@ -70,13 +70,13 @@
         id="verification-code"
         type="text"
         bind:value={verificationCode}
-        placeholder="Enter 6-digit code"
+        placeholder="XXXX-XXXX-XXXX-XXXX"
         disabled={flow.state.submitting}
         required
-        maxlength="6"
-        inputmode="numeric"
         autocomplete="one-time-code"
+        class="code-input"
       />
+      <span class="hint">Copy the entire code from your message, including dashes.</span>
     </div>
 
     <button type="submit" disabled={flow.state.submitting || !verificationCode.trim()}>
@@ -99,5 +99,18 @@
   .info-text {
     color: var(--text-secondary);
     margin: 0;
+  }
+
+  .code-input {
+    font-family: var(--font-mono, monospace);
+    font-size: var(--text-base);
+    letter-spacing: 0.05em;
+  }
+
+  .hint {
+    display: block;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    margin-top: var(--space-1);
   }
 </style>

@@ -6,20 +6,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use chrono::{Duration, Utc};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::Row;
 use tracing::info;
-
-fn generate_verification_code() -> String {
-    rand::thread_rng()
-        .sample_iter(&rand::distributions::Uniform::new(0, 10))
-        .take(6)
-        .map(|x| x.to_string())
-        .collect()
-}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,36 +218,28 @@ pub struct UpdateNotificationPrefsResponse {
 pub async fn request_channel_verification(
     db: &sqlx::PgPool,
     user_id: uuid::Uuid,
+    did: &str,
     channel: &str,
     identifier: &str,
     handle: Option<&str>,
 ) -> Result<String, String> {
-    let code = generate_verification_code();
-    let expires_at = Utc::now() + Duration::minutes(10);
-
-    sqlx::query!(
-        r#"
-        INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at)
-        VALUES ($1, $2::comms_channel, $3, $4, $5)
-        ON CONFLICT (user_id, channel) DO UPDATE
-        SET code = $3, pending_identifier = $4, expires_at = $5, created_at = NOW()
-        "#,
-        user_id,
-        channel as _,
-        code,
-        identifier,
-        expires_at
-    )
-    .execute(db)
-    .await
-    .map_err(|e| format!("Database error: {}", e))?;
+    let token =
+        crate::auth::verification_token::generate_channel_update_token(did, channel, identifier);
+    let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
 
     if channel == "email" {
         let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         let handle_str = handle.unwrap_or("user");
-        crate::comms::enqueue_email_update(db, user_id, identifier, handle_str, &code, &hostname)
-            .await
-            .map_err(|e| format!("Failed to enqueue email notification: {}", e))?;
+        crate::comms::enqueue_email_update(
+            db,
+            user_id,
+            identifier,
+            handle_str,
+            &formatted_token,
+            &hostname,
+        )
+        .await
+        .map_err(|e| format!("Failed to enqueue email notification: {}", e))?;
     } else {
         sqlx::query!(
             r#"
@@ -267,15 +249,15 @@ pub async fn request_channel_verification(
             user_id,
             channel as _,
             identifier,
-            format!("Your verification code is: {}", code),
-            json!({"code": code})
+            format!("Your verification code is: {}", formatted_token),
+            json!({"code": formatted_token})
         )
         .execute(db)
         .await
         .map_err(|e| format!("Failed to enqueue notification: {}", e))?;
     }
 
-    Ok(code)
+    Ok(token)
 }
 
 pub async fn update_notification_prefs(
@@ -397,6 +379,7 @@ pub async fn update_notification_prefs(
             if let Err(e) = request_channel_verification(
                 &state.db,
                 user_id,
+                &user.did,
                 "email",
                 &email_clean,
                 Some(&handle),
@@ -429,16 +412,12 @@ pub async fn update_notification_prefs(
                 )
                     .into_response();
             }
-            let _ = sqlx::query!(
-                "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'discord'",
-                user_id
-            )
-            .execute(&state.db)
-            .await;
             info!(did = %user.did, "Cleared Discord ID");
         } else {
-            if let Err(e) =
-                request_channel_verification(&state.db, user_id, "discord", discord_id, None).await
+            if let Err(e) = request_channel_verification(
+                &state.db, user_id, &user.did, "discord", discord_id, None,
+            )
+            .await
             {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -467,17 +446,17 @@ pub async fn update_notification_prefs(
                 )
                     .into_response();
             }
-            let _ = sqlx::query!(
-                "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'telegram'",
-                user_id
-            )
-            .execute(&state.db)
-            .await;
             info!(did = %user.did, "Cleared Telegram username");
         } else {
-            if let Err(e) =
-                request_channel_verification(&state.db, user_id, "telegram", telegram_clean, None)
-                    .await
+            if let Err(e) = request_channel_verification(
+                &state.db,
+                user_id,
+                &user.did,
+                "telegram",
+                telegram_clean,
+                None,
+            )
+            .await
             {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -505,16 +484,11 @@ pub async fn update_notification_prefs(
                 )
                     .into_response();
             }
-            let _ = sqlx::query!(
-                "DELETE FROM channel_verifications WHERE user_id = $1 AND channel = 'signal'",
-                user_id
-            )
-            .execute(&state.db)
-            .await;
             info!(did = %user.did, "Cleared Signal number");
         } else {
             if let Err(e) =
-                request_channel_verification(&state.db, user_id, "signal", signal, None).await
+                request_channel_verification(&state.db, user_id, &user.did, "signal", signal, None)
+                    .await
             {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,

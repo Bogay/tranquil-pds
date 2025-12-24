@@ -12,6 +12,7 @@ pub mod scope_check;
 pub mod service;
 pub mod token;
 pub mod totp;
+pub mod verification_token;
 pub mod verify;
 pub mod webauthn;
 

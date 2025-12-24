@@ -296,6 +296,14 @@ pub fn app(state: AppState) -> Router {
             post(api::server::reserve_signing_key),
         )
         .route(
+            "/xrpc/com.atproto.server.verifyMigrationEmail",
+            post(api::server::verify_migration_email),
+        )
+        .route(
+            "/xrpc/com.atproto.server.resendMigrationVerification",
+            post(api::server::resend_migration_verification),
+        )
+        .route(
             "/xrpc/com.atproto.identity.updateHandle",
             post(api::identity::update_handle),
         )
@@ -549,6 +557,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.tranquil.account.confirmChannelVerification",
             post(api::verification::confirm_channel_verification),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.verifyToken",
+            post(api::server::verify_token),
         )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
         .layer(middleware::from_fn(metrics::metrics_middleware))

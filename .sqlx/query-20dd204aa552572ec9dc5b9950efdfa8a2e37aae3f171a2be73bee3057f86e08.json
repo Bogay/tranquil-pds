@@ -48,7 +48,8 @@
                 "two_factor_code",
                 "channel_verification",
                 "passkey_recovery",
-                "legacy_login_alert"
+                "legacy_login_alert",
+                "migration_verification"
               ]
             }
           }

@@ -66,7 +66,9 @@ pub async fn get_service_auth(
         }
     };
 
-    let (token, is_dpop) = if auth_header.len() >= 7 && auth_header[..7].eq_ignore_ascii_case("bearer ") {
+    let (token, is_dpop) = if auth_header.len() >= 7
+        && auth_header[..7].eq_ignore_ascii_case("bearer ")
+    {
         (auth_header[7..].trim().to_string(), false)
     } else if auth_header.len() >= 5 && auth_header[..5].eq_ignore_ascii_case("dpop ") {
         (auth_header[5..].trim().to_string(), true)
@@ -81,10 +83,14 @@ pub async fn get_service_auth(
             &token,
             dpop_proof,
             "GET",
-            &format!("/xrpc/com.atproto.server.getServiceAuth?aud={}&lxm={}",
-                     params.aud,
-                     params.lxm.as_deref().unwrap_or("")),
-        ).await {
+            &format!(
+                "/xrpc/com.atproto.server.getServiceAuth?aud={}&lxm={}",
+                params.aud,
+                params.lxm.as_deref().unwrap_or("")
+            ),
+        )
+        .await
+        {
             Ok(result) => crate::auth::AuthenticatedUser {
                 did: result.did,
                 is_oauth: true,
@@ -100,7 +106,8 @@ pub async fn get_service_auth(
                         "error": "use_dpop_nonce",
                         "message": "DPoP nonce required"
                     })),
-                ).into_response();
+                )
+                    .into_response();
             }
             Err(e) => {
                 warn!(error = ?e, "getServiceAuth DPoP auth validation failed");
@@ -110,7 +117,8 @@ pub async fn get_service_auth(
                         "error": "AuthenticationFailed",
                         "message": format!("{:?}", e)
                     })),
-                ).into_response();
+                )
+                    .into_response();
             }
         }
     } else {
@@ -136,7 +144,7 @@ pub async fn get_service_auth(
                 "SELECT k.key_bytes, k.encryption_version
                  FROM users u
                  JOIN user_keys k ON u.id = k.user_id
-                 WHERE u.did = $1"
+                 WHERE u.did = $1",
             )
             .bind(&auth_user.did)
             .fetch_optional(&state.db)
@@ -155,17 +163,13 @@ pub async fn get_service_auth(
                     }
                 }
                 Ok(None) => {
-                    return ApiError::AuthenticationFailedMsg(
-                        "User has no signing key".into(),
-                    )
-                    .into_response();
+                    return ApiError::AuthenticationFailedMsg("User has no signing key".into())
+                        .into_response();
                 }
                 Err(e) => {
                     error!(error = ?e, "DB error fetching user key");
-                    return ApiError::AuthenticationFailedMsg(
-                        "Failed to get signing key".into(),
-                    )
-                    .into_response();
+                    return ApiError::AuthenticationFailedMsg("Failed to get signing key".into())
+                        .into_response();
                 }
             }
         }

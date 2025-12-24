@@ -13,6 +13,8 @@ pub mod session;
 pub mod signing_key;
 pub mod totp;
 pub mod trusted_devices;
+pub mod verify_email;
+pub mod verify_token;
 
 pub use account_status::{
     activate_account, check_account_status, deactivate_account, delete_account,
@@ -35,9 +37,9 @@ pub use password::{
     change_password, get_password_status, remove_password, request_password_reset, reset_password,
 };
 pub use reauth::{
-    check_legacy_session_mfa, check_reauth_required, get_reauth_status, legacy_mfa_required_response,
-    reauth_passkey_finish, reauth_passkey_start, reauth_password, reauth_required_response,
-    reauth_totp, update_mfa_verified,
+    check_legacy_session_mfa, check_reauth_required, get_reauth_status,
+    legacy_mfa_required_response, reauth_passkey_finish, reauth_passkey_start, reauth_password,
+    reauth_required_response, reauth_totp, update_mfa_verified,
 };
 pub use service_auth::get_service_auth;
 pub use session::{
@@ -54,3 +56,5 @@ pub use trusted_devices::{
     extend_device_trust, is_device_trusted, list_trusted_devices, revoke_trusted_device,
     trust_device, update_trusted_device,
 };
+pub use verify_email::{resend_migration_verification, verify_migration_email};
+pub use verify_token::{VerifyTokenInput, VerifyTokenOutput, verify_token, verify_token_internal};

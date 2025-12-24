@@ -64,16 +64,16 @@ pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationErr
         return Err(HandleValidationError::TooLong);
     }
 
-    if let Some(first_char) = handle.chars().next() {
-        if first_char == '-' || first_char == '_' {
-            return Err(HandleValidationError::StartsWithInvalidChar);
-        }
+    if let Some(first_char) = handle.chars().next()
+        && (first_char == '-' || first_char == '_')
+    {
+        return Err(HandleValidationError::StartsWithInvalidChar);
     }
 
-    if let Some(last_char) = handle.chars().last() {
-        if last_char == '-' || last_char == '_' {
-            return Err(HandleValidationError::EndsWithInvalidChar);
-        }
+    if let Some(last_char) = handle.chars().last()
+        && (last_char == '-' || last_char == '_')
+    {
+        return Err(HandleValidationError::EndsWithInvalidChar);
     }
 
     for c in handle.chars() {

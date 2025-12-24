@@ -3,7 +3,7 @@ use bytes::Bytes;
 use cid::Cid;
 use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::storage::BlockStore;
-use k256::ecdsa::{signature::Signer, Signature, SigningKey};
+use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;

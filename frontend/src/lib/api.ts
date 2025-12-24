@@ -319,11 +319,11 @@ export const api = {
     })
   },
 
-  async confirmChannelVerification(token: string, channel: string, code: string): Promise<{ success: boolean }> {
+  async confirmChannelVerification(token: string, channel: string, identifier: string, code: string): Promise<{ success: boolean }> {
     return xrpc('com.tranquil.account.confirmChannelVerification', {
       method: 'POST',
       token,
-      body: { channel, code },
+      body: { channel, identifier, code },
     })
   },
 
@@ -852,6 +852,33 @@ export const api = {
     return xrpc('com.tranquil.account.recoverPasskeyAccount', {
       method: 'POST',
       body: { did, recoveryToken, newPassword },
+    })
+  },
+
+  async verifyMigrationEmail(token: string, email: string): Promise<{ success: boolean; did: string }> {
+    return xrpc('com.atproto.server.verifyMigrationEmail', {
+      method: 'POST',
+      body: { token, email },
+    })
+  },
+
+  async resendMigrationVerification(email: string): Promise<{ sent: boolean }> {
+    return xrpc('com.atproto.server.resendMigrationVerification', {
+      method: 'POST',
+      body: { email },
+    })
+  },
+
+  async verifyToken(token: string, identifier: string, accessToken?: string): Promise<{
+    success: boolean
+    did: string
+    purpose: string
+    channel: string
+  }> {
+    return xrpc('com.tranquil.account.verifyToken', {
+      method: 'POST',
+      body: { token, identifier },
+      token: accessToken,
     })
   },
 }

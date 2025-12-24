@@ -93,8 +93,17 @@
     if (!auth.session || !verificationCode) return
     verificationError = null
     verificationSuccess = null
+
+    let identifier = ''
+    switch (channel) {
+      case 'discord': identifier = discordId; break
+      case 'telegram': identifier = telegramUsername; break
+      case 'signal': identifier = signalNumber; break
+    }
+    if (!identifier) return
+
     try {
-      await api.confirmChannelVerification(auth.session.accessJwt, channel, verificationCode)
+      await api.confirmChannelVerification(auth.session.accessJwt, channel, identifier, verificationCode)
       await refreshSession()
       verificationSuccess = $_('comms.verifiedSuccess', { values: { channel } })
       verificationCode = ''

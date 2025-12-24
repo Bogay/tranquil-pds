@@ -34,6 +34,14 @@
     }
   })
 
+  let creatingStarted = false
+  $effect(() => {
+    if (flow?.state.step === 'creating' && !creatingStarted) {
+      creatingStarted = true
+      flow.createPasskeyAccount()
+    }
+  })
+
   async function loadServerInfo() {
     try {
       serverInfo = await api.describeServer()
@@ -49,27 +57,27 @@
   function validateInfoStep(): string | null {
     if (!flow) return 'Flow not initialized'
     const info = flow.info
-    if (!info.handle.trim()) return 'Handle is required'
-    if (info.handle.includes('.')) return 'Handle cannot contain dots. You can set up a custom domain handle after creating your account.'
+    if (!info.handle.trim()) return $_('registerPasskey.errors.handleRequired')
+    if (info.handle.includes('.')) return $_('registerPasskey.errors.handleNoDots')
     if (serverInfo?.inviteCodeRequired && !info.inviteCode?.trim()) {
-      return 'Invite code is required'
+      return $_('registerPasskey.errors.inviteRequired')
     }
     if (info.didType === 'web-external') {
-      if (!info.externalDid?.trim()) return 'External did:web is required'
-      if (!info.externalDid.trim().startsWith('did:web:')) return 'External DID must start with did:web:'
+      if (!info.externalDid?.trim()) return $_('registerPasskey.errors.externalDidRequired')
+      if (!info.externalDid.trim().startsWith('did:web:')) return $_('registerPasskey.errors.externalDidFormat')
     }
     switch (info.verificationChannel) {
       case 'email':
-        if (!info.email.trim()) return 'Email is required for email verification'
+        if (!info.email.trim()) return $_('registerPasskey.errors.emailRequired')
         break
       case 'discord':
-        if (!info.discordId?.trim()) return 'Discord ID is required for Discord verification'
+        if (!info.discordId?.trim()) return $_('registerPasskey.errors.discordRequired')
         break
       case 'telegram':
-        if (!info.telegramUsername?.trim()) return 'Telegram username is required for Telegram verification'
+        if (!info.telegramUsername?.trim()) return $_('registerPasskey.errors.telegramRequired')
         break
       case 'signal':
-        if (!info.signalNumber?.trim()) return 'Phone number is required for Signal verification'
+        if (!info.signalNumber?.trim()) return $_('registerPasskey.errors.signalRequired')
         break
     }
     return null
@@ -121,7 +129,7 @@
     }
 
     if (!window.PublicKeyCredential) {
-      flow.setError('Passkeys are not supported in this browser. Please use a different browser or register with a password instead.')
+      flow.setError($_('registerPasskey.errors.passkeysNotSupported'))
       return
     }
 
@@ -153,7 +161,7 @@
       })
 
       if (!credential) {
-        flow.setError('Passkey creation was cancelled')
+        flow.setError($_('registerPasskey.errors.passkeyCancelled'))
         flow.setSubmitting(false)
         return
       }
@@ -180,13 +188,13 @@
       flow.setPasskeyComplete(result.appPassword, result.appPasswordName)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
-        flow.setError('Passkey creation was cancelled')
+        flow.setError($_('registerPasskey.errors.passkeyCancelled'))
       } else if (err instanceof ApiError) {
-        flow.setError(err.message || 'Passkey registration failed')
+        flow.setError(err.message || $_('registerPasskey.errors.passkeyFailed'))
       } else if (err instanceof Error) {
-        flow.setError(err.message || 'Passkey registration failed')
+        flow.setError(err.message || $_('registerPasskey.errors.passkeyFailed'))
       } else {
-        flow.setError('Passkey registration failed')
+        flow.setError($_('registerPasskey.errors.passkeyFailed'))
       }
     } finally {
       flow.setSubmitting(false)
@@ -207,10 +215,10 @@
 
   function channelLabel(ch: string): string {
     switch (ch) {
-      case 'email': return 'Email'
-      case 'discord': return 'Discord'
-      case 'telegram': return 'Telegram'
-      case 'signal': return 'Signal'
+      case 'email': return $_('register.email')
+      case 'discord': return $_('register.discord')
+      case 'telegram': return $_('register.telegram')
+      case 'signal': return $_('register.signal')
       default: return ch
     }
   }
@@ -230,16 +238,16 @@
   function getSubtitle(): string {
     if (!flow) return ''
     switch (flow.state.step) {
-      case 'info': return 'Create an ultra-secure account using a passkey instead of a password.'
-      case 'key-choice': return 'Choose how to set up your external did:web identity.'
-      case 'initial-did-doc': return 'Upload your DID document to continue.'
-      case 'creating': return 'Creating your account...'
-      case 'passkey': return 'Register your passkey to secure your account.'
-      case 'app-password': return 'Save your app password for third-party apps.'
-      case 'verify': return `Verify your ${channelLabel(flow.info.verificationChannel)} to continue.`
-      case 'updated-did-doc': return 'Update your DID document with the PDS signing key.'
-      case 'activating': return 'Activating your account...'
-      case 'complete': return 'Your account has been created successfully!'
+      case 'info': return $_('registerPasskey.subtitle')
+      case 'key-choice': return $_('registerPasskey.subtitleKeyChoice')
+      case 'initial-did-doc': return $_('registerPasskey.subtitleInitialDidDoc')
+      case 'creating': return $_('registerPasskey.subtitleCreating')
+      case 'passkey': return $_('registerPasskey.subtitlePasskey')
+      case 'app-password': return $_('registerPasskey.subtitleAppPassword')
+      case 'verify': return $_('registerPasskey.subtitleVerify', { values: { channel: channelLabel(flow.info.verificationChannel) } })
+      case 'updated-did-doc': return $_('registerPasskey.subtitleUpdatedDidDoc')
+      case 'activating': return $_('registerPasskey.subtitleActivating')
+      case 'redirect-to-dashboard': return $_('registerPasskey.subtitleComplete')
       default: return ''
     }
   }
@@ -259,7 +267,7 @@
     </div>
   {/if}
 
-  <h1>Create Passkey Account</h1>
+  <h1>{$_('registerPasskey.title')}</h1>
   <p class="subtitle">{getSubtitle()}</p>
 
   {#if flow?.state.error}
@@ -267,140 +275,140 @@
   {/if}
 
   {#if loadingServerInfo || !flow}
-    <p class="loading">Loading...</p>
+    <p class="loading">{$_('registerPasskey.loading')}</p>
 
   {:else if flow.state.step === 'info'}
     <form onsubmit={handleInfoSubmit}>
       <div class="field">
-        <label for="handle">Handle</label>
+        <label for="handle">{$_('registerPasskey.handle')}</label>
         <input
           id="handle"
           type="text"
           bind:value={flow.info.handle}
-          placeholder="yourname"
+          placeholder={$_('registerPasskey.handlePlaceholder')}
           disabled={flow.state.submitting}
           required
         />
         {#if flow.info.handle.includes('.')}
-          <p class="hint warning">Custom domain handles can be set up after account creation.</p>
+          <p class="hint warning">{$_('registerPasskey.handleDotWarning')}</p>
         {:else if fullHandle()}
-          <p class="hint">Your full handle will be: @{fullHandle()}</p>
+          <p class="hint">{$_('registerPasskey.handleHint', { values: { handle: fullHandle() } })}</p>
         {/if}
       </div>
 
       <fieldset class="section-fieldset">
-        <legend>Contact Method</legend>
-        <p class="section-hint">Choose how you'd like to verify your account and receive notifications.</p>
+        <legend>{$_('registerPasskey.contactMethod')}</legend>
+        <p class="section-hint">{$_('registerPasskey.contactMethodHint')}</p>
         <div class="field">
-          <label for="verification-channel">Verification Method</label>
+          <label for="verification-channel">{$_('registerPasskey.verificationMethod')}</label>
           <select id="verification-channel" bind:value={flow.info.verificationChannel} disabled={flow.state.submitting}>
-            <option value="email">Email</option>
+            <option value="email">{$_('register.email')}</option>
             <option value="discord" disabled={!isChannelAvailable('discord')}>
-              Discord{isChannelAvailable('discord') ? '' : ` (${$_('register.notConfigured')})`}
+              {$_('register.discord')}{isChannelAvailable('discord') ? '' : ` (${$_('register.notConfigured')})`}
             </option>
             <option value="telegram" disabled={!isChannelAvailable('telegram')}>
-              Telegram{isChannelAvailable('telegram') ? '' : ` (${$_('register.notConfigured')})`}
+              {$_('register.telegram')}{isChannelAvailable('telegram') ? '' : ` (${$_('register.notConfigured')})`}
             </option>
             <option value="signal" disabled={!isChannelAvailable('signal')}>
-              Signal{isChannelAvailable('signal') ? '' : ` (${$_('register.notConfigured')})`}
+              {$_('register.signal')}{isChannelAvailable('signal') ? '' : ` (${$_('register.notConfigured')})`}
             </option>
           </select>
         </div>
         {#if flow.info.verificationChannel === 'email'}
           <div class="field">
-            <label for="email">Email Address</label>
-            <input id="email" type="email" bind:value={flow.info.email} placeholder="you@example.com" disabled={flow.state.submitting} required />
+            <label for="email">{$_('registerPasskey.email')}</label>
+            <input id="email" type="email" bind:value={flow.info.email} placeholder={$_('registerPasskey.emailPlaceholder')} disabled={flow.state.submitting} required />
           </div>
         {:else if flow.info.verificationChannel === 'discord'}
           <div class="field">
-            <label for="discord-id">Discord User ID</label>
-            <input id="discord-id" type="text" bind:value={flow.info.discordId} placeholder="Your Discord user ID" disabled={flow.state.submitting} required />
-            <p class="hint">Your numeric Discord user ID (enable Developer Mode to find it)</p>
+            <label for="discord-id">{$_('register.discordId')}</label>
+            <input id="discord-id" type="text" bind:value={flow.info.discordId} placeholder={$_('register.discordIdPlaceholder')} disabled={flow.state.submitting} required />
+            <p class="hint">{$_('register.discordIdHint')}</p>
           </div>
         {:else if flow.info.verificationChannel === 'telegram'}
           <div class="field">
-            <label for="telegram-username">Telegram Username</label>
-            <input id="telegram-username" type="text" bind:value={flow.info.telegramUsername} placeholder="@yourusername" disabled={flow.state.submitting} required />
+            <label for="telegram-username">{$_('register.telegramUsername')}</label>
+            <input id="telegram-username" type="text" bind:value={flow.info.telegramUsername} placeholder={$_('register.telegramUsernamePlaceholder')} disabled={flow.state.submitting} required />
           </div>
         {:else if flow.info.verificationChannel === 'signal'}
           <div class="field">
-            <label for="signal-number">Signal Phone Number</label>
-            <input id="signal-number" type="tel" bind:value={flow.info.signalNumber} placeholder="+1234567890" disabled={flow.state.submitting} required />
-            <p class="hint">Include country code (e.g., +1 for US)</p>
+            <label for="signal-number">{$_('register.signalNumber')}</label>
+            <input id="signal-number" type="tel" bind:value={flow.info.signalNumber} placeholder={$_('register.signalNumberPlaceholder')} disabled={flow.state.submitting} required />
+            <p class="hint">{$_('register.signalNumberHint')}</p>
           </div>
         {/if}
       </fieldset>
 
       <fieldset class="section-fieldset">
-        <legend>Identity Type</legend>
-        <p class="section-hint">Choose how your decentralized identity will be managed.</p>
+        <legend>{$_('registerPasskey.identityType')}</legend>
+        <p class="section-hint">{$_('registerPasskey.identityTypeHint')}</p>
         <div class="radio-group">
           <label class="radio-label">
             <input type="radio" name="didType" value="plc" bind:group={flow.info.didType} disabled={flow.state.submitting} />
             <span class="radio-content">
-              <strong>did:plc</strong> (Recommended)
-              <span class="radio-hint">Portable identity managed by PLC Directory</span>
+              <strong>{$_('registerPasskey.didPlcRecommended')}</strong>
+              <span class="radio-hint">{$_('registerPasskey.didPlcHint')}</span>
             </span>
           </label>
           <label class="radio-label">
             <input type="radio" name="didType" value="web" bind:group={flow.info.didType} disabled={flow.state.submitting} />
             <span class="radio-content">
-              <strong>did:web</strong>
-              <span class="radio-hint">Identity hosted on this PDS (read warning below)</span>
+              <strong>{$_('registerPasskey.didWeb')}</strong>
+              <span class="radio-hint">{$_('registerPasskey.didWebHint')}</span>
             </span>
           </label>
           <label class="radio-label">
             <input type="radio" name="didType" value="web-external" bind:group={flow.info.didType} disabled={flow.state.submitting} />
             <span class="radio-content">
-              <strong>did:web (BYOD)</strong>
-              <span class="radio-hint">Bring your own domain</span>
+              <strong>{$_('registerPasskey.didWebBYOD')}</strong>
+              <span class="radio-hint">{$_('registerPasskey.didWebBYODHint')}</span>
             </span>
           </label>
         </div>
         {#if flow.info.didType === 'web'}
           <div class="warning-box">
-            <strong>Important: Understand the trade-offs</strong>
+            <strong>{$_('registerPasskey.didWebWarningTitle')}</strong>
             <ul>
-              <li><strong>Permanent tie to this PDS:</strong> Your identity will be <code>did:web:yourhandle.{serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>.</li>
-              <li><strong>No recovery mechanism:</strong> Unlike did:plc, did:web has no rotation keys.</li>
-              <li><strong>We commit to you:</strong> If you migrate away, we will continue serving a minimal DID document.</li>
-              <li><strong>Recommendation:</strong> Choose did:plc unless you have a specific reason to prefer did:web.</li>
+              <li><strong>{$_('registerPasskey.didWebWarning1')}</strong> Your identity will be <code>did:web:yourhandle.{serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>.</li>
+              <li><strong>{$_('registerPasskey.didWebWarning2')}</strong> {$_('registerPasskey.didWebWarning2Detail')}</li>
+              <li><strong>{$_('registerPasskey.didWebWarning3')}</strong> {$_('registerPasskey.didWebWarning3Detail')}</li>
+              <li><strong>{$_('registerPasskey.didWebWarning4')}</strong> {$_('registerPasskey.didWebWarning4Detail')}</li>
             </ul>
           </div>
         {/if}
         {#if flow.info.didType === 'web-external'}
           <div class="field">
-            <label for="external-did">Your did:web</label>
-            <input id="external-did" type="text" bind:value={flow.info.externalDid} placeholder="did:web:yourdomain.com" disabled={flow.state.submitting} required />
-            <p class="hint">You'll need to serve a DID document at <code>https://{flow.info.externalDid ? extractDomain(flow.info.externalDid) : 'yourdomain.com'}/.well-known/did.json</code></p>
+            <label for="external-did">{$_('registerPasskey.externalDid')}</label>
+            <input id="external-did" type="text" bind:value={flow.info.externalDid} placeholder={$_('registerPasskey.externalDidPlaceholder')} disabled={flow.state.submitting} required />
+            <p class="hint">{$_('registerPasskey.externalDidHint')} <code>https://{flow.info.externalDid ? extractDomain(flow.info.externalDid) : 'yourdomain.com'}/.well-known/did.json</code></p>
           </div>
         {/if}
       </fieldset>
 
       {#if serverInfo?.inviteCodeRequired}
         <div class="field">
-          <label for="invite-code">Invite Code <span class="required">*</span></label>
-          <input id="invite-code" type="text" bind:value={flow.info.inviteCode} placeholder="Enter your invite code" disabled={flow.state.submitting} required />
+          <label for="invite-code">{$_('registerPasskey.inviteCode')} <span class="required">*</span></label>
+          <input id="invite-code" type="text" bind:value={flow.info.inviteCode} placeholder={$_('registerPasskey.inviteCodePlaceholder')} disabled={flow.state.submitting} required />
         </div>
       {/if}
 
       <div class="info-box">
-        <strong>Why passkey-only?</strong>
-        <p>Passkey accounts are more secure than password-based accounts because they:</p>
+        <strong>{$_('registerPasskey.whyPasskeyOnly')}</strong>
+        <p>{$_('registerPasskey.whyPasskeyOnlyDesc')}</p>
         <ul>
-          <li>Cannot be phished or stolen in data breaches</li>
-          <li>Use hardware-backed cryptographic keys</li>
-          <li>Require your biometric or device PIN to use</li>
+          <li>{$_('registerPasskey.whyPasskeyBullet1')}</li>
+          <li>{$_('registerPasskey.whyPasskeyBullet2')}</li>
+          <li>{$_('registerPasskey.whyPasskeyBullet3')}</li>
         </ul>
       </div>
 
       <button type="submit" disabled={flow.state.submitting}>
-        {flow.state.submitting ? 'Creating account...' : 'Continue'}
+        {flow.state.submitting ? $_('registerPasskey.creating') : $_('registerPasskey.continue')}
       </button>
     </form>
 
     <p class="link-text">
-      Want a traditional password? <a href="#/register">Register with password</a>
+      {$_('registerPasskey.wantTraditional')} <a href="#/register">{$_('registerPasskey.registerWithPassword')}</a>
     </p>
 
   {:else if flow.state.step === 'key-choice'}
@@ -415,33 +423,31 @@
     />
 
   {:else if flow.state.step === 'creating'}
-    {#await flow.createPasskeyAccount()}
-      <p class="loading">Creating your account...</p>
-    {/await}
+    <p class="loading">{$_('registerPasskey.subtitleCreating')}</p>
 
   {:else if flow.state.step === 'passkey'}
     <div class="step-content">
       <div class="field">
-        <label for="passkey-name">Passkey Name (optional)</label>
-        <input id="passkey-name" type="text" bind:value={passkeyName} placeholder="e.g., MacBook Touch ID" disabled={flow.state.submitting} />
-        <p class="hint">A friendly name to identify this passkey</p>
+        <label for="passkey-name">{$_('registerPasskey.passkeyNameLabel')}</label>
+        <input id="passkey-name" type="text" bind:value={passkeyName} placeholder={$_('registerPasskey.passkeyNamePlaceholder')} disabled={flow.state.submitting} />
+        <p class="hint">{$_('registerPasskey.passkeyNameHint')}</p>
       </div>
 
       <div class="info-box">
-        <p>Click the button below to create your passkey. You'll be prompted to use:</p>
+        <p>{$_('registerPasskey.passkeyPrompt')}</p>
         <ul>
-          <li>Touch ID or Face ID</li>
-          <li>Your device PIN or password</li>
-          <li>A security key (if you have one)</li>
+          <li>{$_('registerPasskey.passkeyPromptBullet1')}</li>
+          <li>{$_('registerPasskey.passkeyPromptBullet2')}</li>
+          <li>{$_('registerPasskey.passkeyPromptBullet3')}</li>
         </ul>
       </div>
 
       <button onclick={handlePasskeyRegistration} disabled={flow.state.submitting} class="passkey-btn">
-        {flow.state.submitting ? 'Creating Passkey...' : 'Create Passkey'}
+        {flow.state.submitting ? $_('registerPasskey.creatingPasskey') : $_('registerPasskey.createPasskey')}
       </button>
 
       <button type="button" class="secondary" onclick={() => flow?.goBack()} disabled={flow.state.submitting}>
-        Back
+        {$_('registerPasskey.back')}
       </button>
     </div>
 
@@ -459,7 +465,7 @@
     />
 
   {:else if flow.state.step === 'redirect-to-dashboard'}
-    <p class="loading">Redirecting to dashboard...</p>
+    <p class="loading">{$_('registerPasskey.redirecting')}</p>
   {/if}
 </div>
 

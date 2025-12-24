@@ -94,7 +94,9 @@ impl ApiError {
     fn error_name(&self) -> Cow<'static, str> {
         match self {
             Self::InternalError | Self::DatabaseError => Cow::Borrowed("InternalError"),
-            Self::UpstreamFailure | Self::UpstreamUnavailable(_) => Cow::Borrowed("UpstreamFailure"),
+            Self::UpstreamFailure | Self::UpstreamUnavailable(_) => {
+                Cow::Borrowed("UpstreamFailure")
+            }
             Self::UpstreamTimeout => Cow::Borrowed("UpstreamTimeout"),
             Self::UpstreamError { error, .. } => {
                 if let Some(e) = error {

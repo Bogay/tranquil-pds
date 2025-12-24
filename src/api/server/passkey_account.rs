@@ -117,7 +117,10 @@ pub async fn create_passkey_account(
                 .await
             {
                 Ok(claims) => {
-                    debug!("Service token verified for BYOD did:web: iss={}", claims.iss);
+                    debug!(
+                        "Service token verified for BYOD did:web: iss={}",
+                        claims.iss
+                    );
                     Some(claims.iss)
                 }
                 Err(e) => {
@@ -342,9 +345,10 @@ pub async fn create_passkey_account(
                     .into_response();
             }
             if is_byod_did_web {
-                if let Some(ref auth_did) = byod_auth {
-                    if d != auth_did {
-                        return (
+                if let Some(ref auth_did) = byod_auth
+                    && d != auth_did
+                {
+                    return (
                             StatusCode::FORBIDDEN,
                             Json(json!({
                                 "error": "AuthorizationError",
@@ -352,7 +356,6 @@ pub async fn create_passkey_account(
                             })),
                         )
                             .into_response();
-                    }
                 }
                 info!(did = %d, "Creating external did:web passkey account (BYOD key)");
             } else {
@@ -415,12 +418,6 @@ pub async fn create_passkey_account(
     };
 
     info!(did = %did, handle = %handle, "Created DID for passkey-only account");
-
-    let verification_code = format!(
-        "{:06}",
-        rand::Rng::gen_range(&mut rand::thread_rng(), 0..1_000_000u32)
-    );
-    let verification_code_expires_at = Utc::now() + Duration::minutes(30);
 
     let setup_token = generate_setup_token();
     let setup_token_hash = match hash(&setup_token, DEFAULT_COST) {
@@ -591,17 +588,18 @@ pub async fn create_passkey_account(
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
-    let (commit_bytes, _sig) = match create_signed_commit(&did, mst_root, &rev.to_string(), None, &secret_key) {
-        Ok(result) => result,
-        Err(e) => {
-            error!("Error creating genesis commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+    let (commit_bytes, _sig) =
+        match create_signed_commit(&did, mst_root, rev.as_ref(), None, &secret_key) {
+            Ok(result) => result,
+            Err(e) => {
+                error!("Error creating genesis commit: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
     let commit_cid: cid::Cid = match state.block_store.put(&commit_bytes).await {
         Ok(c) => c,
         Err(e) => {
@@ -647,25 +645,6 @@ pub async fn create_passkey_account(
         .await;
     }
 
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, $2::comms_channel, $3, $4, $5)",
-        user_id,
-        verification_channel as _,
-        verification_code,
-        verification_recipient,
-        verification_code_expires_at
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting channel verification: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
-    }
-
     if let Err(e) = tx.commit().await {
         error!("Error committing transaction: {:?}", e);
         return (
@@ -703,12 +682,19 @@ pub async fn create_passkey_account(
         }
     }
 
+    let verification_token = crate::auth::verification_token::generate_signup_token(
+        &did,
+        verification_channel,
+        &verification_recipient,
+    );
+    let formatted_token =
+        crate::auth::verification_token::format_token_for_display(&verification_token);
     if let Err(e) = crate::comms::enqueue_signup_verification(
         &state.db,
         user_id,
         verification_channel,
         &verification_recipient,
-        &verification_code,
+        &formatted_token,
         None,
     )
     .await
@@ -847,21 +833,20 @@ pub async fn complete_passkey_setup(
         }
     };
 
-    let credential: webauthn_rs::prelude::RegisterPublicKeyCredential = match serde_json::from_value(
-        input.passkey_credential,
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("Failed to parse credential: {:?}", e);
-            return (
+    let credential: webauthn_rs::prelude::RegisterPublicKeyCredential =
+        match serde_json::from_value(input.passkey_credential) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to parse credential: {:?}", e);
+                return (
                 StatusCode::BAD_REQUEST,
                 Json(
                     json!({"error": "InvalidCredential", "message": "Failed to parse credential"}),
                 ),
             )
                 .into_response();
-        }
-    };
+            }
+        };
 
     let security_key = match webauthn.finish_registration(&credential, &reg_state) {
         Ok(sk) => sk,

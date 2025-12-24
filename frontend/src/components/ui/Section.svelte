@@ -33,10 +33,6 @@
     padding: var(--space-6);
   }
 
-  .section + .section {
-    margin-top: var(--space-6);
-  }
-
   .section-danger {
     background: var(--error-bg);
     border: 1px solid var(--error-border);

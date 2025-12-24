@@ -688,10 +688,29 @@ async fn test_refresh_token_replay_protection() {
         .connect(&get_db_connection_string().await)
         .await
         .unwrap();
-    let code: String = sqlx::query_scalar!(
-        "SELECT code FROM channel_verifications WHERE user_id = (SELECT id FROM users WHERE did = $1) AND channel = 'email'",
+    let body_text: String = sqlx::query_scalar!(
+        "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
         did
     ).fetch_one(&pool).await.unwrap();
+    let code = body_text
+        .lines()
+        .find(|line| line.contains("verification code:") || line.contains("code is:"))
+        .and_then(|line| {
+            if line.contains("verification code:") {
+                line.split("verification code:")
+                    .nth(1)
+                    .map(|s| s.trim().to_string())
+            } else {
+                line.split("code is:").nth(1).map(|s| s.trim().to_string())
+            }
+        })
+        .unwrap_or_else(|| {
+            body_text
+                .lines()
+                .find(|line| line.trim().starts_with("MX") && line.contains('-'))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default()
+        });
 
     let confirm = http_client
         .post(format!("{}/xrpc/com.atproto.server.confirmSignup", url))

@@ -313,34 +313,6 @@ pub async fn enqueue_welcome(
     .await
 }
 
-pub async fn enqueue_email_verification(
-    db: &PgPool,
-    user_id: Uuid,
-    email: &str,
-    handle: &str,
-    code: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let body = format_message(
-        strings.email_verification_body,
-        &[("handle", handle), ("code", code)],
-    );
-    let subject = format_message(strings.email_verification_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::email(
-            user_id,
-            super::types::CommsType::EmailVerification,
-            email.to_string(),
-            subject,
-            body,
-        ),
-    )
-    .await
-}
-
 pub async fn enqueue_password_reset(
     db: &PgPool,
     user_id: Uuid,
@@ -378,9 +350,21 @@ pub async fn enqueue_email_update(
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
     let strings = get_strings(&prefs.locale);
+    let encoded_email = urlencoding::encode(new_email);
+    let encoded_token = urlencoding::encode(code);
+    let verify_page = format!("https://{}/#/verify", hostname);
+    let verify_link = format!(
+        "https://{}/#/verify?token={}&identifier={}",
+        hostname, encoded_token, encoded_email
+    );
     let body = format_message(
         strings.email_update_body,
-        &[("handle", handle), ("code", code)],
+        &[
+            ("handle", handle),
+            ("code", code),
+            ("verify_page", &verify_page),
+            ("verify_link", &verify_link),
+        ],
     );
     let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
     enqueue_comms(
@@ -530,14 +514,33 @@ pub async fn enqueue_signup_verification(
         _ => CommsChannel::Email,
     };
     let strings = get_strings(locale.unwrap_or("en"));
+    let (verify_page, verify_link) = if comms_channel == CommsChannel::Email {
+        let encoded_email = urlencoding::encode(recipient);
+        let encoded_token = urlencoding::encode(code);
+        (
+            format!("https://{}/#/verify", hostname),
+            format!(
+                "https://{}/#/verify?token={}&identifier={}",
+                hostname, encoded_token, encoded_email
+            ),
+        )
+    } else {
+        (String::new(), String::new())
+    };
     let body = format_message(
         strings.signup_verification_body,
-        &[("code", code), ("hostname", &hostname)],
+        &[
+            ("code", code),
+            ("hostname", &hostname),
+            ("verify_page", &verify_page),
+            ("verify_link", &verify_link),
+        ],
     );
     let subject = match comms_channel {
-        CommsChannel::Email => {
-            Some(format_message(strings.signup_verification_subject, &[("hostname", &hostname)]))
-        }
+        CommsChannel::Email => Some(format_message(
+            strings.signup_verification_subject,
+            &[("hostname", &hostname)],
+        )),
         _ => None,
     };
     enqueue_comms(
@@ -554,6 +557,48 @@ pub async fn enqueue_signup_verification(
     .await
 }
 
+pub async fn enqueue_migration_verification(
+    db: &PgPool,
+    user_id: Uuid,
+    email: &str,
+    token: &str,
+    hostname: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_comms_prefs(db, user_id).await?;
+    let strings = get_strings(&prefs.locale);
+    let encoded_email = urlencoding::encode(email);
+    let encoded_token = urlencoding::encode(token);
+    let verify_page = format!("https://{}/#/verify", hostname);
+    let verify_link = format!(
+        "https://{}/#/verify?token={}&identifier={}",
+        hostname, encoded_token, encoded_email
+    );
+    let body = format_message(
+        strings.migration_verification_body,
+        &[
+            ("code", token),
+            ("hostname", hostname),
+            ("verify_page", &verify_page),
+            ("verify_link", &verify_link),
+        ],
+    );
+    let subject = format_message(
+        strings.migration_verification_subject,
+        &[("hostname", hostname)],
+    );
+    enqueue_comms(
+        db,
+        NewComms::email(
+            user_id,
+            super::types::CommsType::MigrationVerification,
+            email.to_string(),
+            subject,
+            body,
+        ),
+    )
+    .await
+}
+
 pub async fn queue_legacy_login_notification(
     db: &PgPool,
     user_id: Uuid,
@@ -563,7 +608,9 @@ pub async fn queue_legacy_login_notification(
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
     let strings = get_strings(&prefs.locale);
-    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    let timestamp = chrono::Utc::now()
+        .format("%Y-%m-%d %H:%M:%S UTC")
+        .to_string();
     let body = format_message(
         strings.legacy_login_body,
         &[

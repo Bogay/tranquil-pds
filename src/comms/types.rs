@@ -34,6 +34,7 @@ pub enum CommsType {
     TwoFactorCode,
     PasskeyRecovery,
     LegacyLoginAlert,
+    MigrationVerification,
 }
 
 #[derive(Debug, Clone, FromRow)]

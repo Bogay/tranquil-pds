@@ -33,6 +33,14 @@
     }
   })
 
+  let creatingStarted = false
+  $effect(() => {
+    if (flow?.state.step === 'creating' && !creatingStarted) {
+      creatingStarted = true
+      flow.createPasswordAccount()
+    }
+  })
+
   async function loadServerInfo() {
     try {
       serverInfo = await api.describeServer()
@@ -140,7 +148,7 @@
       case 'verify': return `Verify your ${channelLabel(flow.info.verificationChannel)} to continue.`
       case 'updated-did-doc': return 'Update your DID document with the PDS signing key.'
       case 'activating': return 'Activating your account...'
-      case 'complete': return 'Your account has been created successfully!'
+      case 'redirect-to-dashboard': return 'Your account has been created successfully!'
       default: return ''
     }
   }
@@ -383,9 +391,7 @@
     />
 
   {:else if flow.state.step === 'creating'}
-    {#await flow.createPasswordAccount()}
-      <p class="loading">{$_('register.creating')}</p>
-    {/await}
+    <p class="loading">{$_('register.creating')}</p>
 
   {:else if flow.state.step === 'verify'}
     <VerificationStep {flow} />

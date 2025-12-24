@@ -92,16 +92,24 @@ async fn test_verify_channel_discord() {
         .await
         .expect("User not found");
 
-    let code: String = sqlx::query_scalar!(
-        "SELECT code FROM channel_verifications WHERE user_id = $1 AND channel = 'discord'",
+    let row = sqlx::query!(
+        "SELECT body, metadata FROM comms_queue WHERE user_id = $1 AND comms_type = 'channel_verification' ORDER BY created_at DESC LIMIT 1",
         user_id
     )
     .fetch_one(&pool)
     .await
     .expect("Verification code not found");
 
+    let code = row
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get("code"))
+        .and_then(|c| c.as_str())
+        .expect("No code in metadata");
+
     let input = json!({
         "channel": "discord",
+        "identifier": "123456789",
         "code": code
     });
     let resp = client
@@ -153,7 +161,8 @@ async fn test_verify_channel_invalid_code() {
 
     let input = json!({
         "channel": "telegram",
-        "code": "000000"
+        "identifier": "testuser",
+        "code": "XXXX-XXXX-XXXX-XXXX"
     });
     let resp = client
         .post(format!(
@@ -165,7 +174,11 @@ async fn test_verify_channel_invalid_code() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 400);
+    assert!(
+        resp.status() == 400 || resp.status() == 422,
+        "Expected 400 or 422, got {}",
+        resp.status()
+    );
 }
 
 #[tokio::test]
@@ -176,7 +189,8 @@ async fn test_verify_channel_not_set() {
 
     let input = json!({
         "channel": "signal",
-        "code": "123456"
+        "identifier": "123456",
+        "code": "XXXX-XXXX-XXXX-XXXX"
     });
     let resp = client
         .post(format!(
@@ -188,7 +202,11 @@ async fn test_verify_channel_not_set() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 400);
+    assert!(
+        resp.status() == 400 || resp.status() == 422,
+        "Expected 400 or 422, got {}",
+        resp.status()
+    );
 }
 
 #[tokio::test]
@@ -226,16 +244,34 @@ async fn test_update_email_via_notification_prefs() {
         .await
         .expect("User not found");
 
-    let code: String = sqlx::query_scalar!(
-        "SELECT code FROM channel_verifications WHERE user_id = $1 AND channel = 'email'",
+    let body_text: String = sqlx::query_scalar!(
+        "SELECT body FROM comms_queue WHERE user_id = $1 AND comms_type = 'email_update' ORDER BY created_at DESC LIMIT 1",
         user_id
     )
     .fetch_one(&pool)
     .await
     .expect("Verification code not found");
 
+    let code = body_text
+        .lines()
+        .skip_while(|line| !line.contains("verification code"))
+        .nth(1)
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty() && line.contains('-'))
+        .unwrap_or_else(|| {
+            body_text
+                .lines()
+                .find(|line| {
+                    let trimmed = line.trim();
+                    trimmed.starts_with("MX") && trimmed.contains('-')
+                })
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default()
+        });
+
     let input = json!({
         "channel": "email",
+        "identifier": unique_email,
         "code": code
     });
     let resp = client

@@ -132,11 +132,11 @@ pub async fn create_account(
             .map(|d| d.starts_with("did:plc:"))
             .unwrap_or(false);
 
-    if is_migration || is_did_web_byod {
-        if let (Some(provided_did), Some(auth_did)) = (input.did.as_ref(), migration_auth.as_ref())
-        {
-            if provided_did != auth_did {
-                return (
+    if (is_migration || is_did_web_byod)
+        && let (Some(provided_did), Some(auth_did)) = (input.did.as_ref(), migration_auth.as_ref())
+    {
+        if provided_did != auth_did {
+            return (
                     StatusCode::FORBIDDEN,
                     Json(json!({
                         "error": "AuthorizationError",
@@ -144,12 +144,11 @@ pub async fn create_account(
                     })),
                 )
                     .into_response();
-            }
-            if is_did_web_byod {
-                info!(did = %provided_did, "Processing did:web BYOD account creation");
-            } else {
-                info!(did = %provided_did, "Processing account migration");
-            }
+        }
+        if is_did_web_byod {
+            info!(did = %provided_did, "Processing did:web BYOD account creation");
+        } else {
+            info!(did = %provided_did, "Processing account migration");
         }
     }
 
@@ -348,16 +347,15 @@ pub async fn create_account(
                 )
                     .into_response();
             }
-            if !is_did_web_byod {
-                if let Err(e) =
+            if !is_did_web_byod
+                && let Err(e) =
                     verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await
-                {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "InvalidDid", "message": e})),
-                    )
-                        .into_response();
-                }
+            {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidDid", "message": e})),
+                )
+                    .into_response();
             }
             info!(did = %d, "Creating external did:web account");
             d.clone()
@@ -368,17 +366,20 @@ pub async fn create_account(
                     info!(did = %d, "Migration with existing did:plc");
                     d.clone()
                 } else if d.starts_with("did:web:") {
-                    if !is_did_web_byod {
-                        if let Err(e) =
-                            verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref())
-                                .await
-                        {
-                            return (
-                                StatusCode::BAD_REQUEST,
-                                Json(json!({"error": "InvalidDid", "message": e})),
-                            )
-                                .into_response();
-                        }
+                    if !is_did_web_byod
+                        && let Err(e) = verify_did_web(
+                            d,
+                            &hostname,
+                            &input.handle,
+                            input.signing_key.as_deref(),
+                        )
+                        .await
+                    {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({"error": "InvalidDid", "message": e})),
+                        )
+                            .into_response();
                     }
                     d.clone()
                 } else if !d.trim().is_empty() {
@@ -710,8 +711,6 @@ pub async fn create_account(
                 .into_response();
         }
     };
-    let verification_code = format!("{:06}", rand::random::<u32>() % 1_000_000);
-    let code_expires_at = chrono::Utc::now() + chrono::Duration::minutes(30);
     let is_first_user = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
         .fetch_one(&mut *tx)
         .await
@@ -758,7 +757,7 @@ pub async fn create_account(
     )
     .bind(is_first_user)
     .bind(deactivated_at)
-    .bind(is_migration)
+    .bind(false)
     .fetch_one(&mut *tx)
     .await;
     let user_id = match user_insert {
@@ -806,25 +805,6 @@ pub async fn create_account(
         }
     };
 
-    if !is_migration
-        && let Some(ref recipient) = verification_recipient
-            && let Err(e) = sqlx::query!(
-                "INSERT INTO channel_verifications (user_id, channel, code, pending_identifier, expires_at) VALUES ($1, $2::comms_channel, $3, $4, $5)",
-                user_id,
-                verification_channel as _,
-                verification_code,
-                recipient,
-                code_expires_at
-            )
-            .execute(&mut *tx)
-            .await {
-                error!("Error inserting verification code: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(enc) => enc,
         Err(e) => {
@@ -881,17 +861,18 @@ pub async fn create_account(
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
-    let (commit_bytes, _sig) = match create_signed_commit(&did, mst_root, &rev.to_string(), None, &signing_key) {
-        Ok(result) => result,
-        Err(e) => {
-            error!("Error creating genesis commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+    let (commit_bytes, _sig) =
+        match create_signed_commit(&did, mst_root, rev.as_ref(), None, &signing_key) {
+            Ok(result) => result,
+            Err(e) => {
+                error!("Error creating genesis commit: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
     let commit_cid = match state.block_store.put(&commit_bytes).await {
         Ok(c) => c,
         Err(e) => {
@@ -973,22 +954,45 @@ pub async fn create_account(
             warn!("Failed to create default profile for {}: {}", did, e);
         }
     }
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if !is_migration {
-        if let Some(ref recipient) = verification_recipient
-            && let Err(e) = crate::comms::enqueue_signup_verification(
+        if let Some(ref recipient) = verification_recipient {
+            let verification_token = crate::auth::verification_token::generate_signup_token(
+                &did,
+                verification_channel,
+                recipient,
+            );
+            let formatted_token =
+                crate::auth::verification_token::format_token_for_display(&verification_token);
+            if let Err(e) = crate::comms::enqueue_signup_verification(
                 &state.db,
                 user_id,
                 verification_channel,
                 recipient,
-                &verification_code,
+                &formatted_token,
                 None,
             )
             .await
+            {
+                warn!(
+                    "Failed to enqueue signup verification notification: {:?}",
+                    e
+                );
+            }
+        }
+    } else if let Some(ref user_email) = email {
+        let token = crate::auth::verification_token::generate_migration_token(&did, user_email);
+        let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
+        if let Err(e) = crate::comms::enqueue_migration_verification(
+            &state.db,
+            user_id,
+            user_email,
+            &formatted_token,
+            &hostname,
+        )
+        .await
         {
-            warn!(
-                "Failed to enqueue signup verification notification: {:?}",
-                e
-            );
+            warn!("Failed to enqueue migration verification email: {:?}", e);
         }
     }
 

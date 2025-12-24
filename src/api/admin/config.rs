@@ -1,7 +1,7 @@
 use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
@@ -80,7 +80,7 @@ pub async fn get_server_config(
 async fn upsert_config(db: &sqlx::PgPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO server_config (key, value, updated_at) VALUES ($1, $2, NOW())
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()"
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()",
     )
     .bind(key)
     .bind(value)
@@ -105,7 +105,9 @@ pub async fn update_server_config(
     if let Some(server_name) = req.server_name {
         let trimmed = server_name.trim();
         if trimmed.is_empty() || trimmed.len() > 100 {
-            return Err(ApiError::InvalidRequest("Server name must be 1-100 characters".into()));
+            return Err(ApiError::InvalidRequest(
+                "Server name must be 1-100 characters".into(),
+            ));
         }
         upsert_config(&state.db, "server_name", trimmed).await?;
     }
@@ -116,7 +118,9 @@ pub async fn update_server_config(
         } else if is_valid_hex_color(color) {
             upsert_config(&state.db, "primary_color", color).await?;
         } else {
-            return Err(ApiError::InvalidRequest("Invalid primary color format (expected #RRGGBB)".into()));
+            return Err(ApiError::InvalidRequest(
+                "Invalid primary color format (expected #RRGGBB)".into(),
+            ));
         }
     }
 
@@ -126,7 +130,9 @@ pub async fn update_server_config(
         } else if is_valid_hex_color(color) {
             upsert_config(&state.db, "primary_color_dark", color).await?;
         } else {
-            return Err(ApiError::InvalidRequest("Invalid primary dark color format (expected #RRGGBB)".into()));
+            return Err(ApiError::InvalidRequest(
+                "Invalid primary dark color format (expected #RRGGBB)".into(),
+            ));
         }
     }
 
@@ -136,7 +142,9 @@ pub async fn update_server_config(
         } else if is_valid_hex_color(color) {
             upsert_config(&state.db, "secondary_color", color).await?;
         } else {
-            return Err(ApiError::InvalidRequest("Invalid secondary color format (expected #RRGGBB)".into()));
+            return Err(ApiError::InvalidRequest(
+                "Invalid secondary color format (expected #RRGGBB)".into(),
+            ));
         }
     }
 
@@ -146,16 +154,17 @@ pub async fn update_server_config(
         } else if is_valid_hex_color(color) {
             upsert_config(&state.db, "secondary_color_dark", color).await?;
         } else {
-            return Err(ApiError::InvalidRequest("Invalid secondary dark color format (expected #RRGGBB)".into()));
+            return Err(ApiError::InvalidRequest(
+                "Invalid secondary dark color format (expected #RRGGBB)".into(),
+            ));
         }
     }
 
     if let Some(ref logo_cid) = req.logo_cid {
-        let old_logo_cid: Option<String> = sqlx::query_scalar(
-            "SELECT value FROM server_config WHERE key = 'logo_cid'"
-        )
-        .fetch_optional(&state.db)
-        .await?;
+        let old_logo_cid: Option<String> =
+            sqlx::query_scalar("SELECT value FROM server_config WHERE key = 'logo_cid'")
+                .fetch_optional(&state.db)
+                .await?;
 
         let should_delete_old = match (&old_logo_cid, logo_cid.is_empty()) {
             (Some(old), true) => Some(old.clone()),
@@ -163,23 +172,20 @@ pub async fn update_server_config(
             _ => None,
         };
 
-        if let Some(old_cid) = should_delete_old {
-            if let Ok(Some(blob)) = sqlx::query!(
-                "SELECT storage_key FROM blobs WHERE cid = $1",
-                old_cid
-            )
-            .fetch_optional(&state.db)
-            .await
-            {
-                if let Err(e) = state.blob_store.delete(&blob.storage_key).await {
-                    error!("Failed to delete old logo blob from storage: {:?}", e);
-                }
-                if let Err(e) = sqlx::query!("DELETE FROM blobs WHERE cid = $1", old_cid)
-                    .execute(&state.db)
+        if let Some(old_cid) = should_delete_old
+            && let Ok(Some(blob)) =
+                sqlx::query!("SELECT storage_key FROM blobs WHERE cid = $1", old_cid)
+                    .fetch_optional(&state.db)
                     .await
-                {
-                    error!("Failed to delete old logo blob record: {:?}", e);
-                }
+        {
+            if let Err(e) = state.blob_store.delete(&blob.storage_key).await {
+                error!("Failed to delete old logo blob from storage: {:?}", e);
+            }
+            if let Err(e) = sqlx::query!("DELETE FROM blobs WHERE cid = $1", old_cid)
+                .execute(&state.db)
+                .await
+            {
+                error!("Failed to delete old logo blob record: {:?}", e);
             }
         }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            u.id, u.did, u.handle, u.email,\n            u.preferred_comms_channel as \"channel: crate::comms::CommsChannel\",\n            k.key_bytes, k.encryption_version\n        FROM users u\n        JOIN user_keys k ON u.id = k.user_id\n        WHERE u.did = $1",
+  "query": "SELECT\n            u.id, u.did, u.handle, u.email,\n            u.preferred_comms_channel as \"channel: crate::comms::CommsChannel\",\n            u.discord_id, u.telegram_username, u.signal_number,\n            k.key_bytes, k.encryption_version\n        FROM users u\n        JOIN user_keys k ON u.id = k.user_id\n        WHERE u.did = $1",
   "describe": {
     "columns": [
       {
@@ -42,11 +42,26 @@
       },
       {
         "ordinal": 5,
+        "name": "discord_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "telegram_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "signal_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "key_bytes",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 6,
+        "ordinal": 9,
         "name": "encryption_version",
         "type_info": "Int4"
       }
@@ -62,9 +77,12 @@
       false,
       true,
       false,
+      true,
+      true,
+      true,
       false,
       true
     ]
   },
-  "hash": "efc26a1202b1bbf72da1c06b59b47e560dfb5912db8e40ee92cf91846f306e1a"
+  "hash": "9b895b9db78ec8a5f13c0b55ea0115e4653e01fd6f5c41f156c844381347cb8a"
 }

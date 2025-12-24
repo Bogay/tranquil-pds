@@ -114,8 +114,11 @@ impl AuthConfig {
                 .expect("HKDF expansion failed");
 
             let mut device_cookie_key = [0u8; 32];
-            hk.expand(b"tranquil-pds-device-cookie-signing", &mut device_cookie_key)
-                .expect("HKDF expansion failed");
+            hk.expand(
+                b"tranquil-pds-device-cookie-signing",
+                &mut device_cookie_key,
+            )
+            .expect("HKDF expansion failed");
 
             AuthConfig {
                 jwt_secret,

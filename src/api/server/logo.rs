@@ -9,18 +9,17 @@ use axum::{
 use tracing::error;
 
 pub async fn get_logo(State(state): State<AppState>) -> Response {
-    let logo_cid: Option<String> = match sqlx::query_scalar(
-        "SELECT value FROM server_config WHERE key = 'logo_cid'"
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(cid) => cid,
-        Err(e) => {
-            error!("DB error fetching logo_cid: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    let logo_cid: Option<String> =
+        match sqlx::query_scalar("SELECT value FROM server_config WHERE key = 'logo_cid'")
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(cid) => cid,
+            Err(e) => {
+                error!("DB error fetching logo_cid: {:?}", e);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
 
     let cid = match logo_cid {
         Some(c) if !c.is_empty() => c,

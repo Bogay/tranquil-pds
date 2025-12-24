@@ -55,7 +55,7 @@
       const result = await api.requestEmailUpdate(auth.session.accessJwt, newEmail)
       emailTokenRequired = result.tokenRequired
       if (emailTokenRequired) {
-        showMessage('success', $_('settings.messages.verificationCodeSent'))
+        showMessage('success', $_('settings.messages.emailCodeSent'))
       } else {
         await api.updateEmail(auth.session.accessJwt, newEmail)
         await refreshSession()

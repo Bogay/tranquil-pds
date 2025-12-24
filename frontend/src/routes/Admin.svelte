@@ -302,38 +302,38 @@
 {#if auth.session?.isAdmin}
   <div class="page">
     <header>
-      <a href="#/dashboard" class="back">&larr; Dashboard</a>
-      <h1>Admin Panel</h1>
+      <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+      <h1>{$_('admin.title')}</h1>
     </header>
     {#if loading}
-      <p class="loading">Loading...</p>
+      <p class="loading">{$_('admin.loading')}</p>
     {:else}
       {#if error}
         <div class="message error">{error}</div>
       {/if}
       <section>
-        <h2>Server Configuration</h2>
+        <h2>{$_('admin.serverConfig')}</h2>
         <form class="config-form" onsubmit={saveServerConfig}>
           <div class="form-group">
-            <label for="serverName">Server Name</label>
+            <label for="serverName">{$_('admin.serverName')}</label>
             <input
               type="text"
               id="serverName"
               bind:value={serverNameInput}
-              placeholder="My PDS"
+              placeholder={$_('admin.serverNamePlaceholder')}
               maxlength="100"
               disabled={serverConfigLoading}
             />
-            <span class="help-text">Displayed in the browser tab and other places</span>
+            <span class="help-text">{$_('admin.serverNameHelp')}</span>
           </div>
 
           <div class="form-group">
-            <label for="serverLogo">Server Logo</label>
+            <label for="serverLogo">{$_('admin.serverLogo')}</label>
             <div class="logo-upload">
               {#if logoPreview}
                 <div class="logo-preview">
-                  <img src={logoPreview} alt="Logo preview" />
-                  <button type="button" class="remove-logo" onclick={removeLogo} disabled={serverConfigLoading}>Remove</button>
+                  <img src={logoPreview} alt={$_('admin.logoPreview')} />
+                  <button type="button" class="remove-logo" onclick={removeLogo} disabled={serverConfigLoading}>{$_('admin.removeLogo')}</button>
                 </div>
               {:else}
                 <input
@@ -345,15 +345,15 @@
                 />
               {/if}
             </div>
-            <span class="help-text">Used as favicon and shown in the navbar</span>
+            <span class="help-text">{$_('admin.logoHelp')}</span>
           </div>
 
-          <h3 class="subsection-title">Theme Colors</h3>
-          <p class="theme-hint">Leave blank to use default colors.</p>
+          <h3 class="subsection-title">{$_('admin.themeColors')}</h3>
+          <p class="theme-hint">{$_('admin.themeColorsHint')}</p>
 
           <div class="color-grid">
             <div class="color-group">
-              <label for="primaryColor">Primary (Light Mode)</label>
+              <label for="primaryColor">{$_('admin.primaryLight')}</label>
               <div class="color-input-row">
                 <input
                   type="color"
@@ -364,13 +364,13 @@
                   type="text"
                   id="primaryColor"
                   bind:value={primaryColorInput}
-                  placeholder="#2c00ff (default)"
+                  placeholder={$_('admin.primaryLightDefault')}
                   disabled={serverConfigLoading}
                 />
               </div>
             </div>
             <div class="color-group">
-              <label for="primaryColorDark">Primary (Dark Mode)</label>
+              <label for="primaryColorDark">{$_('admin.primaryDark')}</label>
               <div class="color-input-row">
                 <input
                   type="color"
@@ -381,13 +381,13 @@
                   type="text"
                   id="primaryColorDark"
                   bind:value={primaryColorDarkInput}
-                  placeholder="#7b6bff (default)"
+                  placeholder={$_('admin.primaryDarkDefault')}
                   disabled={serverConfigLoading}
                 />
               </div>
             </div>
             <div class="color-group">
-              <label for="secondaryColor">Secondary (Light Mode)</label>
+              <label for="secondaryColor">{$_('admin.secondaryLight')}</label>
               <div class="color-input-row">
                 <input
                   type="color"
@@ -398,13 +398,13 @@
                   type="text"
                   id="secondaryColor"
                   bind:value={secondaryColorInput}
-                  placeholder="#ff2400 (default)"
+                  placeholder={$_('admin.secondaryLightDefault')}
                   disabled={serverConfigLoading}
                 />
               </div>
             </div>
             <div class="color-group">
-              <label for="secondaryColorDark">Secondary (Dark Mode)</label>
+              <label for="secondaryColorDark">{$_('admin.secondaryDark')}</label>
               <div class="color-input-row">
                 <input
                   type="color"
@@ -415,7 +415,7 @@
                   type="text"
                   id="secondaryColorDark"
                   bind:value={secondaryColorDarkInput}
-                  placeholder="#ff6b5b (default)"
+                  placeholder={$_('admin.secondaryDarkDefault')}
                   disabled={serverConfigLoading}
                 />
               </div>
@@ -426,48 +426,48 @@
             <div class="message error">{serverConfigError}</div>
           {/if}
           {#if serverConfigSuccess}
-            <div class="message success">Server configuration saved</div>
+            <div class="message success">{$_('admin.configSaved')}</div>
           {/if}
           <button type="submit" disabled={serverConfigLoading || !hasConfigChanges()}>
-            {serverConfigLoading ? 'Saving...' : 'Save Configuration'}
+            {serverConfigLoading ? $_('admin.saving') : $_('admin.saveConfig')}
           </button>
         </form>
       </section>
       {#if stats}
         <section>
-          <h2>Server Statistics</h2>
+          <h2>{$_('admin.serverStats')}</h2>
           <div class="stats-grid">
             <div class="stat-card">
               <div class="stat-value">{formatNumber(stats.userCount)}</div>
-              <div class="stat-label">Users</div>
+              <div class="stat-label">{$_('admin.users')}</div>
             </div>
             <div class="stat-card">
               <div class="stat-value">{formatNumber(stats.repoCount)}</div>
-              <div class="stat-label">Repositories</div>
+              <div class="stat-label">{$_('admin.repos')}</div>
             </div>
             <div class="stat-card">
               <div class="stat-value">{formatNumber(stats.recordCount)}</div>
-              <div class="stat-label">Records</div>
+              <div class="stat-label">{$_('admin.records')}</div>
             </div>
             <div class="stat-card">
               <div class="stat-value">{formatBytes(stats.blobStorageBytes)}</div>
-              <div class="stat-label">Blob Storage</div>
+              <div class="stat-label">{$_('admin.blobStorage')}</div>
             </div>
           </div>
-          <button class="refresh-btn" onclick={loadStats}>Refresh Stats</button>
+          <button class="refresh-btn" onclick={loadStats}>{$_('admin.refreshStats')}</button>
         </section>
       {/if}
       <section>
-        <h2>User Management</h2>
+        <h2>{$_('admin.userManagement')}</h2>
         <form class="search-form" onsubmit={handleSearch}>
           <input
             type="text"
             bind:value={handleSearchQuery}
-            placeholder="Search by handle (optional)"
+            placeholder={$_('admin.searchPlaceholder')}
             disabled={usersLoading}
           />
           <button type="submit" disabled={usersLoading}>
-            {usersLoading ? 'Loading...' : 'Search Users'}
+            {usersLoading ? $_('admin.loading') : $_('admin.searchUsers')}
           </button>
         </form>
         {#if usersError}
@@ -476,15 +476,15 @@
         {#if showUsers}
           <div class="user-list">
             {#if users.length === 0}
-              <p class="no-results">No users found</p>
+              <p class="no-results">{$_('admin.noUsers')}</p>
             {:else}
               <table>
                 <thead>
                   <tr>
-                    <th>Handle</th>
-                    <th>Email</th>
-                    <th>Status</th>
-                    <th>Created</th>
+                    <th>{$_('admin.handle')}</th>
+                    <th>{$_('admin.email')}</th>
+                    <th>{$_('admin.status')}</th>
+                    <th>{$_('admin.created')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -494,11 +494,11 @@
                       <td class="email">{user.email || '-'}</td>
                       <td>
                         {#if user.deactivatedAt}
-                          <span class="badge deactivated">Deactivated</span>
+                          <span class="badge deactivated">{$_('admin.deactivated')}</span>
                         {:else if user.emailConfirmedAt}
-                          <span class="badge verified">Verified</span>
+                          <span class="badge verified">{$_('admin.verified')}</span>
                         {:else}
-                          <span class="badge unverified">Unverified</span>
+                          <span class="badge unverified">{$_('admin.unverified')}</span>
                         {/if}
                       </td>
                       <td class="date">{formatDate(user.indexedAt)}</td>
@@ -508,7 +508,7 @@
               </table>
               {#if usersCursor}
                 <button class="load-more" onclick={() => loadUsers(false)} disabled={usersLoading}>
-                  {usersLoading ? 'Loading...' : 'Load More'}
+                  {usersLoading ? $_('admin.loading') : $_('admin.loadMore')}
                 </button>
               {/if}
             {/if}
@@ -516,10 +516,10 @@
         {/if}
       </section>
       <section>
-        <h2>Invite Codes</h2>
+        <h2>{$_('admin.inviteCodes')}</h2>
         <div class="section-actions">
           <button onclick={() => loadInvites(true)} disabled={invitesLoading}>
-            {invitesLoading ? 'Loading...' : showInvites ? 'Refresh' : 'Load Invite Codes'}
+            {invitesLoading ? $_('admin.loading') : showInvites ? $_('admin.refresh') : $_('admin.loadInviteCodes')}
           </button>
         </div>
         {#if invitesError}
@@ -528,17 +528,17 @@
         {#if showInvites}
           <div class="invite-list">
             {#if invites.length === 0}
-              <p class="no-results">No invite codes found</p>
+              <p class="no-results">{$_('admin.noInvites')}</p>
             {:else}
               <table>
                 <thead>
                   <tr>
-                    <th>Code</th>
-                    <th>Available</th>
-                    <th>Uses</th>
-                    <th>Status</th>
-                    <th>Created</th>
-                    <th>Actions</th>
+                    <th>{$_('admin.code')}</th>
+                    <th>{$_('admin.available')}</th>
+                    <th>{$_('admin.uses')}</th>
+                    <th>{$_('admin.status')}</th>
+                    <th>{$_('admin.created')}</th>
+                    <th>{$_('admin.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -549,18 +549,18 @@
                       <td>{invite.uses.length}</td>
                       <td>
                         {#if invite.disabled}
-                          <span class="badge deactivated">Disabled</span>
+                          <span class="badge deactivated">{$_('admin.disabled')}</span>
                         {:else if invite.available === 0}
-                          <span class="badge unverified">Exhausted</span>
+                          <span class="badge unverified">{$_('admin.exhausted')}</span>
                         {:else}
-                          <span class="badge verified">Active</span>
+                          <span class="badge verified">{$_('admin.active')}</span>
                         {/if}
                       </td>
                       <td class="date">{formatDate(invite.createdAt)}</td>
                       <td>
                         {#if !invite.disabled}
                           <button class="action-btn danger" onclick={() => disableInvite(invite.code)}>
-                            Disable
+                            {$_('admin.disable')}
                           </button>
                         {:else}
                           <span class="muted">-</span>
@@ -572,7 +572,7 @@
               </table>
               {#if invitesCursor}
                 <button class="load-more" onclick={() => loadInvites(false)} disabled={invitesLoading}>
-                  {invitesLoading ? 'Loading...' : 'Load More'}
+                  {invitesLoading ? $_('admin.loading') : $_('admin.loadMore')}
                 </button>
               {/if}
             {/if}
@@ -585,38 +585,38 @@
     <div class="modal-overlay" onclick={closeUserDetail} onkeydown={(e) => e.key === 'Escape' && closeUserDetail()} role="presentation">
       <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
         <div class="modal-header">
-          <h2>User Details</h2>
+          <h2>{$_('admin.userDetails')}</h2>
           <button class="close-btn" onclick={closeUserDetail}>&times;</button>
         </div>
         {#if userDetailLoading}
-          <p class="loading">Loading...</p>
+          <p class="loading">{$_('admin.loading')}</p>
         {:else}
           <div class="modal-body">
             <dl class="user-details">
-              <dt>Handle</dt>
+              <dt>{$_('admin.handle')}</dt>
               <dd>@{selectedUser.handle}</dd>
-              <dt>DID</dt>
+              <dt>{$_('admin.did')}</dt>
               <dd class="mono">{selectedUser.did}</dd>
-              <dt>Email</dt>
+              <dt>{$_('admin.email')}</dt>
               <dd>{selectedUser.email || '-'}</dd>
-              <dt>Status</dt>
+              <dt>{$_('admin.status')}</dt>
               <dd>
                 {#if selectedUser.deactivatedAt}
-                  <span class="badge deactivated">Deactivated</span>
+                  <span class="badge deactivated">{$_('admin.deactivated')}</span>
                 {:else if selectedUser.emailConfirmedAt}
-                  <span class="badge verified">Verified</span>
+                  <span class="badge verified">{$_('admin.verified')}</span>
                 {:else}
-                  <span class="badge unverified">Unverified</span>
+                  <span class="badge unverified">{$_('admin.unverified')}</span>
                 {/if}
               </dd>
-              <dt>Created</dt>
+              <dt>{$_('admin.created')}</dt>
               <dd>{formatDateTime(selectedUser.indexedAt)}</dd>
-              <dt>Invites</dt>
+              <dt>{$_('admin.invites')}</dt>
               <dd>
                 {#if selectedUser.invitesDisabled}
-                  <span class="badge deactivated">Disabled</span>
+                  <span class="badge deactivated">{$_('admin.disabled')}</span>
                 {:else}
-                  <span class="badge verified">Enabled</span>
+                  <span class="badge verified">{$_('admin.enabled')}</span>
                 {/if}
               </dd>
             </dl>
@@ -626,14 +626,14 @@
                 onclick={toggleUserInvites}
                 disabled={userActionLoading}
               >
-                {selectedUser.invitesDisabled ? 'Enable Invites' : 'Disable Invites'}
+                {selectedUser.invitesDisabled ? $_('admin.enableInvites') : $_('admin.disableInvites')}
               </button>
               <button
                 class="action-btn danger"
                 onclick={deleteUser}
                 disabled={userActionLoading}
               >
-                Delete Account
+                {$_('admin.deleteAccount')}
               </button>
             </div>
           </div>
@@ -642,7 +642,7 @@
     </div>
   {/if}
 {:else if auth.loading}
-  <div class="loading">Loading...</div>
+  <div class="loading">{$_('admin.loading')}</div>
 {/if}
 <style>
   .page {
