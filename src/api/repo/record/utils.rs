@@ -2,32 +2,12 @@ use crate::state::AppState;
 use bytes::Bytes;
 use cid::Cid;
 use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
-use k256::ecdsa::{Signature, SigningKey, signature::Signer};
-use serde::Serialize;
+use k256::ecdsa::SigningKey;
 use serde_json::json;
+use std::str::FromStr;
 use uuid::Uuid;
-
-/*
- * Why custom commit signing instead of jacquard's Commit::sign()?
- *
- * Jacquard previously had a bug in how it created unsigned bytes for signing:
- * it set sig to empty bytes and serialized (6-field CBOR map), while the
- * ATProto spec creates a struct *without* the sig field (5-field CBOR map).
- * These produce different CBOR bytes, so signatures didn't verify with relays.
- *
- * The bug has been fixed in jacquard, but the fix is untested here.
- * TODO: Switch back to jacquard's Commit::sign() and verify it works.
- */
-
-#[derive(Serialize)]
-struct UnsignedCommit<'a> {
-    data: Cid,
-    did: &'a str,
-    prev: Option<Cid>,
-    rev: &'a str,
-    version: i64,
-}
 
 pub fn create_signed_commit(
     did: &str,
@@ -36,36 +16,17 @@ pub fn create_signed_commit(
     prev: Option<Cid>,
     signing_key: &SigningKey,
 ) -> Result<(Vec<u8>, Bytes), String> {
-    let unsigned = UnsignedCommit {
-        data,
-        did,
-        prev,
-        rev,
-        version: 3,
-    };
-    let unsigned_bytes = serde_ipld_dagcbor::to_vec(&unsigned)
-        .map_err(|e| format!("Failed to serialize unsigned commit: {:?}", e))?;
-    let sig: Signature = signing_key.sign(&unsigned_bytes);
-    let sig_bytes = Bytes::copy_from_slice(&sig.to_bytes());
-    #[derive(Serialize)]
-    struct SignedCommit<'a> {
-        data: Cid,
-        did: &'a str,
-        prev: Option<Cid>,
-        rev: &'a str,
-        #[serde(with = "serde_bytes")]
-        sig: &'a [u8],
-        version: i64,
-    }
-    let signed = SignedCommit {
-        data,
-        did,
-        prev,
-        rev,
-        sig: &sig_bytes,
-        version: 3,
-    };
-    let signed_bytes = serde_ipld_dagcbor::to_vec(&signed)
+    let did = jacquard::types::string::Did::new(did)
+        .map_err(|e| format!("Invalid DID: {:?}", e))?;
+    let rev = jacquard::types::string::Tid::from_str(rev)
+        .map_err(|e| format!("Invalid TID: {:?}", e))?;
+    let unsigned = Commit::new_unsigned(did, data, rev, prev);
+    let signed = unsigned
+        .sign(signing_key)
+        .map_err(|e| format!("Failed to sign commit: {:?}", e))?;
+    let sig_bytes = signed.sig().clone();
+    let signed_bytes = signed
+        .to_cbor()
         .map_err(|e| format!("Failed to serialize signed commit: {:?}", e))?;
     Ok((signed_bytes, sig_bytes))
 }
@@ -423,7 +384,7 @@ pub async fn create_record_internal(
     let uri = format!("at://{}/{}/{}", did, collection, rkey);
     Ok((uri, result.commit_cid))
 }
-use std::str::FromStr;
+
 pub async fn sequence_identity_event(
     state: &AppState,
     did: &str,

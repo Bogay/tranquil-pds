@@ -692,25 +692,23 @@ async fn test_refresh_token_replay_protection() {
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
         did
     ).fetch_one(&pool).await.unwrap();
-    let code = body_text
-        .lines()
-        .find(|line| line.contains("verification code:") || line.contains("code is:"))
-        .and_then(|line| {
-            if line.contains("verification code:") {
-                line.split("verification code:")
-                    .nth(1)
-                    .map(|s| s.trim().to_string())
-            } else {
-                line.split("code is:").nth(1).map(|s| s.trim().to_string())
-            }
+    let lines: Vec<&str> = body_text.lines().collect();
+    let code = lines
+        .iter()
+        .enumerate()
+        .find(|(_, line)| {
+            line.contains("verification code is:") || line.contains("code is:")
         })
-        .unwrap_or_else(|| {
+        .and_then(|(i, _)| lines.get(i + 1).map(|s| s.trim().to_string()))
+        .or_else(|| {
             body_text
-                .lines()
-                .find(|line| line.trim().starts_with("MX") && line.contains('-'))
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default()
-        });
+                .split_whitespace()
+                .find(|word| {
+                    word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3
+                })
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| body_text.clone());
 
     let confirm = http_client
         .post(format!("{}/xrpc/com.atproto.server.confirmSignup", url))

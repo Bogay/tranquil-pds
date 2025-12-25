@@ -305,25 +305,23 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
     .await
     .expect("Failed to get verification code");
 
-    let verification_code = body_text
-        .lines()
-        .find(|line| line.contains("verification code:") || line.contains("code is:"))
-        .and_then(|line| {
-            if line.contains("verification code:") {
-                line.split("verification code:")
-                    .nth(1)
-                    .map(|s| s.trim().to_string())
-            } else {
-                line.split("code is:").nth(1).map(|s| s.trim().to_string())
-            }
+    let lines: Vec<&str> = body_text.lines().collect();
+    let verification_code = lines
+        .iter()
+        .enumerate()
+        .find(|(_, line)| {
+            line.contains("verification code is:") || line.contains("code is:")
         })
-        .unwrap_or_else(|| {
+        .and_then(|(i, _)| lines.get(i + 1).map(|s| s.trim().to_string()))
+        .or_else(|| {
             body_text
-                .lines()
-                .find(|line| line.trim().starts_with("MX") && line.contains('-'))
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default()
-        });
+                .split_whitespace()
+                .find(|word| {
+                    word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3
+                })
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| body_text.clone());
 
     let confirm_payload = json!({
         "did": did,
@@ -480,29 +478,23 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
             .fetch_one(&pool)
             .await
             .expect("Failed to get verification from comms_queue");
-            let verification_code = body_text
-                .lines()
-                .find(|line| line.contains("verification code:") || line.contains("code is:"))
-                .and_then(|line| {
-                    if line.contains("verification code:") {
-                        line.split("verification code:")
-                            .nth(1)
-                            .map(|s| s.trim().to_string())
-                    } else if line.contains("code is:") {
-                        line.split("code is:").nth(1).map(|s| s.trim().to_string())
-                    } else {
-                        None
-                    }
+            let lines: Vec<&str> = body_text.lines().collect();
+            let verification_code = lines
+                .iter()
+                .enumerate()
+                .find(|(_, line)| {
+                    line.contains("verification code is:") || line.contains("code is:")
                 })
-                .unwrap_or_else(|| {
+                .and_then(|(i, _)| lines.get(i + 1).map(|s| s.trim().to_string()))
+                .or_else(|| {
                     body_text
                         .split_whitespace()
                         .find(|word| {
                             word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3
                         })
-                        .unwrap_or(&body_text)
-                        .to_string()
-                });
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_else(|| body_text.clone());
 
             let confirm_payload = json!({
                 "did": did,

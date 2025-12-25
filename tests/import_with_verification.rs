@@ -3,12 +3,14 @@ use cid::Cid;
 use common::*;
 use ipld_core::ipld::Ipld;
 use jacquard::types::{integer::LimitedU32, string::Tid};
-use k256::ecdsa::{Signature, SigningKey, signature::Signer};
+use jacquard_repo::commit::Commit;
+use k256::ecdsa::SigningKey;
 use reqwest::StatusCode;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::collections::BTreeMap;
+use std::str::FromStr;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -89,27 +91,11 @@ fn create_did_document(
 }
 
 fn create_signed_commit(did: &str, data_cid: &Cid, signing_key: &SigningKey) -> (Vec<u8>, Cid) {
-    let rev = Tid::now(LimitedU32::MIN).to_string();
-    let unsigned = Ipld::Map(BTreeMap::from([
-        ("data".to_string(), Ipld::Link(*data_cid)),
-        ("did".to_string(), Ipld::String(did.to_string())),
-        ("prev".to_string(), Ipld::Null),
-        ("rev".to_string(), Ipld::String(rev.clone())),
-        ("sig".to_string(), Ipld::Bytes(vec![])),
-        ("version".to_string(), Ipld::Integer(3)),
-    ]));
-    let unsigned_bytes = serde_ipld_dagcbor::to_vec(&unsigned).unwrap();
-    let signature: Signature = signing_key.sign(&unsigned_bytes);
-    let sig_bytes = signature.to_bytes().to_vec();
-    let signed = Ipld::Map(BTreeMap::from([
-        ("data".to_string(), Ipld::Link(*data_cid)),
-        ("did".to_string(), Ipld::String(did.to_string())),
-        ("prev".to_string(), Ipld::Null),
-        ("rev".to_string(), Ipld::String(rev)),
-        ("sig".to_string(), Ipld::Bytes(sig_bytes)),
-        ("version".to_string(), Ipld::Integer(3)),
-    ]));
-    let signed_bytes = serde_ipld_dagcbor::to_vec(&signed).unwrap();
+    let rev = Tid::now(LimitedU32::MIN);
+    let did = jacquard::types::string::Did::new(did).expect("valid DID");
+    let unsigned = Commit::new_unsigned(did, *data_cid, rev, None);
+    let signed = unsigned.sign(signing_key).expect("signing failed");
+    let signed_bytes = signed.to_cbor().expect("serialization failed");
     let cid = make_cid(&signed_bytes);
     (signed_bytes, cid)
 }

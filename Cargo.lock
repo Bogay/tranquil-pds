@@ -6279,6 +6279,7 @@ dependencies = [
  "bs58",
  "bytes",
  "chrono",
+ "ciborium",
  "cid",
  "ctor",
  "dotenvy",

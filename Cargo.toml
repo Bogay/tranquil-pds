@@ -62,6 +62,7 @@ webauthn-rs-proto = "0.5.4"
 [features]
 external-infra = []
 [dev-dependencies]
+ciborium = "0.2"
 ctor = "0.6.3"
 testcontainers = "0.26.2"
 testcontainers-modules = { version = "0.14.0", features = ["postgres"] }
