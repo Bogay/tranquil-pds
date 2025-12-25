@@ -167,54 +167,60 @@
       </button>
     </div>
   {:else if consentData}
-    <div class="client-info">
-      {#if consentData.logo_uri}
-        <img src={consentData.logo_uri} alt="" class="client-logo" />
-      {/if}
-      <h1>{consentData.client_name || $_('oauth.consent.title')}</h1>
-      <p class="subtitle">{$_('oauth.consent.appWantsAccess', { values: { app: '' } })}</p>
-      {#if consentData.client_uri}
-        <a href={consentData.client_uri} target="_blank" rel="noopener noreferrer" class="client-link">
-          {consentData.client_uri}
-        </a>
-      {/if}
-    </div>
+    <div class="split-layout sidebar-left">
+      <div class="client-panel">
+        <div class="client-info">
+          {#if consentData.logo_uri}
+            <img src={consentData.logo_uri} alt="" class="client-logo" />
+          {/if}
+          <h1>{consentData.client_name || $_('oauth.consent.title')}</h1>
+          <p class="subtitle">{$_('oauth.consent.appWantsAccess', { values: { app: '' } })}</p>
+          {#if consentData.client_uri}
+            <a href={consentData.client_uri} target="_blank" rel="noopener noreferrer" class="client-link">
+              {consentData.client_uri}
+            </a>
+          {/if}
+        </div>
 
-    <div class="account-info">
-      <span class="label">{$_('oauth.consent.signingInAs')}</span>
-      <span class="did">{consentData.did}</span>
-    </div>
+        <div class="account-info">
+          <span class="label">{$_('oauth.consent.signingInAs')}</span>
+          <span class="did">{consentData.did}</span>
+        </div>
+      </div>
 
-    <div class="scopes-section">
-      <h2>{$_('oauth.consent.permissionsRequested')}</h2>
-      {#each Object.entries(scopeGroups) as [category, scopes]}
-        <div class="scope-group">
-          <h3 class="category-title">{category}</h3>
-          {#each scopes as scope}
-            <label class="scope-item" class:required={scope.required}>
-              <input
-                type="checkbox"
-                checked={scopeSelections[scope.scope]}
-                disabled={scope.required || submitting}
-                onchange={() => handleScopeToggle(scope.scope)}
-              />
-              <div class="scope-info">
-                <span class="scope-name">{scope.display_name}</span>
-                <span class="scope-description">{scope.description}</span>
-                {#if scope.required}
-                  <span class="required-badge">{$_('oauth.consent.required')}</span>
-                {/if}
-              </div>
-            </label>
+      <div class="permissions-panel">
+        <div class="scopes-section">
+          <h2>{$_('oauth.consent.permissionsRequested')}</h2>
+          {#each Object.entries(scopeGroups) as [category, scopes]}
+            <div class="scope-group">
+              <h3 class="category-title">{category}</h3>
+              {#each scopes as scope}
+                <label class="scope-item" class:required={scope.required}>
+                  <input
+                    type="checkbox"
+                    checked={scopeSelections[scope.scope]}
+                    disabled={scope.required || submitting}
+                    onchange={() => handleScopeToggle(scope.scope)}
+                  />
+                  <div class="scope-info">
+                    <span class="scope-name">{scope.display_name}</span>
+                    <span class="scope-description">{scope.description}</span>
+                    {#if scope.required}
+                      <span class="required-badge">{$_('oauth.consent.required')}</span>
+                    {/if}
+                  </div>
+                </label>
+              {/each}
+            </div>
           {/each}
         </div>
-      {/each}
-    </div>
 
-    <label class="remember-choice">
-      <input type="checkbox" bind:checked={rememberChoice} disabled={submitting} />
-      <span>{$_('oauth.consent.rememberChoiceLabel')}</span>
-    </label>
+        <label class="remember-choice">
+          <input type="checkbox" bind:checked={rememberChoice} disabled={submitting} />
+          <span>{$_('oauth.consent.rememberChoiceLabel')}</span>
+        </label>
+      </div>
+    </div>
 
     <div class="actions">
       <button type="button" class="deny-btn" onclick={handleDeny} disabled={submitting}>
@@ -229,7 +235,7 @@
 
 <style>
   .consent-container {
-    max-width: 480px;
+    max-width: var(--width-lg);
     margin: var(--space-7) auto;
     padding: var(--space-7);
   }
@@ -244,6 +250,8 @@
 
   .error-container {
     text-align: center;
+    max-width: var(--width-sm);
+    margin: 0 auto;
   }
 
   .error {
@@ -255,9 +263,27 @@
     margin-bottom: var(--space-4);
   }
 
+  .client-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .permissions-panel {
+    min-width: 0;
+  }
+
   .client-info {
     text-align: center;
-    margin-bottom: var(--space-6);
+    padding: var(--space-6);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+  }
+
+  @media (min-width: 800px) {
+    .client-info {
+      text-align: left;
+    }
   }
 
   .client-logo {
@@ -397,7 +423,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    margin-bottom: var(--space-6);
+    margin-top: var(--space-5);
     cursor: pointer;
     color: var(--text-secondary);
     font-size: var(--text-sm);
@@ -411,6 +437,14 @@
   .actions {
     display: flex;
     gap: var(--space-4);
+    margin-top: var(--space-6);
+  }
+
+  @media (min-width: 800px) {
+    .actions {
+      max-width: 400px;
+      margin-left: auto;
+    }
   }
 
   .actions button {

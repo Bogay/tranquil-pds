@@ -149,7 +149,7 @@
 </div>
 <style>
   .page {
-    max-width: var(--width-md);
+    max-width: var(--width-lg);
     margin: 0 auto;
     padding: var(--space-7);
   }

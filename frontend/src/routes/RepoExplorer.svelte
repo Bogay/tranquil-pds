@@ -75,7 +75,7 @@
     }
   }
   async function loadMoreRecords() {
-    if (!auth.session || !selectedCollection || !recordsCursor) return
+    if (!auth.session || !selectedCollection || !recordsCursor || loadingMore) return
     loadingMore = true
     try {
       const result = await api.listRecords(auth.session.accessJwt, auth.session.did, selectedCollection, {
@@ -93,6 +93,12 @@
       loadingMore = false
     }
   }
+
+  $effect(() => {
+    if (view === 'records' && recordsCursor && !loadingMore && !loading) {
+      loadMoreRecords()
+    }
+  })
   async function selectRecord(record: { uri: string; cid: string; value: unknown; rkey: string }) {
     selectedRecord = record
     recordJson = JSON.stringify(record.value, null, 2)
@@ -371,11 +377,17 @@
           </li>
         {/each}
       </ul>
-      {#if recordsCursor}
-        <div class="load-more">
-          <button onclick={loadMoreRecords} disabled={loadingMore}>
-            {loadingMore ? $_('common.loading') : $_('repoExplorer.loadMore')}
-          </button>
+      {#if loadingMore}
+        <div class="skeleton-records">
+          {#each [1, 2, 3] as _}
+            <div class="skeleton-record">
+              <div class="skeleton-record-header">
+                <div class="skeleton-line short"></div>
+                <div class="skeleton-line tiny"></div>
+              </div>
+              <div class="skeleton-preview"></div>
+            </div>
+          {/each}
         </div>
       {/if}
     {/if}
@@ -383,9 +395,9 @@
     <div class="record-detail">
       <div class="record-meta">
         <dl>
-          <dt>URI</dt>
+          <dt>{$_('repoExplorer.uri')}</dt>
           <dd class="mono">{selectedRecord.uri}</dd>
-          <dt>CID</dt>
+          <dt>{$_('repoExplorer.cid')}</dt>
           <dd class="mono">{selectedRecord.cid}</dd>
         </dl>
       </div>
@@ -463,7 +475,7 @@
 </div>
 <style>
   .page {
-    max-width: var(--width-lg);
+    max-width: var(--width-xl);
     margin: 0 auto;
     padding: var(--space-7);
   }
@@ -751,22 +763,51 @@
     overflow: hidden;
   }
 
-  .load-more {
-    text-align: center;
-    padding: var(--space-4);
+  .skeleton-records {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
   }
 
-  .load-more button {
-    padding: var(--space-2) var(--space-7);
-    background: var(--bg-secondary);
+  .skeleton-record {
+    padding: var(--space-4);
+    background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    cursor: pointer;
-    color: var(--text-primary);
   }
 
-  .load-more button:hover:not(:disabled) {
-    background: var(--bg-card);
+  .skeleton-record-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+  }
+
+  .skeleton-line {
+    height: 14px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  .skeleton-line.short {
+    width: 120px;
+  }
+
+  .skeleton-line.tiny {
+    width: 80px;
+  }
+
+  .skeleton-preview {
+    height: 60px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   .record-detail {

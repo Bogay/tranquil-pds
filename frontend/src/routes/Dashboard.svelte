@@ -2,10 +2,22 @@
   import { getAuthState, logout, switchAccount } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
+  import { api } from '../lib/api'
+  import { onMount } from 'svelte'
 
   const auth = getAuthState()
   let dropdownOpen = $state(false)
   let switching = $state(false)
+  let inviteCodesEnabled = $state(false)
+
+  onMount(async () => {
+    try {
+      const serverInfo = await api.describeServer()
+      inviteCodesEnabled = serverInfo.inviteCodeRequired
+    } catch {
+      inviteCodesEnabled = false
+    }
+  })
 
   $effect(() => {
     if (!auth.loading && !auth.session) {
@@ -152,10 +164,12 @@
         <h3>{$_('dashboard.navSessions')}</h3>
         <p>{$_('dashboard.navSessionsDesc')}</p>
       </a>
-      <a href="#/invite-codes" class="nav-card">
-        <h3>{$_('dashboard.navInviteCodes')}</h3>
-        <p>{$_('dashboard.navInviteCodesDesc')}</p>
-      </a>
+      {#if inviteCodesEnabled}
+        <a href="#/invite-codes" class="nav-card">
+          <h3>{$_('dashboard.navInviteCodes')}</h3>
+          <p>{$_('dashboard.navInviteCodesDesc')}</p>
+        </a>
+      {/if}
       <a href="#/settings" class="nav-card">
         <h3>{$_('dashboard.navSettings')}</h3>
         <p>{$_('dashboard.navSettingsDesc')}</p>
@@ -186,7 +200,7 @@
 
 <style>
   .dashboard {
-    max-width: var(--width-lg);
+    max-width: var(--width-xl);
     margin: 0 auto;
     padding: var(--space-7);
   }

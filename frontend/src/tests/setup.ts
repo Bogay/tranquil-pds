@@ -1,35 +1,37 @@
-import '@testing-library/jest-dom/vitest'
-import { vi, beforeEach, afterEach } from 'vitest'
-import { _testReset } from '../lib/auth.svelte'
+import "@testing-library/jest-dom/vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+import { _testReset } from "../lib/auth.svelte";
 
-let locationHash = ''
+let locationHash = "";
 
-Object.defineProperty(window, 'location', {
+Object.defineProperty(window, "location", {
   value: {
-    get hash() { return locationHash },
-    set hash(value: string) {
-      locationHash = value.startsWith('#') ? value : `#${value}`
+    get hash() {
+      return locationHash;
     },
-    href: 'http://localhost:3000/',
-    origin: 'http://localhost:3000',
-    pathname: '/',
-    search: '',
+    set hash(value: string) {
+      locationHash = value.startsWith("#") ? value : `#${value}`;
+    },
+    href: "http://localhost:3000/",
+    origin: "http://localhost:3000",
+    pathname: "/",
+    search: "",
     assign: vi.fn(),
     replace: vi.fn(),
     reload: vi.fn(),
   },
   writable: true,
   configurable: true,
-})
+});
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  localStorage.clear()
-  sessionStorage.clear()
-  locationHash = ''
-  _testReset()
-})
+  vi.clearAllMocks();
+  localStorage.clear();
+  sessionStorage.clear();
+  locationHash = "";
+  _testReset();
+});
 
 afterEach(() => {
-  vi.restoreAllMocks()
-})
+  vi.restoreAllMocks();
+});

@@ -4,19 +4,35 @@
   import { api, type InviteCode, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDate } from '../lib/date'
+  import { onMount } from 'svelte'
+
   const auth = getAuthState()
   let codes = $state<InviteCode[]>([])
   let loading = $state(true)
   let error = $state<string | null>(null)
   let creating = $state(false)
   let createdCode = $state<string | null>(null)
+  let inviteCodesEnabled = $state<boolean | null>(null)
+
+  onMount(async () => {
+    try {
+      const serverInfo = await api.describeServer()
+      inviteCodesEnabled = serverInfo.inviteCodeRequired
+      if (!serverInfo.inviteCodeRequired) {
+        navigate('/dashboard')
+      }
+    } catch {
+      navigate('/dashboard')
+    }
+  })
+
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
     }
   })
   $effect(() => {
-    if (auth.session) {
+    if (auth.session && inviteCodesEnabled) {
       loadCodes()
     }
   })
@@ -114,7 +130,7 @@
 </div>
 <style>
   .page {
-    max-width: var(--width-md);
+    max-width: var(--width-lg);
     margin: 0 auto;
     padding: var(--space-7);
   }

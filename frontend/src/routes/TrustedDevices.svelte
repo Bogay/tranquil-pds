@@ -40,7 +40,7 @@
       const result = await api.listTrustedDevices(auth.session.accessJwt)
       devices = result.devices
     } catch {
-      showMessage('error', 'Failed to load trusted devices')
+      showMessage('error', $_('trustedDevices.failedToLoad'))
     } finally {
       loading = false
     }
@@ -199,9 +199,9 @@
 
 <style>
   .page {
-    max-width: var(--width-md);
+    max-width: var(--width-lg);
     margin: 0 auto;
-    padding: var(--space-7) var(--space-4);
+    padding: var(--space-7);
   }
 
   header {

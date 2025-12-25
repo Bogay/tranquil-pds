@@ -126,10 +126,7 @@ impl ClientMetadataCache {
             client_uri: None,
             logo_uri: None,
             redirect_uris,
-            grant_types: vec![
-                "authorization_code".into(),
-                "refresh_token".into(),
-            ],
+            grant_types: vec!["authorization_code".into(), "refresh_token".into()],
             response_types: vec!["code".into()],
             scope,
             token_endpoint_auth_method: Some("none".into()),

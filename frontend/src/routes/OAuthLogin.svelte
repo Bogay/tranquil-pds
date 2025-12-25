@@ -315,14 +315,16 @@
 </script>
 
 <div class="oauth-login-container">
-  <h1>{$_('oauth.login.title')}</h1>
-  <p class="subtitle">
-    {#if clientName}
-      {$_('oauth.login.subtitle')} <strong>{clientName}</strong>
-    {:else}
-      {$_('oauth.login.subtitle')}
-    {/if}
-  </p>
+  <header class="page-header">
+    <h1>{$_('oauth.login.title')}</h1>
+    <p class="subtitle">
+      {#if clientName}
+        {$_('oauth.login.subtitle')} <strong>{clientName}</strong>
+      {:else}
+        {$_('oauth.login.subtitle')}
+      {/if}
+    </p>
+  </header>
 
   {#if error}
     <div class="error">{error}</div>
@@ -343,62 +345,98 @@
     </div>
 
     {#if passkeySupported && username.length >= 3}
-      <button
-        type="button"
-        class="passkey-btn"
-        class:passkey-unavailable={!hasPasskeys || checkingSecurityStatus || !securityStatusChecked}
-        onclick={handlePasskeyLogin}
-        disabled={submitting || !hasPasskeys || !username || checkingSecurityStatus || !securityStatusChecked}
-        title={checkingSecurityStatus ? $_('oauth.login.passkeyHintChecking') : hasPasskeys ? $_('oauth.login.passkeyHintAvailable') : $_('oauth.login.passkeyHintNotAvailable')}
-      >
-        <svg class="passkey-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M15 7a4 4 0 1 0-8 0 4 4 0 0 0 8 0z" />
-          <path d="M17 17v4l3-2-3-2z" />
-          <path d="M12 11c-4 0-6 2-6 4v4h9" />
-        </svg>
-        <span class="passkey-text">
-          {#if submitting}
-            {$_('oauth.login.authenticating')}
-          {:else if checkingSecurityStatus || !securityStatusChecked}
-            {$_('oauth.login.checkingPasskey')}
-          {:else if hasPasskeys}
-            {$_('oauth.login.signInWithPasskey')}
-          {:else}
-            {$_('oauth.login.passkeyNotSetUp')}
-          {/if}
-        </span>
-      </button>
+      <div class="auth-methods">
+        <div class="passkey-method">
+          <h3>{$_('oauth.login.signInWithPasskey')}</h3>
+          <button
+            type="button"
+            class="passkey-btn"
+            class:passkey-unavailable={!hasPasskeys || checkingSecurityStatus || !securityStatusChecked}
+            onclick={handlePasskeyLogin}
+            disabled={submitting || !hasPasskeys || !username || checkingSecurityStatus || !securityStatusChecked}
+            title={checkingSecurityStatus ? $_('oauth.login.passkeyHintChecking') : hasPasskeys ? $_('oauth.login.passkeyHintAvailable') : $_('oauth.login.passkeyHintNotAvailable')}
+          >
+            <svg class="passkey-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M15 7a4 4 0 1 0-8 0 4 4 0 0 0 8 0z" />
+              <path d="M17 17v4l3-2-3-2z" />
+              <path d="M12 11c-4 0-6 2-6 4v4h9" />
+            </svg>
+            <span class="passkey-text">
+              {#if submitting}
+                {$_('oauth.login.authenticating')}
+              {:else if checkingSecurityStatus || !securityStatusChecked}
+                {$_('oauth.login.checkingPasskey')}
+              {:else if hasPasskeys}
+                {$_('oauth.login.usePasskey')}
+              {:else}
+                {$_('oauth.login.passkeyNotSetUp')}
+              {/if}
+            </span>
+          </button>
+          <p class="method-hint">{$_('oauth.login.passkeyHint')}</p>
+        </div>
 
-      <div class="auth-divider">
-        <span>{$_('oauth.login.orUsePassword')}</span>
+        <div class="method-divider">
+          <span>{$_('oauth.login.orUsePassword')}</span>
+        </div>
+
+        <div class="password-method">
+          <h3>{$_('oauth.login.password')}</h3>
+          <div class="field">
+            <input
+              id="password"
+              type="password"
+              bind:value={password}
+              disabled={submitting}
+              required
+              autocomplete="current-password"
+              placeholder={$_('oauth.login.passwordPlaceholder')}
+            />
+          </div>
+
+          <label class="remember-device">
+            <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
+            <span>{$_('oauth.login.rememberDevice')}</span>
+          </label>
+
+          <button type="submit" class="submit-btn" disabled={submitting || !username || !password}>
+            {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
+          </button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="cancel-btn" onclick={handleCancel} disabled={submitting}>
+          {$_('common.cancel')}
+        </button>
+      </div>
+    {:else}
+      <div class="field">
+        <label for="password">{$_('oauth.login.password')}</label>
+        <input
+          id="password"
+          type="password"
+          bind:value={password}
+          disabled={submitting}
+          required
+          autocomplete="current-password"
+        />
+      </div>
+
+      <label class="remember-device">
+        <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
+        <span>{$_('oauth.login.rememberDevice')}</span>
+      </label>
+
+      <div class="actions">
+        <button type="button" class="cancel-btn" onclick={handleCancel} disabled={submitting}>
+          {$_('common.cancel')}
+        </button>
+        <button type="submit" class="submit-btn" disabled={submitting || !username || !password}>
+          {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
+        </button>
       </div>
     {/if}
-
-    <div class="field">
-      <label for="password">{$_('oauth.login.password')}</label>
-      <input
-        id="password"
-        type="password"
-        bind:value={password}
-        disabled={submitting}
-        required
-        autocomplete="current-password"
-      />
-    </div>
-
-    <label class="remember-device">
-      <input type="checkbox" bind:checked={rememberDevice} disabled={submitting} />
-      <span>{$_('oauth.login.rememberDevice')}</span>
-    </label>
-
-    <div class="actions">
-      <button type="button" class="cancel-btn" onclick={handleCancel} disabled={submitting}>
-        {$_('common.cancel')}
-      </button>
-      <button type="submit" class="submit-btn" disabled={submitting || !username || !password}>
-        {submitting ? $_('oauth.login.signingIn') : $_('oauth.login.title')}
-      </button>
-    </div>
   </form>
 
   <p class="help-links">
@@ -423,9 +461,13 @@
   }
 
   .oauth-login-container {
-    max-width: var(--width-sm);
+    max-width: var(--width-md);
     margin: var(--space-9) auto;
     padding: var(--space-7);
+  }
+
+  .page-header {
+    margin-bottom: var(--space-6);
   }
 
   h1 {
@@ -434,13 +476,97 @@
 
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 var(--space-7) 0;
+    margin: 0;
   }
 
   form {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+  }
+
+  .auth-methods {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    margin-top: var(--space-4);
+  }
+
+  @media (min-width: 600px) {
+    .auth-methods {
+      grid-template-columns: 1fr auto 1fr;
+      align-items: start;
+    }
+  }
+
+  .passkey-method,
+  .password-method {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-5);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+  }
+
+  .passkey-method h3,
+  .password-method h3 {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .method-hint {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+
+  .method-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+  }
+
+  @media (min-width: 600px) {
+    .method-divider {
+      flex-direction: column;
+      padding: 0 var(--space-3);
+    }
+
+    .method-divider::before,
+    .method-divider::after {
+      content: '';
+      width: 1px;
+      height: var(--space-6);
+      background: var(--border-color);
+    }
+
+    .method-divider span {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+      padding: var(--space-2) 0;
+    }
+  }
+
+  @media (max-width: 599px) {
+    .method-divider {
+      gap: var(--space-4);
+    }
+
+    .method-divider::before,
+    .method-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-color);
+    }
   }
 
   .field {
@@ -534,25 +660,6 @@
     background: var(--accent-hover);
   }
 
-  .auth-divider {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    margin: var(--space-2) 0;
-  }
-
-  .auth-divider::before,
-  .auth-divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border-color);
-  }
-
-  .auth-divider span {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
 
   .passkey-btn {
     display: flex;

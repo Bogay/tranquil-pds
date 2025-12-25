@@ -6,6 +6,12 @@
   import { _ } from '../lib/i18n'
   import { formatDate, formatDateTime } from '../lib/date'
   const auth = getAuthState()
+  const DEFAULT_COLORS = {
+    primaryLight: '#1A1D1D',
+    primaryDark: '#E6E8E8',
+    secondaryLight: '#1A1D1D',
+    secondaryDark: '#E6E8E8',
+  }
   let loading = $state(true)
   let error = $state<string | null>(null)
   let stats = $state<{
@@ -364,7 +370,7 @@
                   type="text"
                   id="primaryColor"
                   bind:value={primaryColorInput}
-                  placeholder={$_('admin.primaryLightDefault')}
+                  placeholder={$_('admin.colorDefault', { values: { color: DEFAULT_COLORS.primaryLight } })}
                   disabled={serverConfigLoading}
                 />
               </div>
@@ -381,7 +387,7 @@
                   type="text"
                   id="primaryColorDark"
                   bind:value={primaryColorDarkInput}
-                  placeholder={$_('admin.primaryDarkDefault')}
+                  placeholder={$_('admin.colorDefault', { values: { color: DEFAULT_COLORS.primaryDark } })}
                   disabled={serverConfigLoading}
                 />
               </div>
@@ -398,7 +404,7 @@
                   type="text"
                   id="secondaryColor"
                   bind:value={secondaryColorInput}
-                  placeholder={$_('admin.secondaryLightDefault')}
+                  placeholder={$_('admin.colorDefault', { values: { color: DEFAULT_COLORS.secondaryLight } })}
                   disabled={serverConfigLoading}
                 />
               </div>
@@ -415,7 +421,7 @@
                   type="text"
                   id="secondaryColorDark"
                   bind:value={secondaryColorDarkInput}
-                  placeholder={$_('admin.secondaryDarkDefault')}
+                  placeholder={$_('admin.colorDefault', { values: { color: DEFAULT_COLORS.secondaryDark } })}
                   disabled={serverConfigLoading}
                 />
               </div>
@@ -646,7 +652,7 @@
 {/if}
 <style>
   .page {
-    max-width: var(--width-lg);
+    max-width: var(--width-xl);
     margin: 0 auto;
     padding: var(--space-7);
   }

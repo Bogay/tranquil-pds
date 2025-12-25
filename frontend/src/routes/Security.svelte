@@ -130,7 +130,7 @@
     try {
       const token = await getValidToken()
       if (!token) {
-        showMessage('error', 'Session expired. Please log in again.')
+        showMessage('error', $_('security.sessionExpired'))
         return
       }
       await api.removePassword(token)
@@ -414,6 +414,7 @@
   {#if loading}
     <div class="loading">{$_('common.loading')}</div>
   {:else}
+    <div class="sections-grid">
     <section>
       <h2>{$_('security.totp')}</h2>
       <p class="description">
@@ -725,6 +726,7 @@
         {$_('security.manageTrustedDevices')} &rarr;
       </a>
     </section>
+    </div>
 
     {#if hasMfa}
       <section>
@@ -788,13 +790,33 @@
 
 <style>
   .page {
-    max-width: var(--width-md);
+    max-width: var(--width-lg);
     margin: 0 auto;
     padding: var(--space-7);
   }
 
   header {
     margin-bottom: var(--space-7);
+  }
+
+  .sections-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    margin-bottom: var(--space-6);
+  }
+
+  @media (min-width: 800px) {
+    .sections-grid {
+      columns: 2;
+      column-gap: var(--space-6);
+      display: block;
+    }
+
+    .sections-grid section {
+      break-inside: avoid;
+      margin-bottom: var(--space-6);
+    }
   }
 
   .back {
@@ -822,6 +844,7 @@
     background: var(--bg-secondary);
     border-radius: var(--radius-xl);
     margin-bottom: var(--space-6);
+    height: fit-content;
   }
 
   section h2 {

@@ -8,8 +8,15 @@
   let verificationCode = $state('')
   let resendingCode = $state(false)
   let resendMessage = $state<string | null>(null)
-  let showNewLogin = $state(false)
+  let autoRedirectAttempted = $state(false)
   const auth = getAuthState()
+
+  $effect(() => {
+    if (!auth.loading && !auth.error && auth.savedAccounts.length === 0 && !pendingVerification && !autoRedirectAttempted) {
+      autoRedirectAttempted = true
+      loginWithOAuth()
+    }
+  })
 
   async function handleSwitchAccount(did: string) {
     submitting = true
@@ -74,8 +81,10 @@
   {/if}
 
   {#if pendingVerification}
-    <h1>{$_('verification.title')}</h1>
-    <p class="subtitle">{$_('verification.subtitle')}</p>
+    <header class="page-header">
+      <h1>{$_('verification.title')}</h1>
+      <p class="subtitle">{$_('verification.subtitle')}</p>
+    </header>
 
     {#if resendMessage}
       <div class="message success">{resendMessage}</div>
@@ -109,75 +118,90 @@
       </div>
     </form>
 
-  {:else if auth.savedAccounts.length > 0 && !showNewLogin}
-    <h1>{$_('login.title')}</h1>
-    <p class="subtitle">{$_('login.chooseAccount')}</p>
-
-    <div class="saved-accounts">
-      {#each auth.savedAccounts as account}
-        <div
-          class="account-item"
-          class:disabled={submitting}
-          role="button"
-          tabindex="0"
-          onclick={() => !submitting && handleSwitchAccount(account.did)}
-          onkeydown={(e) => e.key === 'Enter' && !submitting && handleSwitchAccount(account.did)}
-        >
-          <div class="account-info">
-            <span class="account-handle">@{account.handle}</span>
-            <span class="account-did">{account.did}</span>
-          </div>
-          <button
-            type="button"
-            class="forget-btn"
-            onclick={(e) => handleForgetAccount(account.did, e)}
-            title={$_('login.removeAccount')}
-          >
-            &times;
-          </button>
-        </div>
-      {/each}
-    </div>
-
-    <button type="button" class="secondary full-width" onclick={() => showNewLogin = true}>
-      {$_('login.signInToAnother')}
-    </button>
-
-    <p class="link-text">
-      {$_('login.noAccount')} <a href="#/register">{$_('login.createAccount')}</a>
-    </p>
-
   {:else}
-    <h1>{$_('login.title')}</h1>
-    <p class="subtitle">{$_('login.subtitle')}</p>
+    <header class="page-header">
+      <h1>{$_('login.title')}</h1>
+      <p class="subtitle">{auth.savedAccounts.length > 0 ? $_('login.chooseAccount') : $_('login.subtitle')}</p>
+    </header>
 
-    {#if auth.savedAccounts.length > 0}
-      <button type="button" class="tertiary back-btn" onclick={() => showNewLogin = false}>
-        {$_('login.backToSaved')}
-      </button>
-    {/if}
+    <div class="split-layout sidebar-right">
+      <div class="main-section">
+        {#if auth.savedAccounts.length > 0}
+          <div class="saved-accounts">
+            {#each auth.savedAccounts as account}
+              <div
+                class="account-item"
+                class:disabled={submitting}
+                role="button"
+                tabindex="0"
+                onclick={() => !submitting && handleSwitchAccount(account.did)}
+                onkeydown={(e) => e.key === 'Enter' && !submitting && handleSwitchAccount(account.did)}
+              >
+                <div class="account-info">
+                  <span class="account-handle">@{account.handle}</span>
+                  <span class="account-did">{account.did}</span>
+                </div>
+                <button
+                  type="button"
+                  class="forget-btn"
+                  onclick={(e) => handleForgetAccount(account.did, e)}
+                  title={$_('login.removeAccount')}
+                >
+                  &times;
+                </button>
+              </div>
+            {/each}
+          </div>
 
-    <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || auth.loading}>
-      {submitting ? $_('login.redirecting') : $_('login.button')}
-    </button>
+          <p class="or-divider">{$_('login.signInToAnother')}</p>
+        {/if}
 
-    <p class="forgot-links">
-      <a href="#/reset-password">{$_('login.forgotPassword')}</a>
-      <span class="separator">&middot;</span>
-      <a href="#/request-passkey-recovery">{$_('login.lostPasskey')}</a>
-    </p>
+        <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || auth.loading}>
+          {submitting ? $_('login.redirecting') : $_('login.button')}
+        </button>
 
-    <p class="link-text">
-      {$_('login.noAccount')} <a href="#/register">{$_('login.createAccount')}</a>
-    </p>
+        <p class="forgot-links">
+          <a href="#/reset-password">{$_('login.forgotPassword')}</a>
+          <span class="separator">&middot;</span>
+          <a href="#/request-passkey-recovery">{$_('login.lostPasskey')}</a>
+        </p>
+
+        <p class="link-text">
+          {$_('login.noAccount')} <a href="#/register">{$_('login.createAccount')}</a>
+        </p>
+      </div>
+
+      <aside class="info-panel">
+        {#if auth.savedAccounts.length > 0}
+          <h3>{$_('login.infoSavedAccountsTitle')}</h3>
+          <p>{$_('login.infoSavedAccountsDesc')}</p>
+
+          <h3>{$_('login.infoNewAccountTitle')}</h3>
+          <p>{$_('login.infoNewAccountDesc')}</p>
+        {:else}
+          <h3>{$_('login.infoSecureSignInTitle')}</h3>
+          <p>{$_('login.infoSecureSignInDesc')}</p>
+
+          <h3>{$_('login.infoStaySignedInTitle')}</h3>
+          <p>{$_('login.infoStaySignedInDesc')}</p>
+        {/if}
+
+        <h3>{$_('login.infoRecoveryTitle')}</h3>
+        <p>{$_('login.infoRecoveryDesc')}</p>
+      </aside>
+    </div>
   {/if}
 </div>
 
 <style>
   .login-page {
-    max-width: var(--width-sm);
+    max-width: var(--width-lg);
     margin: var(--space-9) auto;
     padding: var(--space-7);
+  }
+
+  .page-header {
+    margin-bottom: var(--space-6);
   }
 
   h1 {
@@ -186,13 +210,18 @@
 
   .subtitle {
     color: var(--text-secondary);
-    margin: 0 0 var(--space-7) 0;
+    margin: 0;
+  }
+
+  .main-section {
+    min-width: 0;
   }
 
   form {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+    max-width: var(--width-sm);
   }
 
   .actions {
@@ -202,6 +231,16 @@
     margin-top: var(--space-3);
   }
 
+  @media (min-width: 600px) {
+    .actions {
+      flex-direction: row;
+    }
+
+    .actions button {
+      flex: 1;
+    }
+  }
+
   .oauth-btn {
     width: 100%;
     padding: var(--space-5);
@@ -209,8 +248,8 @@
   }
 
   .forgot-links {
-    text-align: center;
-    margin-top: var(--space-5);
+    margin-top: var(--space-4);
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
 
@@ -223,8 +262,8 @@
   }
 
   .link-text {
-    text-align: center;
-    margin-top: var(--space-4);
+    margin-top: var(--space-6);
+    font-size: var(--text-sm);
     color: var(--text-secondary);
   }
 
@@ -297,12 +336,10 @@
     color: var(--error-text);
   }
 
-  .full-width {
-    width: 100%;
-  }
-
-  .back-btn {
-    margin-bottom: var(--space-5);
-    padding: 0;
+  .or-divider {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    margin: var(--space-5) 0;
   }
 </style>

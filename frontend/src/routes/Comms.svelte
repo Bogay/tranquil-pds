@@ -22,7 +22,7 @@
   let verificationCode = $state('')
   let verificationError = $state<string | null>(null)
   let verificationSuccess = $state<string | null>(null)
-  let historyLoading = $state(false)
+  let historyLoading = $state(true)
   let historyError = $state<string | null>(null)
   let messages = $state<Array<{
     createdAt: string
@@ -32,7 +32,6 @@
     subject: string | null
     body: string
   }>>([])
-  let showHistory = $state(false)
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -41,6 +40,7 @@
   $effect(() => {
     if (auth.session) {
       loadPrefs()
+      loadHistory()
     }
   })
   async function loadPrefs() {
@@ -120,7 +120,6 @@
     try {
       const result = await api.getNotificationHistory(auth.session.accessJwt)
       messages = result.notifications
-      showHistory = true
     } catch (e) {
       historyError = e instanceof ApiError ? e.message : 'Failed to load notification history'
     } finally {
@@ -171,10 +170,9 @@
   <header>
     <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('comms.title')}</h1>
+    <p class="description">{$_('comms.description')}</p>
   </header>
-  <p class="description">
-    {$_('comms.description')}
-  </p>
+
   {#if loading}
     <p class="loading">{$_('common.loading')}</p>
   {:else}
@@ -184,215 +182,224 @@
     {#if success}
       <div class="message success">{success}</div>
     {/if}
-    <form onsubmit={handleSave}>
-      <section>
-        <h2>{$_('comms.preferredChannel')}</h2>
-        <p class="section-description">
-          {$_('comms.preferredChannelDescription')}
-        </p>
-        <div class="channel-options">
-          {#each channels as channelId}
-            <label class="channel-option" class:disabled={!canSelectChannel(channelId)} class:unavailable={!isChannelAvailableOnServer(channelId)}>
-              <input
-                type="radio"
-                name="preferredChannel"
-                value={channelId}
-                bind:group={preferredChannel}
-                disabled={!canSelectChannel(channelId) || saving}
-              />
-              <div class="channel-info">
-                <span class="channel-name">{getChannelName(channelId)}</span>
-                <span class="channel-description">{getChannelDescription(channelId)}</span>
-                {#if !isChannelAvailableOnServer(channelId)}
-                  <span class="channel-hint server-unavailable">{$_('comms.notConfiguredOnServer')}</span>
-                {:else if channelId !== 'email' && !canSelectChannel(channelId)}
-                  <span class="channel-hint">{$_('comms.configureToEnable')}</span>
-                {/if}
-              </div>
-            </label>
-          {/each}
-        </div>
-      </section>
-      <section>
-        <h2>{$_('comms.channelConfiguration')}</h2>
-        <div class="channel-config">
-          <div class="config-item">
-            <label for="email">{$_('register.email')}</label>
-            <div class="config-input">
-              <input
-                id="email"
-                type="email"
-                value={email}
-                disabled
-                class="readonly"
-              />
-              <span class="status verified">{$_('comms.primary')}</span>
+
+    <div class="split-layout">
+      <div class="main-column">
+        <form onsubmit={handleSave}>
+          <section>
+            <h2>{$_('comms.preferredChannel')}</h2>
+            <p class="section-description">{$_('comms.preferredChannelDescription')}</p>
+            <div class="channel-options">
+              {#each channels as channelId}
+                <label class="channel-option" class:disabled={!canSelectChannel(channelId)} class:unavailable={!isChannelAvailableOnServer(channelId)}>
+                  <input
+                    type="radio"
+                    name="preferredChannel"
+                    value={channelId}
+                    bind:group={preferredChannel}
+                    disabled={!canSelectChannel(channelId) || saving}
+                  />
+                  <div class="channel-info">
+                    <span class="channel-name">{getChannelName(channelId)}</span>
+                    <span class="channel-description">{getChannelDescription(channelId)}</span>
+                    {#if !isChannelAvailableOnServer(channelId)}
+                      <span class="channel-hint server-unavailable">{$_('comms.notConfiguredOnServer')}</span>
+                    {:else if channelId !== 'email' && !canSelectChannel(channelId)}
+                      <span class="channel-hint">{$_('comms.configureToEnable')}</span>
+                    {/if}
+                  </div>
+                </label>
+              {/each}
             </div>
-            <p class="config-hint">{$_('comms.emailManagedInSettings')}</p>
-          </div>
-          <div class="config-item" class:unavailable={!isChannelAvailableOnServer('discord')}>
-            <label for="discord">{$_('register.discordId')}</label>
-            <div class="config-input">
-              <input
-                id="discord"
-                type="text"
-                bind:value={discordId}
-                placeholder={$_('register.discordIdPlaceholder')}
-                disabled={saving || !isChannelAvailableOnServer('discord')}
-              />
-              {#if !isChannelAvailableOnServer('discord')}
-                <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
-              {:else if discordId}
-                {#if discordVerified}
-                  <span class="status verified">{$_('comms.verified')}</span>
-                {:else}
-                  <span class="status unverified">{$_('comms.notVerified')}</span>
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'discord'}>{$_('comms.verifyButton')}</button>
-                {/if}
-              {/if}
-            </div>
-            <p class="config-hint">{$_('comms.discordIdHint')}</p>
-            {#if verifyingChannel === 'discord'}
-              <div class="verify-form">
-                <input
-                  type="text"
-                  bind:value={verificationCode}
-                  placeholder={$_('comms.verifyCodePlaceholder')}
-                  maxlength="6"
-                />
-                <button type="button" onclick={() => handleVerify('discord')}>{$_('comms.submit')}</button>
-                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
-              </div>
-            {/if}
-          </div>
-          <div class="config-item" class:unavailable={!isChannelAvailableOnServer('telegram')}>
-            <label for="telegram">{$_('register.telegramUsername')}</label>
-            <div class="config-input">
-              <input
-                id="telegram"
-                type="text"
-                bind:value={telegramUsername}
-                placeholder={$_('register.telegramUsernamePlaceholder')}
-                disabled={saving || !isChannelAvailableOnServer('telegram')}
-              />
-              {#if !isChannelAvailableOnServer('telegram')}
-                <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
-              {:else if telegramUsername}
-                {#if telegramVerified}
-                  <span class="status verified">{$_('comms.verified')}</span>
-                {:else}
-                  <span class="status unverified">{$_('comms.notVerified')}</span>
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'telegram'}>{$_('comms.verifyButton')}</button>
-                {/if}
-              {/if}
-            </div>
-            <p class="config-hint">{$_('comms.telegramHint')}</p>
-            {#if verifyingChannel === 'telegram'}
-              <div class="verify-form">
-                <input
-                  type="text"
-                  bind:value={verificationCode}
-                  placeholder={$_('comms.verifyCodePlaceholder')}
-                  maxlength="6"
-                />
-                <button type="button" onclick={() => handleVerify('telegram')}>{$_('comms.submit')}</button>
-                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
-              </div>
-            {/if}
-          </div>
-          <div class="config-item" class:unavailable={!isChannelAvailableOnServer('signal')}>
-            <label for="signal">{$_('register.signalNumber')}</label>
-            <div class="config-input">
-              <input
-                id="signal"
-                type="tel"
-                bind:value={signalNumber}
-                placeholder={$_('register.signalNumberPlaceholder')}
-                disabled={saving || !isChannelAvailableOnServer('signal')}
-              />
-              {#if !isChannelAvailableOnServer('signal')}
-                <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
-              {:else if signalNumber}
-                {#if signalVerified}
-                  <span class="status verified">{$_('comms.verified')}</span>
-                {:else}
-                  <span class="status unverified">{$_('comms.notVerified')}</span>
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>{$_('comms.verifyButton')}</button>
-                {/if}
-              {/if}
-            </div>
-            <p class="config-hint">{$_('comms.signalHint')}</p>
-            {#if verifyingChannel === 'signal'}
-              <div class="verify-form">
-                <input
-                  type="text"
-                  bind:value={verificationCode}
-                  placeholder={$_('comms.verifyCodePlaceholder')}
-                  maxlength="6"
-                />
-                <button type="button" onclick={() => handleVerify('signal')}>{$_('comms.submit')}</button>
-                <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
-              </div>
-            {/if}
-          </div>
-        </div>
-        {#if verificationError}
-          <div class="message error" style="margin-top: 1rem">{verificationError}</div>
-        {/if}
-        {#if verificationSuccess}
-          <div class="message success" style="margin-top: 1rem">{verificationSuccess}</div>
-        {/if}
-      </section>
-      <div class="actions">
-        <button type="submit" disabled={saving}>
-          {saving ? $_('comms.saving') : $_('comms.savePreferences')}
-        </button>
-      </div>
-    </form>
-    <section class="history-section">
-      <h2>{$_('comms.messageHistory')}</h2>
-      <p class="section-description">{$_('comms.historyDescription')}</p>
-      {#if !showHistory}
-        <button class="load-history" onclick={loadHistory} disabled={historyLoading}>
-          {historyLoading ? $_('common.loading') : $_('comms.loadHistory')}
-        </button>
-      {:else}
-        <button class="load-history" onclick={() => showHistory = false}>{$_('comms.hideHistory')}</button>
-        {#if historyError}
-          <div class="message error">{historyError}</div>
-        {:else if messages.length === 0}
-          <p class="no-messages">{$_('comms.noMessages')}</p>
-        {:else}
-          <div class="message-list">
-            {#each messages as msg}
-              <div class="message-item">
-                <div class="message-header">
-                  <span class="message-type">{msg.notificationType}</span>
-                  <span class="message-channel">{msg.channel}</span>
-                  <span class="message-status" class:sent={msg.status === 'sent'} class:failed={msg.status === 'failed'}>{msg.status}</span>
+          </section>
+
+          <section>
+            <h2>{$_('comms.channelConfiguration')}</h2>
+            <div class="channel-config">
+              <div class="config-item">
+                <div class="config-header">
+                  <label for="email">{$_('register.email')}</label>
+                  <span class="status verified">{$_('comms.primary')}</span>
                 </div>
-                {#if msg.subject}
-                  <div class="message-subject">{msg.subject}</div>
-                {/if}
-                <div class="message-body">{msg.body}</div>
-                <div class="message-date">{formatDate(msg.createdAt)}</div>
+                <input id="email" type="email" value={email} disabled class="readonly" />
+                <p class="config-hint">{$_('comms.emailManagedInSettings')}</p>
               </div>
-            {/each}
+
+              <div class="config-item" class:unavailable={!isChannelAvailableOnServer('discord')}>
+                <div class="config-header">
+                  <label for="discord">{$_('register.discordId')}</label>
+                  {#if !isChannelAvailableOnServer('discord')}
+                    <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
+                  {:else if discordId}
+                    {#if discordVerified}
+                      <span class="status verified">{$_('comms.verified')}</span>
+                    {:else}
+                      <span class="status unverified">{$_('comms.notVerified')}</span>
+                    {/if}
+                  {/if}
+                </div>
+                <div class="config-input">
+                  <input
+                    id="discord"
+                    type="text"
+                    bind:value={discordId}
+                    placeholder={$_('register.discordIdPlaceholder')}
+                    disabled={saving || !isChannelAvailableOnServer('discord')}
+                  />
+                  {#if discordId && !discordVerified && isChannelAvailableOnServer('discord')}
+                    <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'discord'}>{$_('comms.verifyButton')}</button>
+                  {/if}
+                </div>
+                <p class="config-hint">{$_('comms.discordIdHint')}</p>
+                {#if verifyingChannel === 'discord'}
+                  <div class="verify-form">
+                    <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
+                    <button type="button" onclick={() => handleVerify('discord')}>{$_('comms.submit')}</button>
+                    <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
+                  </div>
+                {/if}
+              </div>
+
+              <div class="config-item" class:unavailable={!isChannelAvailableOnServer('telegram')}>
+                <div class="config-header">
+                  <label for="telegram">{$_('register.telegramUsername')}</label>
+                  {#if !isChannelAvailableOnServer('telegram')}
+                    <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
+                  {:else if telegramUsername}
+                    {#if telegramVerified}
+                      <span class="status verified">{$_('comms.verified')}</span>
+                    {:else}
+                      <span class="status unverified">{$_('comms.notVerified')}</span>
+                    {/if}
+                  {/if}
+                </div>
+                <div class="config-input">
+                  <input
+                    id="telegram"
+                    type="text"
+                    bind:value={telegramUsername}
+                    placeholder={$_('register.telegramUsernamePlaceholder')}
+                    disabled={saving || !isChannelAvailableOnServer('telegram')}
+                  />
+                  {#if telegramUsername && !telegramVerified && isChannelAvailableOnServer('telegram')}
+                    <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'telegram'}>{$_('comms.verifyButton')}</button>
+                  {/if}
+                </div>
+                <p class="config-hint">{$_('comms.telegramHint')}</p>
+                {#if verifyingChannel === 'telegram'}
+                  <div class="verify-form">
+                    <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
+                    <button type="button" onclick={() => handleVerify('telegram')}>{$_('comms.submit')}</button>
+                    <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
+                  </div>
+                {/if}
+              </div>
+
+              <div class="config-item" class:unavailable={!isChannelAvailableOnServer('signal')}>
+                <div class="config-header">
+                  <label for="signal">{$_('register.signalNumber')}</label>
+                  {#if !isChannelAvailableOnServer('signal')}
+                    <span class="status unavailable">{$_('comms.notConfiguredOnServer')}</span>
+                  {:else if signalNumber}
+                    {#if signalVerified}
+                      <span class="status verified">{$_('comms.verified')}</span>
+                    {:else}
+                      <span class="status unverified">{$_('comms.notVerified')}</span>
+                    {/if}
+                  {/if}
+                </div>
+                <div class="config-input">
+                  <input
+                    id="signal"
+                    type="tel"
+                    bind:value={signalNumber}
+                    placeholder={$_('register.signalNumberPlaceholder')}
+                    disabled={saving || !isChannelAvailableOnServer('signal')}
+                  />
+                  {#if signalNumber && !signalVerified && isChannelAvailableOnServer('signal')}
+                    <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>{$_('comms.verifyButton')}</button>
+                  {/if}
+                </div>
+                <p class="config-hint">{$_('comms.signalHint')}</p>
+                {#if verifyingChannel === 'signal'}
+                  <div class="verify-form">
+                    <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
+                    <button type="button" onclick={() => handleVerify('signal')}>{$_('comms.submit')}</button>
+                    <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
+                  </div>
+                {/if}
+              </div>
+            </div>
+
+            {#if verificationError}
+              <div class="message error" style="margin-top: 1rem">{verificationError}</div>
+            {/if}
+            {#if verificationSuccess}
+              <div class="message success" style="margin-top: 1rem">{verificationSuccess}</div>
+            {/if}
+          </section>
+
+          <div class="actions">
+            <button type="submit" disabled={saving}>
+              {saving ? $_('comms.saving') : $_('comms.savePreferences')}
+            </button>
           </div>
-        {/if}
-      {/if}
-    </section>
+        </form>
+      </div>
+
+      <div class="side-column">
+        <section class="history-section">
+          <h2>{$_('comms.messageHistory')}</h2>
+          <p class="section-description">{$_('comms.historyDescription')}</p>
+          {#if historyLoading}
+            <div class="skeleton-list">
+              {#each [1, 2, 3] as _}
+                <div class="skeleton-item">
+                  <div class="skeleton-header">
+                    <div class="skeleton-line short"></div>
+                    <div class="skeleton-line tiny"></div>
+                  </div>
+                  <div class="skeleton-line"></div>
+                  <div class="skeleton-line medium"></div>
+                </div>
+              {/each}
+            </div>
+          {:else if historyError}
+            <div class="message error">{historyError}</div>
+          {:else if messages.length === 0}
+            <p class="no-messages">{$_('comms.noMessages')}</p>
+          {:else}
+            <div class="message-list">
+              {#each messages as msg}
+                <div class="message-item">
+                  <div class="message-header">
+                    <span class="message-type">{msg.notificationType}</span>
+                    <span class="message-channel">{msg.channel}</span>
+                    <span class="message-status" class:sent={msg.status === 'sent'} class:failed={msg.status === 'failed'}>{msg.status}</span>
+                  </div>
+                  {#if msg.subject}
+                    <div class="message-subject">{msg.subject}</div>
+                  {/if}
+                  <div class="message-body">{msg.body}</div>
+                  <div class="message-date">{formatDate(msg.createdAt)}</div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      </div>
+    </div>
   {/if}
 </div>
 <style>
   .page {
-    max-width: var(--width-md);
+    max-width: var(--width-xl);
     margin: 0 auto;
     padding: var(--space-7);
   }
 
   header {
-    margin-bottom: var(--space-4);
+    margin-bottom: var(--space-6);
   }
 
   .back {
@@ -411,7 +418,7 @@
 
   .description {
     color: var(--text-secondary);
-    margin-bottom: var(--space-7);
+    margin: var(--space-2) 0 0 0;
   }
 
   .loading {
@@ -420,11 +427,32 @@
     padding: var(--space-7);
   }
 
+  .split-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+
+  @media (min-width: 900px) {
+    .split-layout {
+      grid-template-columns: 1.5fr 1fr;
+      align-items: start;
+    }
+  }
+
+  .main-column, .side-column {
+    min-width: 0;
+  }
+
   section {
     background: var(--bg-secondary);
     padding: var(--space-6);
     border-radius: var(--radius-xl);
     margin-bottom: var(--space-6);
+  }
+
+  .side-column section {
+    margin-bottom: 0;
   }
 
   section h2 {
@@ -520,6 +548,14 @@
     opacity: 0.6;
   }
 
+  .config-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-1);
+  }
+
   .config-item label {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
@@ -533,9 +569,10 @@
 
   .config-input input {
     flex: 1;
+    min-width: 0;
   }
 
-  .config-input input.readonly {
+  .config-item input.readonly {
     background: var(--bg-input-disabled);
     color: var(--text-secondary);
   }
@@ -624,36 +661,57 @@
     background: var(--bg-secondary);
   }
 
-  .history-section {
-    background: var(--bg-secondary);
-    padding: var(--space-6);
-    border-radius: var(--radius-xl);
-    margin-top: var(--space-6);
-  }
-
   .history-section h2 {
     margin: 0 0 var(--space-2) 0;
     font-size: var(--text-lg);
   }
 
-  .load-history {
-    padding: var(--space-2) var(--space-4);
-    background: transparent;
+  .skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .skeleton-item {
+    background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    cursor: pointer;
-    color: var(--text-primary);
-    margin-top: var(--space-2);
+    padding: var(--space-3);
   }
 
-  .load-history:hover:not(:disabled) {
-    background: var(--bg-card);
-    border-color: var(--accent);
+  .skeleton-header {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
   }
 
-  .load-history:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+  .skeleton-line {
+    height: 14px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  .skeleton-line.short {
+    width: 80px;
+  }
+
+  .skeleton-line.tiny {
+    width: 50px;
+  }
+
+  .skeleton-line.medium {
+    width: 60%;
+  }
+
+  .skeleton-line:not(.short):not(.tiny):not(.medium) {
+    width: 100%;
+    margin-bottom: var(--space-1);
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   .no-messages {

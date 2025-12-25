@@ -1,10 +1,20 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { getAuthState, logout, refreshSession } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { locale, setLocale, getSupportedLocales, localeNames, _, type SupportedLocale } from '../lib/i18n'
   const auth = getAuthState()
   const supportedLocales = getSupportedLocales()
+  let pdsHostname = $state<string | null>(null)
+
+  onMount(() => {
+    api.describeServer().then(info => {
+      if (info.availableUserDomains?.length) {
+        pdsHostname = info.availableUserDomains[0]
+      }
+    }).catch(() => {})
+  })
   let localeLoading = $state(false)
   async function handleLocaleChange(newLocale: SupportedLocale) {
     if (!auth.session) return
@@ -94,7 +104,7 @@
     try {
       const fullHandle = showBYOHandle
         ? newHandle
-        : `${newHandle}.${window.location.hostname}`
+        : `${newHandle}.${pdsHostname}`
       await api.updateHandle(auth.session.accessJwt, fullHandle)
       await refreshSession()
       showMessage('success', $_('settings.messages.handleUpdated'))
@@ -201,6 +211,7 @@
   {#if message}
     <div class="message {message.type}">{message.text}</div>
   {/if}
+  <div class="sections-grid">
   <section>
     <h2>{$_('settings.language')}</h2>
     <p class="description">{$_('settings.languageDescription')}</p>
@@ -335,10 +346,10 @@
               disabled={handleLoading}
               required
             />
-            <span class="handle-suffix">.{window.location.hostname}</span>
+            <span class="handle-suffix">.{pdsHostname ?? '...'}</span>
           </div>
         </div>
-        <button type="submit" disabled={handleLoading || !newHandle}>
+        <button type="submit" disabled={handleLoading || !newHandle || !pdsHostname}>
           {handleLoading ? $_('settings.updating') : $_('settings.changeHandleButton')}
         </button>
       </form>
@@ -393,6 +404,7 @@
       {exportLoading ? $_('settings.exporting') : $_('settings.downloadRepo')}
     </button>
   </section>
+  </div>
   <section class="danger-zone">
     <h2>{$_('settings.deleteAccount')}</h2>
     <p class="warning">{$_('settings.deleteWarning')}</p>
@@ -438,13 +450,32 @@
 </div>
 <style>
   .page {
-    max-width: var(--width-md);
+    max-width: var(--width-lg);
     margin: 0 auto;
     padding: var(--space-7);
   }
 
   header {
     margin-bottom: var(--space-7);
+  }
+
+  .sections-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  @media (min-width: 800px) {
+    .sections-grid {
+      columns: 2;
+      column-gap: var(--space-6);
+      display: block;
+    }
+
+    .sections-grid section {
+      break-inside: avoid;
+      margin-bottom: var(--space-6);
+    }
   }
 
   .back {
@@ -466,6 +497,11 @@
     background: var(--bg-secondary);
     border-radius: var(--radius-xl);
     margin-bottom: var(--space-6);
+    height: fit-content;
+  }
+
+  .danger-zone {
+    margin-top: var(--space-6);
   }
 
   section h2 {
@@ -482,6 +518,11 @@
 
   .language-select {
     width: 100%;
+  }
+
+  form > button,
+  form > .actions {
+    margin-top: var(--space-4);
   }
 
   .actions {

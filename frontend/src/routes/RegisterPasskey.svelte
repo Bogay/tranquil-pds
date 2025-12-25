@@ -369,7 +369,7 @@
           <div class="warning-box">
             <strong>{$_('registerPasskey.didWebWarningTitle')}</strong>
             <ul>
-              <li><strong>{$_('registerPasskey.didWebWarning1')}</strong> Your identity will be <code>did:web:yourhandle.{serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>.</li>
+              <li><strong>{$_('registerPasskey.didWebWarning1')}</strong> {@html $_('registerPasskey.didWebWarning1Detail', { values: { did: `<code>did:web:yourhandle.${serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>` } })}</li>
               <li><strong>{$_('registerPasskey.didWebWarning2')}</strong> {$_('registerPasskey.didWebWarning2Detail')}</li>
               <li><strong>{$_('registerPasskey.didWebWarning3')}</strong> {$_('registerPasskey.didWebWarning3Detail')}</li>
               <li><strong>{$_('registerPasskey.didWebWarning4')}</strong> {$_('registerPasskey.didWebWarning4Detail')}</li>
@@ -542,17 +542,6 @@
 
   .required {
     color: var(--error-text);
-  }
-
-  .section-fieldset {
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5);
-  }
-
-  .section-fieldset legend {
-    font-weight: var(--font-semibold);
-    padding: 0 var(--space-3);
   }
 
   .section-hint {

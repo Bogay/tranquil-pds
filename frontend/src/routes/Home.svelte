@@ -13,6 +13,18 @@
   let pdsVersion = $state<string | null>(null)
   let userCount = $state<number | null>(null)
 
+  const heroWords = ['Bluesky', 'Tangled', 'Leaflet', 'ATProto']
+  const wordSpacing: Record<string, string> = {
+    'Bluesky': '0.01em',
+    'Tangled': '0.02em',
+    'Leaflet': '0.05em',
+    'ATProto': '0',
+  }
+  let currentWordIndex = $state(0)
+  let isTransitioning = $state(false)
+  let currentWord = $derived(heroWords[currentWordIndex])
+  let currentSpacing = $derived(wordSpacing[currentWord] || '0')
+
   onMount(() => {
     api.describeServer().then(info => {
       if (info.availableUserDomains?.length) {
@@ -22,6 +34,21 @@
         pdsVersion = info.version
       }
     }).catch(() => {})
+
+    const baseDuration = 2000
+    let wordTimeout: ReturnType<typeof setTimeout>
+
+    function cycleWord() {
+      isTransitioning = true
+      setTimeout(() => {
+        currentWordIndex = (currentWordIndex + 1) % heroWords.length
+        isTransitioning = false
+        const duration = heroWords[currentWordIndex] === 'ATProto' ? baseDuration * 2 : baseDuration
+        wordTimeout = setTimeout(cycleWord, duration)
+      }, 100)
+    }
+
+    wordTimeout = setTimeout(cycleWord, baseDuration)
 
     api.listRepos(1000).then(data => {
       userCount = data.repos.length
@@ -75,6 +102,7 @@
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       cancelAnimationFrame(animationId)
+      clearTimeout(wordTimeout)
     }
   })
 </script>
@@ -103,7 +131,7 @@
 
 <div class="home">
   <section class="hero">
-    <h1>A home for your ATProto account</h1>
+    <h1>A home for your <span class="cycling-word-container"><span class="cycling-word" class:transitioning={isTransitioning} style="letter-spacing: {currentSpacing}">{currentWord}</span></span> account</h1>
 
     <p class="lede">Tranquil PDS is a Personal Data Server, the thing that stores your posts, profile, and keys. Bluesky runs one for you, but you can run your own.</p>
 
@@ -268,15 +296,24 @@
 
   .user-count {
     font-size: var(--text-sm);
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--text-inverse);
+    opacity: 0.85;
     padding: 4px 10px;
     background: rgba(255, 255, 255, 0.15);
     border-radius: var(--radius-md);
+    white-space: nowrap;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .user-count {
+      background: rgba(0, 0, 0, 0.15);
+    }
   }
 
   .nav-meta {
     font-size: var(--text-sm);
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--text-inverse);
+    opacity: 0.6;
     letter-spacing: 0.05em;
   }
 
@@ -300,6 +337,22 @@
     line-height: var(--leading-tight);
     margin-bottom: var(--space-6);
     letter-spacing: -0.02em;
+  }
+
+  .cycling-word-container {
+    display: inline-block;
+    width: 3.9em;
+    text-align: left;
+  }
+
+  .cycling-word {
+    display: inline-block;
+    transition: opacity 0.1s ease, transform 0.1s ease;
+  }
+
+  .cycling-word.transitioning {
+    opacity: 0;
+    transform: scale(0.95);
   }
 
   .lede {
@@ -439,6 +492,7 @@
       text-align: center;
     }
 
+    .user-count,
     .nav-meta {
       display: none;
     }

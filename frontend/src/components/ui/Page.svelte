@@ -44,9 +44,9 @@
     padding: var(--space-7);
   }
 
-  .page-sm { max-width: var(--width-sm); }
-  .page-md { max-width: var(--width-md); }
-  .page-lg { max-width: var(--width-lg); }
+  .page-sm { max-width: var(--width-md); }
+  .page-md { max-width: var(--width-lg); }
+  .page-lg { max-width: var(--width-xl); }
 
   header {
     margin-bottom: var(--space-7);
