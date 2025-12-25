@@ -309,16 +309,12 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
     let verification_code = lines
         .iter()
         .enumerate()
-        .find(|(_, line)| {
-            line.contains("verification code is:") || line.contains("code is:")
-        })
+        .find(|(_, line)| line.contains("verification code is:") || line.contains("code is:"))
         .and_then(|(i, _)| lines.get(i + 1).map(|s| s.trim().to_string()))
         .or_else(|| {
             body_text
                 .split_whitespace()
-                .find(|word| {
-                    word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3
-                })
+                .find(|word| word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3)
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| body_text.clone());

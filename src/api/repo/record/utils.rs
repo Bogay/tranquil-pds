@@ -16,10 +16,10 @@ pub fn create_signed_commit(
     prev: Option<Cid>,
     signing_key: &SigningKey,
 ) -> Result<(Vec<u8>, Bytes), String> {
-    let did = jacquard::types::string::Did::new(did)
-        .map_err(|e| format!("Invalid DID: {:?}", e))?;
-    let rev = jacquard::types::string::Tid::from_str(rev)
-        .map_err(|e| format!("Invalid TID: {:?}", e))?;
+    let did =
+        jacquard::types::string::Did::new(did).map_err(|e| format!("Invalid DID: {:?}", e))?;
+    let rev =
+        jacquard::types::string::Tid::from_str(rev).map_err(|e| format!("Invalid TID: {:?}", e))?;
     let unsigned = Commit::new_unsigned(did, data, rev, prev);
     let signed = unsigned
         .sign(signing_key)

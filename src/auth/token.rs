@@ -33,9 +33,18 @@ pub fn create_refresh_token(did: &str, key_bytes: &[u8]) -> Result<String> {
 }
 
 pub fn create_access_token_with_metadata(did: &str, key_bytes: &[u8]) -> Result<TokenWithMetadata> {
+    create_access_token_with_scope_metadata(did, key_bytes, None)
+}
+
+pub fn create_access_token_with_scope_metadata(
+    did: &str,
+    key_bytes: &[u8],
+    scopes: Option<&str>,
+) -> Result<TokenWithMetadata> {
+    let scope = scopes.unwrap_or(SCOPE_ACCESS);
     create_signed_token_with_metadata(
         did,
-        SCOPE_ACCESS,
+        scope,
         TOKEN_TYPE_ACCESS,
         key_bytes,
         Duration::minutes(15),

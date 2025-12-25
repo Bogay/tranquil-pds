@@ -26,7 +26,8 @@ pub use scope_preference::{
 pub use token::{
     check_refresh_token_used, count_tokens_for_user, create_token, delete_oldest_tokens_for_user,
     delete_token, delete_token_family, enforce_token_limit_for_user, get_token_by_id,
-    get_token_by_refresh_token, list_tokens_for_user, revoke_tokens_for_client, rotate_token,
+    get_token_by_previous_refresh_token, get_token_by_refresh_token, list_tokens_for_user,
+    revoke_tokens_for_client, rotate_token,
 };
 pub use two_factor::{
     TwoFactorChallenge, check_user_2fa_enabled, cleanup_expired_2fa_challenges,

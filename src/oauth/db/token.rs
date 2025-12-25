@@ -122,7 +122,7 @@ pub async fn rotate_token(
     )
     .fetch_one(&mut *tx)
     .await?;
-    if let Some(old_rt) = old_refresh {
+    if let Some(ref old_rt) = old_refresh {
         sqlx::query!(
             r#"
             INSERT INTO oauth_used_refresh_token (refresh_token, token_id)
@@ -137,13 +137,15 @@ pub async fn rotate_token(
     sqlx::query!(
         r#"
         UPDATE oauth_token
-        SET token_id = $2, current_refresh_token = $3, expires_at = $4, updated_at = NOW()
+        SET token_id = $2, current_refresh_token = $3, expires_at = $4, updated_at = NOW(),
+            previous_refresh_token = $5, rotated_at = NOW()
         WHERE id = $1
         "#,
         old_db_id,
         new_token_id,
         new_refresh_token,
-        new_expires_at
+        new_expires_at,
+        old_refresh
     )
     .execute(&mut *tx)
     .await?;
@@ -164,6 +166,48 @@ pub async fn check_refresh_token_used(
     .fetch_optional(pool)
     .await?;
     Ok(row)
+}
+
+const REFRESH_GRACE_PERIOD_SECS: i64 = 60;
+
+pub async fn get_token_by_previous_refresh_token(
+    pool: &PgPool,
+    refresh_token: &str,
+) -> Result<Option<(i32, TokenData)>, OAuthError> {
+    let grace_cutoff = Utc::now() - chrono::Duration::seconds(REFRESH_GRACE_PERIOD_SECS);
+    let row = sqlx::query!(
+        r#"
+        SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,
+               device_id, parameters, details, code, current_refresh_token, scope
+        FROM oauth_token
+        WHERE previous_refresh_token = $1 AND rotated_at > $2
+        "#,
+        refresh_token,
+        grace_cutoff
+    )
+    .fetch_optional(pool)
+    .await?;
+    match row {
+        Some(r) => Ok(Some((
+            r.id,
+            TokenData {
+                did: r.did,
+                token_id: r.token_id,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+                expires_at: r.expires_at,
+                client_id: r.client_id,
+                client_auth: from_json(r.client_auth)?,
+                device_id: r.device_id,
+                parameters: from_json(r.parameters)?,
+                details: r.details,
+                code: r.code,
+                current_refresh_token: r.current_refresh_token,
+                scope: r.scope,
+            },
+        ))),
+        None => Ok(None),
+    }
 }
 
 pub async fn delete_token(pool: &PgPool, token_id: &str) -> Result<(), OAuthError> {

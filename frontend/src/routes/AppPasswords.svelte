@@ -9,11 +9,25 @@
   let loading = $state(true)
   let error = $state<string | null>(null)
   let newPasswordName = $state('')
+  let selectedScope = $state<string | null>(null)
   let creating = $state(false)
   let createdPassword = $state<{ name: string; password: string } | null>(null)
   let passwordCopied = $state(false)
   let passwordAcknowledged = $state(false)
   let revoking = $state<string | null>(null)
+
+  const SCOPE_PRESETS = [
+    { id: 'full', label: 'appPasswords.scopeFull', scopes: null },
+    { id: 'readonly', label: 'appPasswords.scopeReadOnly', scopes: 'rpc:app.bsky.*?aud=* rpc:chat.bsky.*?aud=* account:status?action=read' },
+    { id: 'post', label: 'appPasswords.scopePostOnly', scopes: 'repo:app.bsky.feed.post?action=create blob:*/*' },
+  ]
+
+  function getScopeLabel(scopes: string | null | undefined): string {
+    if (!scopes) return $_('appPasswords.scopeFull')
+    const preset = SCOPE_PRESETS.find(p => p.scopes === scopes)
+    if (preset) return $_(preset.label)
+    return $_('appPasswords.scopeCustom')
+  }
   $effect(() => {
     if (!auth.loading && !auth.session) {
       navigate('/login')
@@ -43,9 +57,11 @@
     creating = true
     error = null
     try {
-      const result = await api.createAppPassword(auth.session.accessJwt, newPasswordName.trim())
+      const scopeValue = selectedScope === null ? undefined : selectedScope
+      const result = await api.createAppPassword(auth.session.accessJwt, newPasswordName.trim(), scopeValue ?? undefined)
       createdPassword = { name: result.name, password: result.password }
       newPasswordName = ''
+      selectedScope = null
       await loadPasswords()
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Failed to create app password'
@@ -122,6 +138,22 @@
         disabled={creating}
         required
       />
+      <div class="scope-selector" role="group" aria-label={$_('appPasswords.permissions')}>
+        <span class="scope-label">{$_('appPasswords.permissions')}:</span>
+        <div class="scope-buttons">
+          {#each SCOPE_PRESETS as preset}
+            <button
+              type="button"
+              class="scope-btn"
+              class:selected={selectedScope === preset.scopes}
+              onclick={() => selectedScope = preset.scopes}
+              disabled={creating}
+            >
+              {$_(preset.label)}
+            </button>
+          {/each}
+        </div>
+      </div>
       <button type="submit" disabled={creating || !newPasswordName.trim()}>
         {creating ? $_('appPasswords.creating') : $_('common.create')}
       </button>
@@ -139,7 +171,10 @@
           <li>
             <div class="password-info">
               <span class="name">{pw.name}</span>
-              <span class="date">{$_('common.created')} {formatDate(pw.createdAt)}</span>
+              <span class="meta">
+                <span class="scope-badge" class:full={!pw.scopes}>{getScopeLabel(pw.scopes)}</span>
+                <span class="date">{$_('common.created')} {formatDate(pw.createdAt)}</span>
+              </span>
             </div>
             <button
               class="revoke"
@@ -279,11 +314,60 @@
 
   .create-section form {
     display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .create-section form > input {
+    flex: 1;
+  }
+
+  .create-section form > button {
+    align-self: flex-start;
+  }
+
+  .scope-selector {
+    display: flex;
+    flex-direction: column;
     gap: var(--space-2);
   }
 
-  .create-section input {
-    flex: 1;
+  .scope-label {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
+
+  .scope-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .scope-btn {
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    transition: all 0.15s ease;
+  }
+
+  .scope-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+  }
+
+  .scope-btn.selected {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--text-inverse);
+  }
+
+  .scope-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .password-list {
@@ -311,6 +395,27 @@
 
   .name {
     font-weight: var(--font-medium);
+  }
+
+  .meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .scope-badge {
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+
+  .scope-badge.full {
+    background: var(--success-bg);
+    border-color: var(--success-border);
+    color: var(--success-text);
   }
 
   .date {

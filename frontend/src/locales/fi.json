@@ -266,7 +266,12 @@
     "revokeConfirm": "Peruuta sovelluksen salasana \"{name}\"? Sovellukset, jotka käyttävät tätä salasanaa, eivät enää pääse tilillesi.",
     "saveWarningTitle": "Tärkeää: Tallenna tämä sovelluksen salasana!",
     "saveWarningMessage": "Tämä salasana tarvitaan kirjautumiseen sovelluksiin, jotka eivät tue pääsyavaimia tai OAuthia. Näet sen vain kerran.",
-    "acknowledgeLabel": "Olen tallentanut sovelluksen salasanani turvalliseen paikkaan"
+    "acknowledgeLabel": "Olen tallentanut sovelluksen salasanani turvalliseen paikkaan",
+    "permissions": "Käyttöoikeudet",
+    "scopeFull": "Täydet oikeudet",
+    "scopeReadOnly": "Vain luku",
+    "scopePostOnly": "Vain julkaisut",
+    "scopeCustom": "Mukautettu"
   },
   "sessions": {
     "title": "Aktiiviset istunnot",

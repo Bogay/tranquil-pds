@@ -14,7 +14,7 @@ Another excellent PDS is [Cocoon](https://github.com/haileyok/cocoon), written i
 
 This software isn't an afterthought by a company with limited resources.
 
-It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, and a built-in web UI for account management, OAuth consent, repo browsing, and admin.
+It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), and a built-in web UI for account management, OAuth consent, repo browsing, and admin.
 
 The PDS itself is a single small binary with no node/npm runtime. It does require postgres, valkey, and s3-compatible storage, which makes setup heavier than the reference PDS's sqlite. The tradeoff is that these are battle-tested pieces of infra that we already know how to scale, back up, and monitor. 
 
@@ -66,4 +66,5 @@ This project is very grateful to [@nel.pet](https://bsky.app/profile/did:plc:h5w
 
 ## License
 
-TBD
+AGPL-3.0-or-later. Documentation is CC BY-SA 4.0. See [LICENSE](LICENSE) for details.
+

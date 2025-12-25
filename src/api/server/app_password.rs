@@ -18,6 +18,8 @@ pub struct AppPassword {
     pub name: String,
     pub created_at: String,
     pub privileged: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -34,7 +36,7 @@ pub async fn list_app_passwords(
         Err(e) => return ApiError::from(e).into_response(),
     };
     match sqlx::query!(
-        "SELECT name, created_at, privileged FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
+        "SELECT name, created_at, privileged, scopes FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
         user_id
     )
     .fetch_all(&state.db)
@@ -47,6 +49,7 @@ pub async fn list_app_passwords(
                     name: row.name.clone(),
                     created_at: row.created_at.to_rfc3339(),
                     privileged: row.privileged,
+                    scopes: row.scopes.clone(),
                 })
                 .collect();
             Json(ListAppPasswordsOutput { passwords }).into_response()
@@ -62,6 +65,7 @@ pub async fn list_app_passwords(
 pub struct CreateAppPasswordInput {
     pub name: String,
     pub privileged: Option<bool>,
+    pub scopes: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -71,6 +75,8 @@ pub struct CreateAppPasswordOutput {
     pub password: String,
     pub created_at: String,
     pub privileged: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<String>,
 }
 
 pub async fn create_app_password(
@@ -131,14 +137,16 @@ pub async fn create_app_password(
         }
     };
     let privileged = input.privileged.unwrap_or(false);
+    let scopes = input.scopes.clone();
     let created_at = chrono::Utc::now();
     match sqlx::query!(
-        "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged, scopes) VALUES ($1, $2, $3, $4, $5, $6)",
         user_id,
         name,
         password_hash,
         created_at,
-        privileged
+        privileged,
+        scopes
     )
     .execute(&state.db)
     .await
@@ -148,6 +156,7 @@ pub async fn create_app_password(
             password,
             created_at: created_at.to_rfc3339(),
             privileged,
+            scopes,
         })
         .into_response(),
         Err(e) => {

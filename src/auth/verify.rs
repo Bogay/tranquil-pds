@@ -256,12 +256,7 @@ pub fn verify_access_token_typed(
     token: &str,
     key_bytes: &[u8],
 ) -> Result<TokenData<Claims>, TokenVerifyError> {
-    verify_token_typed_internal(
-        token,
-        key_bytes,
-        Some(TOKEN_TYPE_ACCESS),
-        Some(&[SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED]),
-    )
+    verify_token_typed_internal(token, key_bytes, Some(TOKEN_TYPE_ACCESS), None)
 }
 
 fn verify_token_typed_internal(
@@ -307,7 +302,10 @@ fn verify_token_typed_internal(
     let verifying_key = VerifyingKey::from(&signing_key);
 
     let message = format!("{}.{}", header_b64, claims_b64);
-    if verifying_key.verify(message.as_bytes(), &signature).is_err() {
+    if verifying_key
+        .verify(message.as_bytes(), &signature)
+        .is_err()
+    {
         return Err(TokenVerifyError::Invalid);
     }
 

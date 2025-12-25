@@ -8,13 +8,22 @@ use crate::oauth::scopes::{
     AccountAction, AccountAttr, IdentityAttr, RepoAction, ScopePermissions,
 };
 
+use super::token::SCOPE_ACCESS;
+
+fn has_custom_scope(scope: Option<&str>) -> bool {
+    match scope {
+        None => false,
+        Some(s) => s != SCOPE_ACCESS,
+    }
+}
+
 pub fn check_repo_scope(
     is_oauth: bool,
     scope: Option<&str>,
     action: RepoAction,
     collection: &str,
 ) -> Result<(), Response> {
-    if !is_oauth {
+    if !is_oauth && !has_custom_scope(scope) {
         return Ok(());
     }
 
@@ -32,7 +41,7 @@ pub fn check_repo_scope(
 }
 
 pub fn check_blob_scope(is_oauth: bool, scope: Option<&str>, mime: &str) -> Result<(), Response> {
-    if !is_oauth {
+    if !is_oauth && !has_custom_scope(scope) {
         return Ok(());
     }
 
@@ -55,7 +64,7 @@ pub fn check_rpc_scope(
     aud: &str,
     lxm: &str,
 ) -> Result<(), Response> {
-    if !is_oauth {
+    if !is_oauth && !has_custom_scope(scope) {
         return Ok(());
     }
 
@@ -78,7 +87,7 @@ pub fn check_account_scope(
     attr: AccountAttr,
     action: AccountAction,
 ) -> Result<(), Response> {
-    if !is_oauth {
+    if !is_oauth && !has_custom_scope(scope) {
         return Ok(());
     }
 
@@ -100,7 +109,7 @@ pub fn check_identity_scope(
     scope: Option<&str>,
     attr: IdentityAttr,
 ) -> Result<(), Response> {
-    if !is_oauth {
+    if !is_oauth && !has_custom_scope(scope) {
         return Ok(());
     }
 

@@ -173,6 +173,11 @@
         <h3>You decide what apps can do</h3>
         <p>When an app asks for access, you'll see exactly what it wants in plain language. Grant what makes sense, deny what doesn't.</p>
       </div>
+
+      <div class="feature">
+        <h3>App passwords with guardrails</h3>
+        <p>Create app passwords that can only do specific things: read-only for feed readers, post-only for bots. Full control over what each password can access.</p>
+      </div>
     </div>
 
     <h2>Everything in one place</h2>

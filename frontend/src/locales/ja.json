@@ -266,7 +266,12 @@
     "revokeConfirm": "アプリパスワード「{name}」を取り消しますか？このパスワードを使用しているアプリはアカウントにアクセスできなくなります。",
     "saveWarningTitle": "重要: このアプリパスワードを保存してください！",
     "saveWarningMessage": "このパスワードはパスキーや OAuth をサポートしていないアプリにサインインするために必要です。一度しか表示されません。",
-    "acknowledgeLabel": "アプリパスワードを安全な場所に保存しました"
+    "acknowledgeLabel": "アプリパスワードを安全な場所に保存しました",
+    "permissions": "権限",
+    "scopeFull": "フルアクセス",
+    "scopeReadOnly": "読み取り専用",
+    "scopePostOnly": "投稿のみ",
+    "scopeCustom": "カスタム"
   },
   "sessions": {
     "title": "アクティブセッション",

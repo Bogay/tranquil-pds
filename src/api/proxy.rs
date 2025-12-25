@@ -94,6 +94,16 @@ pub async fn proxy_handler(
             }
             Err(e) => {
                 warn!("Token validation failed: {:?}", e);
+                if matches!(e, crate::auth::TokenValidationError::TokenExpired) {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "ExpiredToken",
+                            "message": "Token has expired"
+                        })),
+                    )
+                        .into_response();
+                }
             }
         }
     }

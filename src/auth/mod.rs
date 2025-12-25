@@ -24,8 +24,8 @@ pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 pub use token::{
     SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH, TOKEN_TYPE_ACCESS,
     TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, TokenWithMetadata, create_access_token,
-    create_access_token_with_metadata, create_refresh_token, create_refresh_token_with_metadata,
-    create_service_token,
+    create_access_token_with_metadata, create_access_token_with_scope_metadata,
+    create_refresh_token, create_refresh_token_with_metadata, create_service_token,
 };
 pub use verify::{
     TokenVerifyError, get_did_from_token, get_jti_from_token, verify_access_token,
@@ -66,6 +66,11 @@ pub struct AuthenticatedUser {
 
 impl AuthenticatedUser {
     pub fn permissions(&self) -> ScopePermissions {
+        if let Some(ref scope) = self.scope
+            && scope != SCOPE_ACCESS
+        {
+            return ScopePermissions::from_scope_string(Some(scope));
+        }
         if !self.is_oauth {
             return ScopePermissions::from_scope_string(Some("atproto"));
         }
@@ -212,8 +217,8 @@ async fn validate_bearer_token_with_options_internal(
                     }
 
                     if !session_valid {
-                        let session_exists = sqlx::query_scalar!(
-                            "SELECT 1 as one FROM session_tokens WHERE did = $1 AND access_jti = $2 AND access_expires_at > NOW()",
+                        let session_row = sqlx::query!(
+                            "SELECT access_expires_at FROM session_tokens WHERE did = $1 AND access_jti = $2",
                             did,
                             jti
                         )
@@ -222,16 +227,24 @@ async fn validate_bearer_token_with_options_internal(
                         .ok()
                         .flatten();
 
-                        session_valid = session_exists.is_some();
-
-                        if session_valid && let Some(c) = cache {
-                            let _ = c
-                                .set(
-                                    &session_cache_key,
-                                    "1",
-                                    Duration::from_secs(SESSION_CACHE_TTL_SECS),
-                                )
-                                .await;
+                        match session_row {
+                            Some(row) => {
+                                if row.access_expires_at > chrono::Utc::now() {
+                                    session_valid = true;
+                                    if let Some(c) = cache {
+                                        let _ = c
+                                            .set(
+                                                &session_cache_key,
+                                                "1",
+                                                Duration::from_secs(SESSION_CACHE_TTL_SECS),
+                                            )
+                                            .await;
+                                    }
+                                } else {
+                                    return Err(TokenValidationError::TokenExpired);
+                                }
+                            }
+                            None => {}
                         }
                     }
 
@@ -241,7 +254,7 @@ async fn validate_bearer_token_with_options_internal(
                             key_bytes: Some(decrypted_key),
                             is_oauth: false,
                             is_admin,
-                            scope: None,
+                            scope: token_data.claims.scope.clone(),
                         });
                     }
                 }

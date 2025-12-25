@@ -266,7 +266,12 @@
     "revokeConfirm": "Revoke app password \"{name}\"? Apps using this password will no longer be able to access your account.",
     "saveWarningTitle": "Important: Save this app password!",
     "saveWarningMessage": "This password is required to sign into apps that don't support passkeys or OAuth. You will only see it once.",
-    "acknowledgeLabel": "I have saved my app password in a secure location"
+    "acknowledgeLabel": "I have saved my app password in a secure location",
+    "permissions": "Permissions",
+    "scopeFull": "Full Access",
+    "scopeReadOnly": "Read Only",
+    "scopePostOnly": "Post Only",
+    "scopeCustom": "Custom"
   },
   "sessions": {
     "title": "Active Sessions",

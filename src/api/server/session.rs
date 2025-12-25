@@ -125,24 +125,28 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-    let password_valid = if row
+    let (password_valid, app_password_scopes) = if row
         .password_hash
         .as_ref()
         .map(|h| verify(&input.password, h).unwrap_or(false))
         .unwrap_or(false)
     {
-        true
+        (true, None)
     } else {
         let app_passwords = sqlx::query!(
-            "SELECT password_hash FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
+            "SELECT password_hash, scopes FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
             row.id
         )
         .fetch_all(&state.db)
         .await
         .unwrap_or_default();
-        app_passwords
+        let matched = app_passwords
             .iter()
-            .any(|app| verify(&input.password, &app.password_hash).unwrap_or(false))
+            .find(|app| verify(&input.password, &app.password_hash).unwrap_or(false));
+        match matched {
+            Some(app) => (true, app.scopes.clone()),
+            None => (false, None),
+        }
     };
     if !password_valid {
         warn!("Password verification failed for login attempt");
@@ -177,7 +181,11 @@ pub async fn create_session(
         )
             .into_response();
     }
-    let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
+    let access_meta = match crate::auth::create_access_token_with_scope_metadata(
+        &row.did,
+        &key_bytes,
+        app_password_scopes.as_deref(),
+    ) {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create access token: {:?}", e);
@@ -192,14 +200,15 @@ pub async fn create_session(
         }
     };
     if let Err(e) = sqlx::query!(
-        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         row.did,
         access_meta.jti,
         refresh_meta.jti,
         access_meta.expires_at,
         refresh_meta.expires_at,
         is_legacy_login,
-        false
+        false,
+        app_password_scopes
     )
     .execute(&state.db)
     .await
@@ -388,7 +397,7 @@ pub async fn refresh_session(
         .into_response();
     }
     let session_row = match sqlx::query!(
-        r#"SELECT st.id, st.did, k.key_bytes, k.encryption_version
+        r#"SELECT st.id, st.did, st.scope, k.key_bytes, k.encryption_version
            FROM session_tokens st
            JOIN users u ON st.did = u.did
            JOIN user_keys k ON u.id = k.user_id
@@ -420,14 +429,17 @@ pub async fn refresh_session(
     if crate::auth::verify_refresh_token(&refresh_token, &key_bytes).is_err() {
         return ApiError::AuthenticationFailedMsg("Invalid refresh token".into()).into_response();
     }
-    let new_access_meta =
-        match crate::auth::create_access_token_with_metadata(&session_row.did, &key_bytes) {
-            Ok(m) => m,
-            Err(e) => {
-                error!("Failed to create access token: {:?}", e);
-                return ApiError::InternalError.into_response();
-            }
-        };
+    let new_access_meta = match crate::auth::create_access_token_with_scope_metadata(
+        &session_row.did,
+        &key_bytes,
+        session_row.scope.as_deref(),
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            error!("Failed to create access token: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+    };
     let new_refresh_meta =
         match crate::auth::create_refresh_token_with_metadata(&session_row.did, &key_bytes) {
             Ok(m) => m,
@@ -653,15 +665,17 @@ pub async fn confirm_signup(
             return ApiError::InternalError.into_response();
         }
     };
+    let no_scope: Option<String> = None;
     if let Err(e) = sqlx::query!(
-        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         row.did,
         access_meta.jti,
         refresh_meta.jti,
         access_meta.expires_at,
         refresh_meta.expires_at,
         false,
-        false
+        false,
+        no_scope
     )
     .execute(&state.db)
     .await

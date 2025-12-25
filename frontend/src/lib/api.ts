@@ -93,6 +93,7 @@ export interface Session {
 export interface AppPassword {
   name: string;
   createdAt: string;
+  scopes?: string;
 }
 
 export interface InviteCode {
@@ -226,11 +227,14 @@ export const api = {
   async createAppPassword(
     token: string,
     name: string,
-  ): Promise<{ name: string; password: string; createdAt: string }> {
+    scopes?: string,
+  ): Promise<
+    { name: string; password: string; createdAt: string; scopes?: string }
+  > {
     return xrpc("com.atproto.server.createAppPassword", {
       method: "POST",
       token,
-      body: { name },
+      body: { name, scopes },
     });
   },
 

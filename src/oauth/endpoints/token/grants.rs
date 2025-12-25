@@ -175,6 +175,36 @@ pub async fn handle_refresh_token_grant(
         "Refresh token grant requested"
     );
     if let Some(token_id) = db::check_refresh_token_used(&state.db, &refresh_token_str).await? {
+        if let Some((_db_id, token_data)) =
+            db::get_token_by_previous_refresh_token(&state.db, &refresh_token_str).await?
+        {
+            tracing::info!(
+                refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
+                "Refresh token reuse within grace period, returning existing tokens"
+            );
+            let dpop_jkt = token_data.parameters.dpop_jkt.as_deref();
+            let access_token = create_access_token(
+                &token_data.token_id,
+                &token_data.did,
+                dpop_jkt,
+                token_data.scope.as_deref(),
+            )?;
+            let mut response_headers = HeaderMap::new();
+            let config = AuthConfig::get();
+            let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
+            response_headers.insert("DPoP-Nonce", verifier.generate_nonce().parse().unwrap());
+            return Ok((
+                response_headers,
+                Json(TokenResponse {
+                    access_token,
+                    token_type: if dpop_jkt.is_some() { "DPoP" } else { "Bearer" }.to_string(),
+                    expires_in: ACCESS_TOKEN_EXPIRY_SECONDS as u64,
+                    refresh_token: token_data.current_refresh_token,
+                    scope: token_data.scope,
+                    sub: Some(token_data.did),
+                }),
+            ));
+        }
         tracing::warn!(
             refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
             "Refresh token reuse detected, revoking token family"

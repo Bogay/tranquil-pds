@@ -2,13 +2,6 @@
 
 ## Active development
 
-### Frontend
-So like... make the thing unique, make it cool.
-
-- [ ] Frontpage that explains what this thing is
-- [ ] Unique "brand" style both unauthed and authed
-- [ ] Better documentation on how to sub out the entire frontend for whatever the users want
-
 ### Delegated accounts
 Accounts controlled by other accounts rather than having their own password. When logging in as a delegated account, OAuth asks you to authenticate with a linked controller account. Uses OAuth scopes as the permission model.
 
@@ -90,3 +83,5 @@ Web UI: OAuth login, registration, email verification, password reset, multi-acc
 Auth: ES256K + HS256 dual support, JTI-only token storage, refresh token family tracking, encrypted signing keys (AES-256-GCM), DPoP replay protection, constant-time comparisons.
 
 Passkeys and 2FA: WebAuthn/FIDO2 passkey registration and authentication, TOTP with QR setup, backup codes (hashed, one-time use), passkey-only account creation, trusted devices (remember this browser), re-auth for sensitive actions, rate-limited 2FA attempts, settings UI for managing all auth methods.
+
+App password scopes: Granular permissions for app passwords using the same scope system as OAuth. Preset buttons for common use cases (full access, read-only, post-only), scope stored in session and preserved across token refresh, explicit RPC/repo/blob scope enforcement for restricted passwords.

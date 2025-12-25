@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, info};
 
 const MAX_BATCH_WRITES: usize = 200;
 
@@ -79,6 +79,11 @@ pub async fn apply_writes(
     headers: axum::http::HeaderMap,
     Json(input): Json<ApplyWritesInput>,
 ) -> Response {
+    info!(
+        "apply_writes called: repo={}, writes={}",
+        input.repo,
+        input.writes.len()
+    );
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
@@ -147,7 +152,11 @@ pub async fn apply_writes(
             .into_response();
     }
 
-    if is_oauth {
+    let has_custom_scope = scope
+        .as_ref()
+        .map(|s| s != "com.atproto.access")
+        .unwrap_or(false);
+    if is_oauth || has_custom_scope {
         use std::collections::HashSet;
         let create_collections: HashSet<&str> = input
             .writes

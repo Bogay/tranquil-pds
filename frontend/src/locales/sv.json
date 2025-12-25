@@ -266,7 +266,12 @@
     "revokeConfirm": "Återkalla applösenord \"{name}\"? Appar som använder detta lösenord kommer inte längre att kunna komma åt ditt konto.",
     "saveWarningTitle": "Viktigt: Spara detta applösenord!",
     "saveWarningMessage": "Detta lösenord krävs för att logga in i appar som inte stöder passkeys eller OAuth. Du ser det bara en gång.",
-    "acknowledgeLabel": "Jag har sparat mitt applösenord på en säker plats"
+    "acknowledgeLabel": "Jag har sparat mitt applösenord på en säker plats",
+    "permissions": "Behörigheter",
+    "scopeFull": "Full åtkomst",
+    "scopeReadOnly": "Endast läsning",
+    "scopePostOnly": "Endast publicering",
+    "scopeCustom": "Anpassad"
   },
   "sessions": {
     "title": "Aktiva sessioner",

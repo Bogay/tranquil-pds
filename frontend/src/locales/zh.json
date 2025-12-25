@@ -266,7 +266,12 @@
     "revokeConfirm": "撤销「{name}」的密码？使用此密码的应用将无法再访问您的账户。",
     "saveWarningTitle": "重要：请保存此应用专用密码！",
     "saveWarningMessage": "此密码用于登录不支持通行密钥或 OAuth 的应用。您只能看到一次。",
-    "acknowledgeLabel": "我已将应用专用密码保存在安全的地方"
+    "acknowledgeLabel": "我已将应用专用密码保存在安全的地方",
+    "permissions": "权限",
+    "scopeFull": "完全访问",
+    "scopeReadOnly": "只读",
+    "scopePostOnly": "仅发帖",
+    "scopeCustom": "自定义"
   },
   "sessions": {
     "title": "登录会话",
