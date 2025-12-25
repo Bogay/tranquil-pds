@@ -9,7 +9,7 @@ const SCOPES = [
 ].join(' ')
 const CLIENT_ID = !(import.meta.env.DEV)
     ? `${window.location.origin}/oauth/client-metadata.json`
-    : `http://localhost/oauth/client-metadata.json?scope=${SCOPES}`
+    : `http://localhost/?scope=${SCOPES}`
 const REDIRECT_URI = `${window.location.origin}/`
 
 interface OAuthState {

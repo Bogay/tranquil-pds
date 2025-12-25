@@ -91,7 +91,8 @@ impl ClientMetadataCache {
             url.scheme() == "http"
                 && url.host_str() == Some("localhost")
                 && url.port().is_none()
-                && url.path().is_empty()
+                // empty path
+                && url.path() == "/"
         } else {
             false
         }
