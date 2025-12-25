@@ -1,0 +1,5 @@
+Different licenses apply to different parts of this repo. Unless otherwise specified:
+- Tranquil PDS itself (code, build scripts, anything else not directly mentioned below) is under AGPLv3 or later.
+- Documentation found in this repo under ./docs are licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+
+All three license texts can be found in the repository root. The licenses for documentation and branding can also be found in their respective directories.

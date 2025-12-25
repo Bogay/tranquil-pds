@@ -18,7 +18,7 @@ in rustPlatform.buildRustPackage {
         ./src
       	./.sqlx
       	./migrations
-	      ./frontend
+        ./frontend
       ]
     );
   };
@@ -34,4 +34,8 @@ in rustPlatform.buildRustPackage {
   cargoLock.lockFile = ./Cargo.lock;
 
   doCheck = false;
+
+  meta = {
+    license = lib.licenses.agpl3Plus;
+  };
 }
