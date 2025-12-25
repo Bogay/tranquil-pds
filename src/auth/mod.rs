@@ -28,7 +28,8 @@ pub use token::{
     create_service_token,
 };
 pub use verify::{
-    get_did_from_token, get_jti_from_token, verify_access_token, verify_refresh_token, verify_token,
+    TokenVerifyError, get_did_from_token, get_jti_from_token, verify_access_token,
+    verify_access_token_typed, verify_refresh_token, verify_token,
 };
 
 const KEY_CACHE_TTL_SECS: u64 = 300;
@@ -40,6 +41,7 @@ pub enum TokenValidationError {
     AccountTakedown,
     KeyDecryptionFailed,
     AuthenticationFailed,
+    TokenExpired,
 }
 
 impl fmt::Display for TokenValidationError {
@@ -49,6 +51,7 @@ impl fmt::Display for TokenValidationError {
             Self::AccountTakedown => write!(f, "AccountTakedown"),
             Self::KeyDecryptionFailed => write!(f, "KeyDecryptionFailed"),
             Self::AuthenticationFailed => write!(f, "AuthenticationFailed"),
+            Self::TokenExpired => write!(f, "ExpiredToken"),
         }
     }
 }
@@ -193,53 +196,59 @@ async fn validate_bearer_token_with_options_internal(
                 return Err(TokenValidationError::AccountTakedown);
             }
 
-            if let Ok(token_data) = verify_access_token(token, &decrypted_key) {
-                let jti = &token_data.claims.jti;
-                let session_cache_key = format!("auth:session:{}:{}", did, jti);
-                let mut session_valid = false;
+            match verify_access_token_typed(token, &decrypted_key) {
+                Ok(token_data) => {
+                    let jti = &token_data.claims.jti;
+                    let session_cache_key = format!("auth:session:{}:{}", did, jti);
+                    let mut session_valid = false;
 
-                if let Some(c) = cache {
-                    if let Some(cached_value) = c.get(&session_cache_key).await {
-                        session_valid = cached_value == "1";
-                        crate::metrics::record_auth_cache_hit("session");
-                    } else {
-                        crate::metrics::record_auth_cache_miss("session");
+                    if let Some(c) = cache {
+                        if let Some(cached_value) = c.get(&session_cache_key).await {
+                            session_valid = cached_value == "1";
+                            crate::metrics::record_auth_cache_hit("session");
+                        } else {
+                            crate::metrics::record_auth_cache_miss("session");
+                        }
+                    }
+
+                    if !session_valid {
+                        let session_exists = sqlx::query_scalar!(
+                            "SELECT 1 as one FROM session_tokens WHERE did = $1 AND access_jti = $2 AND access_expires_at > NOW()",
+                            did,
+                            jti
+                        )
+                        .fetch_optional(db)
+                        .await
+                        .ok()
+                        .flatten();
+
+                        session_valid = session_exists.is_some();
+
+                        if session_valid && let Some(c) = cache {
+                            let _ = c
+                                .set(
+                                    &session_cache_key,
+                                    "1",
+                                    Duration::from_secs(SESSION_CACHE_TTL_SECS),
+                                )
+                                .await;
+                        }
+                    }
+
+                    if session_valid {
+                        return Ok(AuthenticatedUser {
+                            did: did.clone(),
+                            key_bytes: Some(decrypted_key),
+                            is_oauth: false,
+                            is_admin,
+                            scope: None,
+                        });
                     }
                 }
-
-                if !session_valid {
-                    let session_exists = sqlx::query_scalar!(
-                        "SELECT 1 as one FROM session_tokens WHERE did = $1 AND access_jti = $2 AND access_expires_at > NOW()",
-                        did,
-                        jti
-                    )
-                    .fetch_optional(db)
-                    .await
-                    .ok()
-                    .flatten();
-
-                    session_valid = session_exists.is_some();
-
-                    if session_valid && let Some(c) = cache {
-                        let _ = c
-                            .set(
-                                &session_cache_key,
-                                "1",
-                                Duration::from_secs(SESSION_CACHE_TTL_SECS),
-                            )
-                            .await;
-                    }
+                Err(verify::TokenVerifyError::Expired) => {
+                    return Err(TokenValidationError::TokenExpired);
                 }
-
-                if session_valid {
-                    return Ok(AuthenticatedUser {
-                        did: did.clone(),
-                        key_bytes: Some(decrypted_key),
-                        is_oauth: false,
-                        is_admin,
-                        scope: None,
-                    });
-                }
+                Err(verify::TokenVerifyError::Invalid) => {}
             }
         }
     }
@@ -283,6 +292,8 @@ async fn validate_bearer_token_with_options_internal(
                 is_admin: oauth_token.is_admin,
                 scope: oauth_info.scope,
             });
+        } else {
+            return Err(TokenValidationError::TokenExpired);
         }
     }
 

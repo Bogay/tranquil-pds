@@ -19,6 +19,7 @@ pub enum AuthError {
     MissingToken,
     InvalidFormat,
     AuthenticationFailed,
+    TokenExpired,
     AccountDeactivated,
     AccountTakedown,
     AdminRequired,
@@ -39,8 +40,13 @@ impl IntoResponse for AuthError {
             ),
             AuthError::AuthenticationFailed => (
                 StatusCode::UNAUTHORIZED,
-                "AuthenticationFailed",
-                "Invalid or expired token",
+                "InvalidToken",
+                "Token could not be verified",
+            ),
+            AuthError::TokenExpired => (
+                StatusCode::UNAUTHORIZED,
+                "ExpiredToken",
+                "Token has expired",
             ),
             AuthError::AccountDeactivated => (
                 StatusCode::UNAUTHORIZED,
@@ -174,6 +180,7 @@ impl FromRequestParts<AppState> for BearerAuth {
                 Ok(user) => Ok(BearerAuth(user)),
                 Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
                 Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         } else {
@@ -181,6 +188,7 @@ impl FromRequestParts<AppState> for BearerAuth {
                 Ok(user) => Ok(BearerAuth(user)),
                 Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
                 Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         }
@@ -224,6 +232,7 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
             {
                 Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
                 Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         } else {
@@ -236,6 +245,7 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
             {
                 Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
                 Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         }
@@ -284,6 +294,9 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
                 Err(TokenValidationError::AccountTakedown) => {
                     return Err(AuthError::AccountTakedown);
                 }
+                Err(TokenValidationError::TokenExpired) => {
+                    return Err(AuthError::TokenExpired);
+                }
                 Err(_) => return Err(AuthError::AuthenticationFailed),
             }
         } else {
@@ -294,6 +307,9 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
                 }
                 Err(TokenValidationError::AccountTakedown) => {
                     return Err(AuthError::AccountTakedown);
+                }
+                Err(TokenValidationError::TokenExpired) => {
+                    return Err(AuthError::TokenExpired);
                 }
                 Err(_) => return Err(AuthError::AuthenticationFailed),
             }

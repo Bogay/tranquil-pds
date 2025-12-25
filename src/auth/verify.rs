@@ -10,9 +10,27 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey, signature::Verifier};
 use sha2::Sha256;
+use std::fmt;
 use subtle::ConstantTimeEq;
 
 type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenVerifyError {
+    Expired,
+    Invalid,
+}
+
+impl fmt::Display for TokenVerifyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Expired => write!(f, "Token expired"),
+            Self::Invalid => write!(f, "Token invalid"),
+        }
+    }
+}
+
+impl std::error::Error for TokenVerifyError {}
 
 pub fn get_did_from_token(token: &str) -> Result<String, String> {
     let parts: Vec<&str> = token.split('.').collect();
@@ -228,6 +246,88 @@ fn verify_token_hs256_internal(
         let token_scope = claims.scope.as_deref().unwrap_or("");
         if !scopes.contains(&token_scope) {
             return Err(anyhow!("Invalid token scope: {}", token_scope));
+        }
+    }
+
+    Ok(TokenData { claims })
+}
+
+pub fn verify_access_token_typed(
+    token: &str,
+    key_bytes: &[u8],
+) -> Result<TokenData<Claims>, TokenVerifyError> {
+    verify_token_typed_internal(
+        token,
+        key_bytes,
+        Some(TOKEN_TYPE_ACCESS),
+        Some(&[SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED]),
+    )
+}
+
+fn verify_token_typed_internal(
+    token: &str,
+    key_bytes: &[u8],
+    expected_typ: Option<&str>,
+    allowed_scopes: Option<&[&str]>,
+) -> Result<TokenData<Claims>, TokenVerifyError> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err(TokenVerifyError::Invalid);
+    }
+
+    let header_b64 = parts[0];
+    let claims_b64 = parts[1];
+    let signature_b64 = parts[2];
+
+    let Ok(header_bytes) = URL_SAFE_NO_PAD.decode(header_b64) else {
+        return Err(TokenVerifyError::Invalid);
+    };
+
+    let Ok(header) = serde_json::from_slice::<Header>(&header_bytes) else {
+        return Err(TokenVerifyError::Invalid);
+    };
+
+    if let Some(expected) = expected_typ
+        && header.typ != expected
+    {
+        return Err(TokenVerifyError::Invalid);
+    }
+
+    let Ok(signature_bytes) = URL_SAFE_NO_PAD.decode(signature_b64) else {
+        return Err(TokenVerifyError::Invalid);
+    };
+
+    let Ok(signature) = Signature::from_slice(&signature_bytes) else {
+        return Err(TokenVerifyError::Invalid);
+    };
+
+    let Ok(signing_key) = SigningKey::from_slice(key_bytes) else {
+        return Err(TokenVerifyError::Invalid);
+    };
+    let verifying_key = VerifyingKey::from(&signing_key);
+
+    let message = format!("{}.{}", header_b64, claims_b64);
+    if verifying_key.verify(message.as_bytes(), &signature).is_err() {
+        return Err(TokenVerifyError::Invalid);
+    }
+
+    let Ok(claims_bytes) = URL_SAFE_NO_PAD.decode(claims_b64) else {
+        return Err(TokenVerifyError::Invalid);
+    };
+
+    let Ok(claims) = serde_json::from_slice::<Claims>(&claims_bytes) else {
+        return Err(TokenVerifyError::Invalid);
+    };
+
+    let now = Utc::now().timestamp() as usize;
+    if claims.exp < now {
+        return Err(TokenVerifyError::Expired);
+    }
+
+    if let Some(scopes) = allowed_scopes {
+        let token_scope = claims.scope.as_deref().unwrap_or("");
+        if !scopes.contains(&token_scope) {
+            return Err(TokenVerifyError::Invalid);
         }
     }
 

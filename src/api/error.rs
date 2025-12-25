@@ -192,6 +192,7 @@ impl From<crate::auth::TokenValidationError> for ApiError {
             crate::auth::TokenValidationError::AccountTakedown => Self::AccountTakedown,
             crate::auth::TokenValidationError::KeyDecryptionFailed => Self::InternalError,
             crate::auth::TokenValidationError::AuthenticationFailed => Self::AuthenticationFailed,
+            crate::auth::TokenValidationError::TokenExpired => Self::ExpiredToken,
         }
     }
 }
