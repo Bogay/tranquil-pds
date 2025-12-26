@@ -12,6 +12,7 @@
   clippy,
   rustfmt,
   rust-analyzer,
+  sqlx-cli,
 
   # frontend tooling
   deno,
@@ -34,7 +35,8 @@ in mkShell {
     clippy
     rustfmt
     rust-analyzer
-
+    sqlx-cli
+    
     deno
     svelte-language-server
     typescript-language-server
