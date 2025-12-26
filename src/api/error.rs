@@ -42,6 +42,7 @@ pub enum ApiError {
     AppPasswordNotFound,
     InvalidSwap,
     Forbidden,
+    InsufficientScope,
     InvitesDisabled,
     DatabaseError,
     UpstreamFailure,
@@ -72,7 +73,9 @@ impl ApiError {
             | Self::TokenRequired
             | Self::AccountDeactivated
             | Self::AccountTakedown => StatusCode::UNAUTHORIZED,
-            Self::Forbidden | Self::InvitesDisabled => StatusCode::FORBIDDEN,
+            Self::Forbidden | Self::InsufficientScope | Self::InvitesDisabled => {
+                StatusCode::FORBIDDEN
+            }
             Self::AccountNotFound
             | Self::RepoNotFound
             | Self::RepoNotFoundMsg(_)
@@ -114,6 +117,7 @@ impl ApiError {
             Self::AccountDeactivated => Cow::Borrowed("AccountDeactivated"),
             Self::AccountTakedown => Cow::Borrowed("AccountTakedown"),
             Self::Forbidden => Cow::Borrowed("Forbidden"),
+            Self::InsufficientScope => Cow::Borrowed("InsufficientScope"),
             Self::InvitesDisabled => Cow::Borrowed("InvitesDisabled"),
             Self::AccountNotFound => Cow::Borrowed("AccountNotFound"),
             Self::RepoNotFound | Self::RepoNotFoundMsg(_) => Cow::Borrowed("RepoNotFound"),

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,\n               device_id, parameters, details, code, current_refresh_token, scope\n        FROM oauth_token\n        WHERE current_refresh_token = $1\n        ",
+  "query": "\n        SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,\n               device_id, parameters, details, code, current_refresh_token, scope, controller_did\n        FROM oauth_token\n        WHERE previous_refresh_token = $1 AND rotated_at > $2\n        ",
   "describe": {
     "columns": [
       {
@@ -72,11 +72,17 @@
         "ordinal": 13,
         "name": "scope",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "controller_did",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Text",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -93,8 +99,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "bc816a96fa2e186cd0ff279f98543bebd9a815677d86fa8852f51fe76f95ce95"
+  "hash": "06c00269b11c250e85bde385e18ae8df6b1cc122f584105a8ea98861ff89e1b9"
 }

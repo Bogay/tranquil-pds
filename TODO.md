@@ -2,23 +2,6 @@
 
 ## Active development
 
-### Delegated accounts
-Accounts controlled by other accounts rather than having their own password. When logging in as a delegated account, OAuth asks you to authenticate with a linked controller account. Uses OAuth scopes as the permission model.
-
-- [ ] Account type flag in actors table (personal | delegated)
-- [ ] account_delegations table (delegated_did, controller_did, granted_scopes[], granted_at, granted_by, revoked_at)
-- [ ] Detect delegated account during authorize flow
-- [ ] Redirect to "authenticate as controller" instead of password prompt
-- [ ] Validate controller has delegation grant for this account
-- [ ] Issue token with intersection of (requested scopes :intersection-emoji: granted scopes)
-- [ ] Token includes act_as claim indicating delegation
-- [ ] Define standard scope sets (owner, admin, editor, viewer)
-- [ ] Create delegated account flow (no password, must add initial controller)
-- [ ] Controller management page (add/remove controllers, modify scopes)
-- [ ] "Act as" account switcher for users with delegation grants
-- [ ] Log all actions with both actor DID and controller DID
-- [ ] Audit log view for delegated account owners
-
 ### Migration tool
 Seamless account migration built into the UI, inspired by pdsmoover. Users shouldn't need external tools or brain surgery on half-done account states.
 
@@ -85,3 +68,5 @@ Auth: ES256K + HS256 dual support, JTI-only token storage, refresh token family 
 Passkeys and 2FA: WebAuthn/FIDO2 passkey registration and authentication, TOTP with QR setup, backup codes (hashed, one-time use), passkey-only account creation, trusted devices (remember this browser), re-auth for sensitive actions, rate-limited 2FA attempts, settings UI for managing all auth methods.
 
 App password scopes: Granular permissions for app passwords using the same scope system as OAuth. Preset buttons for common use cases (full access, read-only, post-only), scope stored in session and preserved across token refresh, explicit RPC/repo/blob scope enforcement for restricted passwords.
+
+Account Delegation: Delegated accounts controlled by other accounts instead of passwords. OAuth delegation flow (authenticate as controller), scope-based permissions (owner/admin/editor/viewer presets), scope intersection (tokens limited to granted permissions), `act` claim for delegation tracking, creating delegated account flow, controller management UI, "act as" account switcher, comprehensive audit logging with actor/controller tracking, delegation-aware OAuth consent with permission limitation notices.

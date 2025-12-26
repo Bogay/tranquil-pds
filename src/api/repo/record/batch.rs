@@ -1,6 +1,7 @@
 use super::validation::validate_record;
 use super::write::has_verified_comms_channel;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
+use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use axum::{
@@ -109,6 +110,7 @@ pub async fn apply_writes(
     let did = auth_user.did.clone();
     let is_oauth = auth_user.is_oauth;
     let scope = auth_user.scope;
+    let controller_did = auth_user.controller_did.clone();
     if input.repo != did {
         return (
             StatusCode::FORBIDDEN,
@@ -116,26 +118,21 @@ pub async fn apply_writes(
         )
             .into_response();
     }
-    match has_verified_comms_channel(&state.db, &did).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "error": "AccountNotVerified",
-                    "message": "You must verify at least one notification channel (email, Discord, Telegram, or Signal) before creating records"
-                })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error checking notification channels: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
+    let is_verified = has_verified_comms_channel(&state.db, &did)
+        .await
+        .unwrap_or(false);
+    let is_delegated = crate::delegation::is_delegated_account(&state.db, &did)
+        .await
+        .unwrap_or(false);
+    if !is_verified && !is_delegated {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "AccountNotVerified",
+                "message": "You must verify at least one notification channel (email, Discord, Telegram, or Signal) before creating records"
+            })),
+        )
+            .into_response();
     }
     if input.writes.is_empty() {
         return (
@@ -485,6 +482,51 @@ pub async fn apply_writes(
                 .into_response();
         }
     };
+
+    if let Some(ref controller) = controller_did {
+        let write_summary: Vec<serde_json::Value> = input
+            .writes
+            .iter()
+            .map(|w| match w {
+                WriteOp::Create {
+                    collection, rkey, ..
+                } => json!({
+                    "action": "create",
+                    "collection": collection,
+                    "rkey": rkey
+                }),
+                WriteOp::Update {
+                    collection, rkey, ..
+                } => json!({
+                    "action": "update",
+                    "collection": collection,
+                    "rkey": rkey
+                }),
+                WriteOp::Delete { collection, rkey } => json!({
+                    "action": "delete",
+                    "collection": collection,
+                    "rkey": rkey
+                }),
+            })
+            .collect();
+
+        let _ = delegation::log_delegation_action(
+            &state.db,
+            &did,
+            controller,
+            Some(controller),
+            DelegationActionType::RepoWrite,
+            Some(json!({
+                "action": "apply_writes",
+                "count": input.writes.len(),
+                "writes": write_summary
+            })),
+            None,
+            None,
+        )
+        .await;
+    }
+
     (
         StatusCode::OK,
         Json(ApplyWritesOutput {

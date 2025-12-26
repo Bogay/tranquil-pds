@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT st.id, st.did, st.scope, k.key_bytes, k.encryption_version\n           FROM session_tokens st\n           JOIN users u ON st.did = u.did\n           JOIN user_keys k ON u.id = k.user_id\n           WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()\n           FOR UPDATE OF st",
+  "query": "SELECT st.id, st.did, st.scope, st.controller_did, k.key_bytes, k.encryption_version\n           FROM session_tokens st\n           JOIN users u ON st.did = u.did\n           JOIN user_keys k ON u.id = k.user_id\n           WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()\n           FOR UPDATE OF st",
   "describe": {
     "columns": [
       {
@@ -20,11 +20,16 @@
       },
       {
         "ordinal": 3,
+        "name": "controller_did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "key_bytes",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "encryption_version",
         "type_info": "Int4"
       }
@@ -38,9 +43,10 @@
       false,
       false,
       true,
+      true,
       false,
       true
     ]
   },
-  "hash": "6b0245cefaec65a48c51239ed099e45c5347224c81f7d01d7af5bd7664d16883"
+  "hash": "80c029ff08ef3f7d19054fca573dee4037f38b7a7bf1473a0cae7887350de556"
 }

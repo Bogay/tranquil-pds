@@ -38,7 +38,7 @@ pub async fn get_authorization_request(
 ) -> Result<Option<RequestData>, OAuthError> {
     let row = sqlx::query!(
         r#"
-        SELECT did, device_id, client_id, client_auth, parameters, expires_at, code
+        SELECT did, device_id, client_id, client_auth, parameters, expires_at, code, controller_did
         FROM oauth_authorization_request
         WHERE id = $1
         "#,
@@ -61,6 +61,7 @@ pub async fn get_authorization_request(
                 did: r.did,
                 device_id: r.device_id,
                 code: r.code,
+                controller_did: r.controller_did,
             }))
         }
         None => Ok(None),
@@ -119,7 +120,7 @@ pub async fn consume_authorization_request_by_code(
         r#"
         DELETE FROM oauth_authorization_request
         WHERE code = $1
-        RETURNING did, device_id, client_id, client_auth, parameters, expires_at, code
+        RETURNING did, device_id, client_id, client_auth, parameters, expires_at, code, controller_did
         "#,
         code
     )
@@ -140,6 +141,7 @@ pub async fn consume_authorization_request_by_code(
                 did: r.did,
                 device_id: r.device_id,
                 code: r.code,
+                controller_did: r.controller_did,
             }))
         }
         None => Ok(None),
@@ -207,6 +209,40 @@ pub async fn update_request_scope(
         "#,
         request_id,
         scope
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_controller_did(
+    pool: &PgPool,
+    request_id: &str,
+    controller_did: &str,
+) -> Result<(), OAuthError> {
+    sqlx::query!(
+        r#"
+        UPDATE oauth_authorization_request
+        SET controller_did = $2
+        WHERE id = $1
+        "#,
+        request_id,
+        controller_did
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_request_did(pool: &PgPool, request_id: &str, did: &str) -> Result<(), OAuthError> {
+    sqlx::query!(
+        r#"
+        UPDATE oauth_authorization_request
+        SET did = $2
+        WHERE id = $1
+        "#,
+        request_id,
+        did
     )
     .execute(pool)
     .await?;

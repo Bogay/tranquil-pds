@@ -1,3 +1,4 @@
+use axum::http::HeaderMap;
 use rand::Rng;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -70,6 +71,21 @@ pub async fn get_user_by_identifier(
     .fetch_optional(db)
     .await?
     .ok_or(DbLookupError::NotFound)
+}
+
+pub fn extract_client_ip(headers: &HeaderMap) -> String {
+    if let Some(forwarded) = headers.get("x-forwarded-for")
+        && let Ok(value) = forwarded.to_str()
+        && let Some(first_ip) = value.split(',').next()
+    {
+        return first_ip.trim().to_string();
+    }
+    if let Some(real_ip) = headers.get("x-real-ip")
+        && let Ok(value) = real_ip.to_str()
+    {
+        return value.trim().to_string();
+    }
+    "unknown".to_string()
 }
 
 #[cfg(test)]

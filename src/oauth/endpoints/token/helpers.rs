@@ -38,6 +38,16 @@ pub fn create_access_token(
     dpop_jkt: Option<&str>,
     scope: Option<&str>,
 ) -> Result<String, OAuthError> {
+    create_access_token_with_delegation(token_id, sub, dpop_jkt, scope, None)
+}
+
+pub fn create_access_token_with_delegation(
+    token_id: &str,
+    sub: &str,
+    dpop_jkt: Option<&str>,
+    scope: Option<&str>,
+    controller_did: Option<&str>,
+) -> Result<String, OAuthError> {
     use serde_json::json;
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let issuer = format!("https://{}", pds_hostname);
@@ -55,6 +65,9 @@ pub fn create_access_token(
     });
     if let Some(jkt) = dpop_jkt {
         payload["cnf"] = json!({ "jkt": jkt });
+    }
+    if let Some(controller) = controller_did {
+        payload["act"] = json!({ "sub": controller });
     }
     let header = json!({
         "alg": "HS256",

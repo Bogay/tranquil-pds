@@ -25,9 +25,13 @@
   import OAuth2FA from './routes/OAuth2FA.svelte'
   import OAuthTotp from './routes/OAuthTotp.svelte'
   import OAuthPasskey from './routes/OAuthPasskey.svelte'
+  import OAuthDelegation from './routes/OAuthDelegation.svelte'
   import OAuthError from './routes/OAuthError.svelte'
   import Security from './routes/Security.svelte'
   import TrustedDevices from './routes/TrustedDevices.svelte'
+  import Controllers from './routes/Controllers.svelte'
+  import DelegationAudit from './routes/DelegationAudit.svelte'
+  import ActAs from './routes/ActAs.svelte'
   import Home from './routes/Home.svelte'
 
   initI18n()
@@ -95,12 +99,20 @@
         return OAuthTotp
       case '/oauth/passkey':
         return OAuthPasskey
+      case '/oauth/delegation':
+        return OAuthDelegation
       case '/oauth/error':
         return OAuthError
       case '/security':
         return Security
       case '/trusted-devices':
         return TrustedDevices
+      case '/controllers':
+        return Controllers
+      case '/delegation-audit':
+        return DelegationAudit
+      case '/act-as':
+        return ActAs
       default:
         return Home
     }

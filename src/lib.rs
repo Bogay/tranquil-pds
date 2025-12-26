@@ -6,6 +6,7 @@ pub mod circuit_breaker;
 pub mod comms;
 pub mod config;
 pub mod crawlers;
+pub mod delegation;
 pub mod handle;
 pub mod image;
 pub mod metrics;
@@ -528,6 +529,14 @@ pub fn app(state: AppState) -> Router {
             "/oauth/authorize/consent",
             post(oauth::endpoints::consent_post),
         )
+        .route(
+            "/oauth/delegation/auth",
+            post(oauth::endpoints::delegation_auth),
+        )
+        .route(
+            "/oauth/delegation/totp",
+            post(oauth::endpoints::delegation_totp_verify),
+        )
         .route("/oauth/token", post(oauth::endpoints::token_endpoint))
         .route("/oauth/revoke", post(oauth::endpoints::revoke_token))
         .route(
@@ -561,6 +570,38 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/xrpc/com.tranquil.account.verifyToken",
             post(api::server::verify_token),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.listControllers",
+            get(api::delegation::list_controllers),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.addController",
+            post(api::delegation::add_controller),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.removeController",
+            post(api::delegation::remove_controller),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.updateControllerScopes",
+            post(api::delegation::update_controller_scopes),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.listControlledAccounts",
+            get(api::delegation::list_controlled_accounts),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.getAuditLog",
+            get(api::delegation::get_audit_log),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.getScopePresets",
+            get(api::delegation::get_scope_presets),
+        )
+        .route(
+            "/xrpc/com.tranquil.delegation.createDelegatedAccount",
+            post(api::delegation::create_delegated_account),
         )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
         .layer(middleware::from_fn(metrics::metrics_middleware))

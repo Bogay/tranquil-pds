@@ -10,8 +10,8 @@ pub async fn create_token(pool: &PgPool, data: &TokenData) -> Result<i32, OAuthE
         r#"
         INSERT INTO oauth_token
             (did, token_id, created_at, updated_at, expires_at, client_id, client_auth,
-             device_id, parameters, details, code, current_refresh_token, scope)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             device_id, parameters, details, code, current_refresh_token, scope, controller_did)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING id
         "#,
         data.did,
@@ -27,6 +27,7 @@ pub async fn create_token(pool: &PgPool, data: &TokenData) -> Result<i32, OAuthE
         data.code,
         data.current_refresh_token,
         data.scope,
+        data.controller_did,
     )
     .fetch_one(pool)
     .await?;
@@ -40,7 +41,7 @@ pub async fn get_token_by_id(
     let row = sqlx::query!(
         r#"
         SELECT did, token_id, created_at, updated_at, expires_at, client_id, client_auth,
-               device_id, parameters, details, code, current_refresh_token, scope
+               device_id, parameters, details, code, current_refresh_token, scope, controller_did
         FROM oauth_token
         WHERE token_id = $1
         "#,
@@ -63,6 +64,7 @@ pub async fn get_token_by_id(
             code: r.code,
             current_refresh_token: r.current_refresh_token,
             scope: r.scope,
+            controller_did: r.controller_did,
         })),
         None => Ok(None),
     }
@@ -75,7 +77,7 @@ pub async fn get_token_by_refresh_token(
     let row = sqlx::query!(
         r#"
         SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,
-               device_id, parameters, details, code, current_refresh_token, scope
+               device_id, parameters, details, code, current_refresh_token, scope, controller_did
         FROM oauth_token
         WHERE current_refresh_token = $1
         "#,
@@ -100,6 +102,7 @@ pub async fn get_token_by_refresh_token(
                 code: r.code,
                 current_refresh_token: r.current_refresh_token,
                 scope: r.scope,
+                controller_did: r.controller_did,
             },
         ))),
         None => Ok(None),
@@ -178,7 +181,7 @@ pub async fn get_token_by_previous_refresh_token(
     let row = sqlx::query!(
         r#"
         SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,
-               device_id, parameters, details, code, current_refresh_token, scope
+               device_id, parameters, details, code, current_refresh_token, scope, controller_did
         FROM oauth_token
         WHERE previous_refresh_token = $1 AND rotated_at > $2
         "#,
@@ -204,6 +207,7 @@ pub async fn get_token_by_previous_refresh_token(
                 code: r.code,
                 current_refresh_token: r.current_refresh_token,
                 scope: r.scope,
+                controller_did: r.controller_did,
             },
         ))),
         None => Ok(None),
@@ -238,7 +242,7 @@ pub async fn list_tokens_for_user(pool: &PgPool, did: &str) -> Result<Vec<TokenD
     let rows = sqlx::query!(
         r#"
         SELECT did, token_id, created_at, updated_at, expires_at, client_id, client_auth,
-               device_id, parameters, details, code, current_refresh_token, scope
+               device_id, parameters, details, code, current_refresh_token, scope, controller_did
         FROM oauth_token
         WHERE did = $1
         "#,
@@ -262,6 +266,7 @@ pub async fn list_tokens_for_user(pool: &PgPool, did: &str) -> Result<Vec<TokenD
             code: r.code,
             current_refresh_token: r.current_refresh_token,
             scope: r.scope,
+            controller_did: r.controller_did,
         });
     }
     Ok(tokens)
@@ -322,6 +327,21 @@ pub async fn revoke_tokens_for_client(
         "DELETE FROM oauth_token WHERE did = $1 AND client_id = $2",
         did,
         client_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+pub async fn revoke_tokens_for_controller(
+    pool: &PgPool,
+    delegated_did: &str,
+    controller_did: &str,
+) -> Result<u64, OAuthError> {
+    let result = sqlx::query!(
+        "DELETE FROM oauth_token WHERE did = $1 AND controller_did = $2",
+        delegated_did,
+        controller_did
     )
     .execute(pool)
     .await?;

@@ -1,5 +1,6 @@
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::api::repo::record::write::prepare_repo_write;
+use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use axum::{
@@ -52,6 +53,7 @@ pub async fn delete_record(
     let did = auth.did;
     let user_id = auth.user_id;
     let current_root_cid = auth.current_root_cid;
+    let controller_did = auth.controller_did;
 
     if let Some(swap_commit) = &input.swap_commit
         && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
@@ -124,6 +126,8 @@ pub async fn delete_record(
                 .into_response();
         }
     };
+    let collection_for_audit = input.collection.clone();
+    let rkey_for_audit = input.rkey.clone();
     let op = RecordOp::Delete {
         collection: input.collection,
         rkey: input.rkey,
@@ -174,5 +178,24 @@ pub async fn delete_record(
         )
             .into_response();
     };
+
+    if let Some(ref controller) = controller_did {
+        let _ = delegation::log_delegation_action(
+            &state.db,
+            &did,
+            controller,
+            Some(controller),
+            DelegationActionType::RepoWrite,
+            Some(json!({
+                "action": "delete",
+                "collection": collection_for_audit,
+                "rkey": rkey_for_audit
+            })),
+            None,
+            None,
+        )
+        .await;
+    }
+
     (StatusCode::OK, Json(json!({}))).into_response()
 }

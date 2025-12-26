@@ -107,6 +107,7 @@ pub struct RequestData {
     pub did: Option<String>,
     pub device_id: Option<String>,
     pub code: Option<String>,
+    pub controller_did: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,6 +133,7 @@ pub struct TokenData {
     pub code: Option<String>,
     pub current_refresh_token: Option<String>,
     pub scope: Option<String>,
+    pub controller_did: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -58,8 +58,10 @@ pub async fn pushed_authorization_request(
         serde_json::from_slice(&body)
             .map_err(|e| OAuthError::InvalidRequest(format!("Invalid JSON: {}", e)))?
     } else if content_type.starts_with("application/x-www-form-urlencoded") {
-        serde_urlencoded::from_bytes(&body)
-            .map_err(|e| OAuthError::InvalidRequest(format!("Invalid form data: {}", e)))?
+        let parsed: ParRequest = serde_urlencoded::from_bytes(&body)
+            .map_err(|e| OAuthError::InvalidRequest(format!("Invalid form data: {}", e)))?;
+        tracing::info!(login_hint = ?parsed.login_hint, "PAR request received (form)");
+        parsed
     } else {
         return Err(OAuthError::InvalidRequest(
             "Content-Type must be application/json or application/x-www-form-urlencoded"
@@ -128,6 +130,7 @@ pub async fn pushed_authorization_request(
         did: None,
         device_id: None,
         code: None,
+        controller_did: None,
     };
     db::create_authorization_request(&state.db, &request_id.0, &request_data).await?;
     tokio::spawn({

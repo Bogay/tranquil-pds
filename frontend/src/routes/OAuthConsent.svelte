@@ -20,6 +20,10 @@
     scopes: ScopeInfo[]
     show_consent: boolean
     did: string
+    is_delegation?: boolean
+    controller_did?: string
+    controller_handle?: string
+    delegation_level?: string
   }
 
   let loading = $state(true)
@@ -77,9 +81,13 @@
     if (!consentData) return
 
     submitting = true
-    const approvedScopes = Object.entries(scopeSelections)
+    let approvedScopes = Object.entries(scopeSelections)
       .filter(([_, approved]) => approved)
       .map(([scope]) => scope)
+
+    if (approvedScopes.length === 0 && consentData.scopes.length === 0) {
+      approvedScopes = ['atproto']
+    }
 
     try {
       const response = await fetch('/oauth/authorize/consent', {
@@ -183,36 +191,82 @@
         </div>
 
         <div class="account-info">
-          <span class="label">{$_('oauth.consent.signingInAs')}</span>
-          <span class="did">{consentData.did}</span>
+          {#if consentData.is_delegation}
+            <div class="delegation-badge">{$_('oauthConsent.delegatedAccess')}</div>
+            <div class="delegation-info">
+              <div class="info-row">
+                <span class="label">{$_('oauthConsent.actingAs')}</span>
+                <span class="did">{consentData.did}</span>
+              </div>
+              <div class="info-row">
+                <span class="label">{$_('oauthConsent.controller')}</span>
+                <span class="handle">@{consentData.controller_handle || consentData.controller_did}</span>
+              </div>
+              <div class="info-row">
+                <span class="label">{$_('oauthConsent.accessLevel')}</span>
+                <span class="level-badge level-{consentData.delegation_level?.toLowerCase()}">{consentData.delegation_level}</span>
+              </div>
+            </div>
+            {#if consentData.delegation_level && consentData.delegation_level !== 'Owner'}
+              <div class="permissions-notice">
+                <div class="notice-header">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span>{$_('oauthConsent.permissionsLimited')}</span>
+                </div>
+                <p class="notice-text">
+                  {#if consentData.delegation_level === 'Viewer'}
+                    {$_('oauthConsent.viewerLimitedDesc')}
+                  {:else if consentData.delegation_level === 'Editor'}
+                    {$_('oauthConsent.editorLimitedDesc')}
+                  {:else}
+                    {$_('oauthConsent.permissionsLimitedDesc', { values: { level: consentData.delegation_level } })}
+                  {/if}
+                </p>
+              </div>
+            {/if}
+          {:else}
+            <span class="label">{$_('oauth.consent.signingInAs')}</span>
+            <span class="did">{consentData.did}</span>
+          {/if}
         </div>
       </div>
 
       <div class="permissions-panel">
         <div class="scopes-section">
           <h2>{$_('oauth.consent.permissionsRequested')}</h2>
-          {#each Object.entries(scopeGroups) as [category, scopes]}
-            <div class="scope-group">
-              <h3 class="category-title">{category}</h3>
-              {#each scopes as scope}
-                <label class="scope-item" class:required={scope.required}>
-                  <input
-                    type="checkbox"
-                    checked={scopeSelections[scope.scope]}
-                    disabled={scope.required || submitting}
-                    onchange={() => handleScopeToggle(scope.scope)}
-                  />
-                  <div class="scope-info">
-                    <span class="scope-name">{scope.display_name}</span>
-                    <span class="scope-description">{scope.description}</span>
-                    {#if scope.required}
-                      <span class="required-badge">{$_('oauth.consent.required')}</span>
-                    {/if}
-                  </div>
-                </label>
-              {/each}
+          {#if consentData.scopes.length === 0}
+            <div class="read-only-notice">
+              <div class="scope-item read-only">
+                <div class="scope-info">
+                  <span class="scope-name">{$_('oauthConsent.readOnlyAccess')}</span>
+                  <span class="scope-description">{$_('oauthConsent.readOnlyDesc')}</span>
+                </div>
+              </div>
             </div>
-          {/each}
+          {:else}
+            {#each Object.entries(scopeGroups) as [category, scopes]}
+              <div class="scope-group">
+                <h3 class="category-title">{category}</h3>
+                {#each scopes as scope}
+                  <label class="scope-item" class:required={scope.required}>
+                    <input
+                      type="checkbox"
+                      checked={scopeSelections[scope.scope]}
+                      disabled={scope.required || submitting}
+                      onchange={() => handleScopeToggle(scope.scope)}
+                    />
+                    <div class="scope-info">
+                      <span class="scope-name">{scope.display_name}</span>
+                      <span class="scope-description">{scope.description}</span>
+                      {#if scope.required}
+                        <span class="required-badge">{$_('oauth.consent.required')}</span>
+                      {/if}
+                    </div>
+                  </label>
+                {/each}
+              </div>
+            {/each}
+          {/if}
         </div>
 
         <label class="remember-choice">
@@ -339,6 +393,94 @@
     word-break: break-all;
   }
 
+  .delegation-badge {
+    display: inline-block;
+    padding: var(--space-1) var(--space-2);
+    background: var(--accent);
+    color: var(--text-inverse);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--space-3);
+  }
+
+  .delegation-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .delegation-info .info-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .delegation-info .handle {
+    font-weight: var(--font-medium);
+    color: var(--text-primary);
+  }
+
+  .level-badge {
+    display: inline-block;
+    padding: 2px var(--space-2);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+  }
+
+  .level-badge.level-owner {
+    background: var(--success-bg);
+    color: var(--success-text);
+  }
+
+  .level-badge.level-admin {
+    background: var(--accent);
+    color: var(--text-inverse);
+  }
+
+  .level-badge.level-editor {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+  }
+
+  .level-badge.level-viewer {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+  }
+
+  .permissions-notice {
+    margin-top: var(--space-3);
+    padding: var(--space-3);
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-md);
+  }
+
+  .notice-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: var(--font-semibold);
+    color: var(--warning-text);
+    margin-bottom: var(--space-2);
+  }
+
+  .notice-header svg {
+    flex-shrink: 0;
+  }
+
+  .notice-text {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--warning-text);
+    line-height: 1.5;
+  }
+
   .scopes-section {
     margin-bottom: var(--space-6);
   }
@@ -380,6 +522,11 @@
 
   .scope-item.required {
     background: var(--bg-secondary);
+  }
+
+  .scope-item.read-only {
+    background: var(--bg-secondary);
+    border-style: dashed;
   }
 
   .scope-item input[type="checkbox"] {

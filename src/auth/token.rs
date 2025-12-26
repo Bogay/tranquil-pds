@@ -1,4 +1,4 @@
-use super::{Claims, Header};
+use super::{ActClaim, Claims, Header};
 use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -51,6 +51,24 @@ pub fn create_access_token_with_scope_metadata(
     )
 }
 
+pub fn create_access_token_with_delegation(
+    did: &str,
+    key_bytes: &[u8],
+    scopes: Option<&str>,
+    controller_did: Option<&str>,
+) -> Result<TokenWithMetadata> {
+    let scope = scopes.unwrap_or(SCOPE_ACCESS);
+    let act = controller_did.map(|c| ActClaim { sub: c.to_string() });
+    create_signed_token_with_act(
+        did,
+        scope,
+        TOKEN_TYPE_ACCESS,
+        key_bytes,
+        Duration::minutes(15),
+        act,
+    )
+}
+
 pub fn create_refresh_token_with_metadata(
     did: &str,
     key_bytes: &[u8],
@@ -81,6 +99,7 @@ pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -
         scope: None,
         lxm: Some(lxm.to_string()),
         jti: uuid::Uuid::new_v4().to_string(),
+        act: None,
     };
 
     sign_claims(claims, &signing_key)
@@ -92,6 +111,17 @@ fn create_signed_token_with_metadata(
     typ: &str,
     key_bytes: &[u8],
     duration: Duration,
+) -> Result<TokenWithMetadata> {
+    create_signed_token_with_act(did, scope, typ, key_bytes, duration, None)
+}
+
+fn create_signed_token_with_act(
+    did: &str,
+    scope: &str,
+    typ: &str,
+    key_bytes: &[u8],
+    duration: Duration,
+    act: Option<ActClaim>,
 ) -> Result<TokenWithMetadata> {
     let signing_key = SigningKey::from_slice(key_bytes)?;
 
@@ -114,6 +144,7 @@ fn create_signed_token_with_metadata(
         scope: Some(scope.to_string()),
         lxm: None,
         jti: jti.clone(),
+        act,
     };
 
     let token = sign_claims_with_type(claims, &signing_key, typ)?;
@@ -202,6 +233,7 @@ pub fn create_service_token_hs256(
         scope: None,
         lxm: Some(lxm.to_string()),
         jti: uuid::Uuid::new_v4().to_string(),
+        act: None,
     };
 
     sign_claims_hs256(claims, TOKEN_TYPE_SERVICE, secret)
@@ -233,6 +265,7 @@ fn create_hs256_token_with_metadata(
         scope: Some(scope.to_string()),
         lxm: None,
         jti: jti.clone(),
+        act: None,
     };
 
     let token = sign_claims_hs256(claims, typ, secret)?;

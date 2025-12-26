@@ -1,22 +1,22 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT password_hash, scopes FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
+  "query": "SELECT did, password_hash FROM users WHERE handle = $1 OR email = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "password_hash",
+        "name": "did",
         "type_info": "Text"
       },
       {
         "ordinal": 1,
-        "name": "scopes",
+        "name": "password_hash",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -24,5 +24,5 @@
       true
     ]
   },
-  "hash": "3d5ab47cdcb0d04b0a0d63c2d5a0cc45889ff4330b500ba7e77eac06ee9606c9"
+  "hash": "c4621f6a8a1ab78a6355b09fdfc2bf8999d276564e93015792ec07cb05e79038"
 }

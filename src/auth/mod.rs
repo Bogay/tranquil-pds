@@ -24,8 +24,9 @@ pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 pub use token::{
     SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH, TOKEN_TYPE_ACCESS,
     TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, TokenWithMetadata, create_access_token,
-    create_access_token_with_metadata, create_access_token_with_scope_metadata,
-    create_refresh_token, create_refresh_token_with_metadata, create_service_token,
+    create_access_token_with_delegation, create_access_token_with_metadata,
+    create_access_token_with_scope_metadata, create_refresh_token,
+    create_refresh_token_with_metadata, create_service_token,
 };
 pub use verify::{
     TokenVerifyError, get_did_from_token, get_jti_from_token, verify_access_token,
@@ -62,6 +63,7 @@ pub struct AuthenticatedUser {
     pub is_oauth: bool,
     pub is_admin: bool,
     pub scope: Option<String>,
+    pub controller_did: Option<String>,
 }
 
 impl AuthenticatedUser {
@@ -249,12 +251,14 @@ async fn validate_bearer_token_with_options_internal(
                     }
 
                     if session_valid {
+                        let controller_did = token_data.claims.act.as_ref().map(|a| a.sub.clone());
                         return Ok(AuthenticatedUser {
                             did: did.clone(),
                             key_bytes: Some(decrypted_key),
                             is_oauth: false,
                             is_admin,
                             scope: token_data.claims.scope.clone(),
+                            controller_did,
                         });
                     }
                 }
@@ -304,6 +308,7 @@ async fn validate_bearer_token_with_options_internal(
                 is_oauth: true,
                 is_admin: oauth_token.is_admin,
                 scope: oauth_info.scope,
+                controller_did: oauth_info.controller_did,
             });
         } else {
             return Err(TokenValidationError::TokenExpired);
@@ -378,10 +383,16 @@ pub async fn validate_token_with_dpop(
                 is_oauth: true,
                 is_admin: user_info.is_admin,
                 scope: result.scope,
+                controller_did: None,
             })
         }
         Err(_) => Err(TokenValidationError::AuthenticationFailed),
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActClaim {
+    pub sub: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -396,6 +407,8 @@ pub struct Claims {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lxm: Option<String>,
     pub jti: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub act: Option<ActClaim>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

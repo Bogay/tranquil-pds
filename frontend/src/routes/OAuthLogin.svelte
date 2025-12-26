@@ -9,6 +9,9 @@
   let error = $state<string | null>(null)
   let hasPasskeys = $state(false)
   let hasTotp = $state(false)
+  let hasPassword = $state(true)
+  let isDelegated = $state(false)
+  let userDid = $state<string | null>(null)
   let checkingSecurityStatus = $state(false)
   let securityStatusChecked = $state(false)
   let passkeySupported = $state(false)
@@ -84,11 +87,24 @@
         const data = await response.json()
         hasPasskeys = passkeySupported && data.hasPasskeys === true
         hasTotp = data.hasTotp === true
+        hasPassword = data.hasPassword !== false
+        isDelegated = data.isDelegated === true
+        userDid = data.did || null
         securityStatusChecked = true
+
+        if (!hasPassword && !hasPasskeys && isDelegated && data.did) {
+          const requestUri = getRequestUri()
+          if (requestUri) {
+            navigate(`/oauth/delegation?request_uri=${encodeURIComponent(requestUri)}&delegated_did=${encodeURIComponent(data.did)}`)
+            return
+          }
+        }
       }
     } catch {
       hasPasskeys = false
       hasTotp = false
+      hasPassword = true
+      isDelegated = false
     } finally {
       checkingSecurityStatus = false
     }

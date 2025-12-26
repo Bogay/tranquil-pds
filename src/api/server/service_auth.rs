@@ -97,6 +97,7 @@ pub async fn get_service_auth(
                 is_admin: false,
                 scope: result.scope,
                 key_bytes: None,
+                controller_did: None,
             },
             Err(crate::oauth::OAuthError::UseDpopNonce(nonce)) => {
                 return (

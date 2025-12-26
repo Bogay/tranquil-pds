@@ -178,6 +178,11 @@
         <h3>App passwords with guardrails</h3>
         <p>Create app passwords that can only do specific things: read-only for feed readers, post-only for bots. Full control over what each password can access.</p>
       </div>
+
+      <div class="feature">
+        <h3>Delegate without sharing passwords</h3>
+        <p>Let team members or tools manage your account with specific permission levels. They authenticate with their own credentials, you see everything they do in an audit log.</p>
+      </div>
     </div>
 
     <h2>Everything in one place</h2>

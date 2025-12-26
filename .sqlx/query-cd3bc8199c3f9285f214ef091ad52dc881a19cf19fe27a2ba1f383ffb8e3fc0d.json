@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO oauth_token\n            (did, token_id, created_at, updated_at, expires_at, client_id, client_auth,\n             device_id, parameters, details, code, current_refresh_token, scope)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\n        RETURNING id\n        ",
+  "query": "\n        INSERT INTO oauth_token\n            (did, token_id, created_at, updated_at, expires_at, client_id, client_auth,\n             device_id, parameters, details, code, current_refresh_token, scope, controller_did)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)\n        RETURNING id\n        ",
   "describe": {
     "columns": [
       {
@@ -23,6 +23,7 @@
         "Jsonb",
         "Text",
         "Text",
+        "Text",
         "Text"
       ]
     },
@@ -30,5 +31,5 @@
       false
     ]
   },
-  "hash": "6b30d0a7dc0759c336334c2d34d3302b883795730c5dfa97925319dc998a43f0"
+  "hash": "cd3bc8199c3f9285f214ef091ad52dc881a19cf19fe27a2ba1f383ffb8e3fc0d"
 }

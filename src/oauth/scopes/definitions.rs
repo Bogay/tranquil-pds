@@ -40,8 +40,8 @@ pub static SCOPE_DEFINITIONS: LazyLock<HashMap<&'static str, ScopeDefinition>> =
                 scope: "atproto",
                 category: ScopeCategory::Core,
                 required: true,
-                description: "Use AT Protocol OAuth (required for all sessions)",
-                display_name: "AT Protocol",
+                description: "Full access to read, write, and manage this account",
+                display_name: "Full Account Access",
             },
             ScopeDefinition {
                 scope: "transition:generic",
@@ -91,6 +91,20 @@ pub static SCOPE_DEFINITIONS: LazyLock<HashMap<&'static str, ScopeDefinition>> =
                 required: false,
                 description: "Upload images, videos, and other media files",
                 display_name: "Upload Media",
+            },
+            ScopeDefinition {
+                scope: "repo:*",
+                category: ScopeCategory::Repo,
+                required: false,
+                description: "Full read and write access to all repository records",
+                display_name: "Full Repository Access",
+            },
+            ScopeDefinition {
+                scope: "account:*?action=manage",
+                category: ScopeCategory::Account,
+                required: false,
+                description: "Manage account settings and preferences",
+                display_name: "Manage Account",
             },
         ];
 

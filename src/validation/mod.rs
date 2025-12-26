@@ -382,6 +382,32 @@ pub fn validate_record_key(rkey: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+pub fn is_valid_did(did: &str) -> bool {
+    if !did.starts_with("did:") {
+        return false;
+    }
+    let parts: Vec<&str> = did.splitn(3, ':').collect();
+    if parts.len() < 3 {
+        return false;
+    }
+    let method = parts[1];
+    if method.is_empty() || !method.chars().all(|c| c.is_ascii_lowercase()) {
+        return false;
+    }
+    let id = parts[2];
+    !id.is_empty()
+}
+
+pub fn validate_did(did: &str) -> Result<(), ValidationError> {
+    if !is_valid_did(did) {
+        return Err(ValidationError::InvalidField {
+            path: "did".to_string(),
+            message: "Invalid DID format".to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError> {
     if collection.is_empty() {
         return Err(ValidationError::InvalidRecord(
@@ -603,5 +629,20 @@ mod tests {
         assert!(validate_collection_nsid("invalid").is_err());
         assert!(validate_collection_nsid("a.b").is_err());
         assert!(validate_collection_nsid("").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_did() {
+        assert!(is_valid_did("did:plc:1234567890abcdefghijk"));
+        assert!(is_valid_did("did:web:example.com"));
+        assert!(is_valid_did(
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        ));
+        assert!(!is_valid_did(""));
+        assert!(!is_valid_did("plc:1234567890abcdefghijk"));
+        assert!(!is_valid_did("did:"));
+        assert!(!is_valid_did("did:plc:"));
+        assert!(!is_valid_did("did::something"));
+        assert!(!is_valid_did("DID:plc:test"));
     }
 }

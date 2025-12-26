@@ -1,71 +1,81 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT did, token_id, created_at, updated_at, expires_at, client_id, client_auth,\n               device_id, parameters, details, code, current_refresh_token, scope\n        FROM oauth_token\n        WHERE token_id = $1\n        ",
+  "query": "\n        SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,\n               device_id, parameters, details, code, current_refresh_token, scope, controller_did\n        FROM oauth_token\n        WHERE current_refresh_token = $1\n        ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
         "name": "did",
         "type_info": "Text"
       },
       {
-        "ordinal": 1,
+        "ordinal": 2,
         "name": "token_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "expires_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "client_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "client_auth",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "device_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "parameters",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "details",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "code",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "current_refresh_token",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "scope",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "controller_did",
         "type_info": "Text"
       }
     ],
@@ -82,13 +92,15 @@
       false,
       false,
       false,
+      false,
       true,
       false,
+      true,
       true,
       true,
       true,
       true
     ]
   },
-  "hash": "b5d3a6a68443fbf3e6027f462ffaf5ac7e0d44344ce181e5a81932e7610265c8"
+  "hash": "09cc26fbdc2d210146dccc3f9d1e6e82814596eadfd20d814e9f0d3f615127a8"
 }

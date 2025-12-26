@@ -1,6 +1,7 @@
-use super::helpers::{create_access_token, verify_pkce};
+use super::helpers::{create_access_token_with_delegation, verify_pkce};
 use super::types::{TokenRequest, TokenResponse};
 use crate::config::AuthConfig;
+use crate::delegation;
 use crate::oauth::{
     ClientAuth, OAuthError, RefreshToken, TokenData, TokenId,
     client::{ClientMetadataCache, verify_client_auth},
@@ -106,11 +107,30 @@ pub async fn handle_authorization_code_grant(
     let token_id = TokenId::generate();
     let refresh_token = RefreshToken::generate();
     let now = Utc::now();
-    let access_token = create_access_token(
+
+    let (final_scope, controller_did) = if let Some(ref controller) = auth_request.controller_did {
+        let grant = delegation::get_delegation(&state.db, &did, controller)
+            .await
+            .ok()
+            .flatten();
+        let granted_scopes = grant.map(|g| g.granted_scopes).unwrap_or_default();
+        let requested = auth_request
+            .parameters
+            .scope
+            .as_deref()
+            .unwrap_or("atproto");
+        let intersected = delegation::intersect_scopes(requested, &granted_scopes);
+        (Some(intersected), Some(controller.clone()))
+    } else {
+        (auth_request.parameters.scope.clone(), None)
+    };
+
+    let access_token = create_access_token_with_delegation(
         &token_id.0,
         &did,
         dpop_jkt.as_deref(),
-        auth_request.parameters.scope.as_deref(),
+        final_scope.as_deref(),
+        controller_did.as_deref(),
     )?;
     let stored_client_auth = auth_request.client_auth.unwrap_or(ClientAuth::None);
     let refresh_expiry_days = if matches!(stored_client_auth, ClientAuth::None) {
@@ -131,7 +151,8 @@ pub async fn handle_authorization_code_grant(
         details: None,
         code: None,
         current_refresh_token: Some(refresh_token.0.clone()),
-        scope: auth_request.parameters.scope.clone(),
+        scope: final_scope.clone(),
+        controller_did: controller_did.clone(),
     };
     db::create_token(&state.db, &token_data).await?;
     tokio::spawn({
@@ -154,7 +175,7 @@ pub async fn handle_authorization_code_grant(
             token_type: if dpop_jkt.is_some() { "DPoP" } else { "Bearer" }.to_string(),
             expires_in: ACCESS_TOKEN_EXPIRY_SECONDS as u64,
             refresh_token: Some(refresh_token.0),
-            scope: auth_request.parameters.scope,
+            scope: final_scope,
             sub: Some(did),
         }),
     ))
@@ -183,11 +204,12 @@ pub async fn handle_refresh_token_grant(
                 "Refresh token reuse within grace period, returning existing tokens"
             );
             let dpop_jkt = token_data.parameters.dpop_jkt.as_deref();
-            let access_token = create_access_token(
+            let access_token = create_access_token_with_delegation(
                 &token_data.token_id,
                 &token_data.did,
                 dpop_jkt,
                 token_data.scope.as_deref(),
+                token_data.controller_did.as_deref(),
             )?;
             let mut response_headers = HeaderMap::new();
             let config = AuthConfig::get();
@@ -282,11 +304,12 @@ pub async fn handle_refresh_token_grant(
         new_expires_at = %new_expires_at,
         "Refresh token rotated successfully"
     );
-    let access_token = create_access_token(
+    let access_token = create_access_token_with_delegation(
         &new_token_id.0,
         &token_data.did,
         dpop_jkt.as_deref(),
         token_data.scope.as_deref(),
+        token_data.controller_did.as_deref(),
     )?;
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();

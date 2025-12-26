@@ -204,6 +204,55 @@ pub async fn authorize_get(
         .into_response();
     }
     let force_new_account = query.new_account.unwrap_or(false);
+
+    if let Some(ref login_hint) = request_data.parameters.login_hint {
+        tracing::info!(login_hint = %login_hint, "Checking login_hint for delegation");
+        let pds_hostname =
+            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let normalized = if login_hint.contains('@') || login_hint.starts_with("did:") {
+            login_hint.clone()
+        } else if !login_hint.contains('.') {
+            format!("{}.{}", login_hint.to_lowercase(), pds_hostname)
+        } else {
+            login_hint.to_lowercase()
+        };
+        tracing::info!(normalized = %normalized, "Normalized login_hint");
+
+        match sqlx::query!(
+            "SELECT did, password_hash FROM users WHERE handle = $1 OR email = $1",
+            normalized
+        )
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(user)) => {
+                tracing::info!(did = %user.did, has_password = user.password_hash.is_some(), "Found user for login_hint");
+                let is_delegated = crate::delegation::is_delegated_account(&state.db, &user.did)
+                    .await
+                    .unwrap_or(false);
+                let has_password = user.password_hash.is_some();
+                tracing::info!(is_delegated = %is_delegated, has_password = %has_password, "Delegation check");
+
+                if is_delegated && !has_password {
+                    tracing::info!("Redirecting to delegation auth");
+                    return redirect_see_other(&format!(
+                        "/#/oauth/delegation?request_uri={}&delegated_did={}",
+                        url_encode(&request_uri),
+                        url_encode(&user.did)
+                    ));
+                }
+            }
+            Ok(None) => {
+                tracing::info!(normalized = %normalized, "No user found for login_hint");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Error looking up user for login_hint");
+            }
+        }
+    } else {
+        tracing::info!("No login_hint in request");
+    }
+
     if !force_new_account
         && let Some(device_id) = extract_device_cookie(&headers)
         && let Ok(accounts) = db::get_device_accounts(&state.db, &device_id).await
@@ -445,7 +494,8 @@ pub async fn authorize_post(
         SELECT id, did, email, password_hash, password_required, two_factor_enabled,
                preferred_comms_channel as "preferred_comms_channel: CommsChannel",
                deactivated_at, takedown_ref,
-               email_verified, discord_verified, telegram_verified, signal_verified
+               email_verified, discord_verified, telegram_verified, signal_verified,
+               account_type::text as "account_type!"
         FROM users
         WHERE handle = $1 OR email = $1
         "#,
@@ -479,6 +529,32 @@ pub async fn authorize_post(
             "Please verify your account before logging in.",
             json_response,
         );
+    }
+
+    if user.account_type == "delegated" {
+        if db::set_authorization_did(&state.db, &form.request_uri, &user.did, None)
+            .await
+            .is_err()
+        {
+            return show_login_error("An error occurred. Please try again.", json_response);
+        }
+        let redirect_url = format!(
+            "/#/oauth/delegation?request_uri={}&delegated_did={}",
+            url_encode(&form.request_uri),
+            url_encode(&user.did)
+        );
+        if json_response {
+            return (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "next": "delegation",
+                    "delegated_did": user.did,
+                    "redirect": redirect_url
+                })),
+            )
+                .into_response();
+        }
+        return redirect_see_other(&redirect_url);
     }
 
     if !user.password_required {
@@ -1053,6 +1129,14 @@ pub struct ConsentResponse {
     pub scopes: Vec<ScopeInfo>,
     pub show_consent: bool,
     pub did: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_delegation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controller_did: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controller_handle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delegation_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1127,8 +1211,25 @@ pub async fn consent_get(
         .parameters
         .scope
         .as_deref()
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or("atproto");
-    let requested_scopes: Vec<&str> = requested_scope_str.split_whitespace().collect();
+
+    let delegation_grant = if let Some(ref ctrl_did) = request_data.controller_did {
+        crate::delegation::get_delegation(&state.db, &did, ctrl_did)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
+    let effective_scope_str = if let Some(ref grant) = delegation_grant {
+        crate::delegation::scopes::intersect_scopes(requested_scope_str, &grant.granted_scopes)
+    } else {
+        requested_scope_str.to_string()
+    };
+
+    let requested_scopes: Vec<&str> = effective_scope_str.split_whitespace().collect();
     let preferences =
         db::get_scope_preferences(&state.db, &did, &request_data.parameters.client_id)
             .await
@@ -1182,6 +1283,31 @@ pub async fn consent_get(
             granted,
         });
     }
+    let (is_delegation, controller_did, controller_handle, delegation_level) =
+        if let Some(ref ctrl_did) = request_data.controller_did {
+            let ctrl_handle =
+                sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", ctrl_did)
+                    .fetch_optional(&state.db)
+                    .await
+                    .ok()
+                    .flatten();
+
+            let level = if let Some(ref grant) = delegation_grant {
+                let preset = crate::delegation::SCOPE_PRESETS
+                    .iter()
+                    .find(|p| p.scopes == grant.granted_scopes);
+                preset
+                    .map(|p| p.label.to_string())
+                    .unwrap_or_else(|| "Custom".to_string())
+            } else {
+                "Unknown".to_string()
+            };
+
+            (Some(true), Some(ctrl_did.clone()), ctrl_handle, Some(level))
+        } else {
+            (None, None, None, None)
+        };
+
     Json(ConsentResponse {
         request_uri: query.request_uri.clone(),
         client_id: request_data.parameters.client_id.clone(),
@@ -1191,6 +1317,10 @@ pub async fn consent_get(
         scopes,
         show_consent,
         did,
+        is_delegation,
+        controller_did,
+        controller_handle,
+        delegation_level,
     })
     .into_response()
 }
@@ -1199,6 +1329,11 @@ pub async fn consent_post(
     State(state): State<AppState>,
     Json(form): Json<ConsentSubmit>,
 ) -> Response {
+    tracing::info!(
+        "consent_post: approved_scopes={:?}, remember={}",
+        form.approved_scopes,
+        form.remember
+    );
     let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
         Ok(Some(data)) => data,
         Ok(None) => {
@@ -1246,12 +1381,28 @@ pub async fn consent_post(
                 .into_response();
         }
     };
-    let requested_scope_str = request_data
+    let original_scope_str = request_data
         .parameters
         .scope
         .as_deref()
         .unwrap_or("atproto");
-    let requested_scopes: Vec<&str> = requested_scope_str.split_whitespace().collect();
+
+    let delegation_grant = if let Some(ref ctrl_did) = request_data.controller_did {
+        crate::delegation::get_delegation(&state.db, &did, ctrl_did)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
+    let effective_scope_str = if let Some(ref grant) = delegation_grant {
+        crate::delegation::scopes::intersect_scopes(original_scope_str, &grant.granted_scopes)
+    } else {
+        original_scope_str.to_string()
+    };
+
+    let requested_scopes: Vec<&str> = effective_scope_str.split_whitespace().collect();
     let has_granular_scopes = requested_scopes.iter().any(|s| {
         s.starts_with("repo:")
             || s.starts_with("blob:")
@@ -1640,6 +1791,10 @@ pub async fn check_user_has_passkeys(
 pub struct SecurityStatusResponse {
     pub has_passkeys: bool,
     pub has_totp: bool,
+    pub has_password: bool,
+    pub is_delegated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did: Option<String>,
 }
 
 pub async fn check_user_security_status(
@@ -1658,24 +1813,37 @@ pub async fn check_user_security_status(
     };
 
     let user = sqlx::query!(
-        "SELECT did FROM users WHERE handle = $1 OR email = $1",
+        "SELECT did, password_hash FROM users WHERE handle = $1 OR email = $1",
         normalized_identifier
     )
     .fetch_optional(&state.db)
     .await;
 
-    let (has_passkeys, has_totp) = match user {
+    let (has_passkeys, has_totp, has_password, is_delegated, did): (
+        bool,
+        bool,
+        bool,
+        bool,
+        Option<String>,
+    ) = match user {
         Ok(Some(u)) => {
             let passkeys = crate::api::server::has_passkeys_for_user(&state, &u.did).await;
             let totp = crate::api::server::has_totp_enabled(&state, &u.did).await;
-            (passkeys, totp)
+            let has_pw = u.password_hash.is_some();
+            let has_controllers = crate::delegation::is_delegated_account(&state.db, &u.did)
+                .await
+                .unwrap_or(false);
+            (passkeys, totp, has_pw, has_controllers, Some(u.did))
         }
-        _ => (false, false),
+        _ => (false, false, false, false, None),
     };
 
     Json(SecurityStatusResponse {
         has_passkeys,
         has_totp,
+        has_password,
+        is_delegated,
+        did,
     })
     .into_response()
 }

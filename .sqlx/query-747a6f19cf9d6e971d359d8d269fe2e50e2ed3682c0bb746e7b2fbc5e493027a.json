@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT did, device_id, client_id, client_auth, parameters, expires_at, code\n        FROM oauth_authorization_request\n        WHERE id = $1\n        ",
+  "query": "\n        DELETE FROM oauth_authorization_request\n        WHERE code = $1\n        RETURNING did, device_id, client_id, client_auth, parameters, expires_at, code, controller_did\n        ",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "code",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "controller_did",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       true,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "d5ec5d1952918c1d6ca035446cc5ffb805f271d621116b3ab314a1c57e3ba5c3"
+  "hash": "747a6f19cf9d6e971d359d8d269fe2e50e2ed3682c0bb746e7b2fbc5e493027a"
 }

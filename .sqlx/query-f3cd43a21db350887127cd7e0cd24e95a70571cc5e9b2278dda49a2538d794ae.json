@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO delegation_audit_log\n            (delegated_did, actor_did, controller_did, action_type, action_details, ip_address, user_agent)\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "delegation_action_type",
+            "kind": {
+              "Enum": [
+                "grant_created",
+                "grant_revoked",
+                "scopes_modified",
+                "token_issued",
+                "repo_write",
+                "blob_upload",
+                "account_action"
+              ]
+            }
+          }
+        },
+        "Jsonb",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f3cd43a21db350887127cd7e0cd24e95a70571cc5e9b2278dda49a2538d794ae"
+}

@@ -24,6 +24,7 @@ pub struct OAuthTokenInfo {
     pub client_id: String,
     pub scope: Option<String>,
     pub dpop_jkt: Option<String>,
+    pub controller_did: Option<String>,
 }
 
 pub struct VerifyResult {
@@ -148,12 +149,18 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         .and_then(|c| c.as_str())
         .map(|s| s.to_string())
         .unwrap_or_default();
+    let controller_did = payload
+        .get("act")
+        .and_then(|a| a.get("sub"))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
     Ok(OAuthTokenInfo {
         did,
         token_id,
         client_id,
         scope,
         dpop_jkt,
+        controller_did,
     })
 }
 

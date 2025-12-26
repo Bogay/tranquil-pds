@@ -1,5 +1,6 @@
 use crate::api::ApiError;
 use crate::auth::BearerAuth;
+use crate::delegation::{self, DelegationActionType};
 use crate::state::{AppState, RateLimitKind};
 use crate::util::get_user_id_by_did;
 use axum::{
@@ -20,6 +21,8 @@ pub struct AppPassword {
     pub privileged: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scopes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by_controller: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -36,7 +39,7 @@ pub async fn list_app_passwords(
         Err(e) => return ApiError::from(e).into_response(),
     };
     match sqlx::query!(
-        "SELECT name, created_at, privileged, scopes FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
+        "SELECT name, created_at, privileged, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
         user_id
     )
     .fetch_all(&state.db)
@@ -50,6 +53,7 @@ pub async fn list_app_passwords(
                     created_at: row.created_at.to_rfc3339(),
                     privileged: row.privileged,
                     scopes: row.scopes.clone(),
+                    created_by_controller: row.created_by_controller_did.clone(),
                 })
                 .collect();
             Json(ListAppPasswordsOutput { passwords }).into_response()
@@ -118,6 +122,31 @@ pub async fn create_app_password(
     if let Ok(Some(_)) = existing {
         return ApiError::DuplicateAppPassword.into_response();
     }
+
+    let (final_scopes, controller_did) = if let Some(ref controller) = auth_user.controller_did {
+        let grant = delegation::get_delegation(&state.db, &auth_user.did, controller)
+            .await
+            .ok()
+            .flatten();
+        let granted_scopes = grant.map(|g| g.granted_scopes).unwrap_or_default();
+
+        let requested = input.scopes.as_deref().unwrap_or("atproto");
+        let intersected = delegation::intersect_scopes(requested, &granted_scopes);
+
+        if intersected.is_empty() && !granted_scopes.is_empty() {
+            return ApiError::InsufficientScope.into_response();
+        }
+
+        let scope_result = if intersected.is_empty() {
+            None
+        } else {
+            Some(intersected)
+        };
+        (scope_result, Some(controller.clone()))
+    } else {
+        (input.scopes.clone(), None)
+    };
+
     let password: String = (0..4)
         .map(|_| {
             use rand::Rng;
@@ -137,28 +166,47 @@ pub async fn create_app_password(
         }
     };
     let privileged = input.privileged.unwrap_or(false);
-    let scopes = input.scopes.clone();
     let created_at = chrono::Utc::now();
     match sqlx::query!(
-        "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged, scopes) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged, scopes, created_by_controller_did) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         user_id,
         name,
         password_hash,
         created_at,
         privileged,
-        scopes
+        final_scopes,
+        controller_did
     )
     .execute(&state.db)
     .await
     {
-        Ok(_) => Json(CreateAppPasswordOutput {
-            name: name.to_string(),
-            password,
-            created_at: created_at.to_rfc3339(),
-            privileged,
-            scopes,
-        })
-        .into_response(),
+        Ok(_) => {
+            if let Some(ref controller) = controller_did {
+                let _ = delegation::log_delegation_action(
+                    &state.db,
+                    &auth_user.did,
+                    controller,
+                    Some(controller),
+                    DelegationActionType::AccountAction,
+                    Some(json!({
+                        "action": "create_app_password",
+                        "name": name,
+                        "scopes": final_scopes
+                    })),
+                    None,
+                    None,
+                )
+                .await;
+            }
+            Json(CreateAppPasswordOutput {
+                name: name.to_string(),
+                password,
+                created_at: created_at.to_rfc3339(),
+                privileged,
+                scopes: final_scopes,
+            })
+            .into_response()
+        }
         Err(e) => {
             error!("DB error creating app password: {:?}", e);
             ApiError::InternalError.into_response()

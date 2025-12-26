@@ -44,20 +44,20 @@ function base64UrlEncode(buffer: ArrayBuffer): string {
   );
 }
 
-async function generateCodeChallenge(verifier: string): Promise<string> {
+export async function generateCodeChallenge(verifier: string): Promise<string> {
   const hash = await sha256(verifier);
   return base64UrlEncode(hash);
 }
 
-function generateState(): string {
+export function generateState(): string {
   return generateRandomString(32);
 }
 
-function generateCodeVerifier(): string {
+export function generateCodeVerifier(): string {
   return generateRandomString(32);
 }
 
-function saveOAuthState(state: OAuthState): void {
+export function saveOAuthState(state: OAuthState): void {
   sessionStorage.setItem(OAUTH_STATE_KEY, state.state);
   sessionStorage.setItem(OAUTH_VERIFIER_KEY, state.codeVerifier);
 }

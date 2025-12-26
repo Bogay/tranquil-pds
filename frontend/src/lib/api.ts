@@ -94,6 +94,7 @@ export interface AppPassword {
   name: string;
   createdAt: string;
   scopes?: string;
+  createdByController?: string;
 }
 
 export interface InviteCode {

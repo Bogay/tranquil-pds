@@ -1,4 +1,5 @@
 use crate::auth::{ServiceTokenVerifier, is_service_token};
+use crate::delegation::{self, DelegationActionType};
 use crate::state::AppState;
 use axum::body::Bytes;
 use axum::{
@@ -39,7 +40,7 @@ pub async fn upload_blob(
 
     let is_service_auth = is_service_token(&token);
 
-    let (did, is_migration) = if is_service_auth {
+    let (did, is_migration, controller_did) = if is_service_auth {
         debug!("Verifying service token for blob upload");
         let verifier = ServiceTokenVerifier::new();
         match verifier
@@ -48,7 +49,7 @@ pub async fn upload_blob(
         {
             Ok(claims) => {
                 debug!("Service token verified for DID: {}", claims.iss);
-                (claims.iss, false)
+                (claims.iss, false, None)
             }
             Err(e) => {
                 error!("Service token verification failed: {:?}", e);
@@ -82,7 +83,8 @@ pub async fn upload_blob(
                 .ok()
                 .flatten()
                 .flatten();
-                (user.did, deactivated.is_some())
+                let ctrl_did = user.controller_did.clone();
+                (user.did, deactivated.is_some(), ctrl_did)
             }
             Err(_) => {
                 return (
@@ -204,6 +206,25 @@ pub async fn upload_blob(
         )
             .into_response();
     }
+
+    if let Some(ref controller) = controller_did {
+        let _ = delegation::log_delegation_action(
+            &state.db,
+            &did,
+            controller,
+            Some(controller),
+            DelegationActionType::BlobUpload,
+            Some(json!({
+                "cid": cid_str,
+                "mime_type": mime_type,
+                "size": size
+            })),
+            None,
+            None,
+        )
+        .await;
+    }
+
     Json(json!({
         "blob": {
             "$type": "blob",

@@ -3,7 +3,7 @@ mod common;
 mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
-use common::{base_url, client};
+use common::{base_url, client, create_account_and_login};
 use helpers::verify_new_account;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
@@ -439,18 +439,16 @@ async fn test_replay_attacks() {
         .unwrap();
     assert_eq!(
         rt_replay.status(),
-        StatusCode::BAD_REQUEST,
-        "Refresh token replay should fail"
+        StatusCode::OK,
+        "Refresh token reuse within grace period should return existing tokens"
     );
-    let body: Value = rt_replay.json().await.unwrap();
-    assert!(
-        body["error_description"]
-            .as_str()
-            .unwrap()
-            .to_lowercase()
-            .contains("reuse")
+    let grace_body: Value = rt_replay.json().await.unwrap();
+    assert_eq!(
+        grace_body["refresh_token"].as_str().unwrap(),
+        new_rt,
+        "Grace period response should return the current refresh token"
     );
-    let family_revoked = http_client
+    let second_refresh: Value = http_client
         .post(format!("{}/oauth/token", url))
         .form(&[
             ("grant_type", "refresh_token"),
@@ -459,11 +457,53 @@ async fn test_replay_attacks() {
         ])
         .send()
         .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        second_refresh["access_token"].is_string(),
+        "Second refresh with new token should succeed"
+    );
+    let newest_rt = second_refresh["refresh_token"].as_str().unwrap();
+    let replay_after_rotation = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", &stolen_rt),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        replay_after_rotation.status(),
+        StatusCode::BAD_REQUEST,
+        "Replay of original token after another rotation should fail"
+    );
+    let body: Value = replay_after_rotation.json().await.unwrap();
+    assert!(
+        body["error_description"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .contains("reuse"),
+        "Error should indicate token reuse"
+    );
+    let family_revoked = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", newest_rt),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
         .unwrap();
     assert_eq!(
         family_revoked.status(),
         StatusCode::BAD_REQUEST,
-        "Token family should be revoked"
+        "Token family should be revoked after replay detection"
     );
 }
 
@@ -1063,5 +1103,146 @@ fn test_dpop_http_method_case() {
             .verify_proof(&proof, "POST", "https://example.com/token", None)
             .is_ok(),
         "HTTP method should be case-insensitive"
+    );
+}
+
+#[tokio::test]
+async fn test_delegation_viewer_scope_cannot_write() {
+    let url = base_url().await;
+    let http_client = client();
+    let ts = Utc::now().timestamp_millis();
+
+    let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
+
+    let delegated_handle = format!("deleg-{}", ts);
+    let delegated_res = http_client
+        .post(format!("{}/xrpc/com.tranquil.delegation.createDelegatedAccount", url))
+        .bearer_auth(controller_jwt)
+        .json(&json!({
+            "handle": delegated_handle,
+            "controllerScopes": ""
+        }))
+        .send()
+        .await
+        .unwrap();
+    if delegated_res.status() != StatusCode::OK {
+        let error_body = delegated_res.text().await.unwrap();
+        panic!("Failed to create delegated account: {}", error_body);
+    }
+    let delegated_account: Value = delegated_res.json().await.unwrap();
+    let delegated_did = delegated_account["did"].as_str().unwrap();
+
+    let redirect_uri = "https://example.com/deleg-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (code_verifier, code_challenge) = generate_pkce();
+
+    let par_body: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("login_hint", delegated_did),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let auth_res = http_client
+        .post(format!("{}/oauth/delegation/auth", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "delegated_did": delegated_did,
+            "controller_did": controller_did,
+            "password": "Testpass123!",
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    if auth_res.status() != StatusCode::OK {
+        let error_body = auth_res.text().await.unwrap();
+        panic!("Delegation auth failed: {}", error_body);
+    }
+    let auth_body: Value = auth_res.json().await.unwrap();
+    assert!(auth_body["success"].as_bool().unwrap_or(false), "Delegation auth should succeed: {:?}", auth_body);
+
+    let consent_res = http_client
+        .post(format!("{}/oauth/authorize/consent", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "approved_scopes": ["atproto"],
+            "remember": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    if consent_res.status() != StatusCode::OK {
+        let error_body = consent_res.text().await.unwrap();
+        panic!("Consent failed: {}", error_body);
+    }
+    let consent_body: Value = consent_res.json().await.unwrap();
+    let location = consent_body["redirect_uri"].as_str().unwrap();
+
+    let code = location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
+
+    let token_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(token_res.status(), StatusCode::OK);
+    let tokens: Value = token_res.json().await.unwrap();
+    let access_token = tokens["access_token"].as_str().unwrap();
+
+    let create_post_res = http_client
+        .post(format!("{}/xrpc/com.atproto.repo.createRecord", url))
+        .bearer_auth(access_token)
+        .json(&json!({
+            "repo": delegated_did,
+            "collection": "app.bsky.feed.post",
+            "record": {
+                "$type": "app.bsky.feed.post",
+                "text": "Test post from viewer",
+                "createdAt": Utc::now().to_rfc3339()
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        create_post_res.status(),
+        StatusCode::FORBIDDEN,
+        "Viewer scope delegation should not be able to create posts"
+    );
+    let error_body: Value = create_post_res.json().await.unwrap();
+    assert_eq!(
+        error_body["error"].as_str().unwrap(),
+        "InsufficientScope",
+        "Error should be InsufficientScope"
     );
 }

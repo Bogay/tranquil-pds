@@ -173,6 +173,9 @@
               <span class="name">{pw.name}</span>
               <span class="meta">
                 <span class="scope-badge" class:full={!pw.scopes}>{getScopeLabel(pw.scopes)}</span>
+                {#if pw.createdByController}
+                  <span class="controller-badge" title={pw.createdByController}>{$_('appPasswords.byController')}</span>
+                {/if}
                 <span class="date">{$_('common.created')} {formatDate(pw.createdAt)}</span>
               </span>
             </div>
@@ -416,6 +419,16 @@
     background: var(--success-bg);
     border-color: var(--success-border);
     color: var(--success-text);
+  }
+
+  .controller-badge {
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
+    background: var(--info-bg, #e3f2fd);
+    border: 1px solid var(--info-border, #90caf9);
+    border-radius: var(--radius-sm);
+    color: var(--info-text, #1565c0);
+    cursor: help;
   }
 
   .date {

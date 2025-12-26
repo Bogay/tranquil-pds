@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT name, created_at, privileged, scopes FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
+  "query": "SELECT name, created_at, privileged, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "scopes",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_by_controller_did",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -33,8 +38,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "f47f2236dcc27bc203b0cd13cc022611492f0f82c572c5a536663e8d252cfafb"
+  "hash": "bbd387655387724e97f819e78033682edffbd2463a65b2bb48ca73794dafdbcc"
 }

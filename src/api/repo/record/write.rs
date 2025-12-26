@@ -1,5 +1,6 @@
 use super::validation::validate_record;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
+use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use axum::{
@@ -55,6 +56,7 @@ pub struct RepoWriteAuth {
     pub current_root_cid: Cid,
     pub is_oauth: bool,
     pub scope: Option<String>,
+    pub controller_did: Option<String>,
 }
 
 pub async fn prepare_repo_write(
@@ -99,26 +101,21 @@ pub async fn prepare_repo_write(
         )
             .into_response());
     }
-    match has_verified_comms_channel(&state.db, &auth_user.did).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "error": "AccountNotVerified",
-                    "message": "You must verify at least one notification channel (email, Discord, Telegram, or Signal) before creating records"
-                })),
-            )
-                .into_response());
-        }
-        Err(e) => {
-            error!("DB error checking notification channels: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response());
-        }
+    let is_verified = has_verified_comms_channel(&state.db, &auth_user.did)
+        .await
+        .unwrap_or(false);
+    let is_delegated = crate::delegation::is_delegated_account(&state.db, &auth_user.did)
+        .await
+        .unwrap_or(false);
+    if !is_verified && !is_delegated {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "AccountNotVerified",
+                "message": "You must verify at least one notification channel (email, Discord, Telegram, or Signal) before creating records"
+            })),
+        )
+            .into_response());
     }
     let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
         .fetch_optional(&state.db)
@@ -172,6 +169,7 @@ pub async fn prepare_repo_write(
         current_root_cid,
         is_oauth: auth_user.is_oauth,
         scope: auth_user.scope,
+        controller_did: auth_user.controller_did,
     })
 }
 #[derive(Deserialize)]
@@ -215,6 +213,7 @@ pub async fn create_record(
     let did = auth.did;
     let user_id = auth.user_id;
     let current_root_cid = auth.current_root_cid;
+    let controller_did = auth.controller_did;
 
     if let Some(swap_commit) = &input.swap_commit
         && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
@@ -355,6 +354,25 @@ pub async fn create_record(
         )
             .into_response();
     };
+
+    if let Some(ref controller) = controller_did {
+        let _ = delegation::log_delegation_action(
+            &state.db,
+            &did,
+            controller,
+            Some(controller),
+            DelegationActionType::RepoWrite,
+            Some(json!({
+                "action": "create",
+                "collection": input.collection,
+                "rkey": rkey
+            })),
+            None,
+            None,
+        )
+        .await;
+    }
+
     (
         StatusCode::OK,
         Json(CreateRecordOutput {
@@ -415,6 +433,7 @@ pub async fn put_record(
     let did = auth.did;
     let user_id = auth.user_id;
     let current_root_cid = auth.current_root_cid;
+    let controller_did = auth.controller_did;
 
     if let Some(swap_commit) = &input.swap_commit
         && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
@@ -562,6 +581,7 @@ pub async fn put_record(
         .iter()
         .map(|c| c.to_string())
         .collect::<Vec<_>>();
+    let is_update = existing_cid.is_some();
     if let Err(e) = commit_and_log(
         &state,
         CommitParams {
@@ -582,6 +602,25 @@ pub async fn put_record(
         )
             .into_response();
     };
+
+    if let Some(ref controller) = controller_did {
+        let _ = delegation::log_delegation_action(
+            &state.db,
+            &did,
+            controller,
+            Some(controller),
+            DelegationActionType::RepoWrite,
+            Some(json!({
+                "action": if is_update { "update" } else { "create" },
+                "collection": input.collection,
+                "rkey": input.rkey
+            })),
+            None,
+            None,
+        )
+        .await;
+    }
+
     (
         StatusCode::OK,
         Json(PutRecordOutput {

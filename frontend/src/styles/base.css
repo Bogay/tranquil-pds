@@ -171,6 +171,17 @@ button.danger:hover:not(:disabled) {
   background: #900;
 }
 
+button.danger-outline {
+  background: transparent;
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+}
+
+button.danger-outline:hover:not(:disabled) {
+  background: var(--error-bg);
+  border-color: var(--error-text);
+}
+
 button.ghost {
   background: transparent;
   color: var(--text-secondary);
