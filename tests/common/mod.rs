@@ -258,7 +258,9 @@ async fn spawn_app(database_url: String) -> String {
         .with_email_update_limit(10000)
         .with_oauth_authorize_limit(10000)
         .with_oauth_token_limit(10000);
-    let state = AppState::new(pool).await.with_rate_limiters(rate_limiters);
+    let state = AppState::from_db(pool)
+        .await
+        .with_rate_limiters(rate_limiters);
     tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
     let app = tranquil_pds::app(state);
     tokio::spawn(async move {

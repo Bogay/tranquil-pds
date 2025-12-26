@@ -23,50 +23,12 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let database_url = std::env::var("DATABASE_URL")
-        .map_err(|_| "DATABASE_URL environment variable must be set")?;
-
-    let max_connections: u32 = std::env::var("DATABASE_MAX_CONNECTIONS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(100);
-
-    let min_connections: u32 = std::env::var("DATABASE_MIN_CONNECTIONS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10);
-
-    let acquire_timeout_secs: u64 = std::env::var("DATABASE_ACQUIRE_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10);
-
-    info!(
-        "Configuring database pool: max={}, min={}, acquire_timeout={}s",
-        max_connections, min_connections, acquire_timeout_secs
-    );
-
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(max_connections)
-        .min_connections(min_connections)
-        .acquire_timeout(std::time::Duration::from_secs(acquire_timeout_secs))
-        .idle_timeout(std::time::Duration::from_secs(300))
-        .max_lifetime(std::time::Duration::from_secs(1800))
-        .connect(&database_url)
-        .await
-        .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .map_err(|e| format!("Failed to run migrations: {}", e))?;
-
-    let state = AppState::new(pool.clone()).await;
+    let state = AppState::new().await?;
     tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let mut comms_service = CommsService::new(pool);
+    let mut comms_service = CommsService::new(state.db.clone());
 
     if let Some(email_sender) = EmailSender::from_env() {
         info!("Email comms enabled");

@@ -7,6 +7,7 @@ use crate::repo::PostgresBlockStore;
 use crate::storage::{BlobStorage, S3BlobStorage};
 use crate::sync::firehose::SequencedEvent;
 use sqlx::PgPool;
+use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -75,7 +76,51 @@ impl RateLimitKind {
 }
 
 impl AppState {
-    pub async fn new(db: PgPool) -> Self {
+    pub async fn new() -> Result<Self, Box<dyn Error>> {
+        let database_url = std::env::var("DATABASE_URL")
+            .map_err(|_| "DATABASE_URL environment variable must be set")?;
+
+        let max_connections: u32 = std::env::var("DATABASE_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100);
+
+        let min_connections: u32 = std::env::var("DATABASE_MIN_CONNECTIONS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+
+        let acquire_timeout_secs: u64 = std::env::var("DATABASE_ACQUIRE_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(10);
+
+        tracing::info!(
+            "Configuring database pool: max={}, min={}, acquire_timeout={}s",
+            max_connections,
+            min_connections,
+            acquire_timeout_secs
+        );
+
+        let db = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(max_connections)
+            .min_connections(min_connections)
+            .acquire_timeout(std::time::Duration::from_secs(acquire_timeout_secs))
+            .idle_timeout(std::time::Duration::from_secs(300))
+            .max_lifetime(std::time::Duration::from_secs(1800))
+            .connect(&database_url)
+            .await
+            .map_err(|e| format!("Failed to connect to Postgres: {}", e))?;
+
+        sqlx::migrate!("./migrations")
+            .run(&db)
+            .await
+            .map_err(|e| format!("Failed to run migrations: {}", e))?;
+
+        Ok(Self::from_db(db).await)
+    }
+
+    pub async fn from_db(db: PgPool) -> Self {
         AuthConfig::init();
 
         let block_store = PostgresBlockStore::new(db.clone());
