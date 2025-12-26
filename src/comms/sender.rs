@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::Client;
 use serde_json::json;
 use std::process::Stdio;
@@ -57,6 +58,15 @@ pub fn sanitize_header_value(value: &str) -> String {
     value.replace(['\r', '\n'], " ").trim().to_string()
 }
 
+pub fn mime_encode_header(value: &str) -> String {
+    if value.is_ascii() {
+        sanitize_header_value(value)
+    } else {
+        let sanitized = sanitize_header_value(value);
+        format!("=?UTF-8?B?{}?=", BASE64.encode(sanitized.as_bytes()))
+    }
+}
+
 pub fn is_valid_phone_number(number: &str) -> bool {
     if number.len() < 2 || number.len() > 20 {
         return false;
@@ -94,7 +104,7 @@ impl EmailSender {
 
     pub fn format_email(&self, notification: &QueuedComms) -> String {
         let subject =
-            sanitize_header_value(notification.subject.as_deref().unwrap_or("Notification"));
+            mime_encode_header(notification.subject.as_deref().unwrap_or("Notification"));
         let recipient = sanitize_header_value(&notification.recipient);
         let from_header = if self.from_name.is_empty() {
             self.from_address.clone()

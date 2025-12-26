@@ -172,6 +172,8 @@
     "navCommsDesc": "Discord-, Telegram-, Signal-kanavat",
     "navRepo": "Tietovarastoselaaja",
     "navRepoDesc": "Selaa ja hallitse raakoja AT Protocol -tietueita",
+    "navDelegation": "Delegointi",
+    "navDelegationDesc": "Hallitse tilin ohjaajia ja delegoituja tilejä",
     "navAdmin": "Ylläpitopaneeli",
     "navAdminDesc": "Palvelintilastot ja ylläpitotoiminnot"
   },

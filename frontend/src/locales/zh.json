@@ -172,6 +172,8 @@
     "navCommsDesc": "Discord、Telegram、Signal 渠道设置",
     "navRepo": "数据浏览器",
     "navRepoDesc": "浏览和管理原始 AT Protocol 记录",
+    "navDelegation": "账户委托",
+    "navDelegationDesc": "管理控制者和委托账户",
     "navAdmin": "管理后台",
     "navAdminDesc": "服务器统计和管理操作"
   },
@@ -912,6 +914,7 @@
     "actor": "执行者",
     "controller": "控制者",
     "account": "账户",
+    "accountCreated": "已创建委托账户：{handle}",
     "details": "详情",
     "actionGrantCreated": "授权创建",
     "actionGrantRevoked": "授权撤销",

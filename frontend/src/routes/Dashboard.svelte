@@ -187,8 +187,8 @@
         <p>{$_('dashboard.navRepoDesc')}</p>
       </a>
       <a href="#/controllers" class="nav-card">
-        <h3>Delegation</h3>
-        <p>Manage account controllers and delegated accounts</p>
+        <h3>{$_('dashboard.navDelegation')}</h3>
+        <p>{$_('dashboard.navDelegationDesc')}</p>
       </a>
       {#if auth.session.isAdmin}
         <a href="#/admin" class="nav-card admin-card">

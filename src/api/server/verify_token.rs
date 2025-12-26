@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -30,15 +30,13 @@ pub struct VerifyTokenOutput {
 
 pub async fn verify_token(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(input): Json<VerifyTokenInput>,
 ) -> Result<Json<VerifyTokenOutput>, (StatusCode, Json<serde_json::Value>)> {
-    verify_token_internal(&state, Some(&headers), input).await
+    verify_token_internal(&state, input).await
 }
 
 pub async fn verify_token_internal(
     state: &AppState,
-    headers: Option<&HeaderMap>,
     input: VerifyTokenInput,
 ) -> Result<Json<VerifyTokenOutput>, (StatusCode, Json<serde_json::Value>)> {
     let normalized_token = normalize_token_input(&input.token);
@@ -95,15 +93,6 @@ pub async fn verify_token_internal(
                 .await
         }
         VerificationPurpose::ChannelUpdate => {
-            let auth_did = extract_and_validate_auth(state, headers).await?;
-            if auth_did != token_data.did {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(
-                        json!({ "error": "InvalidToken", "message": "Token does not match authenticated account" }),
-                    ),
-                ));
-            }
             handle_channel_update(state, &token_data.did, &token_data.channel, &identifier).await
         }
         VerificationPurpose::Signup => {
@@ -111,39 +100,6 @@ pub async fn verify_token_internal(
                 .await
         }
     }
-}
-
-async fn extract_and_validate_auth(
-    state: &AppState,
-    headers: Option<&HeaderMap>,
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
-    let headers = headers.ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "AuthenticationRequired", "message": "Authentication required for this verification" })),
-        )
-    })?;
-
-    let token = crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    )
-    .ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "AuthenticationRequired", "message": "Authentication required for this verification" })),
-        )
-    })?;
-
-    let user = crate::auth::validate_bearer_token(&state.db, &token)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "AuthenticationFailed", "message": "Invalid authentication token" })),
-            )
-        })?;
-
-    Ok(user.did)
 }
 
 async fn handle_migration_verification(

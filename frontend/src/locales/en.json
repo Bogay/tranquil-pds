@@ -172,6 +172,8 @@
     "navCommsDesc": "Discord, Telegram, Signal channels",
     "navRepo": "Repository Explorer",
     "navRepoDesc": "Browse and manage raw AT Protocol records",
+    "navDelegation": "Delegation",
+    "navDelegationDesc": "Manage account controllers and delegated accounts",
     "navAdmin": "Admin Panel",
     "navAdminDesc": "Server stats and admin operations"
   },

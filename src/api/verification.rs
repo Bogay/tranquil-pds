@@ -2,7 +2,6 @@ use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -18,7 +17,6 @@ pub struct ConfirmChannelVerificationInput {
 
 pub async fn confirm_channel_verification(
     State(state): State<AppState>,
-    headers: HeaderMap,
     Json(input): Json<ConfirmChannelVerificationInput>,
 ) -> Response {
     let token_input = crate::api::server::VerifyTokenInput {
@@ -26,7 +24,7 @@ pub async fn confirm_channel_verification(
         identifier: input.identifier,
     };
 
-    match crate::api::server::verify_token_internal(&state, Some(&headers), token_input).await {
+    match crate::api::server::verify_token_internal(&state, token_input).await {
         Ok(output) => Json(json!({"success": output.success})).into_response(),
         Err((status, err_json)) => (status, err_json).into_response(),
     }

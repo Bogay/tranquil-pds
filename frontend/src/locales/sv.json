@@ -172,6 +172,8 @@
     "navCommsDesc": "Discord, Telegram, Signal-kanaler",
     "navRepo": "Dataförvarsutforskare",
     "navRepoDesc": "Bläddra och hantera råa AT Protocol-poster",
+    "navDelegation": "Delegering",
+    "navDelegationDesc": "Hantera kontokontrollanter och delegerade konton",
     "navAdmin": "Adminpanel",
     "navAdminDesc": "Serverstatistik och administratörsoperationer"
   },

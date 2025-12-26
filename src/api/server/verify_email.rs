@@ -28,7 +28,7 @@ pub async fn verify_migration_email(
         identifier: input.email,
     };
 
-    let result = super::verify_token::verify_token_internal(&state, None, token_input).await?;
+    let result = super::verify_token::verify_token_internal(&state, token_input).await?;
 
     Ok(Json(VerifyMigrationEmailOutput {
         success: result.success,

@@ -172,6 +172,8 @@
     "navCommsDesc": "Discord, Telegram, Signal 채널",
     "navRepo": "저장소 탐색기",
     "navRepoDesc": "AT Protocol 레코드 탐색 및 관리",
+    "navDelegation": "위임",
+    "navDelegationDesc": "계정 컨트롤러 및 위임된 계정 관리",
     "navAdmin": "관리 패널",
     "navAdminDesc": "서버 통계 및 관리 작업"
   },

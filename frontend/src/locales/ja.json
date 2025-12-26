@@ -172,6 +172,8 @@
     "navCommsDesc": "Discord、Telegram、Signal チャンネル",
     "navRepo": "リポジトリエクスプローラー",
     "navRepoDesc": "AT Protocol レコードを閲覧・管理",
+    "navDelegation": "委任",
+    "navDelegationDesc": "アカウントコントローラーと委任アカウントを管理",
     "navAdmin": "管理パネル",
     "navAdminDesc": "サーバー統計と管理操作"
   },

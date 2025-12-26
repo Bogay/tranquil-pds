@@ -57,8 +57,9 @@ async function xrpc<T>(method: string, options?: {
       message: res.statusText,
     }));
     if (
-      res.status === 401 && err.error === "AuthenticationFailed" && token &&
-      tokenRefreshCallback && !skipRetry
+      res.status === 401 &&
+      (err.error === "AuthenticationFailed" || err.error === "ExpiredToken") &&
+      token && tokenRefreshCallback && !skipRetry
     ) {
       const newToken = await tokenRefreshCallback();
       if (newToken && newToken !== token) {
