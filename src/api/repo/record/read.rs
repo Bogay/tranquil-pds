@@ -6,13 +6,46 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use base64::Engine;
 use cid::Cid;
+use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::{error, info};
+
+fn ipld_to_json(ipld: Ipld) -> Value {
+    match ipld {
+        Ipld::Null => Value::Null,
+        Ipld::Bool(b) => Value::Bool(b),
+        Ipld::Integer(i) => {
+            if let Ok(n) = i64::try_from(i) {
+                Value::Number(n.into())
+            } else {
+                Value::String(i.to_string())
+            }
+        }
+        Ipld::Float(f) => serde_json::Number::from_f64(f)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        Ipld::String(s) => Value::String(s),
+        Ipld::Bytes(b) => {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&b);
+            json!({ "$bytes": encoded })
+        }
+        Ipld::List(arr) => Value::Array(arr.into_iter().map(ipld_to_json).collect()),
+        Ipld::Map(map) => {
+            let obj: Map<String, Value> = map
+                .into_iter()
+                .map(|(k, v)| (k, ipld_to_json(v)))
+                .collect();
+            Value::Object(obj)
+        }
+        Ipld::Link(cid) => json!({ "$link": cid.to_string() }),
+    }
+}
 
 #[derive(Deserialize)]
 pub struct GetRecordInput {
@@ -163,7 +196,7 @@ pub async fn get_record(
                 .into_response();
         }
     };
-    let value: serde_json::Value = match serde_ipld_dagcbor::from_slice(&block) {
+    let ipld: Ipld = match serde_ipld_dagcbor::from_slice(&block) {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to deserialize record: {:?}", e);
@@ -174,6 +207,7 @@ pub async fn get_record(
                 .into_response();
         }
     };
+    let value = ipld_to_json(ipld);
     Json(json!({
         "uri": format!("at://{}/{}/{}", input.repo, input.collection, input.rkey),
         "cid": record_cid_str,
@@ -323,8 +357,9 @@ pub async fn list_records(
     for (cid, block_opt) in cids.iter().zip(blocks.into_iter()) {
         if let Some(block) = block_opt
             && let Some((rkey, cid_str)) = cid_to_rkey.get(cid)
-            && let Ok(value) = serde_ipld_dagcbor::from_slice::<serde_json::Value>(&block)
+            && let Ok(ipld) = serde_ipld_dagcbor::from_slice::<Ipld>(&block)
         {
+            let value = ipld_to_json(ipld);
             records.push(json!({
                 "uri": format!("at://{}/{}/{}", input.repo, input.collection, rkey),
                 "cid": cid_str,

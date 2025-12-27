@@ -1029,5 +1029,206 @@
     "permissionsLimitedDesc": "앱이 무엇을 요청하든 실제 권한은 {level} 액세스 수준으로 제한됩니다.",
     "viewerLimitedDesc": "뷰어로서 읽기 전용 액세스 권한만 있습니다. 이 앱은 이 계정에서 콘텐츠를 생성, 수정 또는 삭제할 수 없습니다.",
     "editorLimitedDesc": "편집자로서 콘텐츠를 생성하고 편집할 수 있지만 계정 설정이나 보안을 관리할 수 없습니다."
+  },
+  "migration": {
+    "title": "계정 마이그레이션",
+    "subtitle": "AT Protocol 아이덴티티를 서버 간에 이동",
+    "navTitle": "마이그레이션",
+    "navDesc": "다른 PDS로 또는 다른 PDS에서 계정 이동",
+    "migrateHere": "여기로 마이그레이션",
+    "migrateHereDesc": "기존 AT Protocol 계정을 다른 서버에서 이 PDS로 이동합니다.",
+    "migrateAway": "다른 곳으로 마이그레이션",
+    "migrateAwayDesc": "이 PDS에서 다른 서버로 계정을 이동합니다.",
+    "loginRequired": "로그인 필요",
+    "bringDid": "DID와 아이덴티티 가져오기",
+    "transferData": "모든 데이터 전송",
+    "keepFollowers": "팔로워 유지",
+    "exportRepo": "저장소 내보내기",
+    "transferToPds": "새 PDS로 전송",
+    "updateIdentity": "아이덴티티 업데이트",
+    "whatIsMigration": "계정 마이그레이션이란?",
+    "whatIsMigrationDesc": "계정 마이그레이션을 통해 AT Protocol 아이덴티티를 개인 데이터 서버(PDS) 간에 이동할 수 있습니다. DID(분산 식별자)는 동일하게 유지되므로 팔로워와 소셜 연결이 보존됩니다.",
+    "beforeMigrate": "마이그레이션 전 확인사항",
+    "beforeMigrate1": "현재 계정 인증 정보가 필요합니다",
+    "beforeMigrate2": "보안을 위해 이메일 인증이 필요합니다",
+    "beforeMigrate3": "이미지가 많은 대용량 계정은 몇 분이 걸릴 수 있습니다",
+    "beforeMigrate4": "이전 PDS에 계정 비활성화가 통보됩니다",
+    "importantWarning": "계정 마이그레이션은 중요한 작업입니다. 대상 PDS를 신뢰하고 데이터가 이동된다는 것을 이해하세요. 문제가 발생하면 수동 복구가 필요할 수 있습니다.",
+    "learnMore": "마이그레이션 위험에 대해 자세히 알아보기",
+    "resume": {
+      "title": "마이그레이션을 재개하시겠습니까?",
+      "incomplete": "완료되지 않은 마이그레이션이 있습니다:",
+      "direction": "방향",
+      "migratingHere": "여기로 마이그레이션 중",
+      "migratingAway": "다른 곳으로 마이그레이션 중",
+      "from": "출발지",
+      "to": "목적지",
+      "progress": "진행 상황",
+      "reenterCredentials": "계속하려면 인증 정보를 다시 입력해야 합니다.",
+      "startOver": "처음부터 다시 시작",
+      "resumeButton": "재개"
+    },
+    "inbound": {
+      "welcome": {
+        "title": "이 PDS로 마이그레이션",
+        "desc": "기존 AT Protocol 계정을 이 서버로 이동합니다.",
+        "understand": "위험을 이해하고 계속 진행합니다"
+      },
+      "sourceLogin": {
+        "title": "현재 PDS에 로그인",
+        "desc": "마이그레이션할 계정의 인증 정보를 입력하세요.",
+        "handle": "핸들",
+        "handlePlaceholder": "you.bsky.social",
+        "password": "비밀번호",
+        "twoFactorCode": "2단계 인증 코드",
+        "twoFactorRequired": "2단계 인증이 필요합니다",
+        "signIn": "로그인 및 계속"
+      },
+      "chooseHandle": {
+        "title": "새 핸들 선택",
+        "desc": "이 PDS에서 사용할 계정 핸들을 선택하세요.",
+        "handleHint": "전체 핸들: @{handle}"
+      },
+      "review": {
+        "title": "마이그레이션 검토",
+        "desc": "마이그레이션 세부 정보를 검토하고 확인하세요.",
+        "currentHandle": "현재 핸들",
+        "newHandle": "새 핸들",
+        "sourcePds": "소스 PDS",
+        "targetPds": "이 PDS",
+        "email": "이메일",
+        "inviteCode": "초대 코드",
+        "confirm": "계정 마이그레이션을 확인합니다",
+        "startMigration": "마이그레이션 시작"
+      },
+      "migrating": {
+        "title": "계정 마이그레이션 중",
+        "desc": "데이터를 전송하는 중입니다...",
+        "gettingServiceAuth": "서비스 인증 획득 중...",
+        "creatingAccount": "새 PDS에 계정 생성 중...",
+        "exportingRepo": "저장소 내보내기 중...",
+        "importingRepo": "저장소 가져오기 중...",
+        "countingBlobs": "blob 개수 세는 중...",
+        "migratingBlobs": "blob 마이그레이션 중 ({current}/{total})...",
+        "migratingPrefs": "환경설정 마이그레이션 중...",
+        "requestingPlc": "PLC 작업 요청 중..."
+      },
+      "emailVerify": {
+        "title": "이메일 인증",
+        "desc": "인증 코드가 {email}(으)로 전송되었습니다.",
+        "hint": "아래에 코드를 입력하거나, 이메일의 링크를 클릭하여 자동으로 계속할 수 있습니다.",
+        "tokenLabel": "인증 코드",
+        "tokenPlaceholder": "이메일에서 받은 코드 입력",
+        "resend": "코드 재전송",
+        "verify": "이메일 인증",
+        "verifying": "인증 중..."
+      },
+      "plcToken": {
+        "title": "신원 확인",
+        "desc": "현재 PDS에 등록된 이메일로 인증 코드가 전송되었습니다.",
+        "tokenLabel": "인증 토큰",
+        "tokenPlaceholder": "이메일에서 받은 토큰 입력",
+        "resend": "재전송",
+        "resending": "전송 중..."
+      },
+      "finalizing": {
+        "title": "마이그레이션 완료 중",
+        "desc": "마이그레이션을 완료하는 중입니다...",
+        "signingPlc": "아이덴티티 업데이트 서명",
+        "activating": "새 PDS에서 계정 활성화",
+        "deactivating": "이전 PDS에서 계정 비활성화"
+      },
+      "success": {
+        "title": "마이그레이션 완료!",
+        "desc": "계정이 이 PDS로 성공적으로 마이그레이션되었습니다.",
+        "newHandle": "새 핸들",
+        "did": "DID",
+        "goToDashboard": "대시보드로 이동"
+      }
+    },
+    "outbound": {
+      "welcome": {
+        "title": "이 PDS에서 마이그레이션",
+        "desc": "계정을 다른 개인 데이터 서버로 이동합니다.",
+        "warning": "마이그레이션 후 이 PDS에서 계정이 비활성화됩니다.",
+        "didWebNotice": "did:web 마이그레이션 알림",
+        "didWebNoticeDesc": "귀하의 계정은 did:web 식별자({did})를 사용합니다. 마이그레이션 후 이 PDS는 새 PDS를 가리키는 DID 문서를 계속 제공합니다. 이 서버가 온라인인 한 아이덴티티는 계속 작동합니다.",
+        "understand": "위험을 이해하고 계속 진행합니다"
+      },
+      "targetPds": {
+        "title": "대상 PDS 선택",
+        "desc": "마이그레이션할 PDS의 URL을 입력하세요.",
+        "url": "PDS URL",
+        "urlPlaceholder": "https://pds.example.com",
+        "validate": "확인 및 계속",
+        "validating": "확인 중...",
+        "connected": "{name}에 연결됨",
+        "inviteRequired": "초대 코드 필요",
+        "privacyPolicy": "개인정보 처리방침",
+        "termsOfService": "서비스 약관"
+      },
+      "newAccount": {
+        "title": "새 계정 세부 정보",
+        "desc": "새 PDS에서 계정을 설정합니다.",
+        "handle": "핸들",
+        "availableDomains": "사용 가능한 도메인",
+        "email": "이메일",
+        "password": "비밀번호",
+        "confirmPassword": "비밀번호 확인",
+        "inviteCode": "초대 코드"
+      },
+      "review": {
+        "title": "마이그레이션 검토",
+        "desc": "마이그레이션 세부 정보를 검토하고 확인하세요.",
+        "currentHandle": "현재 핸들",
+        "newHandle": "새 핸들",
+        "sourcePds": "이 PDS",
+        "targetPds": "대상 PDS",
+        "confirm": "계정 마이그레이션을 확인합니다",
+        "startMigration": "마이그레이션 시작"
+      },
+      "migrating": {
+        "title": "계정 마이그레이션 중",
+        "desc": "데이터를 전송하는 중입니다..."
+      },
+      "plcToken": {
+        "title": "신원 확인",
+        "desc": "이메일로 인증 코드가 전송되었습니다."
+      },
+      "finalizing": {
+        "title": "마이그레이션 완료 중",
+        "desc": "마이그레이션을 완료하는 중입니다...",
+        "updatingForwarding": "DID 문서 포워딩 업데이트 중..."
+      },
+      "success": {
+        "title": "마이그레이션 완료!",
+        "desc": "계정이 새 PDS로 성공적으로 마이그레이션되었습니다.",
+        "newHandle": "새 핸들",
+        "newPds": "새 PDS",
+        "nextSteps": "다음 단계",
+        "nextSteps1": "새 PDS에 로그인",
+        "nextSteps2": "새 인증 정보로 앱 업데이트",
+        "nextSteps3": "팔로워가 자동으로 새 위치를 확인할 수 있습니다",
+        "loggingOut": "{seconds}초 후 로그아웃됩니다..."
+      }
+    },
+    "progress": {
+      "repoExported": "저장소 내보내기 완료",
+      "repoImported": "저장소 가져오기 완료",
+      "blobsMigrated": "{count}개 blob 마이그레이션됨",
+      "prefsMigrated": "환경설정 마이그레이션됨",
+      "plcSigned": "아이덴티티 업데이트됨",
+      "activated": "계정 활성화됨",
+      "deactivated": "이전 계정 비활성화됨"
+    },
+    "errors": {
+      "connectionFailed": "PDS에 연결할 수 없습니다",
+      "invalidCredentials": "잘못된 인증 정보",
+      "twoFactorRequired": "2단계 인증이 필요합니다",
+      "accountExists": "대상 PDS에 계정이 이미 존재합니다",
+      "plcFailed": "PLC 작업 실패",
+      "blobFailed": "blob 마이그레이션 실패: {cid}",
+      "networkError": "네트워크 오류. 다시 시도하세요."
+    }
   }
 }

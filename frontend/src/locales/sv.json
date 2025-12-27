@@ -1029,5 +1029,206 @@
     "permissionsLimitedDesc": "Dina faktiska behörigheter begränsas till din {level}-åtkomstnivå, oavsett vad appen begär.",
     "viewerLimitedDesc": "Som visare har du endast läsåtkomst. Denna app kommer inte att kunna skapa, uppdatera eller ta bort innehåll på detta konto.",
     "editorLimitedDesc": "Som redigerare kan du skapa och redigera innehåll men kan inte hantera kontoinställningar eller säkerhet."
+  },
+  "migration": {
+    "title": "Kontoflyttning",
+    "subtitle": "Flytta din AT Protocol-identitet mellan servrar",
+    "navTitle": "Flytta",
+    "navDesc": "Flytta ditt konto till eller från en annan PDS",
+    "migrateHere": "Flytta hit",
+    "migrateHereDesc": "Flytta ditt befintliga AT Protocol-konto till denna PDS från en annan server.",
+    "migrateAway": "Flytta bort",
+    "migrateAwayDesc": "Flytta ditt konto från denna PDS till en annan server.",
+    "loginRequired": "Inloggning krävs",
+    "bringDid": "Ta med din DID och identitet",
+    "transferData": "Överför all din data",
+    "keepFollowers": "Behåll dina följare",
+    "exportRepo": "Exportera ditt arkiv",
+    "transferToPds": "Överför till ny PDS",
+    "updateIdentity": "Uppdatera din identitet",
+    "whatIsMigration": "Vad är kontoflyttning?",
+    "whatIsMigrationDesc": "Kontoflyttning låter dig flytta din AT Protocol-identitet mellan personliga dataservrar (PDS). Din DID (decentraliserad identifierare) förblir densamma, så dina följare och sociala kopplingar bevaras.",
+    "beforeMigrate": "Innan du flyttar",
+    "beforeMigrate1": "Du behöver dina nuvarande kontouppgifter",
+    "beforeMigrate2": "Flytt kräver e-postverifiering för säkerhet",
+    "beforeMigrate3": "Stora konton med många bilder kan ta flera minuter",
+    "beforeMigrate4": "Din gamla PDS kommer att meddelas om kontoinaktivering",
+    "importantWarning": "Kontoflyttning är en betydande åtgärd. Se till att du litar på mål-PDS och förstår att din data kommer att flyttas. Om något går fel kan manuell återställning krävas.",
+    "learnMore": "Läs mer om flyttningsrisker",
+    "resume": {
+      "title": "Återuppta flytt?",
+      "incomplete": "Du har en ofullständig flytt pågående:",
+      "direction": "Riktning",
+      "migratingHere": "Flyttar hit",
+      "migratingAway": "Flyttar bort",
+      "from": "Från",
+      "to": "Till",
+      "progress": "Framsteg",
+      "reenterCredentials": "Du måste ange dina uppgifter igen för att fortsätta.",
+      "startOver": "Börja om",
+      "resumeButton": "Återuppta"
+    },
+    "inbound": {
+      "welcome": {
+        "title": "Flytta till denna PDS",
+        "desc": "Flytta ditt befintliga AT Protocol-konto till denna server.",
+        "understand": "Jag förstår riskerna och vill fortsätta"
+      },
+      "sourceLogin": {
+        "title": "Logga in på din nuvarande PDS",
+        "desc": "Ange uppgifterna för kontot du vill flytta.",
+        "handle": "Användarnamn",
+        "handlePlaceholder": "du.bsky.social",
+        "password": "Lösenord",
+        "twoFactorCode": "Tvåfaktorkod",
+        "twoFactorRequired": "Tvåfaktorautentisering krävs",
+        "signIn": "Logga in och fortsätt"
+      },
+      "chooseHandle": {
+        "title": "Välj ditt nya användarnamn",
+        "desc": "Välj ett användarnamn för ditt konto på denna PDS.",
+        "handleHint": "Ditt fullständiga användarnamn blir: @{handle}"
+      },
+      "review": {
+        "title": "Granska flytt",
+        "desc": "Granska och bekräfta dina flyttdetaljer.",
+        "currentHandle": "Nuvarande användarnamn",
+        "newHandle": "Nytt användarnamn",
+        "sourcePds": "Käll-PDS",
+        "targetPds": "Denna PDS",
+        "email": "E-post",
+        "inviteCode": "Inbjudningskod",
+        "confirm": "Jag bekräftar att jag vill flytta mitt konto",
+        "startMigration": "Starta flytt"
+      },
+      "migrating": {
+        "title": "Flyttar ditt konto",
+        "desc": "Vänta medan vi överför din data...",
+        "gettingServiceAuth": "Hämtar tjänstauktorisering...",
+        "creatingAccount": "Skapar konto på ny PDS...",
+        "exportingRepo": "Exporterar arkiv...",
+        "importingRepo": "Importerar arkiv...",
+        "countingBlobs": "Räknar blobbar...",
+        "migratingBlobs": "Flyttar blobbar ({current}/{total})...",
+        "migratingPrefs": "Flyttar inställningar...",
+        "requestingPlc": "Begär PLC-operation..."
+      },
+      "emailVerify": {
+        "title": "Verifiera din e-post",
+        "desc": "En verifieringskod har skickats till {email}.",
+        "hint": "Ange koden nedan eller klicka på länken i e-postmeddelandet för att fortsätta automatiskt.",
+        "tokenLabel": "Verifieringskod",
+        "tokenPlaceholder": "Ange kod från e-post",
+        "resend": "Skicka kod igen",
+        "verify": "Verifiera e-post",
+        "verifying": "Verifierar..."
+      },
+      "plcToken": {
+        "title": "Verifiera din identitet",
+        "desc": "En verifieringskod har skickats till din e-post på din nuvarande PDS.",
+        "tokenLabel": "Verifieringstoken",
+        "tokenPlaceholder": "Ange token från din e-post",
+        "resend": "Skicka igen",
+        "resending": "Skickar..."
+      },
+      "finalizing": {
+        "title": "Slutför flytt",
+        "desc": "Vänta medan vi slutför flytten...",
+        "signingPlc": "Signera identitetsuppdatering",
+        "activating": "Aktivera konto på ny PDS",
+        "deactivating": "Inaktivera konto på gammal PDS"
+      },
+      "success": {
+        "title": "Flytt klar!",
+        "desc": "Ditt konto har framgångsrikt flyttats till denna PDS.",
+        "newHandle": "Nytt användarnamn",
+        "did": "DID",
+        "goToDashboard": "Gå till instrumentpanel"
+      }
+    },
+    "outbound": {
+      "welcome": {
+        "title": "Flytta från denna PDS",
+        "desc": "Flytta ditt konto till en annan personlig dataserver.",
+        "warning": "Efter flytten kommer ditt konto här att inaktiveras.",
+        "didWebNotice": "did:web-flyttmeddelande",
+        "didWebNoticeDesc": "Ditt konto använder en did:web-identifierare ({did}). Efter flytten kommer denna PDS att fortsätta servera ditt DID-dokument som pekar till den nya PDS. Din identitet kommer att fungera så länge denna server är online.",
+        "understand": "Jag förstår riskerna och vill fortsätta"
+      },
+      "targetPds": {
+        "title": "Välj mål-PDS",
+        "desc": "Ange URL:en för PDS du vill flytta till.",
+        "url": "PDS URL",
+        "urlPlaceholder": "https://pds.example.com",
+        "validate": "Validera och fortsätt",
+        "validating": "Validerar...",
+        "connected": "Ansluten till {name}",
+        "inviteRequired": "Inbjudningskod krävs",
+        "privacyPolicy": "Integritetspolicy",
+        "termsOfService": "Användarvillkor"
+      },
+      "newAccount": {
+        "title": "Nya kontouppgifter",
+        "desc": "Konfigurera ditt konto på den nya PDS.",
+        "handle": "Användarnamn",
+        "availableDomains": "Tillgängliga domäner",
+        "email": "E-post",
+        "password": "Lösenord",
+        "confirmPassword": "Bekräfta lösenord",
+        "inviteCode": "Inbjudningskod"
+      },
+      "review": {
+        "title": "Granska flytt",
+        "desc": "Granska och bekräfta dina flyttdetaljer.",
+        "currentHandle": "Nuvarande användarnamn",
+        "newHandle": "Nytt användarnamn",
+        "sourcePds": "Denna PDS",
+        "targetPds": "Mål-PDS",
+        "confirm": "Jag bekräftar att jag vill flytta mitt konto",
+        "startMigration": "Starta flytt"
+      },
+      "migrating": {
+        "title": "Flyttar ditt konto",
+        "desc": "Vänta medan vi överför din data..."
+      },
+      "plcToken": {
+        "title": "Verifiera din identitet",
+        "desc": "En verifieringskod har skickats till din e-post."
+      },
+      "finalizing": {
+        "title": "Slutför flytt",
+        "desc": "Vänta medan vi slutför flytten...",
+        "updatingForwarding": "Uppdaterar DID-dokumentvidarebefordran..."
+      },
+      "success": {
+        "title": "Flytt klar!",
+        "desc": "Ditt konto har framgångsrikt flyttats till din nya PDS.",
+        "newHandle": "Nytt användarnamn",
+        "newPds": "Ny PDS",
+        "nextSteps": "Nästa steg",
+        "nextSteps1": "Logga in på din nya PDS",
+        "nextSteps2": "Uppdatera dina appar med nya uppgifter",
+        "nextSteps3": "Dina följare kommer automatiskt se din nya plats",
+        "loggingOut": "Loggar ut om {seconds} sekunder..."
+      }
+    },
+    "progress": {
+      "repoExported": "Arkiv exporterat",
+      "repoImported": "Arkiv importerat",
+      "blobsMigrated": "{count} blobbar flyttade",
+      "prefsMigrated": "Inställningar flyttade",
+      "plcSigned": "Identitet uppdaterad",
+      "activated": "Konto aktiverat",
+      "deactivated": "Gammalt konto inaktiverat"
+    },
+    "errors": {
+      "connectionFailed": "Kunde inte ansluta till PDS",
+      "invalidCredentials": "Ogiltiga uppgifter",
+      "twoFactorRequired": "Tvåfaktorautentisering krävs",
+      "accountExists": "Konto finns redan på mål-PDS",
+      "plcFailed": "PLC-operation misslyckades",
+      "blobFailed": "Kunde inte flytta blob: {cid}",
+      "networkError": "Nätverksfel. Försök igen."
+    }
   }
 }

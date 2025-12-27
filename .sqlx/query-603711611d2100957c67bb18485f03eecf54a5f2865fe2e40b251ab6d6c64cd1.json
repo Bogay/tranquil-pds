@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET migrated_to_pds = NULL, migrated_at = NULL WHERE did = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "603711611d2100957c67bb18485f03eecf54a5f2865fe2e40b251ab6d6c64cd1"
+}

@@ -1007,5 +1007,206 @@
     "permissionsLimitedDesc": "Todelliset oikeutesi rajoitetaan {level}-käyttöoikeustasoosi riippumatta siitä, mitä sovellus pyytää.",
     "viewerLimitedDesc": "Katselijana sinulla on vain lukuoikeus. Tämä sovellus ei voi luoda, muokata tai poistaa sisältöä tällä tilillä.",
     "editorLimitedDesc": "Muokkaajana voit luoda ja muokata sisältöä, mutta et voi hallita tilin asetuksia tai tietoturvaa."
+  },
+  "migration": {
+    "title": "Tilin siirto",
+    "subtitle": "Siirrä AT Protocol -identiteettisi palvelimien välillä",
+    "navTitle": "Siirto",
+    "navDesc": "Siirrä tilisi toiseen tai toisesta PDS:stä",
+    "migrateHere": "Siirrä tänne",
+    "migrateHereDesc": "Siirrä olemassa oleva AT Protocol -tilisi tähän PDS:ään toiselta palvelimelta.",
+    "migrateAway": "Siirrä pois",
+    "migrateAwayDesc": "Siirrä tilisi tästä PDS:stä toiselle palvelimelle.",
+    "loginRequired": "Kirjautuminen vaaditaan",
+    "bringDid": "Tuo DID ja identiteettisi",
+    "transferData": "Siirrä kaikki tietosi",
+    "keepFollowers": "Säilytä seuraajasi",
+    "exportRepo": "Vie tietovarastosi",
+    "transferToPds": "Siirrä uuteen PDS:ään",
+    "updateIdentity": "Päivitä identiteettisi",
+    "whatIsMigration": "Mikä on tilin siirto?",
+    "whatIsMigrationDesc": "Tilin siirto mahdollistaa AT Protocol -identiteettisi siirtämisen henkilökohtaisten datapalvelimien (PDS) välillä. DID (hajautettu tunniste) pysyy samana, joten seuraajasi ja sosiaaliset yhteytesi säilyvät.",
+    "beforeMigrate": "Ennen siirtoa",
+    "beforeMigrate1": "Tarvitset nykyisen tilisi tunnukset",
+    "beforeMigrate2": "Siirto vaatii sähköpostivahvistuksen turvallisuussyistä",
+    "beforeMigrate3": "Suuret tilit, joissa on paljon kuvia, voivat kestää useita minuutteja",
+    "beforeMigrate4": "Vanhalle PDS:llesi ilmoitetaan tilisi deaktivoinnista",
+    "importantWarning": "Tilin siirto on merkittävä toimenpide. Varmista, että luotat kohde-PDS:ään ja ymmärrät, että tietosi siirretään. Jos jokin menee pieleen, palautus voi vaatia manuaalista toimenpidettä.",
+    "learnMore": "Lue lisää siirron riskeistä",
+    "resume": {
+      "title": "Jatka siirtoa?",
+      "incomplete": "Sinulla on keskeneräinen siirto:",
+      "direction": "Suunta",
+      "migratingHere": "Siirretään tänne",
+      "migratingAway": "Siirretään pois",
+      "from": "Mistä",
+      "to": "Minne",
+      "progress": "Edistyminen",
+      "reenterCredentials": "Sinun täytyy syöttää tunnuksesi uudelleen jatkaaksesi.",
+      "startOver": "Aloita alusta",
+      "resumeButton": "Jatka"
+    },
+    "inbound": {
+      "welcome": {
+        "title": "Siirrä tähän PDS:ään",
+        "desc": "Siirrä olemassa oleva AT Protocol -tilisi tälle palvelimelle.",
+        "understand": "Ymmärrän riskit ja haluan jatkaa"
+      },
+      "sourceLogin": {
+        "title": "Kirjaudu nykyiseen PDS:ääsi",
+        "desc": "Syötä siirrettävän tilin tunnukset.",
+        "handle": "Käyttäjätunnus",
+        "handlePlaceholder": "sinä.bsky.social",
+        "password": "Salasana",
+        "twoFactorCode": "Kaksivaiheinen koodi",
+        "twoFactorRequired": "Kaksivaiheinen tunnistautuminen vaaditaan",
+        "signIn": "Kirjaudu ja jatka"
+      },
+      "chooseHandle": {
+        "title": "Valitse uusi käyttäjätunnuksesi",
+        "desc": "Valitse käyttäjätunnus tilillesi tässä PDS:ssä.",
+        "handleHint": "Täydellinen käyttäjätunnuksesi on: @{handle}"
+      },
+      "review": {
+        "title": "Tarkista siirto",
+        "desc": "Tarkista ja vahvista siirtotietosi.",
+        "currentHandle": "Nykyinen käyttäjätunnus",
+        "newHandle": "Uusi käyttäjätunnus",
+        "sourcePds": "Lähde-PDS",
+        "targetPds": "Tämä PDS",
+        "email": "Sähköposti",
+        "inviteCode": "Kutsukoodi",
+        "confirm": "Vahvistan haluavani siirtää tilini",
+        "startMigration": "Aloita siirto"
+      },
+      "migrating": {
+        "title": "Siirretään tiliäsi",
+        "desc": "Odota, kun siirrämme tietojasi...",
+        "gettingServiceAuth": "Haetaan palveluvaltuutusta...",
+        "creatingAccount": "Luodaan tiliä uuteen PDS:ään...",
+        "exportingRepo": "Viedään tietovarastoa...",
+        "importingRepo": "Tuodaan tietovarastoa...",
+        "countingBlobs": "Lasketaan blob-tiedostoja...",
+        "migratingBlobs": "Siirretään blob-tiedostoja ({current}/{total})...",
+        "migratingPrefs": "Siirretään asetuksia...",
+        "requestingPlc": "Pyydetään PLC-toimintoa..."
+      },
+      "emailVerify": {
+        "title": "Vahvista sähköpostisi",
+        "desc": "Vahvistuskoodi on lähetetty osoitteeseen {email}.",
+        "hint": "Syötä koodi alle tai klikkaa sähköpostissa olevaa linkkiä jatkaaksesi automaattisesti.",
+        "tokenLabel": "Vahvistuskoodi",
+        "tokenPlaceholder": "Syötä sähköpostista saatu koodi",
+        "resend": "Lähetä koodi uudelleen",
+        "verify": "Vahvista sähköposti",
+        "verifying": "Vahvistetaan..."
+      },
+      "plcToken": {
+        "title": "Vahvista henkilöllisyytesi",
+        "desc": "Vahvistuskoodi on lähetetty sähköpostiisi nykyisessä PDS:ssäsi.",
+        "tokenLabel": "Vahvistuskoodi",
+        "tokenPlaceholder": "Syötä sähköpostista saatu koodi",
+        "resend": "Lähetä uudelleen",
+        "resending": "Lähetetään..."
+      },
+      "finalizing": {
+        "title": "Viimeistellään siirtoa",
+        "desc": "Odota, kun viimeistelemme siirtoa...",
+        "signingPlc": "Allekirjoita identiteettipäivitys",
+        "activating": "Aktivoi tili uudessa PDS:ssä",
+        "deactivating": "Deaktivoi tili vanhassa PDS:ssä"
+      },
+      "success": {
+        "title": "Siirto valmis!",
+        "desc": "Tilisi on siirretty onnistuneesti tähän PDS:ään.",
+        "newHandle": "Uusi käyttäjätunnus",
+        "did": "DID",
+        "goToDashboard": "Siirry hallintapaneeliin"
+      }
+    },
+    "outbound": {
+      "welcome": {
+        "title": "Siirrä pois tästä PDS:stä",
+        "desc": "Siirrä tilisi toiseen henkilökohtaiseen datapalvelimeen.",
+        "warning": "Siirron jälkeen tilisi täällä deaktivoidaan.",
+        "didWebNotice": "did:web-siirtoilmoitus",
+        "didWebNoticeDesc": "Tilisi käyttää did:web-tunnistetta ({did}). Siirron jälkeen tämä PDS jatkaa DID-dokumenttisi tarjoamista osoittaen uuteen PDS:ään. Identiteettisi toimii niin kauan kuin tämä palvelin on päällä.",
+        "understand": "Ymmärrän riskit ja haluan jatkaa"
+      },
+      "targetPds": {
+        "title": "Valitse kohde-PDS",
+        "desc": "Syötä sen PDS:n URL, johon haluat siirtyä.",
+        "url": "PDS URL",
+        "urlPlaceholder": "https://pds.example.com",
+        "validate": "Vahvista ja jatka",
+        "validating": "Vahvistetaan...",
+        "connected": "Yhdistetty: {name}",
+        "inviteRequired": "Kutsukoodi vaaditaan",
+        "privacyPolicy": "Tietosuojakäytäntö",
+        "termsOfService": "Käyttöehdot"
+      },
+      "newAccount": {
+        "title": "Uuden tilin tiedot",
+        "desc": "Määritä tilisi uudessa PDS:ssä.",
+        "handle": "Käyttäjätunnus",
+        "availableDomains": "Käytettävissä olevat verkkotunnukset",
+        "email": "Sähköposti",
+        "password": "Salasana",
+        "confirmPassword": "Vahvista salasana",
+        "inviteCode": "Kutsukoodi"
+      },
+      "review": {
+        "title": "Tarkista siirto",
+        "desc": "Tarkista ja vahvista siirtotietosi.",
+        "currentHandle": "Nykyinen käyttäjätunnus",
+        "newHandle": "Uusi käyttäjätunnus",
+        "sourcePds": "Tämä PDS",
+        "targetPds": "Kohde-PDS",
+        "confirm": "Vahvistan haluavani siirtää tilini",
+        "startMigration": "Aloita siirto"
+      },
+      "migrating": {
+        "title": "Siirretään tiliäsi",
+        "desc": "Odota, kun siirrämme tietojasi..."
+      },
+      "plcToken": {
+        "title": "Vahvista henkilöllisyytesi",
+        "desc": "Vahvistuskoodi on lähetetty sähköpostiisi."
+      },
+      "finalizing": {
+        "title": "Viimeistellään siirtoa",
+        "desc": "Odota, kun viimeistelemme siirtoa...",
+        "updatingForwarding": "Päivitetään DID-dokumentin uudelleenohjausta..."
+      },
+      "success": {
+        "title": "Siirto valmis!",
+        "desc": "Tilisi on siirretty onnistuneesti uuteen PDS:ääsi.",
+        "newHandle": "Uusi käyttäjätunnus",
+        "newPds": "Uusi PDS",
+        "nextSteps": "Seuraavat vaiheet",
+        "nextSteps1": "Kirjaudu uuteen PDS:ääsi",
+        "nextSteps2": "Päivitä sovellukset uusilla tunnuksillasi",
+        "nextSteps3": "Seuraajasi näkevät automaattisesti uuden sijaintisi",
+        "loggingOut": "Kirjaudutaan ulos {seconds} sekunnin kuluttua..."
+      }
+    },
+    "progress": {
+      "repoExported": "Tietovarasto viety",
+      "repoImported": "Tietovarasto tuotu",
+      "blobsMigrated": "{count} blob-tiedostoa siirretty",
+      "prefsMigrated": "Asetukset siirretty",
+      "plcSigned": "Identiteetti päivitetty",
+      "activated": "Tili aktivoitu",
+      "deactivated": "Vanha tili deaktivoitu"
+    },
+    "errors": {
+      "connectionFailed": "Yhteys PDS:ään epäonnistui",
+      "invalidCredentials": "Virheelliset tunnukset",
+      "twoFactorRequired": "Kaksivaiheinen tunnistautuminen vaaditaan",
+      "accountExists": "Tili on jo olemassa kohde-PDS:ssä",
+      "plcFailed": "PLC-toiminto epäonnistui",
+      "blobFailed": "Blob-tiedoston siirto epäonnistui: {cid}",
+      "networkError": "Verkkovirhe. Yritä uudelleen."
+    }
   }
 }

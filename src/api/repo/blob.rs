@@ -295,7 +295,7 @@ pub async fn list_missing_blobs(
                 .into_response();
         }
     };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
+    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
         Ok(user) => user,
         Err(_) => {
             return (

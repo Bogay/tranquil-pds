@@ -163,68 +163,91 @@ pub fn walk_mst(
     root_cid: &Cid,
 ) -> Result<Vec<ImportedRecord>, ImportError> {
     let mut records = Vec::new();
-    let mut stack = vec![*root_cid];
-    let mut visited = std::collections::HashSet::new();
-    while let Some(cid) = stack.pop() {
-        if visited.contains(&cid) {
-            continue;
+    walk_mst_node(blocks, root_cid, &[], &mut records)?;
+    Ok(records)
+}
+
+fn walk_mst_node(
+    blocks: &HashMap<Cid, Bytes>,
+    cid: &Cid,
+    prev_key: &[u8],
+    records: &mut Vec<ImportedRecord>,
+) -> Result<(), ImportError> {
+    let block = blocks
+        .get(cid)
+        .ok_or_else(|| ImportError::BlockNotFound(cid.to_string()))?;
+    let value: Ipld = serde_ipld_dagcbor::from_slice(block)
+        .map_err(|e| ImportError::InvalidCbor(e.to_string()))?;
+
+    if let Ipld::Map(ref obj) = value {
+        if let Some(Ipld::Link(left_cid)) = obj.get("l") {
+            walk_mst_node(blocks, left_cid, prev_key, records)?;
         }
-        visited.insert(cid);
-        let block = blocks
-            .get(&cid)
-            .ok_or_else(|| ImportError::BlockNotFound(cid.to_string()))?;
-        let value: Ipld = serde_ipld_dagcbor::from_slice(block)
-            .map_err(|e| ImportError::InvalidCbor(e.to_string()))?;
-        if let Ipld::Map(ref obj) = value {
-            if let Some(Ipld::List(entries)) = obj.get("e") {
-                for entry in entries {
-                    if let Ipld::Map(entry_obj) = entry {
-                        let key = entry_obj.get("k").and_then(|k| {
-                            if let Ipld::Bytes(b) = k {
-                                String::from_utf8(b.clone()).ok()
-                            } else if let Ipld::String(s) = k {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        });
-                        let record_cid = entry_obj.get("v").and_then(|v| {
-                            if let Ipld::Link(cid) = v {
-                                Some(*cid)
-                            } else {
-                                None
-                            }
-                        });
-                        if let (Some(key), Some(record_cid)) = (key, record_cid)
-                            && let Some(record_block) = blocks.get(&record_cid)
-                            && let Ok(record_value) =
-                                serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
-                        {
-                            let blob_refs = find_blob_refs_ipld(&record_value, 0);
-                            let parts: Vec<&str> = key.split('/').collect();
-                            if parts.len() >= 2 {
-                                let collection = parts[..parts.len() - 1].join("/");
-                                let rkey = parts[parts.len() - 1].to_string();
-                                records.push(ImportedRecord {
-                                    collection,
-                                    rkey,
-                                    cid: record_cid,
-                                    blob_refs,
-                                });
-                            }
+
+        let mut current_key = prev_key.to_vec();
+
+        if let Some(Ipld::List(entries)) = obj.get("e") {
+            for entry in entries {
+                if let Ipld::Map(entry_obj) = entry {
+                    let prefix_len = entry_obj.get("p").and_then(|p| {
+                        if let Ipld::Integer(n) = p {
+                            Some(*n as usize)
+                        } else {
+                            None
                         }
-                        if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
-                            stack.push(*tree_cid);
+                    }).unwrap_or(0);
+
+                    let key_suffix = entry_obj.get("k").and_then(|k| {
+                        if let Ipld::Bytes(b) = k {
+                            Some(b.clone())
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(suffix) = key_suffix {
+                        current_key.truncate(prefix_len);
+                        current_key.extend_from_slice(&suffix);
+                    }
+
+                    if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
+                        walk_mst_node(blocks, tree_cid, &current_key, records)?;
+                    }
+
+                    let record_cid = entry_obj.get("v").and_then(|v| {
+                        if let Ipld::Link(cid) = v {
+                            Some(*cid)
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(record_cid) = record_cid {
+                        if let Ok(full_key) = String::from_utf8(current_key.clone()) {
+                            if let Some(record_block) = blocks.get(&record_cid)
+                                && let Ok(record_value) =
+                                    serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
+                            {
+                                let blob_refs = find_blob_refs_ipld(&record_value, 0);
+                                let parts: Vec<&str> = full_key.split('/').collect();
+                                if parts.len() >= 2 {
+                                    let collection = parts[..parts.len() - 1].join("/");
+                                    let rkey = parts[parts.len() - 1].to_string();
+                                    records.push(ImportedRecord {
+                                        collection,
+                                        rkey,
+                                        cid: record_cid,
+                                        blob_refs,
+                                    });
+                                }
+                            }
                         }
                     }
                 }
             }
-            if let Some(Ipld::Link(left_cid)) = obj.get("l") {
-                stack.push(*left_cid);
-            }
         }
     }
-    Ok(records)
+    Ok(())
 }
 
 pub struct CommitInfo {

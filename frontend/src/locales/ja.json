@@ -1029,5 +1029,206 @@
     "permissionsLimitedDesc": "アプリが何を要求しても、実際の権限は{level}アクセスレベルに制限されます。",
     "viewerLimitedDesc": "閲覧者として、読み取り専用アクセスのみ可能です。このアプリはこのアカウントでコンテンツの作成、更新、削除ができません。",
     "editorLimitedDesc": "編集者として、コンテンツの作成と編集が可能ですが、アカウント設定やセキュリティの管理はできません。"
+  },
+  "migration": {
+    "title": "アカウント移行",
+    "subtitle": "AT Protocolアイデンティティをサーバー間で移動",
+    "navTitle": "移行",
+    "navDesc": "別のPDSへ、または別のPDSからアカウントを移動",
+    "migrateHere": "ここに移行",
+    "migrateHereDesc": "既存のAT ProtocolアカウントをこのPDSに移動します。",
+    "migrateAway": "別の場所に移行",
+    "migrateAwayDesc": "このPDSから別のサーバーにアカウントを移動します。",
+    "loginRequired": "ログインが必要です",
+    "bringDid": "DIDとアイデンティティを持ち込む",
+    "transferData": "すべてのデータを転送",
+    "keepFollowers": "フォロワーを維持",
+    "exportRepo": "リポジトリをエクスポート",
+    "transferToPds": "新しいPDSに転送",
+    "updateIdentity": "アイデンティティを更新",
+    "whatIsMigration": "アカウント移行とは？",
+    "whatIsMigrationDesc": "アカウント移行により、AT Protocolアイデンティティをパーソナルデータサーバー（PDS）間で移動できます。DID（分散型識別子）は変わらないため、フォロワーやソーシャルコネクションは維持されます。",
+    "beforeMigrate": "移行前の確認事項",
+    "beforeMigrate1": "現在のアカウント認証情報が必要です",
+    "beforeMigrate2": "セキュリティのためメール認証が必要です",
+    "beforeMigrate3": "画像が多い大きなアカウントは数分かかる場合があります",
+    "beforeMigrate4": "古いPDSにアカウントの無効化が通知されます",
+    "importantWarning": "アカウント移行は重要な操作です。移行先のPDSを信頼し、データが移動されることを理解してください。問題が発生した場合、手動での復旧が必要になる可能性があります。",
+    "learnMore": "移行のリスクについて詳しく",
+    "resume": {
+      "title": "移行を再開しますか？",
+      "incomplete": "未完了の移行があります：",
+      "direction": "方向",
+      "migratingHere": "ここに移行中",
+      "migratingAway": "別の場所に移行中",
+      "from": "移行元",
+      "to": "移行先",
+      "progress": "進行状況",
+      "reenterCredentials": "続行するには認証情報を再入力する必要があります。",
+      "startOver": "最初からやり直す",
+      "resumeButton": "再開"
+    },
+    "inbound": {
+      "welcome": {
+        "title": "このPDSに移行",
+        "desc": "既存のAT Protocolアカウントをこのサーバーに移動します。",
+        "understand": "リスクを理解し、続行します"
+      },
+      "sourceLogin": {
+        "title": "現在のPDSにサインイン",
+        "desc": "移行するアカウントの認証情報を入力してください。",
+        "handle": "ハンドル",
+        "handlePlaceholder": "you.bsky.social",
+        "password": "パスワード",
+        "twoFactorCode": "2要素認証コード",
+        "twoFactorRequired": "2要素認証が必要です",
+        "signIn": "サインインして続行"
+      },
+      "chooseHandle": {
+        "title": "新しいハンドルを選択",
+        "desc": "このPDSでのアカウントのハンドルを選択してください。",
+        "handleHint": "完全なハンドル: @{handle}"
+      },
+      "review": {
+        "title": "移行の確認",
+        "desc": "移行の詳細を確認してください。",
+        "currentHandle": "現在のハンドル",
+        "newHandle": "新しいハンドル",
+        "sourcePds": "移行元PDS",
+        "targetPds": "このPDS",
+        "email": "メール",
+        "inviteCode": "招待コード",
+        "confirm": "アカウントを移行することを確認します",
+        "startMigration": "移行を開始"
+      },
+      "migrating": {
+        "title": "アカウントを移行中",
+        "desc": "データを転送しています...",
+        "gettingServiceAuth": "サービス認証を取得中...",
+        "creatingAccount": "新しいPDSにアカウントを作成中...",
+        "exportingRepo": "リポジトリをエクスポート中...",
+        "importingRepo": "リポジトリをインポート中...",
+        "countingBlobs": "blobをカウント中...",
+        "migratingBlobs": "blobを移行中 ({current}/{total})...",
+        "migratingPrefs": "設定を移行中...",
+        "requestingPlc": "PLC操作をリクエスト中..."
+      },
+      "emailVerify": {
+        "title": "メールアドレスを確認",
+        "desc": "確認コードが {email} に送信されました。",
+        "hint": "下記にコードを入力するか、メール内のリンクをクリックして自動的に続行できます。",
+        "tokenLabel": "確認コード",
+        "tokenPlaceholder": "メールに記載されたコードを入力",
+        "resend": "コードを再送信",
+        "verify": "メールを確認",
+        "verifying": "確認中..."
+      },
+      "plcToken": {
+        "title": "本人確認",
+        "desc": "現在のPDSに登録されているメールアドレスに確認コードが送信されました。",
+        "tokenLabel": "確認トークン",
+        "tokenPlaceholder": "メールに記載されたトークンを入力",
+        "resend": "再送信",
+        "resending": "送信中..."
+      },
+      "finalizing": {
+        "title": "移行を完了中",
+        "desc": "移行を完了しています...",
+        "signingPlc": "アイデンティティ更新に署名",
+        "activating": "新しいPDSでアカウントを有効化",
+        "deactivating": "古いPDSでアカウントを無効化"
+      },
+      "success": {
+        "title": "移行完了！",
+        "desc": "アカウントはこのPDSに正常に移行されました。",
+        "newHandle": "新しいハンドル",
+        "did": "DID",
+        "goToDashboard": "ダッシュボードへ"
+      }
+    },
+    "outbound": {
+      "welcome": {
+        "title": "このPDSから移行",
+        "desc": "アカウントを別のパーソナルデータサーバーに移動します。",
+        "warning": "移行後、ここでのアカウントは無効化されます。",
+        "didWebNotice": "did:web移行のお知らせ",
+        "didWebNoticeDesc": "あなたのアカウントはdid:web識別子（{did}）を使用しています。移行後、このPDSは新しいPDSを指すDIDドキュメントを引き続き提供します。このサーバーがオンラインである限り、アイデンティティは機能し続けます。",
+        "understand": "リスクを理解し、続行します"
+      },
+      "targetPds": {
+        "title": "移行先PDSを選択",
+        "desc": "移行先のPDSのURLを入力してください。",
+        "url": "PDS URL",
+        "urlPlaceholder": "https://pds.example.com",
+        "validate": "検証して続行",
+        "validating": "検証中...",
+        "connected": "{name}に接続しました",
+        "inviteRequired": "招待コードが必要です",
+        "privacyPolicy": "プライバシーポリシー",
+        "termsOfService": "利用規約"
+      },
+      "newAccount": {
+        "title": "新しいアカウントの詳細",
+        "desc": "新しいPDSでアカウントを設定します。",
+        "handle": "ハンドル",
+        "availableDomains": "利用可能なドメイン",
+        "email": "メール",
+        "password": "パスワード",
+        "confirmPassword": "パスワードを確認",
+        "inviteCode": "招待コード"
+      },
+      "review": {
+        "title": "移行の確認",
+        "desc": "移行の詳細を確認してください。",
+        "currentHandle": "現在のハンドル",
+        "newHandle": "新しいハンドル",
+        "sourcePds": "このPDS",
+        "targetPds": "移行先PDS",
+        "confirm": "アカウントを移行することを確認します",
+        "startMigration": "移行を開始"
+      },
+      "migrating": {
+        "title": "アカウントを移行中",
+        "desc": "データを転送しています..."
+      },
+      "plcToken": {
+        "title": "本人確認",
+        "desc": "確認コードがメールに送信されました。"
+      },
+      "finalizing": {
+        "title": "移行を完了中",
+        "desc": "移行を完了しています...",
+        "updatingForwarding": "DIDドキュメントの転送先を更新中..."
+      },
+      "success": {
+        "title": "移行完了！",
+        "desc": "アカウントは新しいPDSに正常に移行されました。",
+        "newHandle": "新しいハンドル",
+        "newPds": "新しいPDS",
+        "nextSteps": "次のステップ",
+        "nextSteps1": "新しいPDSにサインイン",
+        "nextSteps2": "アプリの認証情報を更新",
+        "nextSteps3": "フォロワーは自動的に新しい場所を確認できます",
+        "loggingOut": "{seconds}秒後にログアウトします..."
+      }
+    },
+    "progress": {
+      "repoExported": "リポジトリをエクスポートしました",
+      "repoImported": "リポジトリをインポートしました",
+      "blobsMigrated": "{count}個のblobを移行しました",
+      "prefsMigrated": "設定を移行しました",
+      "plcSigned": "アイデンティティを更新しました",
+      "activated": "アカウントを有効化しました",
+      "deactivated": "古いアカウントを無効化しました"
+    },
+    "errors": {
+      "connectionFailed": "PDSに接続できませんでした",
+      "invalidCredentials": "認証情報が無効です",
+      "twoFactorRequired": "2要素認証が必要です",
+      "accountExists": "移行先PDSにアカウントが既に存在します",
+      "plcFailed": "PLC操作に失敗しました",
+      "blobFailed": "blobの移行に失敗しました: {cid}",
+      "networkError": "ネットワークエラー。再試行してください。"
+    }
   }
 }

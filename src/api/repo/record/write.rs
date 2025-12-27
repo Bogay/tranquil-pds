@@ -1,5 +1,5 @@
 use super::validation::validate_record;
-use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
+use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -334,6 +334,7 @@ pub async fn create_record(
         .iter()
         .map(|c| c.to_string())
         .collect::<Vec<_>>();
+    let blob_cids = extract_blob_cids(&input.record);
     if let Err(e) = commit_and_log(
         &state,
         CommitParams {
@@ -344,6 +345,7 @@ pub async fn create_record(
             new_mst_root,
             ops: vec![op],
             blocks_cids: &written_cids_str,
+            blobs: &blob_cids,
         },
     )
     .await
@@ -582,6 +584,7 @@ pub async fn put_record(
         .map(|c| c.to_string())
         .collect::<Vec<_>>();
     let is_update = existing_cid.is_some();
+    let blob_cids = extract_blob_cids(&input.record);
     if let Err(e) = commit_and_log(
         &state,
         CommitParams {
@@ -592,6 +595,7 @@ pub async fn put_record(
             new_mst_root,
             ops: vec![op],
             blocks_cids: &written_cids_str,
+            blobs: &blob_cids,
         },
     )
     .await

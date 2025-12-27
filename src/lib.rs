@@ -281,6 +281,18 @@ pub fn app(state: AppState) -> Router {
             post(api::server::recover_passkey_account),
         )
         .route(
+            "/xrpc/com.tranquil.account.getMigrationStatus",
+            get(api::server::get_migration_status),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.updateMigrationForwarding",
+            post(api::server::update_migration_forwarding),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.clearMigrationForwarding",
+            post(api::server::clear_migration_forwarding),
+        )
+        .route(
             "/xrpc/com.atproto.server.requestEmailUpdate",
             post(api::server::request_email_update),
         )

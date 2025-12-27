@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT did, migrated_to_pds, migrated_at FROM users WHERE did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "migrated_to_pds",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "migrated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "791d0d6ea6fbedc3e51fb8b1fda7bfe756f2631daf688e6646705725342ad67e"
+}

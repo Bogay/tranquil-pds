@@ -71,7 +71,7 @@
     "infoNextDesc": "After creating your account, you'll verify your contact method and then you're ready to use any ATProto app with your new identity.",
     "migrateTitle": "Already have a Bluesky account?",
     "migrateDescription": "You can migrate your existing account to this PDS instead of creating a new one. Your followers, posts, and identity will come with you.",
-    "migrateLink": "Migrate with PDS Moover",
+    "migrateLink": "Migrate your account",
     "handle": "Handle",
     "handlePlaceholder": "yourname",
     "handleHint": "Your full handle will be: @{handle}",
@@ -991,5 +991,206 @@
     "codeLabel": "Verification Code",
     "codeHelp": "Copy the entire code from your message, including dashes.",
     "verifyButton": "Verify"
+  },
+  "migration": {
+    "title": "Account Migration",
+    "subtitle": "Move your AT Protocol identity between servers",
+    "navTitle": "Migration",
+    "navDesc": "Move your account to or from another PDS",
+    "migrateHere": "Migrate Here",
+    "migrateHereDesc": "Move your existing AT Protocol account to this PDS from another server.",
+    "migrateAway": "Migrate Away",
+    "migrateAwayDesc": "Move your account from this PDS to another server.",
+    "loginRequired": "Login required",
+    "bringDid": "Bring your DID and identity",
+    "transferData": "Transfer all your data",
+    "keepFollowers": "Keep your followers",
+    "exportRepo": "Export your repository",
+    "transferToPds": "Transfer to new PDS",
+    "updateIdentity": "Update your identity",
+    "whatIsMigration": "What is account migration?",
+    "whatIsMigrationDesc": "Account migration allows you to move your AT Protocol identity between Personal Data Servers (PDSes). Your DID (decentralized identifier) stays the same, so your followers and social connections are preserved.",
+    "beforeMigrate": "Before you migrate",
+    "beforeMigrate1": "You will need your current account credentials",
+    "beforeMigrate2": "Migration requires email verification for security",
+    "beforeMigrate3": "Large accounts with many images may take several minutes",
+    "beforeMigrate4": "Your old PDS will be notified to deactivate your account",
+    "importantWarning": "Account migration is a significant action. Make sure you trust the destination PDS and understand that your data will be moved. If something goes wrong, recovery may require manual intervention.",
+    "learnMore": "Learn more about migration risks",
+    "resume": {
+      "title": "Resume Migration?",
+      "incomplete": "You have an incomplete migration in progress:",
+      "direction": "Direction",
+      "migratingHere": "Migrating here",
+      "migratingAway": "Migrating away",
+      "from": "From",
+      "to": "To",
+      "progress": "Progress",
+      "reenterCredentials": "You will need to re-enter your credentials to continue.",
+      "startOver": "Start Over",
+      "resumeButton": "Resume"
+    },
+    "inbound": {
+      "welcome": {
+        "title": "Migrate to This PDS",
+        "desc": "Move your existing AT Protocol account to this server.",
+        "understand": "I understand the risks and want to proceed"
+      },
+      "sourceLogin": {
+        "title": "Sign In to Your Current PDS",
+        "desc": "Enter your credentials for the account you want to migrate.",
+        "handle": "Handle",
+        "handlePlaceholder": "you.bsky.social",
+        "password": "Password",
+        "twoFactorCode": "Two-Factor Code",
+        "twoFactorRequired": "Two-factor authentication required",
+        "signIn": "Sign In & Continue"
+      },
+      "chooseHandle": {
+        "title": "Choose Your New Handle",
+        "desc": "Select a handle for your account on this PDS.",
+        "handleHint": "Your full handle will be: @{handle}"
+      },
+      "review": {
+        "title": "Review Migration",
+        "desc": "Please review and confirm your migration details.",
+        "currentHandle": "Current Handle",
+        "newHandle": "New Handle",
+        "sourcePds": "Source PDS",
+        "targetPds": "This PDS",
+        "email": "Email",
+        "inviteCode": "Invite Code",
+        "confirm": "I confirm I want to migrate my account",
+        "startMigration": "Start Migration"
+      },
+      "migrating": {
+        "title": "Migrating Your Account",
+        "desc": "Please wait while we transfer your data...",
+        "gettingServiceAuth": "Getting service authorization...",
+        "creatingAccount": "Creating account on new PDS...",
+        "exportingRepo": "Exporting repository...",
+        "importingRepo": "Importing repository...",
+        "countingBlobs": "Counting blobs...",
+        "migratingBlobs": "Migrating blobs ({current}/{total})...",
+        "migratingPrefs": "Migrating preferences...",
+        "requestingPlc": "Requesting PLC operation..."
+      },
+      "emailVerify": {
+        "title": "Verify Your Email",
+        "desc": "A verification code has been sent to {email}.",
+        "hint": "Enter the code below, or click the link in the email to continue automatically.",
+        "tokenLabel": "Verification Code",
+        "tokenPlaceholder": "Enter code from email",
+        "resend": "Resend Code",
+        "verify": "Verify Email",
+        "verifying": "Verifying..."
+      },
+      "plcToken": {
+        "title": "Verify Your Identity",
+        "desc": "A verification code has been sent to your email on your current PDS.",
+        "tokenLabel": "Verification Token",
+        "tokenPlaceholder": "Enter the token from your email",
+        "resend": "Resend Token",
+        "resending": "Resending..."
+      },
+      "finalizing": {
+        "title": "Finalizing Migration",
+        "desc": "Please wait while we complete the migration...",
+        "signingPlc": "Sign identity update",
+        "activating": "Activate account on new PDS",
+        "deactivating": "Deactivate account on old PDS"
+      },
+      "success": {
+        "title": "Migration Complete!",
+        "desc": "Your account has been successfully migrated to this PDS.",
+        "newHandle": "New Handle",
+        "did": "DID",
+        "goToDashboard": "Go to Dashboard"
+      }
+    },
+    "outbound": {
+      "welcome": {
+        "title": "Migrate Away from This PDS",
+        "desc": "Move your account to another Personal Data Server.",
+        "warning": "After migration, your account here will be deactivated.",
+        "didWebNotice": "did:web Migration Notice",
+        "didWebNoticeDesc": "Your account uses a did:web identifier ({did}). After migrating, this PDS will continue to serve your DID document pointing to the new PDS. Your identity will remain functional as long as this server is online.",
+        "understand": "I understand the risks and want to proceed"
+      },
+      "targetPds": {
+        "title": "Choose Target PDS",
+        "desc": "Enter the URL of the PDS you want to migrate to.",
+        "url": "PDS URL",
+        "urlPlaceholder": "https://pds.example.com",
+        "validate": "Validate & Continue",
+        "validating": "Validating...",
+        "connected": "Connected to {name}",
+        "inviteRequired": "Invite code required",
+        "privacyPolicy": "Privacy Policy",
+        "termsOfService": "Terms of Service"
+      },
+      "newAccount": {
+        "title": "New Account Details",
+        "desc": "Set up your account on the new PDS.",
+        "handle": "Handle",
+        "availableDomains": "Available domains",
+        "email": "Email",
+        "password": "Password",
+        "confirmPassword": "Confirm Password",
+        "inviteCode": "Invite Code"
+      },
+      "review": {
+        "title": "Review Migration",
+        "desc": "Please review and confirm your migration details.",
+        "currentHandle": "Current Handle",
+        "newHandle": "New Handle",
+        "sourcePds": "This PDS",
+        "targetPds": "Target PDS",
+        "confirm": "I confirm I want to migrate my account",
+        "startMigration": "Start Migration"
+      },
+      "migrating": {
+        "title": "Migrating Your Account",
+        "desc": "Please wait while we transfer your data..."
+      },
+      "plcToken": {
+        "title": "Verify Your Identity",
+        "desc": "A verification code has been sent to your email."
+      },
+      "finalizing": {
+        "title": "Finalizing Migration",
+        "desc": "Please wait while we complete the migration...",
+        "updatingForwarding": "Updating DID document forwarding..."
+      },
+      "success": {
+        "title": "Migration Complete!",
+        "desc": "Your account has been successfully migrated to your new PDS.",
+        "newHandle": "New Handle",
+        "newPds": "New PDS",
+        "nextSteps": "Next Steps",
+        "nextSteps1": "Sign in to your new PDS",
+        "nextSteps2": "Update any apps with your new credentials",
+        "nextSteps3": "Your followers will automatically see your new location",
+        "loggingOut": "Logging you out in {seconds} seconds..."
+      }
+    },
+    "progress": {
+      "repoExported": "Repository exported",
+      "repoImported": "Repository imported",
+      "blobsMigrated": "{count} blobs migrated",
+      "prefsMigrated": "Preferences migrated",
+      "plcSigned": "Identity updated",
+      "activated": "Account activated",
+      "deactivated": "Old account deactivated"
+    },
+    "errors": {
+      "connectionFailed": "Could not connect to PDS",
+      "invalidCredentials": "Invalid credentials",
+      "twoFactorRequired": "Two-factor authentication required",
+      "accountExists": "Account already exists on target PDS",
+      "plcFailed": "PLC operation failed",
+      "blobFailed": "Failed to migrate blob: {cid}",
+      "networkError": "Network error. Please try again."
+    }
   }
 }

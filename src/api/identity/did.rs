@@ -449,6 +449,7 @@ pub struct VerificationMethods {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Services {
+    #[serde(rename = "atproto_pds")]
     pub atproto_pds: AtprotoPds,
 }
 

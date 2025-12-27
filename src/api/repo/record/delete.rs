@@ -168,6 +168,7 @@ pub async fn delete_record(
             new_mst_root,
             ops: vec![op],
             blocks_cids: &written_cids_str,
+            blobs: &[],
         },
     )
     .await

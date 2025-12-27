@@ -4,6 +4,7 @@ pub mod email;
 pub mod invite;
 pub mod logo;
 pub mod meta;
+pub mod migration;
 pub mod passkey_account;
 pub mod passkeys;
 pub mod password;
@@ -55,6 +56,9 @@ pub use totp::{
 pub use trusted_devices::{
     extend_device_trust, is_device_trusted, list_trusted_devices, revoke_trusted_device,
     trust_device, update_trusted_device,
+};
+pub use migration::{
+    clear_migration_forwarding, get_migration_status, update_migration_forwarding,
 };
 pub use verify_email::{resend_migration_verification, verify_migration_email};
 pub use verify_token::{VerifyTokenInput, VerifyTokenOutput, verify_token, verify_token_internal};

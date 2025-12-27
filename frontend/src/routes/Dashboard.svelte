@@ -190,6 +190,10 @@
         <h3>{$_('dashboard.navDelegation')}</h3>
         <p>{$_('dashboard.navDelegationDesc')}</p>
       </a>
+      <a href="#/migrate" class="nav-card">
+        <h3>{$_('migration.navTitle')}</h3>
+        <p>{$_('migration.navDesc')}</p>
+      </a>
       {#if auth.session.isAdmin}
         <a href="#/admin" class="nav-card admin-card">
           <h3>{$_('dashboard.navAdmin')}</h3>

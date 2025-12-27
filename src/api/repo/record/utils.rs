@@ -5,9 +5,38 @@ use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::str::FromStr;
 use uuid::Uuid;
+
+pub fn extract_blob_cids(record: &Value) -> Vec<String> {
+    let mut blobs = Vec::new();
+    extract_blob_cids_recursive(record, &mut blobs);
+    blobs
+}
+
+fn extract_blob_cids_recursive(value: &Value, blobs: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            if map.get("$type").and_then(|v| v.as_str()) == Some("blob") {
+                if let Some(ref_obj) = map.get("ref") {
+                    if let Some(link) = ref_obj.get("$link").and_then(|v| v.as_str()) {
+                        blobs.push(link.to_string());
+                    }
+                }
+            }
+            for v in map.values() {
+                extract_blob_cids_recursive(v, blobs);
+            }
+        }
+        Value::Array(arr) => {
+            for v in arr {
+                extract_blob_cids_recursive(v, blobs);
+            }
+        }
+        _ => {}
+    }
+}
 
 pub fn create_signed_commit(
     did: &str,
@@ -63,6 +92,7 @@ pub struct CommitParams<'a> {
     pub new_mst_root: Cid,
     pub ops: Vec<RecordOp>,
     pub blocks_cids: &'a [String],
+    pub blobs: &'a [String],
 }
 
 pub async fn commit_and_log(
@@ -77,6 +107,7 @@ pub async fn commit_and_log(
         new_mst_root,
         ops,
         blocks_cids,
+        blobs,
     } = params;
     let key_row = sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
@@ -274,7 +305,7 @@ pub async fn commit_and_log(
             new_root_cid.to_string(),
             prev_cid_str,
             json!(ops_json),
-            &[] as &[String],
+            blobs,
             blocks_cids,
             prev_data_cid_str,
         )
@@ -368,6 +399,7 @@ pub async fn create_record_internal(
         }
     }
     let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
+    let blob_cids = extract_blob_cids(record);
     let result = commit_and_log(
         state,
         CommitParams {
@@ -378,6 +410,7 @@ pub async fn create_record_internal(
             new_mst_root,
             ops: vec![op],
             blocks_cids: &written_cids_str,
+            blobs: &blob_cids,
         },
     )
     .await?;

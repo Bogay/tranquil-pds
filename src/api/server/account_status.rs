@@ -1,4 +1,5 @@
 use crate::api::ApiError;
+use crate::plc::PlcClient;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -8,6 +9,7 @@ use axum::{
 };
 use bcrypt::verify;
 use chrono::{Duration, Utc};
+use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
@@ -118,6 +120,185 @@ pub async fn check_account_status(
         .into_response()
 }
 
+async fn assert_valid_did_document_for_service(
+    db: &sqlx::PgPool,
+    did: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let expected_endpoint = format!("https://{}", hostname);
+
+    if did.starts_with("did:plc:") {
+        let plc_client = PlcClient::new(None);
+
+        let mut last_error = None;
+        let mut doc_data = None;
+        for attempt in 0..5 {
+            if attempt > 0 {
+                let delay_ms = 500 * (1 << (attempt - 1));
+                info!(
+                    "Waiting {}ms before retry {} for DID document validation ({})",
+                    delay_ms, attempt, did
+                );
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            }
+
+            match plc_client.get_document_data(did).await {
+                Ok(data) => {
+                    let pds_endpoint = data
+                        .get("services")
+                        .and_then(|s| s.get("atproto_pds").or_else(|| s.get("atprotoPds")))
+                        .and_then(|p| p.get("endpoint"))
+                        .and_then(|e| e.as_str());
+
+                    if pds_endpoint == Some(&expected_endpoint) {
+                        doc_data = Some(data);
+                        break;
+                    } else {
+                        info!(
+                            "Attempt {}: DID {} has endpoint {:?}, expected {} - retrying",
+                            attempt + 1,
+                            did,
+                            pds_endpoint,
+                            expected_endpoint
+                        );
+                        last_error = Some(format!(
+                            "DID document endpoint {:?} does not match expected {}",
+                            pds_endpoint, expected_endpoint
+                        ));
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Attempt {}: Failed to fetch PLC document for {}: {:?}",
+                        attempt + 1,
+                        did,
+                        e
+                    );
+                    last_error = Some(format!("Could not resolve DID document: {}", e));
+                }
+            }
+        }
+
+        let doc_data = match doc_data {
+            Some(d) => d,
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "InvalidRequest",
+                        "message": last_error.unwrap_or_else(|| "DID document validation failed".to_string())
+                    })),
+                ));
+            }
+        };
+
+        let doc_signing_key = doc_data
+            .get("verificationMethods")
+            .and_then(|v| v.get("atproto"))
+            .and_then(|k| k.as_str());
+
+        let user_row = sqlx::query!(
+            "SELECT uk.key_bytes, uk.encryption_version FROM user_keys uk JOIN users u ON uk.user_id = u.id WHERE u.did = $1",
+            did
+        )
+        .fetch_optional(db)
+        .await
+        .map_err(|e| {
+            error!("Failed to fetch user key: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+        })?;
+
+        if let Some(row) = user_row {
+            let key_bytes =
+                crate::config::decrypt_key(&row.key_bytes, row.encryption_version).map_err(|e| {
+                    error!("Failed to decrypt user key: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                })?;
+            let signing_key = SigningKey::from_slice(&key_bytes).map_err(|e| {
+                error!("Failed to create signing key: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+            })?;
+            let expected_did_key = crate::plc::signing_key_to_did_key(&signing_key);
+
+            if doc_signing_key != Some(&expected_did_key) {
+                warn!(
+                    "DID {} has signing key {:?}, expected {}",
+                    did, doc_signing_key, expected_did_key
+                );
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "InvalidRequest",
+                        "message": "DID document verification method does not match expected signing key"
+                    })),
+                ));
+            }
+        }
+    } else if did.starts_with("did:web:") {
+        let client = reqwest::Client::new();
+        let did_path = &did[8..];
+        let url = format!("https://{}/.well-known/did.json", did_path.replace(':', "/"));
+        let resp = client.get(&url).send().await.map_err(|e| {
+            warn!("Failed to fetch did:web document for {}: {:?}", did, e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": format!("Could not resolve DID document: {}", e)
+                })),
+            )
+        })?;
+        let doc: serde_json::Value = resp.json().await.map_err(|e| {
+            warn!("Failed to parse did:web document for {}: {:?}", did, e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": format!("Could not parse DID document: {}", e)
+                })),
+            )
+        })?;
+
+        let pds_endpoint = doc
+            .get("service")
+            .and_then(|s| s.as_array())
+            .and_then(|arr| {
+                arr.iter().find(|svc| {
+                    svc.get("id").and_then(|id| id.as_str()) == Some("#atproto_pds")
+                        || svc.get("type").and_then(|t| t.as_str())
+                            == Some("AtprotoPersonalDataServer")
+                })
+            })
+            .and_then(|svc| svc.get("serviceEndpoint"))
+            .and_then(|e| e.as_str());
+
+        if pds_endpoint != Some(&expected_endpoint) {
+            warn!(
+                "DID {} has endpoint {:?}, expected {}",
+                did, pds_endpoint, expected_endpoint
+            );
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": "DID document atproto_pds service endpoint does not match PDS public url"
+                })),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn activate_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -158,6 +339,15 @@ pub async fn activate_account(
     }
 
     let did = auth_user.did;
+
+    if let Err((status, json)) = assert_valid_did_document_for_service(&state.db, &did).await {
+        info!(
+            "activateAccount rejected for {}: DID document validation failed",
+            did
+        );
+        return (status, json).into_response();
+    }
+
     let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
@@ -182,13 +372,20 @@ pub async fn activate_account(
             {
                 warn!("Failed to sequence identity event for activation: {}", e);
             }
-            if let Err(e) =
-                crate::api::repo::record::sequence_empty_commit_event(&state, &did).await
-            {
-                warn!(
-                    "Failed to sequence empty commit event for activation: {}",
-                    e
-                );
+            let repo_root = sqlx::query_scalar!(
+                "SELECT r.repo_root_cid FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
+                did
+            )
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+            if let Some(root_cid) = repo_root {
+                if let Err(e) =
+                    crate::api::repo::record::sequence_sync_event(&state, &did, &root_cid).await
+                {
+                    warn!("Failed to sequence sync event for activation: {}", e);
+                }
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }

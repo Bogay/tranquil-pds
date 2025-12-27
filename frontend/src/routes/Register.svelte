@@ -173,7 +173,7 @@
       <div class="migrate-content">
         <strong>{$_('register.migrateTitle')}</strong>
         <p>{$_('register.migrateDescription')}</p>
-        <a href="https://pdsmoover.com/moover" target="_blank" rel="noopener" class="migrate-link">
+        <a href="#/migrate" class="migrate-link">
           {$_('register.migrateLink')} →
         </a>
       </div>

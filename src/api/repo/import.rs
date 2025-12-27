@@ -318,8 +318,10 @@ pub async fn import_repo(
                 records.len(),
                 did
             );
-            if let Err(e) = sequence_import_event(&state, did, &root.to_string()).await {
-                warn!("Failed to sequence import event: {:?}", e);
+            if !is_migration {
+                if let Err(e) = sequence_import_event(&state, did, &root.to_string()).await {
+                    warn!("Failed to sequence import event: {:?}", e);
+                }
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }

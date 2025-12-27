@@ -1013,5 +1013,206 @@
     "permissionsLimitedDesc": "无论应用请求什么权限，您的实际权限将限制在{level}访问级别。",
     "viewerLimitedDesc": "作为查看者，您只有只读权限。此应用无法在此账户上创建、更新或删除内容。",
     "editorLimitedDesc": "作为编辑者，您可以创建和编辑内容，但无法管理账户设置或安全选项。"
+  },
+  "migration": {
+    "title": "账户迁移",
+    "subtitle": "在服务器之间移动您的AT Protocol身份",
+    "navTitle": "迁移",
+    "navDesc": "将您的账户移至其他PDS或从其他PDS移入",
+    "migrateHere": "迁移到此处",
+    "migrateHereDesc": "将您现有的AT Protocol账户从其他服务器移至此PDS。",
+    "migrateAway": "迁移离开",
+    "migrateAwayDesc": "将您的账户从此PDS移至其他服务器。",
+    "loginRequired": "需要登录",
+    "bringDid": "携带您的DID和身份",
+    "transferData": "转移所有数据",
+    "keepFollowers": "保留您的关注者",
+    "exportRepo": "导出您的存储库",
+    "transferToPds": "转移到新PDS",
+    "updateIdentity": "更新您的身份",
+    "whatIsMigration": "什么是账户迁移？",
+    "whatIsMigrationDesc": "账户迁移允许您在个人数据服务器（PDS）之间移动AT Protocol身份。您的DID（去中心化标识符）保持不变，因此您的关注者和社交连接得以保留。",
+    "beforeMigrate": "迁移前须知",
+    "beforeMigrate1": "您需要当前账户的凭据",
+    "beforeMigrate2": "为确保安全，迁移需要邮箱验证",
+    "beforeMigrate3": "包含大量图片的大型账户可能需要几分钟",
+    "beforeMigrate4": "您的旧PDS将收到账户停用通知",
+    "importantWarning": "账户迁移是一项重要操作。请确保您信任目标PDS，并了解您的数据将被移动。如果出现问题，可能需要手动恢复。",
+    "learnMore": "了解更多迁移风险",
+    "resume": {
+      "title": "恢复迁移？",
+      "incomplete": "您有一个未完成的迁移：",
+      "direction": "方向",
+      "migratingHere": "正在迁移到此处",
+      "migratingAway": "正在迁移离开",
+      "from": "从",
+      "to": "到",
+      "progress": "进度",
+      "reenterCredentials": "您需要重新输入凭据以继续。",
+      "startOver": "重新开始",
+      "resumeButton": "恢复"
+    },
+    "inbound": {
+      "welcome": {
+        "title": "迁移到此PDS",
+        "desc": "将您现有的AT Protocol账户移至此服务器。",
+        "understand": "我了解风险并希望继续"
+      },
+      "sourceLogin": {
+        "title": "登录到您当前的PDS",
+        "desc": "输入您要迁移的账户凭据。",
+        "handle": "用户名",
+        "handlePlaceholder": "you.bsky.social",
+        "password": "密码",
+        "twoFactorCode": "双因素验证码",
+        "twoFactorRequired": "需要双因素认证",
+        "signIn": "登录并继续"
+      },
+      "chooseHandle": {
+        "title": "选择新用户名",
+        "desc": "为您在此PDS上的账户选择用户名。",
+        "handleHint": "您的完整用户名将是：@{handle}"
+      },
+      "review": {
+        "title": "检查迁移",
+        "desc": "请检查并确认您的迁移详情。",
+        "currentHandle": "当前用户名",
+        "newHandle": "新用户名",
+        "sourcePds": "源PDS",
+        "targetPds": "此PDS",
+        "email": "邮箱",
+        "inviteCode": "邀请码",
+        "confirm": "我确认要迁移我的账户",
+        "startMigration": "开始迁移"
+      },
+      "migrating": {
+        "title": "正在迁移您的账户",
+        "desc": "请稍候，正在转移您的数据...",
+        "gettingServiceAuth": "正在获取服务授权...",
+        "creatingAccount": "正在新PDS上创建账户...",
+        "exportingRepo": "正在导出存储库...",
+        "importingRepo": "正在导入存储库...",
+        "countingBlobs": "正在统计blob...",
+        "migratingBlobs": "正在迁移blob ({current}/{total})...",
+        "migratingPrefs": "正在迁移偏好设置...",
+        "requestingPlc": "正在请求PLC操作..."
+      },
+      "emailVerify": {
+        "title": "验证您的邮箱",
+        "desc": "验证码已发送至 {email}。",
+        "hint": "在下方输入验证码，或点击邮件中的链接自动继续。",
+        "tokenLabel": "验证码",
+        "tokenPlaceholder": "输入邮件中的验证码",
+        "resend": "重新发送",
+        "verify": "验证邮箱",
+        "verifying": "验证中..."
+      },
+      "plcToken": {
+        "title": "验证您的身份",
+        "desc": "验证码已发送到您在当前PDS注册的邮箱。",
+        "tokenLabel": "验证令牌",
+        "tokenPlaceholder": "输入邮件中的令牌",
+        "resend": "重新发送",
+        "resending": "发送中..."
+      },
+      "finalizing": {
+        "title": "正在完成迁移",
+        "desc": "请稍候，正在完成迁移...",
+        "signingPlc": "签署身份更新",
+        "activating": "在新PDS上激活账户",
+        "deactivating": "在旧PDS上停用账户"
+      },
+      "success": {
+        "title": "迁移完成！",
+        "desc": "您的账户已成功迁移到此PDS。",
+        "newHandle": "新用户名",
+        "did": "DID",
+        "goToDashboard": "前往仪表板"
+      }
+    },
+    "outbound": {
+      "welcome": {
+        "title": "从此PDS迁移离开",
+        "desc": "将您的账户移至另一个个人数据服务器。",
+        "warning": "迁移后，您在此处的账户将被停用。",
+        "didWebNotice": "did:web迁移通知",
+        "didWebNoticeDesc": "您的账户使用did:web标识符（{did}）。迁移后，此PDS将继续提供指向新PDS的DID文档。只要此服务器在线，您的身份将继续有效。",
+        "understand": "我了解风险并希望继续"
+      },
+      "targetPds": {
+        "title": "选择目标PDS",
+        "desc": "输入您要迁移到的PDS的URL。",
+        "url": "PDS URL",
+        "urlPlaceholder": "https://pds.example.com",
+        "validate": "验证并继续",
+        "validating": "验证中...",
+        "connected": "已连接到 {name}",
+        "inviteRequired": "需要邀请码",
+        "privacyPolicy": "隐私政策",
+        "termsOfService": "服务条款"
+      },
+      "newAccount": {
+        "title": "新账户详情",
+        "desc": "在新PDS上设置您的账户。",
+        "handle": "用户名",
+        "availableDomains": "可用域名",
+        "email": "邮箱",
+        "password": "密码",
+        "confirmPassword": "确认密码",
+        "inviteCode": "邀请码"
+      },
+      "review": {
+        "title": "检查迁移",
+        "desc": "请检查并确认您的迁移详情。",
+        "currentHandle": "当前用户名",
+        "newHandle": "新用户名",
+        "sourcePds": "此PDS",
+        "targetPds": "目标PDS",
+        "confirm": "我确认要迁移我的账户",
+        "startMigration": "开始迁移"
+      },
+      "migrating": {
+        "title": "正在迁移您的账户",
+        "desc": "请稍候，正在转移您的数据..."
+      },
+      "plcToken": {
+        "title": "验证您的身份",
+        "desc": "验证码已发送到您的邮箱。"
+      },
+      "finalizing": {
+        "title": "正在完成迁移",
+        "desc": "请稍候，正在完成迁移...",
+        "updatingForwarding": "正在更新DID文档转发..."
+      },
+      "success": {
+        "title": "迁移完成！",
+        "desc": "您的账户已成功迁移到新PDS。",
+        "newHandle": "新用户名",
+        "newPds": "新PDS",
+        "nextSteps": "后续步骤",
+        "nextSteps1": "登录到您的新PDS",
+        "nextSteps2": "使用新凭据更新您的应用",
+        "nextSteps3": "您的关注者将自动看到您的新位置",
+        "loggingOut": "{seconds}秒后退出登录..."
+      }
+    },
+    "progress": {
+      "repoExported": "存储库已导出",
+      "repoImported": "存储库已导入",
+      "blobsMigrated": "已迁移{count}个blob",
+      "prefsMigrated": "偏好设置已迁移",
+      "plcSigned": "身份已更新",
+      "activated": "账户已激活",
+      "deactivated": "旧账户已停用"
+    },
+    "errors": {
+      "connectionFailed": "无法连接到PDS",
+      "invalidCredentials": "凭据无效",
+      "twoFactorRequired": "需要双因素认证",
+      "accountExists": "目标PDS上已存在账户",
+      "plcFailed": "PLC操作失败",
+      "blobFailed": "blob迁移失败：{cid}",
+      "networkError": "网络错误，请重试。"
+    }
   }
 }

@@ -32,6 +32,7 @@
   import Controllers from './routes/Controllers.svelte'
   import DelegationAudit from './routes/DelegationAudit.svelte'
   import ActAs from './routes/ActAs.svelte'
+  import Migration from './routes/Migration.svelte'
   import Home from './routes/Home.svelte'
 
   initI18n()
@@ -113,6 +114,8 @@
         return DelegationAudit
       case '/act-as':
         return ActAs
+      case '/migrate':
+        return Migration
       default:
         return Home
     }

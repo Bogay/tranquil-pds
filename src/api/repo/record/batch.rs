@@ -1,6 +1,6 @@
 use super::validation::validate_record;
 use super::write::has_verified_comms_channel;
-use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
+use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -295,6 +295,7 @@ pub async fn apply_writes(
     let mut results: Vec<WriteResult> = Vec::new();
     let mut ops: Vec<RecordOp> = Vec::new();
     let mut modified_keys: Vec<String> = Vec::new();
+    let mut all_blob_cids: Vec<String> = Vec::new();
     for write in &input.writes {
         match write {
             WriteOp::Create {
@@ -307,6 +308,7 @@ pub async fn apply_writes(
                 {
                     return *err_response;
                 }
+                all_blob_cids.extend(extract_blob_cids(value));
                 let rkey = rkey
                     .clone()
                     .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
@@ -359,6 +361,7 @@ pub async fn apply_writes(
                 {
                     return *err_response;
                 }
+                all_blob_cids.extend(extract_blob_cids(value));
                 let mut record_bytes = Vec::new();
                 if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();
@@ -468,6 +471,7 @@ pub async fn apply_writes(
             new_mst_root,
             ops,
             blocks_cids: &written_cids_str,
+            blobs: &all_blob_cids,
         },
     )
     .await

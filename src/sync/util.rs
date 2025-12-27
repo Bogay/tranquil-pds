@@ -86,6 +86,15 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error
     let mut bytes = Vec::new();
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
+    let hex_str: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    tracing::info!(
+        did = %frame.did,
+        active = frame.active,
+        status = ?frame.status,
+        cbor_len = bytes.len(),
+        cbor_hex = %hex_str,
+        "Sending account event to firehose"
+    );
     Ok(bytes)
 }
 
