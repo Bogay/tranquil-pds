@@ -1,4 +1,4 @@
-use super::validation::validate_record;
+use super::validation::validate_record_with_rkey;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
@@ -257,7 +257,8 @@ pub async fn create_record(
         }
     };
     if input.validate.unwrap_or(true)
-        && let Err(err_response) = validate_record(&input.record, &input.collection)
+        && let Err(err_response) =
+            validate_record_with_rkey(&input.record, &input.collection, input.rkey.as_deref())
     {
         return *err_response;
     }
@@ -480,7 +481,8 @@ pub async fn put_record(
     };
     let key = format!("{}/{}", collection_nsid, input.rkey);
     if input.validate.unwrap_or(true)
-        && let Err(err_response) = validate_record(&input.record, &input.collection)
+        && let Err(err_response) =
+            validate_record_with_rkey(&input.record, &input.collection, Some(&input.rkey))
     {
         return *err_response;
     }

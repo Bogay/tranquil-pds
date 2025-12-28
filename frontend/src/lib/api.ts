@@ -175,7 +175,7 @@ export const api = {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new ApiError(data.error, data.message, response.status);
+      throw new ApiError(response.status, data.error, data.message);
     }
     return data;
   },

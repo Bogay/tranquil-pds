@@ -10,6 +10,7 @@ pub mod delegation;
 pub mod handle;
 pub mod image;
 pub mod metrics;
+pub mod moderation;
 pub mod oauth;
 pub mod plc;
 pub mod rate_limit;

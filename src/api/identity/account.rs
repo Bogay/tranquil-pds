@@ -194,7 +194,15 @@ pub async fn create_account(
                     .into_response();
             }
         }
-        input.handle.to_lowercase()
+        let handle_lower = input.handle.to_lowercase();
+        if crate::moderation::has_explicit_slur(&handle_lower) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidHandle", "message": "Inappropriate language in handle"})),
+            )
+                .into_response();
+        }
+        handle_lower
     };
     let email: Option<String> = input
         .email

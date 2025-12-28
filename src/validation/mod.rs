@@ -17,6 +17,8 @@ pub enum ValidationError {
     InvalidRecord(String),
     #[error("Unknown record type: {0}")]
     UnknownType(String),
+    #[error("Unacceptable slur in record at {path}")]
+    BannedContent { path: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +55,15 @@ impl RecordValidator {
         record: &Value,
         collection: &str,
     ) -> Result<ValidationStatus, ValidationError> {
+        self.validate_with_rkey(record, collection, None)
+    }
+
+    pub fn validate_with_rkey(
+        &self,
+        record: &Value,
+        collection: &str,
+        rkey: Option<&str>,
+    ) -> Result<ValidationStatus, ValidationError> {
         let obj = record.as_object().ok_or_else(|| {
             ValidationError::InvalidRecord("Record must be an object".to_string())
         })?;
@@ -78,9 +89,10 @@ impl RecordValidator {
             "app.bsky.graph.block" => self.validate_block(obj)?,
             "app.bsky.graph.list" => self.validate_list(obj)?,
             "app.bsky.graph.listitem" => self.validate_list_item(obj)?,
-            "app.bsky.feed.generator" => self.validate_feed_generator(obj)?,
+            "app.bsky.feed.generator" => self.validate_feed_generator(obj, rkey)?,
             "app.bsky.feed.threadgate" => self.validate_threadgate(obj)?,
             "app.bsky.labeler.service" => self.validate_labeler_service(obj)?,
+            "app.bsky.graph.starterpack" => self.validate_starterpack(obj)?,
             _ => {
                 if self.require_lexicon {
                     return Err(ValidationError::UnknownType(record_type.to_string()));
@@ -126,13 +138,39 @@ impl RecordValidator {
                 });
             }
             for (i, tag) in tags.iter().enumerate() {
-                if let Some(tag_str) = tag.as_str()
-                    && tag_str.len() > 640
-                {
-                    return Err(ValidationError::InvalidField {
-                        path: format!("tags/{}", i),
-                        message: "Tag exceeds maximum length of 640 bytes".to_string(),
-                    });
+                if let Some(tag_str) = tag.as_str() {
+                    if tag_str.len() > 640 {
+                        return Err(ValidationError::InvalidField {
+                            path: format!("tags/{}", i),
+                            message: "Tag exceeds maximum length of 640 bytes".to_string(),
+                        });
+                    }
+                    if crate::moderation::has_explicit_slur(tag_str) {
+                        return Err(ValidationError::BannedContent {
+                            path: format!("tags/{}", i),
+                        });
+                    }
+                }
+            }
+        }
+        if let Some(facets) = obj.get("facets").and_then(|v| v.as_array()) {
+            for (i, facet) in facets.iter().enumerate() {
+                if let Some(features) = facet.get("features").and_then(|v| v.as_array()) {
+                    for (j, feature) in features.iter().enumerate() {
+                        let is_tag = feature
+                            .get("$type")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|t| t == "app.bsky.richtext.facet#tag");
+                        if is_tag {
+                            if let Some(tag) = feature.get("tag").and_then(|v| v.as_str()) {
+                                if crate::moderation::has_explicit_slur(tag) {
+                                    return Err(ValidationError::BannedContent {
+                                        path: format!("facets/{}/features/{}/tag", i, j),
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -154,6 +192,11 @@ impl RecordValidator {
                     ),
                 });
             }
+            if crate::moderation::has_explicit_slur(display_name) {
+                return Err(ValidationError::BannedContent {
+                    path: "displayName".to_string(),
+                });
+            }
         }
         if let Some(description) = obj.get("description").and_then(|v| v.as_str()) {
             let grapheme_count = description.chars().count();
@@ -164,6 +207,11 @@ impl RecordValidator {
                         "Description exceeds maximum length of 2560 characters (got {})",
                         grapheme_count
                     ),
+                });
+            }
+            if crate::moderation::has_explicit_slur(description) {
+                return Err(ValidationError::BannedContent {
+                    path: "description".to_string(),
                 });
             }
         }
@@ -238,13 +286,18 @@ impl RecordValidator {
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        if let Some(name) = obj.get("name").and_then(|v| v.as_str())
-            && (name.is_empty() || name.len() > 64)
-        {
-            return Err(ValidationError::InvalidField {
-                path: "name".to_string(),
-                message: "Name must be 1-64 characters".to_string(),
-            });
+        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+            if name.is_empty() || name.len() > 64 {
+                return Err(ValidationError::InvalidField {
+                    path: "name".to_string(),
+                    message: "Name must be 1-64 characters".to_string(),
+                });
+            }
+            if crate::moderation::has_explicit_slur(name) {
+                return Err(ValidationError::BannedContent {
+                    path: "name".to_string(),
+                });
+            }
         }
         Ok(())
     }
@@ -268,6 +321,7 @@ impl RecordValidator {
     fn validate_feed_generator(
         &self,
         obj: &serde_json::Map<String, Value>,
+        rkey: Option<&str>,
     ) -> Result<(), ValidationError> {
         if !obj.contains_key("did") {
             return Err(ValidationError::MissingField("did".to_string()));
@@ -278,13 +332,64 @@ impl RecordValidator {
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str())
-            && (display_name.is_empty() || display_name.len() > 240)
-        {
-            return Err(ValidationError::InvalidField {
-                path: "displayName".to_string(),
-                message: "displayName must be 1-240 characters".to_string(),
-            });
+        if let Some(rkey) = rkey {
+            if crate::moderation::has_explicit_slur(rkey) {
+                return Err(ValidationError::BannedContent {
+                    path: "rkey".to_string(),
+                });
+            }
+        }
+        if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
+            if display_name.is_empty() || display_name.len() > 240 {
+                return Err(ValidationError::InvalidField {
+                    path: "displayName".to_string(),
+                    message: "displayName must be 1-240 characters".to_string(),
+                });
+            }
+            if crate::moderation::has_explicit_slur(display_name) {
+                return Err(ValidationError::BannedContent {
+                    path: "displayName".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_starterpack(
+        &self,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<(), ValidationError> {
+        if !obj.contains_key("name") {
+            return Err(ValidationError::MissingField("name".to_string()));
+        }
+        if !obj.contains_key("createdAt") {
+            return Err(ValidationError::MissingField("createdAt".to_string()));
+        }
+        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+            if name.is_empty() || name.len() > 500 {
+                return Err(ValidationError::InvalidField {
+                    path: "name".to_string(),
+                    message: "name must be 1-500 characters".to_string(),
+                });
+            }
+            if crate::moderation::has_explicit_slur(name) {
+                return Err(ValidationError::BannedContent {
+                    path: "name".to_string(),
+                });
+            }
+        }
+        if let Some(description) = obj.get("description").and_then(|v| v.as_str()) {
+            if description.len() > 3000 {
+                return Err(ValidationError::InvalidField {
+                    path: "description".to_string(),
+                    message: "description must be at most 3000 characters".to_string(),
+                });
+            }
+            if crate::moderation::has_explicit_slur(description) {
+                return Err(ValidationError::BannedContent {
+                    path: "description".to_string(),
+                });
+            }
         }
         Ok(())
     }

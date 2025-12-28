@@ -7,8 +7,16 @@ use axum::{
 use serde_json::json;
 
 pub fn validate_record(record: &serde_json::Value, collection: &str) -> Result<(), Box<Response>> {
+    validate_record_with_rkey(record, collection, None)
+}
+
+pub fn validate_record_with_rkey(
+    record: &serde_json::Value,
+    collection: &str,
+    rkey: Option<&str>,
+) -> Result<(), Box<Response>> {
     let validator = RecordValidator::new();
-    match validator.validate(record, collection) {
+    match validator.validate_with_rkey(record, collection, rkey) {
         Ok(_) => Ok(()),
         Err(ValidationError::MissingType) => Err(Box::new((
             StatusCode::BAD_REQUEST,
@@ -29,6 +37,10 @@ pub fn validate_record(record: &serde_json::Value, collection: &str) -> Result<(
         Err(ValidationError::InvalidDatetime { path }) => Err(Box::new((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidRecord", "message": format!("Invalid datetime format at '{}'", path)})),
+        ).into_response())),
+        Err(ValidationError::BannedContent { path }) => Err(Box::new((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRecord", "message": format!("Unacceptable slur in record at '{}'", path)})),
         ).into_response())),
         Err(e) => Err(Box::new((
             StatusCode::BAD_REQUEST,

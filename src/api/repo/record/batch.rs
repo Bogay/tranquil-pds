@@ -1,4 +1,4 @@
-use super::validation::validate_record;
+use super::validation::validate_record_with_rkey;
 use super::write::has_verified_comms_channel;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::delegation::{self, DelegationActionType};
@@ -304,7 +304,8 @@ pub async fn apply_writes(
                 value,
             } => {
                 if input.validate.unwrap_or(true)
-                    && let Err(err_response) = validate_record(value, collection)
+                    && let Err(err_response) =
+                        validate_record_with_rkey(value, collection, rkey.as_deref())
                 {
                     return *err_response;
                 }
@@ -357,7 +358,8 @@ pub async fn apply_writes(
                 value,
             } => {
                 if input.validate.unwrap_or(true)
-                    && let Err(err_response) = validate_record(value, collection)
+                    && let Err(err_response) =
+                        validate_record_with_rkey(value, collection, Some(rkey))
                 {
                     return *err_response;
                 }

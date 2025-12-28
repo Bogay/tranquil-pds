@@ -16,6 +16,7 @@ pub enum HandleValidationError {
     StartsWithInvalidChar,
     EndsWithInvalidChar,
     ContainsSpaces,
+    BannedWord,
 }
 
 impl std::fmt::Display for HandleValidationError {
@@ -41,6 +42,7 @@ impl std::fmt::Display for HandleValidationError {
             }
             Self::EndsWithInvalidChar => write!(f, "Handle cannot end with a hyphen or underscore"),
             Self::ContainsSpaces => write!(f, "Handle cannot contain spaces"),
+            Self::BannedWord => write!(f, "Inappropriate language in handle"),
         }
     }
 }
@@ -80,6 +82,10 @@ pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationErr
         if !c.is_ascii_alphanumeric() && c != '-' && c != '_' {
             return Err(HandleValidationError::InvalidCharacters);
         }
+    }
+
+    if crate::moderation::has_explicit_slur(handle) {
+        return Err(HandleValidationError::BannedWord);
     }
 
     Ok(handle.to_lowercase())

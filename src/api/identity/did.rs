@@ -582,6 +582,13 @@ pub async fn update_handle(
         )
             .into_response();
     }
+    if crate::moderation::has_explicit_slur(new_handle) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidHandle", "message": "Inappropriate language in handle"})),
+        )
+            .into_response();
+    }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let suffix = format!(".{}", hostname);
     let is_service_domain = crate::handle::is_service_domain_handle(new_handle, &hostname);
