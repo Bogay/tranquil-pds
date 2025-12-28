@@ -88,30 +88,12 @@ pub async fn get_account_info(
     }
 }
 
-fn parse_repeated_param(query: Option<&str>, key: &str) -> Vec<String> {
-    query
-        .map(|q| {
-            q.split('&')
-                .filter_map(|pair| {
-                    let (k, v) = pair.split_once('=')?;
-
-                    if k == key {
-                        Some(urlencoding::decode(v).ok()?.into_owned())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 pub async fn get_account_infos(
     State(state): State<AppState>,
     _auth: BearerAuthAdmin,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let dids = parse_repeated_param(raw_query.as_deref(), "dids");
+    let dids = crate::util::parse_repeated_query_param(raw_query.as_deref(), "dids");
     if dids.is_empty() {
         return (
             StatusCode::BAD_REQUEST,

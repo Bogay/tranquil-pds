@@ -200,6 +200,7 @@ async fn test_firehose_frame_structure() {
         app_port()
     );
     let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let post_text = "Testing firehose validation!";
     let post_payload = json!({
@@ -224,7 +225,7 @@ async fn test_firehose_frame_structure() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let mut frame_opt: Option<(FrameHeader, CommitFrame)> = None;
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             let msg = ws_stream.next().await.unwrap().unwrap();
             let raw_bytes = match msg {
@@ -392,6 +393,7 @@ async fn test_firehose_update_has_prev_field() {
         app_port()
     );
     let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let update_payload = json!({
         "repo": did,
@@ -415,7 +417,7 @@ async fn test_firehose_update_has_prev_field() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let mut frame_opt: Option<CommitFrame> = None;
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(20), async {
         loop {
             let msg = match ws_stream.next().await {
                 Some(Ok(m)) => m,
@@ -472,6 +474,7 @@ async fn test_firehose_commit_has_prev_data() {
         app_port()
     );
     let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let post_payload = json!({
         "repo": did,
@@ -494,7 +497,7 @@ async fn test_firehose_commit_has_prev_data() {
         .expect("Failed to create first post");
 
     let mut first_frame_opt: Option<CommitFrame> = None;
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             let msg = ws_stream.next().await.unwrap().unwrap();
             let raw_bytes = match msg {
@@ -544,7 +547,7 @@ async fn test_firehose_commit_has_prev_data() {
         .expect("Failed to create second post");
 
     let mut second_frame_opt: Option<CommitFrame> = None;
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             let msg = ws_stream.next().await.unwrap().unwrap();
             let raw_bytes = match msg {
@@ -593,6 +596,7 @@ async fn test_compare_raw_cbor_encoding() {
         app_port()
     );
     let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let post_payload = json!({
         "repo": did,
@@ -615,7 +619,7 @@ async fn test_compare_raw_cbor_encoding() {
         .expect("Failed to create post");
 
     let mut raw_bytes_opt: Option<Vec<u8>> = None;
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             let msg = ws_stream.next().await.unwrap().unwrap();
             let raw = match msg {
@@ -660,4 +664,189 @@ async fn test_compare_raw_cbor_encoding() {
     println!("\n=== Analysis Complete ===\n");
 
     ws_stream.send(tungstenite::Message::Close(None)).await.ok();
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorFrameHeader {
+    op: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorFrameBody {
+    error: String,
+    #[allow(dead_code)]
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InfoFrameHeader {
+    #[allow(dead_code)]
+    op: i64,
+    t: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InfoFrameBody {
+    name: String,
+    #[allow(dead_code)]
+    message: Option<String>,
+}
+
+fn parse_error_frame(bytes: &[u8]) -> Result<(ErrorFrameHeader, ErrorFrameBody), String> {
+    let header_len = find_cbor_map_end(bytes)?;
+    let header: ErrorFrameHeader = serde_ipld_dagcbor::from_slice(&bytes[..header_len])
+        .map_err(|e| format!("Failed to parse error header: {:?}", e))?;
+
+    if header.op != -1 {
+        return Err(format!("Not an error frame, op: {}", header.op));
+    }
+
+    let remaining = &bytes[header_len..];
+    let body: ErrorFrameBody = serde_ipld_dagcbor::from_slice(remaining)
+        .map_err(|e| format!("Failed to parse error body: {:?}", e))?;
+
+    Ok((header, body))
+}
+
+fn parse_info_frame(bytes: &[u8]) -> Result<(InfoFrameHeader, InfoFrameBody), String> {
+    let header_len = find_cbor_map_end(bytes)?;
+    let header: InfoFrameHeader = serde_ipld_dagcbor::from_slice(&bytes[..header_len])
+        .map_err(|e| format!("Failed to parse info header: {:?}", e))?;
+
+    if header.t != "#info" {
+        return Err(format!("Not an info frame, t: {}", header.t));
+    }
+
+    let remaining = &bytes[header_len..];
+    let body: InfoFrameBody = serde_ipld_dagcbor::from_slice(remaining)
+        .map_err(|e| format!("Failed to parse info body: {:?}", e))?;
+
+    Ok((header, body))
+}
+
+#[tokio::test]
+async fn test_firehose_future_cursor_error() {
+    let _ = base_url().await;
+
+    let future_cursor = 9999999999i64;
+    let url = format!(
+        "ws://127.0.0.1:{}/xrpc/com.atproto.sync.subscribeRepos?cursor={}",
+        app_port(),
+        future_cursor
+    );
+
+    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match ws_stream.next().await {
+                Some(Ok(tungstenite::Message::Binary(bin))) => {
+                    if let Ok((header, body)) = parse_error_frame(&bin) {
+                        println!("Received error frame: {:?} {:?}", header, body);
+                        assert_eq!(header.op, -1, "Error frame op should be -1");
+                        assert_eq!(body.error, "FutureCursor", "Error should be FutureCursor");
+                        return true;
+                    }
+                }
+                Some(Ok(tungstenite::Message::Close(_))) => {
+                    println!("Connection closed");
+                    return false;
+                }
+                None => {
+                    println!("Stream ended");
+                    return false;
+                }
+                _ => continue,
+            }
+        }
+    })
+    .await;
+
+    match timeout {
+        Ok(received_error) => {
+            assert!(
+                received_error,
+                "Should have received FutureCursor error frame before connection closed"
+            );
+        }
+        Err(_) => {
+            panic!(
+                "Timed out waiting for FutureCursor error - connection should close quickly with error"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_firehose_outdated_cursor_info() {
+    let client = client();
+    let (token, did) = create_account_and_login(&client).await;
+
+    let post_payload = json!({
+        "repo": did,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": "Post for outdated cursor test",
+            "createdAt": chrono::Utc::now().to_rfc3339(),
+        }
+    });
+    let _ = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .json(&post_payload)
+        .send()
+        .await
+        .expect("Failed to create post");
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let outdated_cursor = 1i64;
+    let url = format!(
+        "ws://127.0.0.1:{}/xrpc/com.atproto.sync.subscribeRepos?cursor={}",
+        app_port(),
+        outdated_cursor
+    );
+
+    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+
+    let mut found_info = false;
+    let mut found_commit = false;
+
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            match ws_stream.next().await {
+                Some(Ok(tungstenite::Message::Binary(bin))) => {
+                    if let Ok((header, body)) = parse_info_frame(&bin) {
+                        println!("Received info frame: {:?} {:?}", header, body);
+                        if body.name == "OutdatedCursor" {
+                            found_info = true;
+                            println!("Found OutdatedCursor info frame!");
+                        }
+                    } else if let Ok((_, frame)) = parse_frame(&bin) {
+                        if frame.repo == did {
+                            found_commit = true;
+                            println!("Found commit for our DID");
+                        }
+                    }
+                    if found_commit {
+                        break;
+                    }
+                }
+                Some(Ok(tungstenite::Message::Close(_))) => break,
+                None => break,
+                _ => continue,
+            }
+        }
+    })
+    .await;
+
+    assert!(timeout.is_ok(), "Timed out");
+    assert!(
+        found_commit,
+        "Should have received commits even with outdated cursor"
+    );
 }

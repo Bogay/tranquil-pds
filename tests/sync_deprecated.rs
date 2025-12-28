@@ -138,7 +138,7 @@ async fn test_get_checkout_comprehensive() {
         "CAR file should have at least header length"
     );
     for i in 0..4 {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         create_post(&client, &did, &jwt, &format!("Checkout post {}", i)).await;
     }
     let multi_res = client

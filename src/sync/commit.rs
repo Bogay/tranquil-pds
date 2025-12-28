@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use crate::sync::util::{AccountStatus, assert_repo_availability, get_account_with_status};
 use axum::{
     Json,
     extract::{Query, State},
@@ -43,45 +44,46 @@ pub async fn get_latest_commit(
         )
             .into_response();
     }
-    let result = sqlx::query!(
-        r#"
-        SELECT r.repo_root_cid
-        FROM repos r
-        JOIN users u ON r.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&state.db)
-    .await;
-    match result {
-        Ok(Some(row)) => {
-            let rev = get_rev_from_commit(&state, &row.repo_root_cid)
-                .await
-                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
-            (
-                StatusCode::OK,
-                Json(GetLatestCommitOutput {
-                    cid: row.repo_root_cid,
-                    rev,
-                }),
+
+    let account = match assert_repo_availability(&state.db, did, false).await {
+        Ok(a) => a,
+        Err(e) => return e.into_response(),
+    };
+
+    let repo_root_cid = match account.repo_root_cid {
+        Some(cid) => cid,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
             )
-                .into_response()
+                .into_response();
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "RepoNotFound", "message": "Could not find repo for DID"})),
-        )
-            .into_response(),
-        Err(e) => {
-            error!("DB error in get_latest_commit: {:?}", e);
-            (
+    };
+
+    let rev = match get_rev_from_commit(&state, &repo_root_cid).await {
+        Some(r) => r,
+        None => {
+            error!(
+                "Failed to parse commit for DID {}: CID {}",
+                did, repo_root_cid
+            );
+            return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
+                Json(json!({"error": "InternalError", "message": "Failed to read repo commit"})),
             )
-                .into_response()
+                .into_response();
         }
-    }
+    };
+
+    (
+        StatusCode::OK,
+        Json(GetLatestCommitOutput {
+            cid: repo_root_cid,
+            rev,
+        }),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -97,6 +99,8 @@ pub struct RepoInfo {
     pub head: String,
     pub rev: String,
     pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -114,7 +118,7 @@ pub async fn list_repos(
     let cursor_did = params.cursor.as_deref().unwrap_or("");
     let result = sqlx::query!(
         r#"
-        SELECT u.did, r.repo_root_cid
+        SELECT u.did, u.deactivated_at, u.takedown_ref, r.repo_root_cid, r.repo_rev
         FROM repos r
         JOIN users u ON r.user_id = u.id
         WHERE u.did > $1
@@ -131,14 +135,34 @@ pub async fn list_repos(
             let has_more = rows.len() as i64 > limit;
             let mut repos: Vec<RepoInfo> = Vec::new();
             for row in rows.iter().take(limit as usize) {
-                let rev = get_rev_from_commit(&state, &row.repo_root_cid)
-                    .await
-                    .unwrap_or_else(|| chrono::Utc::now().timestamp_millis().to_string());
+                let rev = match get_rev_from_commit(&state, &row.repo_root_cid).await {
+                    Some(r) => r,
+                    None => {
+                        if let Some(ref stored_rev) = row.repo_rev {
+                            stored_rev.clone()
+                        } else {
+                            tracing::warn!(
+                                "Failed to parse commit for DID {} in list_repos: CID {}",
+                                row.did,
+                                row.repo_root_cid
+                            );
+                            continue;
+                        }
+                    }
+                };
+                let status = if row.takedown_ref.is_some() {
+                    AccountStatus::Takendown
+                } else if row.deactivated_at.is_some() {
+                    AccountStatus::Deactivated
+                } else {
+                    AccountStatus::Active
+                };
                 repos.push(RepoInfo {
                     did: row.did.clone(),
                     head: row.repo_root_cid.clone(),
                     rev,
-                    active: true,
+                    active: status.is_active(),
+                    status: status.as_str().map(String::from),
                 });
             }
             let next_cursor = if has_more {
@@ -175,6 +199,9 @@ pub struct GetRepoStatusParams {
 pub struct GetRepoStatusOutput {
     pub did: String,
     pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
 }
 
@@ -190,42 +217,44 @@ pub async fn get_repo_status(
         )
             .into_response();
     }
-    let result = sqlx::query!(
-        r#"
-        SELECT u.did, r.repo_root_cid
-        FROM users u
-        LEFT JOIN repos r ON u.id = r.user_id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&state.db)
-    .await;
-    match result {
-        Ok(Some(row)) => {
-            let rev = get_rev_from_commit(&state, &row.repo_root_cid).await;
-            (
-                StatusCode::OK,
-                Json(GetRepoStatusOutput {
-                    did: row.did,
-                    active: true,
-                    rev,
-                }),
+
+    let account = match get_account_with_status(&state.db, did).await {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "RepoNotFound", "message": format!("Could not find repo for DID: {}", did)})),
             )
                 .into_response()
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "RepoNotFound", "message": "Could not find repo for DID"})),
-        )
-            .into_response(),
         Err(e) => {
             error!("DB error in get_repo_status: {:?}", e);
-            (
+            return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
             )
-                .into_response()
+                .into_response();
         }
-    }
+    };
+
+    let rev = if account.status.is_active() {
+        if let Some(ref cid) = account.repo_root_cid {
+            get_rev_from_commit(&state, cid).await
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    (
+        StatusCode::OK,
+        Json(GetRepoStatusOutput {
+            did: account.did,
+            active: account.status.is_active(),
+            status: account.status.as_str().map(String::from),
+            rev,
+        }),
+    )
+        .into_response()
 }

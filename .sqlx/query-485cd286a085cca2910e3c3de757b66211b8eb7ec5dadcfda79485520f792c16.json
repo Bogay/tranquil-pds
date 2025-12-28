@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT unnest(blobs) as \"cid!\"\n            FROM repo_seq\n            WHERE did = $1 AND rev > $2 AND blobs IS NOT NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cid!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "485cd286a085cca2910e3c3de757b66211b8eb7ec5dadcfda79485520f792c16"
+}

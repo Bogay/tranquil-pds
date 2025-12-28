@@ -1,15 +1,166 @@
 use crate::state::AppState;
 use crate::sync::firehose::SequencedEvent;
-use crate::sync::frame::{AccountFrame, CommitFrame, FrameHeader, IdentityFrame, SyncFrame};
+use crate::sync::frame::{
+    AccountFrame, CommitFrame, ErrorFrameBody, ErrorFrameHeader, FrameHeader, IdentityFrame,
+    InfoFrame, SyncFrame,
+};
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use cid::Cid;
 use iroh_car::{CarHeader, CarWriter};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
+use serde::Serialize;
+use serde_json::json;
+use sqlx::PgPool;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AccountStatus {
+    Active,
+    Takendown,
+    Suspended,
+    Deactivated,
+    Deleted,
+}
+
+impl AccountStatus {
+    pub fn as_str(&self) -> Option<&'static str> {
+        match self {
+            AccountStatus::Active => None,
+            AccountStatus::Takendown => Some("takendown"),
+            AccountStatus::Suspended => Some("suspended"),
+            AccountStatus::Deactivated => Some("deactivated"),
+            AccountStatus::Deleted => Some("deleted"),
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self, AccountStatus::Active)
+    }
+}
+
+pub struct RepoAccount {
+    pub did: String,
+    pub user_id: uuid::Uuid,
+    pub status: AccountStatus,
+    pub repo_root_cid: Option<String>,
+}
+
+pub enum RepoAvailabilityError {
+    NotFound(String),
+    Takendown(String),
+    Deactivated(String),
+    Internal(String),
+}
+
+impl IntoResponse for RepoAvailabilityError {
+    fn into_response(self) -> Response {
+        match self {
+            RepoAvailabilityError::NotFound(did) => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "RepoNotFound",
+                    "message": format!("Could not find repo for DID: {}", did)
+                })),
+            )
+                .into_response(),
+            RepoAvailabilityError::Takendown(did) => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "RepoTakendown",
+                    "message": format!("Repo has been takendown: {}", did)
+                })),
+            )
+                .into_response(),
+            RepoAvailabilityError::Deactivated(did) => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "RepoDeactivated",
+                    "message": format!("Repo has been deactivated: {}", did)
+                })),
+            )
+                .into_response(),
+            RepoAvailabilityError::Internal(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "InternalError",
+                    "message": msg
+                })),
+            )
+                .into_response(),
+        }
+    }
+}
+
+pub async fn get_account_with_status(
+    db: &PgPool,
+    did: &str,
+) -> Result<Option<RepoAccount>, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"
+        SELECT u.id, u.did, u.deactivated_at, u.takedown_ref, r.repo_root_cid
+        FROM users u
+        LEFT JOIN repos r ON r.user_id = u.id
+        WHERE u.did = $1
+        "#,
+        did
+    )
+    .fetch_optional(db)
+    .await?;
+
+    Ok(row.map(|r| {
+        let status = if r.takedown_ref.is_some() {
+            AccountStatus::Takendown
+        } else if r.deactivated_at.is_some() {
+            AccountStatus::Deactivated
+        } else {
+            AccountStatus::Active
+        };
+
+        RepoAccount {
+            did: r.did,
+            user_id: r.id,
+            status,
+            repo_root_cid: Some(r.repo_root_cid),
+        }
+    }))
+}
+
+pub async fn assert_repo_availability(
+    db: &PgPool,
+    did: &str,
+    is_admin_or_self: bool,
+) -> Result<RepoAccount, RepoAvailabilityError> {
+    let account = get_account_with_status(db, did)
+        .await
+        .map_err(|e| RepoAvailabilityError::Internal(e.to_string()))?;
+
+    let account = match account {
+        Some(a) => a,
+        None => return Err(RepoAvailabilityError::NotFound(did.to_string())),
+    };
+
+    if is_admin_or_self {
+        return Ok(account);
+    }
+
+    match account.status {
+        AccountStatus::Takendown => return Err(RepoAvailabilityError::Takendown(did.to_string())),
+        AccountStatus::Deactivated => {
+            return Err(RepoAvailabilityError::Deactivated(did.to_string()));
+        }
+        _ => {}
+    }
+
+    Ok(account)
+}
 
 fn extract_rev_from_commit_bytes(commit_bytes: &[u8]) -> Option<String> {
     Commit::from_cbor(commit_bytes)
@@ -345,6 +496,33 @@ pub async fn format_event_with_prefetched_blocks(
     let header = FrameHeader {
         op: 1,
         t: "#commit".to_string(),
+    };
+    let mut bytes = Vec::new();
+    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
+    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
+    Ok(bytes)
+}
+
+pub fn format_info_frame(name: &str, message: Option<&str>) -> Result<Vec<u8>, anyhow::Error> {
+    let header = FrameHeader {
+        op: 1,
+        t: "#info".to_string(),
+    };
+    let frame = InfoFrame {
+        name: name.to_string(),
+        message: message.map(String::from),
+    };
+    let mut bytes = Vec::new();
+    serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
+    serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
+    Ok(bytes)
+}
+
+pub fn format_error_frame(error: &str, message: Option<&str>) -> Result<Vec<u8>, anyhow::Error> {
+    let header = ErrorFrameHeader { op: -1 };
+    let frame = ErrorFrameBody {
+        error: error.to_string(),
+        message: message.map(String::from),
     };
     let mut bytes = Vec::new();
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;

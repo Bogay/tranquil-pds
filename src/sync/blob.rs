@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use crate::sync::util::assert_repo_availability;
 use axum::{
     Json,
     body::Body,
@@ -37,29 +38,14 @@ pub async fn get_blob(
         )
             .into_response();
     }
-    let user_exists = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await;
-    match user_exists {
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Could not find repo for DID"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in get_blob: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-        Ok(Some(_)) => {}
-    }
+
+    let _account = match assert_repo_availability(&state.db, did, false).await {
+        Ok(a) => a,
+        Err(e) => return e.into_response(),
+    };
+
     let blob_result = sqlx::query!(
-        "SELECT storage_key, mime_type FROM blobs WHERE cid = $1",
+        "SELECT storage_key, mime_type, size_bytes FROM blobs WHERE cid = $1",
         cid
     )
     .fetch_optional(&state.db)
@@ -68,10 +54,14 @@ pub async fn get_blob(
         Ok(Some(row)) => {
             let storage_key = &row.storage_key;
             let mime_type = &row.mime_type;
+            let size_bytes = row.size_bytes;
             match state.blob_store.get(storage_key).await {
                 Ok(data) => Response::builder()
                     .status(StatusCode::OK)
                     .header(header::CONTENT_TYPE, mime_type)
+                    .header(header::CONTENT_LENGTH, size_bytes.to_string())
+                    .header("x-content-type-options", "nosniff")
+                    .header("content-security-policy", "default-src 'none'; sandbox")
                     .body(Body::from(data))
                     .unwrap(),
                 Err(e) => {
@@ -127,48 +117,35 @@ pub async fn list_blobs(
         )
             .into_response();
     }
+
+    let account = match assert_repo_availability(&state.db, did, false).await {
+        Ok(a) => a,
+        Err(e) => return e.into_response(),
+    };
+
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor_cid = params.cursor.as_deref().unwrap_or("");
-    let user_result = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await;
-    let user_id = match user_result {
-        Ok(Some(row)) => row.id,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Could not find repo for DID"})),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            error!("DB error in list_blobs: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+    let user_id = account.user_id;
+
     let cids_result: Result<Vec<String>, sqlx::Error> = if let Some(since) = &params.since {
-        let since_time = chrono::DateTime::parse_from_rfc3339(since)
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(|_| chrono::Utc::now());
-        sqlx::query!(
+        sqlx::query_scalar!(
             r#"
-            SELECT cid FROM blobs
-            WHERE created_by_user = $1 AND cid > $2 AND created_at > $3
-            ORDER BY cid ASC
-            LIMIT $4
+            SELECT DISTINCT unnest(blobs) as "cid!"
+            FROM repo_seq
+            WHERE did = $1 AND rev > $2 AND blobs IS NOT NULL
             "#,
-            user_id,
-            cursor_cid,
-            since_time,
-            limit + 1
+            did,
+            since
         )
         .fetch_all(&state.db)
         .await
-        .map(|rows| rows.into_iter().map(|r| r.cid).collect())
+        .map(|mut cids| {
+            cids.sort();
+            cids.into_iter()
+                .filter(|c| c.as_str() > cursor_cid)
+                .take((limit + 1) as usize)
+                .collect()
+        })
     } else {
         sqlx::query!(
             r#"

@@ -50,7 +50,7 @@ async fn test_list_blobs_not_found() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }

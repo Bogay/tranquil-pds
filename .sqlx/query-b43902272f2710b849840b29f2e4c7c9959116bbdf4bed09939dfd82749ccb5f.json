@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT MIN(seq) FROM repo_seq WHERE created_at >= $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "min",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b43902272f2710b849840b29f2e4c7c9959116bbdf4bed09939dfd82749ccb5f"
+}

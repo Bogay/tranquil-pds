@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT storage_key, mime_type, size_bytes FROM blobs WHERE cid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "storage_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "mime_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "size_bytes",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dd1b61d6ec81fd891d4effd3b51e6c22308b878acdc5355dfcb04c5664c9463b"
+}

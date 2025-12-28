@@ -107,7 +107,9 @@ mod tests {
     use base64::Engine;
 
     fn d(b64: &str) -> String {
-        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap();
         String::from_utf8(bytes).unwrap()
     }
 

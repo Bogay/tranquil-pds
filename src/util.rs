@@ -73,6 +73,33 @@ pub async fn get_user_by_identifier(
     .ok_or(DbLookupError::NotFound)
 }
 
+pub fn parse_repeated_query_param(query: Option<&str>, key: &str) -> Vec<String> {
+    query
+        .map(|q| {
+            let mut values = Vec::new();
+            for pair in q.split('&') {
+                if let Some((k, v)) = pair.split_once('=')
+                    && k == key
+                    && let Ok(decoded) = urlencoding::decode(v)
+                {
+                    let decoded = decoded.into_owned();
+                    if decoded.contains(',') {
+                        for part in decoded.split(',') {
+                            let trimmed = part.trim();
+                            if !trimmed.is_empty() {
+                                values.push(trimmed.to_string());
+                            }
+                        }
+                    } else if !decoded.is_empty() {
+                        values.push(decoded);
+                    }
+                }
+            }
+            values
+        })
+        .unwrap_or_default()
+}
+
 pub fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
@@ -91,6 +118,48 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_repeated_query_param_repeated() {
+        let query = "did=test&cids=a&cids=b&cids=c";
+        let result = parse_repeated_query_param(Some(query), "cids");
+        assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_parse_repeated_query_param_comma_separated() {
+        let query = "did=test&cids=a,b,c";
+        let result = parse_repeated_query_param(Some(query), "cids");
+        assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_parse_repeated_query_param_mixed() {
+        let query = "did=test&cids=a,b&cids=c";
+        let result = parse_repeated_query_param(Some(query), "cids");
+        assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_parse_repeated_query_param_single() {
+        let query = "did=test&cids=a";
+        let result = parse_repeated_query_param(Some(query), "cids");
+        assert_eq!(result, vec!["a"]);
+    }
+
+    #[test]
+    fn test_parse_repeated_query_param_empty() {
+        let query = "did=test";
+        let result = parse_repeated_query_param(Some(query), "cids");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_parse_repeated_query_param_url_encoded() {
+        let query = "did=test&cids=bafyreib%2Btest";
+        let result = parse_repeated_query_param(Some(query), "cids");
+        assert_eq!(result, vec!["bafyreib+test"]);
+    }
 
     #[test]
     fn test_generate_token_code() {

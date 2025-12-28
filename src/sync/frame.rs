@@ -74,6 +74,25 @@ pub struct SyncFrame {
     pub time: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InfoFrame {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ErrorFrameHeader {
+    pub op: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ErrorFrameBody {
+    pub error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 pub struct CommitFrameBuilder {
     pub seq: i64,
     pub did: String,

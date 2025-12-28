@@ -39,7 +39,7 @@ async fn test_get_latest_commit_not_found() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
@@ -106,25 +106,19 @@ async fn test_list_repos_with_limit() {
 #[tokio::test]
 async fn test_list_repos_pagination() {
     let client = client();
-    let _ = create_account_and_login(&client).await;
-    let _ = create_account_and_login(&client).await;
-    let _ = create_account_and_login(&client).await;
-    let params = [("limit", "1")];
-    let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.sync.listRepos",
-            base_url().await
-        ))
-        .query(&params)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Response was not valid JSON");
-    let repos = body["repos"].as_array().unwrap();
-    assert_eq!(repos.len(), 1);
-    if let Some(cursor) = body["cursor"].as_str() {
-        let params = [("limit", "1"), ("cursor", cursor)];
+    let (_, did1) = create_account_and_login(&client).await;
+    let (_, did2) = create_account_and_login(&client).await;
+    let (_, did3) = create_account_and_login(&client).await;
+    let our_dids: std::collections::HashSet<String> = [did1, did2, did3].into_iter().collect();
+    let mut all_dids_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut cursor: Option<String> = None;
+    let mut page_count = 0;
+    let max_pages = 100;
+    loop {
+        let mut params: Vec<(&str, String)> = vec![("limit".into(), "10".into())];
+        if let Some(ref c) = cursor {
+            params.push(("cursor", c.clone()));
+        }
         let res = client
             .get(format!(
                 "{}/xrpc/com.atproto.sync.listRepos",
@@ -136,9 +130,28 @@ async fn test_list_repos_pagination() {
             .expect("Failed to send request");
         assert_eq!(res.status(), StatusCode::OK);
         let body: Value = res.json().await.expect("Response was not valid JSON");
-        let repos2 = body["repos"].as_array().unwrap();
-        assert_eq!(repos2.len(), 1);
-        assert_ne!(repos[0]["did"], repos2[0]["did"]);
+        let repos = body["repos"].as_array().unwrap();
+        for repo in repos {
+            let did = repo["did"].as_str().unwrap().to_string();
+            assert!(
+                !all_dids_seen.contains(&did),
+                "Pagination returned duplicate DID: {}",
+                did
+            );
+            all_dids_seen.insert(did);
+        }
+        cursor = body["cursor"].as_str().map(String::from);
+        page_count += 1;
+        if cursor.is_none() || page_count >= max_pages {
+            break;
+        }
+    }
+    for did in &our_dids {
+        assert!(
+            all_dids_seen.contains(did),
+            "Our created DID {} was not found in paginated results",
+            did
+        );
     }
 }
 
@@ -176,7 +189,7 @@ async fn test_get_repo_status_not_found() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
@@ -270,7 +283,7 @@ async fn test_get_repo_not_found() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "RepoNotFound");
 }
@@ -397,7 +410,7 @@ async fn test_get_blocks_not_found() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -536,7 +549,7 @@ async fn test_sync_repo_export_lifecycle() {
         .expect("Failed to create profile");
     assert_eq!(profile_res.status(), StatusCode::OK);
     for i in 0..3 {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         create_post(&client, &did, &jwt, &format!("Export test post {}", i)).await;
     }
     let blob_data = b"blob data for sync export test";

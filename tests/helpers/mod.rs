@@ -214,3 +214,41 @@ pub async fn create_repost(
         body["cid"].as_str().unwrap().to_string(),
     )
 }
+
+#[allow(dead_code)]
+pub async fn set_account_takedown(did: &str, takedown_ref: Option<&str>) {
+    let conn_str = get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&conn_str)
+        .await
+        .expect("Failed to connect to test database");
+    sqlx::query!(
+        "UPDATE users SET takedown_ref = $1 WHERE did = $2",
+        takedown_ref,
+        did
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to update takedown_ref");
+}
+
+#[allow(dead_code)]
+pub async fn set_account_deactivated(did: &str, deactivated: bool) {
+    let conn_str = get_db_connection_string().await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&conn_str)
+        .await
+        .expect("Failed to connect to test database");
+    let deactivated_at: Option<chrono::DateTime<Utc>> =
+        if deactivated { Some(Utc::now()) } else { None };
+    sqlx::query!(
+        "UPDATE users SET deactivated_at = $1 WHERE did = $2",
+        deactivated_at,
+        did
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to update deactivated_at");
+}
