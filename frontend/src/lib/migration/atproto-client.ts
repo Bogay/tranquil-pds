@@ -11,6 +11,20 @@ import type {
   Session,
 } from "./types";
 
+function apiLog(
+  method: string,
+  endpoint: string,
+  data?: Record<string, unknown>,
+) {
+  const timestamp = new Date().toISOString();
+  const msg = `[API ${timestamp}] ${method} ${endpoint}`;
+  if (data) {
+    console.log(msg, JSON.stringify(data, null, 2));
+  } else {
+    console.log(msg);
+  }
+}
+
 export class AtprotoClient {
   private baseUrl: string;
   private accessToken: string | null = null;
@@ -107,10 +121,13 @@ export class AtprotoClient {
       body.authFactorToken = authFactorToken;
     }
 
-    const session = await this.xrpc<Session>("com.atproto.server.createSession", {
-      httpMethod: "POST",
-      body,
-    });
+    const session = await this.xrpc<Session>(
+      "com.atproto.server.createSession",
+      {
+        httpMethod: "POST",
+        body,
+      },
+    );
 
     this.accessToken = session.accessJwt;
     return session;
@@ -239,7 +256,9 @@ export class AtprotoClient {
   async listMissingBlobs(
     cursor?: string,
     limit = 100,
-  ): Promise<{ blobs: Array<{ cid: string; recordUri: string }>; cursor?: string }> {
+  ): Promise<
+    { blobs: Array<{ cid: string; recordUri: string }>; cursor?: string }
+  > {
     const params: Record<string, string> = { limit: String(limit) };
     if (cursor) {
       params.cursor = cursor;
@@ -267,10 +286,26 @@ export class AtprotoClient {
   }
 
   async submitPlcOperation(operation: PlcOperation): Promise<void> {
+    apiLog(
+      "POST",
+      `${this.baseUrl}/xrpc/com.atproto.identity.submitPlcOperation`,
+      {
+        operationType: operation.type,
+        operationPrev: operation.prev,
+      },
+    );
+    const start = Date.now();
     await this.xrpc("com.atproto.identity.submitPlcOperation", {
       httpMethod: "POST",
       body: { operation },
     });
+    apiLog(
+      "POST",
+      `${this.baseUrl}/xrpc/com.atproto.identity.submitPlcOperation COMPLETE`,
+      {
+        durationMs: Date.now() - start,
+      },
+    );
   }
 
   async getRecommendedDidCredentials(): Promise<DidCredentials> {
@@ -278,15 +313,49 @@ export class AtprotoClient {
   }
 
   async activateAccount(): Promise<void> {
+    apiLog("POST", `${this.baseUrl}/xrpc/com.atproto.server.activateAccount`);
+    const start = Date.now();
     await this.xrpc("com.atproto.server.activateAccount", {
       httpMethod: "POST",
     });
+    apiLog(
+      "POST",
+      `${this.baseUrl}/xrpc/com.atproto.server.activateAccount COMPLETE`,
+      {
+        durationMs: Date.now() - start,
+      },
+    );
   }
 
   async deactivateAccount(): Promise<void> {
-    await this.xrpc("com.atproto.server.deactivateAccount", {
-      httpMethod: "POST",
-    });
+    apiLog("POST", `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount`);
+    const start = Date.now();
+    try {
+      await this.xrpc("com.atproto.server.deactivateAccount", {
+        httpMethod: "POST",
+      });
+      apiLog(
+        "POST",
+        `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount COMPLETE`,
+        {
+          durationMs: Date.now() - start,
+          success: true,
+        },
+      );
+    } catch (e) {
+      const err = e as Error & { error?: string; status?: number };
+      apiLog(
+        "POST",
+        `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount FAILED`,
+        {
+          durationMs: Date.now() - start,
+          error: err.message,
+          errorCode: err.error,
+          status: err.status,
+        },
+      );
+      throw e;
+    }
   }
 
   async checkAccountStatus(): Promise<AccountStatus> {
@@ -330,10 +399,13 @@ export class AtprotoClient {
     identifier: string,
     password: string,
   ): Promise<Session> {
-    const session = await this.xrpc<Session>("com.atproto.server.createSession", {
-      httpMethod: "POST",
-      body: { identifier, password, allowDeactivated: true },
-    });
+    const session = await this.xrpc<Session>(
+      "com.atproto.server.createSession",
+      {
+        httpMethod: "POST",
+        body: { identifier, password, allowDeactivated: true },
+      },
+    );
     this.accessToken = session.accessJwt;
     return session;
   }
@@ -341,7 +413,9 @@ export class AtprotoClient {
   async verifyToken(
     token: string,
     identifier: string,
-  ): Promise<{ success: boolean; did: string; purpose: string; channel: string }> {
+  ): Promise<
+    { success: boolean; did: string; purpose: string; channel: string }
+  > {
     return this.xrpc("com.tranquil.account.verifyToken", {
       httpMethod: "POST",
       body: { token, identifier },
@@ -392,7 +466,9 @@ export async function resolvePdsUrl(
 
     if (handle.endsWith(".bsky.social")) {
       const res = await fetch(
-        `https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`,
+        `https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=${
+          encodeURIComponent(handle)
+        }`,
       );
       if (!res.ok) {
         throw new Error(`Failed to resolve handle: ${res.statusText}`);

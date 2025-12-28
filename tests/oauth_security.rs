@@ -1116,7 +1116,10 @@ async fn test_delegation_viewer_scope_cannot_write() {
 
     let delegated_handle = format!("deleg-{}", ts);
     let delegated_res = http_client
-        .post(format!("{}/xrpc/com.tranquil.delegation.createDelegatedAccount", url))
+        .post(format!(
+            "{}/xrpc/com.tranquil.delegation.createDelegatedAccount",
+            url
+        ))
         .bearer_auth(controller_jwt)
         .json(&json!({
             "handle": delegated_handle,
@@ -1174,7 +1177,11 @@ async fn test_delegation_viewer_scope_cannot_write() {
         panic!("Delegation auth failed: {}", error_body);
     }
     let auth_body: Value = auth_res.json().await.unwrap();
-    assert!(auth_body["success"].as_bool().unwrap_or(false), "Delegation auth should succeed: {:?}", auth_body);
+    assert!(
+        auth_body["success"].as_bool().unwrap_or(false),
+        "Delegation auth should succeed: {:?}",
+        auth_body
+    );
 
     let consent_res = http_client
         .post(format!("{}/oauth/authorize/consent", url))

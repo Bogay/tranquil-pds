@@ -1,4 +1,8 @@
-import type { MigrationDirection, MigrationState, StoredMigrationState } from "./types";
+import type {
+  MigrationDirection,
+  MigrationState,
+  StoredMigrationState,
+} from "./types";
 
 const STORAGE_KEY = "tranquil_migration_state";
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -9,8 +13,12 @@ export function saveMigrationState(state: MigrationState): void {
     direction: state.direction,
     step: state.direction === "inbound" ? state.step : state.step,
     startedAt: new Date().toISOString(),
-    sourcePdsUrl: state.direction === "inbound" ? state.sourcePdsUrl : window.location.origin,
-    targetPdsUrl: state.direction === "inbound" ? window.location.origin : state.targetPdsUrl,
+    sourcePdsUrl: state.direction === "inbound"
+      ? state.sourcePdsUrl
+      : window.location.origin,
+    targetPdsUrl: state.direction === "inbound"
+      ? window.location.origin
+      : state.targetPdsUrl,
     sourceDid: state.direction === "inbound" ? state.sourceDid : "",
     sourceHandle: state.direction === "inbound" ? state.sourceHandle : "",
     targetHandle: state.targetHandle,

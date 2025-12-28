@@ -23,22 +23,34 @@ pub async fn submit_plc_operation(
     headers: axum::http::HeaderMap,
     Json(input): Json<SubmitPlcOperationInput>,
 ) -> Response {
+    info!("[MIGRATION] submitPlcOperation called");
     let bearer = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
+        None => {
+            info!("[MIGRATION] submitPlcOperation: No bearer token");
+            return ApiError::AuthenticationRequired.into_response();
+        }
     };
     let auth_user =
         match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
             Ok(user) => user,
-            Err(e) => return ApiError::from(e).into_response(),
+            Err(e) => {
+                info!("[MIGRATION] submitPlcOperation: Auth failed: {:?}", e);
+                return ApiError::from(e).into_response();
+            }
         };
+    info!(
+        "[MIGRATION] submitPlcOperation: Authenticated user did={}",
+        auth_user.did
+    );
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
         auth_user.is_oauth,
         auth_user.scope.as_deref(),
         crate::oauth::scopes::IdentityAttr::Wildcard,
     ) {
+        info!("[MIGRATION] submitPlcOperation: Scope check failed");
         return e;
     }
     let did = &auth_user.did;
@@ -188,6 +200,11 @@ pub async fn submit_plc_operation(
     let plc_client = PlcClient::new(None);
     let operation_clone = input.operation.clone();
     let did_clone = did.clone();
+    info!(
+        "[MIGRATION] submitPlcOperation: Sending operation to PLC directory for did={}",
+        did
+    );
+    let plc_start = std::time::Instant::now();
     let result: Result<(), CircuitBreakerError<PlcError>> =
         with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
             plc_client
@@ -196,9 +213,17 @@ pub async fn submit_plc_operation(
         })
         .await;
     match result {
-        Ok(()) => {}
+        Ok(()) => {
+            info!(
+                "[MIGRATION] submitPlcOperation: PLC directory accepted operation in {:?}",
+                plc_start.elapsed()
+            );
+        }
         Err(CircuitBreakerError::CircuitOpen(e)) => {
-            warn!("PLC directory circuit breaker open: {}", e);
+            warn!(
+                "[MIGRATION] submitPlcOperation: PLC directory circuit breaker open: {}",
+                e
+            );
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(json!({
@@ -209,7 +234,10 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
         Err(CircuitBreakerError::OperationFailed(e)) => {
-            error!("Failed to submit PLC operation: {:?}", e);
+            error!(
+                "[MIGRATION] submitPlcOperation: PLC operation failed: {:?}",
+                e
+            );
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(json!({
@@ -220,6 +248,10 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     }
+    info!(
+        "[MIGRATION] submitPlcOperation: Sequencing identity event for did={}",
+        did
+    );
     match sqlx::query!(
         "INSERT INTO repo_seq (did, event_type) VALUES ($1, 'identity') RETURNING seq",
         did
@@ -228,17 +260,27 @@ pub async fn submit_plc_operation(
     .await
     {
         Ok(row) => {
+            info!(
+                "[MIGRATION] submitPlcOperation: Identity event sequenced with seq={}",
+                row.seq
+            );
             if let Err(e) = sqlx::query(&format!("NOTIFY repo_updates, '{}'", row.seq))
                 .execute(&state.db)
                 .await
             {
-                warn!("Failed to notify identity event: {:?}", e);
+                warn!(
+                    "[MIGRATION] submitPlcOperation: Failed to notify identity event: {:?}",
+                    e
+                );
             }
         }
         Err(e) => {
-            warn!("Failed to sequence identity event: {:?}", e);
+            warn!(
+                "[MIGRATION] submitPlcOperation: Failed to sequence identity event: {:?}",
+                e
+            );
         }
     }
-    info!("Submitted PLC operation for user {}", did);
+    info!("[MIGRATION] submitPlcOperation: SUCCESS for did={}", did);
     (StatusCode::OK, Json(json!({}))).into_response()
 }

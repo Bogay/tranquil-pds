@@ -189,13 +189,16 @@ fn walk_mst_node(
         if let Some(Ipld::List(entries)) = obj.get("e") {
             for entry in entries {
                 if let Ipld::Map(entry_obj) = entry {
-                    let prefix_len = entry_obj.get("p").and_then(|p| {
-                        if let Ipld::Integer(n) = p {
-                            Some(*n as usize)
-                        } else {
-                            None
-                        }
-                    }).unwrap_or(0);
+                    let prefix_len = entry_obj
+                        .get("p")
+                        .and_then(|p| {
+                            if let Ipld::Integer(n) = p {
+                                Some(*n as usize)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
 
                     let key_suffix = entry_obj.get("k").and_then(|k| {
                         if let Ipld::Bytes(b) = k {
@@ -222,25 +225,23 @@ fn walk_mst_node(
                         }
                     });
 
-                    if let Some(record_cid) = record_cid {
-                        if let Ok(full_key) = String::from_utf8(current_key.clone()) {
-                            if let Some(record_block) = blocks.get(&record_cid)
-                                && let Ok(record_value) =
-                                    serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
-                            {
-                                let blob_refs = find_blob_refs_ipld(&record_value, 0);
-                                let parts: Vec<&str> = full_key.split('/').collect();
-                                if parts.len() >= 2 {
-                                    let collection = parts[..parts.len() - 1].join("/");
-                                    let rkey = parts[parts.len() - 1].to_string();
-                                    records.push(ImportedRecord {
-                                        collection,
-                                        rkey,
-                                        cid: record_cid,
-                                        blob_refs,
-                                    });
-                                }
-                            }
+                    if let Some(record_cid) = record_cid
+                        && let Ok(full_key) = String::from_utf8(current_key.clone())
+                        && let Some(record_block) = blocks.get(&record_cid)
+                        && let Ok(record_value) =
+                            serde_ipld_dagcbor::from_slice::<Ipld>(record_block)
+                    {
+                        let blob_refs = find_blob_refs_ipld(&record_value, 0);
+                        let parts: Vec<&str> = full_key.split('/').collect();
+                        if parts.len() >= 2 {
+                            let collection = parts[..parts.len() - 1].join("/");
+                            let rkey = parts[parts.len() - 1].to_string();
+                            records.push(ImportedRecord {
+                                collection,
+                                rkey,
+                                cid: record_cid,
+                                blob_refs,
+                            });
                         }
                     }
                 }

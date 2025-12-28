@@ -350,17 +350,18 @@ pub async fn import_repo(
                         .into_response();
                 }
             };
-            let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version) {
-                Ok(k) => k,
-                Err(e) => {
-                    error!("Failed to decrypt signing key: {}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
-                }
-            };
+            let key_bytes =
+                match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        error!("Failed to decrypt signing key: {}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError"})),
+                        )
+                            .into_response();
+                    }
+                };
             let signing_key = match SigningKey::from_slice(&key_bytes) {
                 Ok(k) => k,
                 Err(e) => {
@@ -422,10 +423,9 @@ pub async fn import_repo(
                 "Created new commit for imported repo: cid={}, rev={}",
                 new_root_str, new_rev_str
             );
-            if !is_migration {
-                if let Err(e) = sequence_import_event(&state, did, &new_root_str).await {
-                    warn!("Failed to sequence import event: {:?}", e);
-                }
+            if !is_migration && let Err(e) = sequence_import_event(&state, did, &new_root_str).await
+            {
+                warn!("Failed to sequence import event: {:?}", e);
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }

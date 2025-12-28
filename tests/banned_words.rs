@@ -1,17 +1,17 @@
 /*
-  * CONTENT WARNING
-  *
-  * This file contains explicit slurs and hateful language. We're sorry you have to see them.
-  *
-  * These words exist here for one reason: to ensure our moderation system correctly blocks them.
-  * We can't verify the filter catches the n-word without testing against the actual word.
-  * Euphemisms wouldn't prove the protection works.
-  *
-  * If reading this file has caused you distress, please know:
-  * - you are valued and welcome in this community
-  * - these words do not reflect the views of this project or its contributors
-  * - we maintain this code precisely because we believe everyone deserves an experience on the web that is free from this kinda language
-*/
+ * CONTENT WARNING
+ *
+ * This file contains explicit slurs and hateful language. We're sorry you have to see them.
+ *
+ * These words exist here for one reason: to ensure our moderation system correctly blocks them.
+ * We can't verify the filter catches the n-word without testing against the actual word.
+ * Euphemisms wouldn't prove the protection works.
+ *
+ * If reading this file has caused you distress, please know:
+ * - you are valued and welcome in this community
+ * - these words do not reflect the views of this project or its contributors
+ * - we maintain this code precisely because we believe everyone deserves an experience on the web that is free from this kinda language
+ */
 
 mod common;
 mod helpers;
@@ -20,11 +20,20 @@ use helpers::*;
 use reqwest::StatusCode;
 use serde_json::json;
 
+fn decode(b64: &str) -> String {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .expect("invalid base64 in test");
+    String::from_utf8(bytes).expect("invalid utf8 in test")
+}
+
 #[tokio::test]
 async fn test_handle_with_slur_rejected() {
     let client = client();
     let timestamp = chrono::Utc::now().timestamp_millis();
-    let offensive_handle = format!("nigger{}", timestamp);
+    let slur = decode("bmlnZ2Vy");
+    let offensive_handle = format!("{}{}", slur, timestamp);
 
     let create_payload = json!({
         "handle": offensive_handle,
@@ -45,17 +54,20 @@ async fn test_handle_with_slur_rejected() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidHandle");
-    assert!(body["message"]
-        .as_str()
-        .unwrap_or("")
-        .contains("Inappropriate language"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Inappropriate language")
+    );
 }
 
 #[tokio::test]
 async fn test_handle_with_normalized_slur_rejected() {
     let client = client();
     let timestamp = chrono::Utc::now().timestamp_millis();
-    let offensive_handle = format!("n-i-g-g-e-r{}", timestamp);
+    let slur = decode("bi1pLWctZy1lLXI=");
+    let offensive_handle = format!("{}{}", slur, timestamp);
 
     let create_payload = json!({
         "handle": offensive_handle,
@@ -84,7 +96,7 @@ async fn test_handle_update_with_slur_rejected() {
     let (_, jwt) = setup_new_user("handleupdate").await;
 
     let update_payload = json!({
-        "handle": "faggots"
+        "handle": decode("ZmFnZ290cw==")
     });
 
     let res = client
@@ -114,7 +126,7 @@ async fn test_profile_displayname_with_slur_rejected() {
         "rkey": "self",
         "record": {
             "$type": "app.bsky.actor.profile",
-            "displayName": "I am a kike"
+            "displayName": decode("SSBhbSBhIGtpa2U=")
         }
     });
 
@@ -146,7 +158,7 @@ async fn test_profile_description_with_slur_rejected() {
         "record": {
             "$type": "app.bsky.actor.profile",
             "displayName": "Normal Name",
-            "description": "I hate all chinks"
+            "description": decode("SSBoYXRlIGFsbCBjaGlua3M=")
         }
     });
 

@@ -8,8 +8,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::verify;
-use cid::Cid;
 use chrono::{Duration, Utc};
+use cid::Cid;
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
@@ -216,8 +216,8 @@ async fn assert_valid_did_document_for_service(
         })?;
 
         if let Some(row) = user_row {
-            let key_bytes =
-                crate::config::decrypt_key(&row.key_bytes, row.encryption_version).map_err(|e| {
+            let key_bytes = crate::config::decrypt_key(&row.key_bytes, row.encryption_version)
+                .map_err(|e| {
                     error!("Failed to decrypt user key: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -247,21 +247,22 @@ async fn assert_valid_did_document_for_service(
                 ));
             }
         }
-    } else if did.starts_with("did:web:") {
+    } else if let Some(host_and_path) = did.strip_prefix("did:web:") {
         let client = reqwest::Client::new();
-        let host_and_path = &did[8..];
         let decoded = host_and_path.replace("%3A", ":");
         let parts: Vec<&str> = decoded.split(':').collect();
-        let (host, path_parts) = if parts.len() > 1 && parts[1].chars().all(|c| c.is_ascii_digit()) {
+        let (host, path_parts) = if parts.len() > 1 && parts[1].chars().all(|c| c.is_ascii_digit())
+        {
             (format!("{}:{}", parts[0], parts[1]), parts[2..].to_vec())
         } else {
             (parts[0].to_string(), parts[1..].to_vec())
         };
-        let scheme = if host.starts_with("localhost") || host.starts_with("127.") || host.contains(':') {
-            "http"
-        } else {
-            "https"
-        };
+        let scheme =
+            if host.starts_with("localhost") || host.starts_with("127.") || host.contains(':') {
+                "http"
+            } else {
+                "https"
+            };
         let url = if path_parts.is_empty() {
             format!("{}://{}/.well-known/did.json", scheme, host)
         } else {
@@ -323,11 +324,15 @@ pub async fn activate_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Response {
+    info!("[MIGRATION] activateAccount called");
     let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
+        None => {
+            info!("[MIGRATION] activateAccount: No auth token");
+            return ApiError::AuthenticationRequired.into_response();
+        }
     };
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
     let http_uri = format!(
@@ -346,8 +351,15 @@ pub async fn activate_account(
     .await
     {
         Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
+        Err(e) => {
+            info!("[MIGRATION] activateAccount: Auth failed: {:?}", e);
+            return ApiError::from(e).into_response();
+        }
     };
+    info!(
+        "[MIGRATION] activateAccount: Authenticated user did={}",
+        auth_user.did
+    );
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
         auth_user.is_oauth,
@@ -355,42 +367,80 @@ pub async fn activate_account(
         crate::oauth::scopes::AccountAttr::Repo,
         crate::oauth::scopes::AccountAction::Manage,
     ) {
+        info!("[MIGRATION] activateAccount: Scope check failed");
         return e;
     }
 
     let did = auth_user.did;
 
+    info!(
+        "[MIGRATION] activateAccount: Validating DID document for did={}",
+        did
+    );
+    let did_validation_start = std::time::Instant::now();
     if let Err((status, json)) = assert_valid_did_document_for_service(&state.db, &did).await {
         info!(
-            "activateAccount rejected for {}: DID document validation failed",
-            did
+            "[MIGRATION] activateAccount: DID document validation FAILED for {} (took {:?})",
+            did,
+            did_validation_start.elapsed()
         );
         return (status, json).into_response();
     }
+    info!(
+        "[MIGRATION] activateAccount: DID document validation SUCCESS for {} (took {:?})",
+        did,
+        did_validation_start.elapsed()
+    );
 
     let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
         .ok()
         .flatten();
+    info!(
+        "[MIGRATION] activateAccount: Activating account did={} handle={:?}",
+        did, handle
+    );
     let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
         .execute(&state.db)
         .await;
     match result {
         Ok(_) => {
+            info!(
+                "[MIGRATION] activateAccount: DB update success for did={}",
+                did
+            );
             if let Some(ref h) = handle {
                 let _ = state.cache.delete(&format!("handle:{}", h)).await;
             }
+            info!(
+                "[MIGRATION] activateAccount: Sequencing account event (active=true) for did={}",
+                did
+            );
             if let Err(e) =
                 crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
             {
-                warn!("Failed to sequence account activation event: {}", e);
+                warn!(
+                    "[MIGRATION] activateAccount: Failed to sequence account activation event: {}",
+                    e
+                );
+            } else {
+                info!("[MIGRATION] activateAccount: Account event sequenced successfully");
             }
+            info!(
+                "[MIGRATION] activateAccount: Sequencing identity event for did={} handle={:?}",
+                did, handle
+            );
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, &did, handle.as_deref())
                     .await
             {
-                warn!("Failed to sequence identity event for activation: {}", e);
+                warn!(
+                    "[MIGRATION] activateAccount: Failed to sequence identity event for activation: {}",
+                    e
+                );
+            } else {
+                info!("[MIGRATION] activateAccount: Identity event sequenced successfully");
             }
             let repo_root = sqlx::query_scalar!(
                 "SELECT r.repo_root_cid FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
@@ -401,6 +451,10 @@ pub async fn activate_account(
             .ok()
             .flatten();
             if let Some(root_cid) = repo_root {
+                info!(
+                    "[MIGRATION] activateAccount: Sequencing sync event for did={} root_cid={}",
+                    did, root_cid
+                );
                 let rev = if let Ok(cid) = Cid::from_str(&root_cid) {
                     if let Ok(Some(block)) = state.block_store.get(&cid).await {
                         Commit::from_cbor(&block).ok().map(|c| c.rev().to_string())
@@ -410,16 +464,35 @@ pub async fn activate_account(
                 } else {
                     None
                 };
-                if let Err(e) =
-                    crate::api::repo::record::sequence_sync_event(&state, &did, &root_cid, rev.as_deref()).await
+                if let Err(e) = crate::api::repo::record::sequence_sync_event(
+                    &state,
+                    &did,
+                    &root_cid,
+                    rev.as_deref(),
+                )
+                .await
                 {
-                    warn!("Failed to sequence sync event for activation: {}", e);
+                    warn!(
+                        "[MIGRATION] activateAccount: Failed to sequence sync event for activation: {}",
+                        e
+                    );
+                } else {
+                    info!("[MIGRATION] activateAccount: Sync event sequenced successfully");
                 }
+            } else {
+                warn!(
+                    "[MIGRATION] activateAccount: No repo root found for did={}",
+                    did
+                );
             }
+            info!("[MIGRATION] activateAccount: SUCCESS for did={}", did);
             (StatusCode::OK, Json(json!({}))).into_response()
         }
         Err(e) => {
-            error!("DB error activating account: {:?}", e);
+            error!(
+                "[MIGRATION] activateAccount: DB error activating account: {:?}",
+                e
+            );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),

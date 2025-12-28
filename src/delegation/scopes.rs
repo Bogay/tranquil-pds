@@ -75,12 +75,10 @@ pub fn intersect_scopes(requested: &str, granted: &str) -> String {
 }
 
 fn find_matching_scope<'a>(requested: &str, granted: &HashSet<&'a str>) -> Option<&'a str> {
-    for granted_scope in granted {
-        if scopes_compatible(granted_scope, requested) {
-            return Some(granted_scope);
-        }
-    }
-    None
+    granted
+        .iter()
+        .find(|&granted_scope| scopes_compatible(granted_scope, requested))
+        .map(|v| v as _)
 }
 
 fn scopes_compatible(granted: &str, requested: &str) -> bool {
@@ -97,11 +95,11 @@ fn scopes_compatible(granted: &str, requested: &str) -> bool {
         return true;
     }
 
-    if granted_base.ends_with(".*") {
-        let prefix = &granted_base[..granted_base.len() - 2];
-        if requested_base.starts_with(prefix) && requested_base.len() > prefix.len() {
-            return true;
-        }
+    if let Some(prefix) = granted_base.strip_suffix(".*")
+        && requested_base.starts_with(prefix)
+        && requested_base.len() > prefix.len()
+    {
+        return true;
     }
 
     false

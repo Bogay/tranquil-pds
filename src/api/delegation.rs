@@ -468,7 +468,7 @@ pub async fn get_audit_log(
     auth: BearerAuth,
     Query(params): Query<AuditLogParams>,
 ) -> Response {
-    let limit = params.limit.min(100).max(1);
+    let limit = params.limit.clamp(1, 100);
     let offset = params.offset.max(0);
 
     let entries =
@@ -489,10 +489,9 @@ pub async fn get_audit_log(
             }
         };
 
-    let total = match delegation::audit::count_audit_log_entries(&state.db, &auth.0.did).await {
-        Ok(t) => t,
-        Err(_) => 0,
-    };
+    let total = delegation::audit::count_audit_log_entries(&state.db, &auth.0.did)
+        .await
+        .unwrap_or_default();
 
     Json(GetAuditLogResponse {
         entries: entries

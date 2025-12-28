@@ -229,24 +229,21 @@ async fn validate_bearer_token_with_options_internal(
                         .ok()
                         .flatten();
 
-                        match session_row {
-                            Some(row) => {
-                                if row.access_expires_at > chrono::Utc::now() {
-                                    session_valid = true;
-                                    if let Some(c) = cache {
-                                        let _ = c
-                                            .set(
-                                                &session_cache_key,
-                                                "1",
-                                                Duration::from_secs(SESSION_CACHE_TTL_SECS),
-                                            )
-                                            .await;
-                                    }
-                                } else {
-                                    return Err(TokenValidationError::TokenExpired);
+                        if let Some(row) = session_row {
+                            if row.access_expires_at > chrono::Utc::now() {
+                                session_valid = true;
+                                if let Some(c) = cache {
+                                    let _ = c
+                                        .set(
+                                            &session_cache_key,
+                                            "1",
+                                            Duration::from_secs(SESSION_CACHE_TTL_SECS),
+                                        )
+                                        .await;
                                 }
+                            } else {
+                                return Err(TokenValidationError::TokenExpired);
                             }
-                            None => {}
                         }
                     }
 

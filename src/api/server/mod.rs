@@ -26,6 +26,9 @@ pub use email::{confirm_email, request_email_update, update_email};
 pub use invite::{create_invite_code, create_invite_codes, get_account_invite_codes};
 pub use logo::get_logo;
 pub use meta::{describe_server, health, robots_txt};
+pub use migration::{
+    clear_migration_forwarding, get_migration_status, update_migration_forwarding,
+};
 pub use passkey_account::{
     complete_passkey_setup, create_passkey_account, recover_passkey_account,
     request_passkey_recovery, start_passkey_registration_for_setup,
@@ -56,9 +59,6 @@ pub use totp::{
 pub use trusted_devices::{
     extend_device_trust, is_device_trusted, list_trusted_devices, revoke_trusted_device,
     trust_device, update_trusted_device,
-};
-pub use migration::{
-    clear_migration_forwarding, get_migration_status, update_migration_forwarding,
 };
 pub use verify_email::{resend_migration_verification, verify_migration_email};
 pub use verify_token::{VerifyTokenInput, VerifyTokenOutput, verify_token, verify_token_internal};

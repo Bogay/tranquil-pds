@@ -11,7 +11,7 @@ use cid::Cid;
 use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::{error, info};
@@ -37,10 +37,8 @@ fn ipld_to_json(ipld: Ipld) -> Value {
         }
         Ipld::List(arr) => Value::Array(arr.into_iter().map(ipld_to_json).collect()),
         Ipld::Map(map) => {
-            let obj: Map<String, Value> = map
-                .into_iter()
-                .map(|(k, v)| (k, ipld_to_json(v)))
-                .collect();
+            let obj: Map<String, Value> =
+                map.into_iter().map(|(k, v)| (k, ipld_to_json(v))).collect();
             Value::Object(obj)
         }
         Ipld::Link(cid) => json!({ "$link": cid.to_string() }),

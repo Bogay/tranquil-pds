@@ -1,16 +1,16 @@
 /*
-  * CONTENT WARNING
-  *
-  * This file contains explicit slurs and hateful language. We're sorry you have to see them.
-  *
-  * These words exist here for one reason: to ensure our moderation system correctly blocks them.
-  * We can't verify the filter catches the n-word without testing against the actual word.
-  * Euphemisms wouldn't prove the protection works.
-  *
-  * If reading this file has caused you distress, please know:
-  * - you are valued and welcome in this community
-  * - these words do not reflect the views of this project or its contributors
-  * - we maintain this code precisely because we believe everyone deserves an experience on the web that is free from this kinda language
+ * CONTENT WARNING
+ *
+ * This file contains explicit slurs and hateful language. We're sorry you have to see them.
+ *
+ * These words exist here for one reason: to ensure our moderation system correctly blocks them.
+ * We can't verify the filter catches the n-word without testing against the actual word.
+ * Euphemisms wouldn't prove the protection works.
+ *
+ * If reading this file has caused you distress, please know:
+ * - you are valued and welcome in this community
+ * - these words do not reflect the views of this project or its contributors
+ * - we maintain this code precisely because we believe everyone deserves an experience on the web that is free from this kinda language
 */
 
 use regex::Regex;
@@ -70,7 +70,7 @@ pub fn has_explicit_slur(text: &str) -> bool {
 
 fn has_explicit_slur_with_extra_words(text: &str, extra_words: &[String]) -> bool {
     let text_lower = text.to_lowercase();
-    let normalized = text_lower.replace('.', "").replace('-', "").replace('_', "");
+    let normalized = text_lower.replace(['.', '-', '_'], "");
     let stripped = strip_trailing_digits(&text_lower);
     let normalized_stripped = strip_trailing_digits(&normalized);
 
@@ -104,81 +104,87 @@ fn has_explicit_slur_with_extra_words(text: &str, extra_words: &[String]) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+
+    fn d(b64: &str) -> String {
+        let bytes = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        String::from_utf8(bytes).unwrap()
+    }
 
     #[test]
     fn test_chink_pattern() {
-        assert!(has_explicit_slur("chink"));
-        assert!(has_explicit_slur("chinks"));
-        assert!(has_explicit_slur("CHINK"));
-        assert!(has_explicit_slur("Chinks"));
+        assert!(has_explicit_slur(&d("Y2hpbms=")));
+        assert!(has_explicit_slur(&d("Y2hpbmtz")));
+        assert!(has_explicit_slur(&d("Q0hJTks=")));
+        assert!(has_explicit_slur(&d("Q2hpbmtz")));
     }
 
     #[test]
     fn test_coon_pattern() {
-        assert!(has_explicit_slur("coon"));
-        assert!(has_explicit_slur("coons"));
-        assert!(has_explicit_slur("COON"));
+        assert!(has_explicit_slur(&d("Y29vbg==")));
+        assert!(has_explicit_slur(&d("Y29vbnM=")));
+        assert!(has_explicit_slur(&d("Q09PTg==")));
     }
 
     #[test]
     fn test_fag_pattern() {
-        assert!(has_explicit_slur("fag"));
-        assert!(has_explicit_slur("fags"));
-        assert!(has_explicit_slur("faggot"));
-        assert!(has_explicit_slur("faggots"));
-        assert!(has_explicit_slur("faggotry"));
+        assert!(has_explicit_slur(&d("ZmFn")));
+        assert!(has_explicit_slur(&d("ZmFncw==")));
+        assert!(has_explicit_slur(&d("ZmFnZ290")));
+        assert!(has_explicit_slur(&d("ZmFnZ290cw==")));
+        assert!(has_explicit_slur(&d("ZmFnZ290cnk=")));
     }
 
     #[test]
     fn test_kike_pattern() {
-        assert!(has_explicit_slur("kike"));
-        assert!(has_explicit_slur("kikes"));
-        assert!(has_explicit_slur("KIKE"));
-        assert!(has_explicit_slur("kikery"));
+        assert!(has_explicit_slur(&d("a2lrZQ==")));
+        assert!(has_explicit_slur(&d("a2lrZXM=")));
+        assert!(has_explicit_slur(&d("S0lLRQ==")));
+        assert!(has_explicit_slur(&d("a2lrZXJ5")));
     }
 
     #[test]
     fn test_nigger_pattern() {
-        assert!(has_explicit_slur("nigger"));
-        assert!(has_explicit_slur("niggers"));
-        assert!(has_explicit_slur("NIGGER"));
-        assert!(has_explicit_slur("nigga"));
-        assert!(has_explicit_slur("niggas"));
+        assert!(has_explicit_slur(&d("bmlnZ2Vy")));
+        assert!(has_explicit_slur(&d("bmlnZ2Vycw==")));
+        assert!(has_explicit_slur(&d("TklHR0VS")));
+        assert!(has_explicit_slur(&d("bmlnZ2E=")));
+        assert!(has_explicit_slur(&d("bmlnZ2Fz")));
     }
 
     #[test]
     fn test_tranny_pattern() {
-        assert!(has_explicit_slur("tranny"));
-        assert!(has_explicit_slur("trannies"));
-        assert!(has_explicit_slur("TRANNY"));
+        assert!(has_explicit_slur(&d("dHJhbm55")));
+        assert!(has_explicit_slur(&d("dHJhbm5pZXM=")));
+        assert!(has_explicit_slur(&d("VFJBTk5Z")));
     }
 
     #[test]
     fn test_normalization_bypass() {
-        assert!(has_explicit_slur("n.i.g.g.e.r"));
-        assert!(has_explicit_slur("n-i-g-g-e-r"));
-        assert!(has_explicit_slur("n_i_g_g_e_r"));
-        assert!(has_explicit_slur("f.a.g"));
-        assert!(has_explicit_slur("f-a-g"));
-        assert!(has_explicit_slur("c.h.i.n.k"));
-        assert!(has_explicit_slur("k_i_k_e"));
+        assert!(has_explicit_slur(&d("bi5pLmcuZy5lLnI=")));
+        assert!(has_explicit_slur(&d("bi1pLWctZy1lLXI=")));
+        assert!(has_explicit_slur(&d("bl9pX2dfZ19lX3I=")));
+        assert!(has_explicit_slur(&d("Zi5hLmc=")));
+        assert!(has_explicit_slur(&d("Zi1hLWc=")));
+        assert!(has_explicit_slur(&d("Yy5oLmkubi5r")));
+        assert!(has_explicit_slur(&d("a19pX2tfZQ==")));
     }
 
     #[test]
     fn test_trailing_digits_bypass() {
-        assert!(has_explicit_slur("faggot123"));
-        assert!(has_explicit_slur("nigger69"));
-        assert!(has_explicit_slur("chink420"));
-        assert!(has_explicit_slur("fag1"));
-        assert!(has_explicit_slur("kike2024"));
-        assert!(has_explicit_slur("n_i_g_g_e_r123"));
+        assert!(has_explicit_slur(&d("ZmFnZ290MTIz")));
+        assert!(has_explicit_slur(&d("bmlnZ2VyNjk=")));
+        assert!(has_explicit_slur(&d("Y2hpbms0MjA=")));
+        assert!(has_explicit_slur(&d("ZmFnMQ==")));
+        assert!(has_explicit_slur(&d("a2lrZTIwMjQ=")));
+        assert!(has_explicit_slur(&d("bl9pX2dfZ19lX3IxMjM=")));
     }
 
     #[test]
     fn test_embedded_in_sentence() {
-        assert!(has_explicit_slur("you are a faggot"));
-        assert!(has_explicit_slur("stupid nigger"));
-        assert!(has_explicit_slur("go away chink"));
+        assert!(has_explicit_slur(&d("eW91IGFyZSBhIGZhZ2dvdA==")));
+        assert!(has_explicit_slur(&d("c3R1cGlkIG5pZ2dlcg==")));
+        assert!(has_explicit_slur(&d("Z28gYXdheSBjaGluaw==")));
     }
 
     #[test]
@@ -210,22 +216,22 @@ mod tests {
 
     #[test]
     fn test_case_insensitive() {
-        assert!(has_explicit_slur("NIGGER"));
-        assert!(has_explicit_slur("Nigger"));
-        assert!(has_explicit_slur("NiGgEr"));
-        assert!(has_explicit_slur("FAGGOT"));
-        assert!(has_explicit_slur("Faggot"));
+        assert!(has_explicit_slur(&d("TklHR0VS")));
+        assert!(has_explicit_slur(&d("TmlnZ2Vy")));
+        assert!(has_explicit_slur(&d("TmlHZ0Vy")));
+        assert!(has_explicit_slur(&d("RkFHR09U")));
+        assert!(has_explicit_slur(&d("RmFnZ290")));
     }
 
     #[test]
     fn test_leetspeak_bypass() {
-        assert!(has_explicit_slur("f4ggot"));
-        assert!(has_explicit_slur("f4gg0t"));
-        assert!(has_explicit_slur("n1gger"));
-        assert!(has_explicit_slur("n1gg3r"));
-        assert!(has_explicit_slur("k1ke"));
-        assert!(has_explicit_slur("ch1nk"));
-        assert!(has_explicit_slur("tr4nny"));
+        assert!(has_explicit_slur(&d("ZjRnZ290")));
+        assert!(has_explicit_slur(&d("ZjRnZzB0")));
+        assert!(has_explicit_slur(&d("bjFnZ2Vy")));
+        assert!(has_explicit_slur(&d("bjFnZzNy")));
+        assert!(has_explicit_slur(&d("azFrZQ==")));
+        assert!(has_explicit_slur(&d("Y2gxbms=")));
+        assert!(has_explicit_slur(&d("dHI0bm55")));
     }
 
     #[test]
@@ -253,7 +259,10 @@ mod tests {
         assert!(has_explicit_slur_with_extra_words("b4dw0rd", &extra));
         assert!(has_explicit_slur_with_extra_words("b4dw0rd789", &extra));
         assert!(has_explicit_slur_with_extra_words("b.4.d.w.0.r.d", &extra));
-        assert!(has_explicit_slur_with_extra_words("this contains badword here", &extra));
+        assert!(has_explicit_slur_with_extra_words(
+            "this contains badword here",
+            &extra
+        ));
         assert!(has_explicit_slur_with_extra_words("0ff3n$1v3", &extra));
 
         assert!(!has_explicit_slur_with_extra_words("goodword", &extra));

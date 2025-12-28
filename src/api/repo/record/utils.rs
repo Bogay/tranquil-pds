@@ -5,7 +5,7 @@ use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -18,12 +18,11 @@ pub fn extract_blob_cids(record: &Value) -> Vec<String> {
 fn extract_blob_cids_recursive(value: &Value, blobs: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
-            if map.get("$type").and_then(|v| v.as_str()) == Some("blob") {
-                if let Some(ref_obj) = map.get("ref") {
-                    if let Some(link) = ref_obj.get("$link").and_then(|v| v.as_str()) {
-                        blobs.push(link.to_string());
-                    }
-                }
+            if map.get("$type").and_then(|v| v.as_str()) == Some("blob")
+                && let Some(ref_obj) = map.get("ref")
+                && let Some(link) = ref_obj.get("$link").and_then(|v| v.as_str())
+            {
+                blobs.push(link.to_string());
             }
             for v in map.values() {
                 extract_blob_cids_recursive(v, blobs);

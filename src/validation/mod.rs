@@ -161,14 +161,13 @@ impl RecordValidator {
                             .get("$type")
                             .and_then(|v| v.as_str())
                             .is_some_and(|t| t == "app.bsky.richtext.facet#tag");
-                        if is_tag {
-                            if let Some(tag) = feature.get("tag").and_then(|v| v.as_str()) {
-                                if crate::moderation::has_explicit_slur(tag) {
-                                    return Err(ValidationError::BannedContent {
-                                        path: format!("facets/{}/features/{}/tag", i, j),
-                                    });
-                                }
-                            }
+                        if is_tag
+                            && let Some(tag) = feature.get("tag").and_then(|v| v.as_str())
+                            && crate::moderation::has_explicit_slur(tag)
+                        {
+                            return Err(ValidationError::BannedContent {
+                                path: format!("facets/{}/features/{}/tag", i, j),
+                            });
                         }
                     }
                 }
@@ -332,12 +331,12 @@ impl RecordValidator {
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        if let Some(rkey) = rkey {
-            if crate::moderation::has_explicit_slur(rkey) {
-                return Err(ValidationError::BannedContent {
-                    path: "rkey".to_string(),
-                });
-            }
+        if let Some(rkey) = rkey
+            && crate::moderation::has_explicit_slur(rkey)
+        {
+            return Err(ValidationError::BannedContent {
+                path: "rkey".to_string(),
+            });
         }
         if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
             if display_name.is_empty() || display_name.len() > 240 {

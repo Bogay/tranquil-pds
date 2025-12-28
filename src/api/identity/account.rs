@@ -69,7 +69,19 @@ pub async fn create_account(
     headers: HeaderMap,
     Json(input): Json<CreateAccountInput>,
 ) -> Response {
-    info!("create_account called");
+    let is_potential_migration = input
+        .did
+        .as_ref()
+        .map(|d| d.starts_with("did:plc:"))
+        .unwrap_or(false);
+    if is_potential_migration {
+        info!(
+            "[MIGRATION] createAccount called for potential migration did={:?} handle={}",
+            input.did, input.handle
+        );
+    } else {
+        info!("create_account called");
+    }
     let client_ip = extract_client_ip(&headers);
     if !state
         .check_rate_limit(RateLimitKind::AccountCreation, &client_ip)
@@ -136,6 +148,10 @@ pub async fn create_account(
         && let (Some(provided_did), Some(auth_did)) = (input.did.as_ref(), migration_auth.as_ref())
     {
         if provided_did != auth_did {
+            info!(
+                "[MIGRATION] createAccount: Service token mismatch - token_did={} provided_did={}",
+                auth_did, provided_did
+            );
             return (
                     StatusCode::FORBIDDEN,
                     Json(json!({
@@ -148,7 +164,10 @@ pub async fn create_account(
         if is_did_web_byod {
             info!(did = %provided_did, "Processing did:web BYOD account creation");
         } else {
-            info!(did = %provided_did, "Processing account migration");
+            info!(
+                "[MIGRATION] createAccount: Service token verified, processing migration for did={}",
+                provided_did
+            );
         }
     }
 
@@ -1005,30 +1024,44 @@ pub async fn create_account(
     }
 
     let (access_jwt, refresh_jwt) = if is_migration {
-        let access_meta =
-            match crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes) {
-                Ok(m) => m,
-                Err(e) => {
-                    error!("Error creating access token for migration: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
-                }
-            };
-        let refresh_meta =
-            match crate::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes) {
-                Ok(m) => m,
-                Err(e) => {
-                    error!("Error creating refresh token for migration: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
-                }
-            };
+        info!(
+            "[MIGRATION] createAccount: Creating session tokens for migration did={}",
+            did
+        );
+        let access_meta = match crate::auth::create_access_token_with_metadata(
+            &did,
+            &secret_key_bytes,
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                error!(
+                    "[MIGRATION] createAccount: Error creating access token for migration: {:?}",
+                    e
+                );
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
+        let refresh_meta = match crate::auth::create_refresh_token_with_metadata(
+            &did,
+            &secret_key_bytes,
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                error!(
+                    "[MIGRATION] createAccount: Error creating refresh token for migration: {:?}",
+                    e
+                );
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
         if let Err(e) = sqlx::query!(
             "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
             did,
@@ -1040,17 +1073,28 @@ pub async fn create_account(
         .execute(&state.db)
         .await
         {
-            error!("Error creating session for migration: {:?}", e);
+            error!("[MIGRATION] createAccount: Error creating session for migration: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
             )
                 .into_response();
         }
+        info!(
+            "[MIGRATION] createAccount: Session created successfully for did={}",
+            did
+        );
         (Some(access_meta.token), Some(refresh_meta.token))
     } else {
         (None, None)
     };
+
+    if is_migration {
+        info!(
+            "[MIGRATION] createAccount: SUCCESS - Account ready for migration did={} handle={}",
+            did, handle
+        );
+    }
 
     (
         StatusCode::OK,

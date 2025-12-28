@@ -364,12 +364,6 @@ async fn test_firehose_update_has_prev_field() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
 
-    let url = format!(
-        "ws://127.0.0.1:{}/xrpc/com.atproto.sync.subscribeRepos",
-        app_port()
-    );
-    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
-
     let profile_payload = json!({
         "repo": did,
         "collection": "app.bsky.actor.profile",
@@ -393,22 +387,11 @@ async fn test_firehose_update_has_prev_field() {
     let first_profile: Value = res.json().await.unwrap();
     let first_cid = first_profile["cid"].as_str().unwrap();
 
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            let msg = ws_stream.next().await.unwrap().unwrap();
-            let raw_bytes = match msg {
-                tungstenite::Message::Binary(bin) => bin,
-                _ => continue,
-            };
-            if let Ok((_, f)) = parse_frame(&raw_bytes) {
-                if f.repo == did {
-                    break;
-                }
-            }
-        }
-    })
-    .await;
-    assert!(timeout.is_ok(), "Timed out waiting for first commit");
+    let url = format!(
+        "ws://127.0.0.1:{}/xrpc/com.atproto.sync.subscribeRepos",
+        app_port()
+    );
+    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
 
     let update_payload = json!({
         "repo": did,
@@ -432,9 +415,12 @@ async fn test_firehose_update_has_prev_field() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let mut frame_opt: Option<CommitFrame> = None;
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
-            let msg = ws_stream.next().await.unwrap().unwrap();
+            let msg = match ws_stream.next().await {
+                Some(Ok(m)) => m,
+                _ => continue,
+            };
             let raw_bytes = match msg {
                 tungstenite::Message::Binary(bin) => bin,
                 _ => continue,

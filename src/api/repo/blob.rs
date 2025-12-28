@@ -1,6 +1,7 @@
 use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::delegation::{self, DelegationActionType};
 use crate::state::AppState;
+use crate::sync::import::find_blob_refs_ipld;
 use axum::body::Bytes;
 use axum::{
     Json,
@@ -9,13 +10,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cid::Cid;
+use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 const MAX_BLOB_SIZE: usize = 10_000_000_000;
 const MAX_VIDEO_BLOB_SIZE: usize = 10_000_000_000;
@@ -258,26 +260,6 @@ pub struct ListMissingBlobsOutput {
     pub blobs: Vec<RecordBlob>,
 }
 
-fn find_blobs(val: &serde_json::Value, blobs: &mut Vec<String>) {
-    if let Some(obj) = val.as_object() {
-        if let Some(type_val) = obj.get("$type")
-            && type_val == "blob"
-            && let Some(r) = obj.get("ref")
-            && let Some(link) = r.get("$link")
-            && let Some(s) = link.as_str()
-        {
-            blobs.push(s.to_string());
-        }
-        for (_, v) in obj {
-            find_blobs(v, blobs);
-        }
-    } else if let Some(arr) = val.as_array() {
-        for v in arr {
-            find_blobs(v, blobs);
-        }
-    }
-}
-
 pub async fn list_missing_blobs(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -295,16 +277,17 @@ pub async fn list_missing_blobs(
                 .into_response();
         }
     };
-    let auth_user = match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-        Ok(user) => user,
-        Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed"})),
-            )
-                .into_response();
-        }
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+            Ok(user) => user,
+            Err(_) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "AuthenticationFailed"})),
+                )
+                    .into_response();
+            }
+        };
     let did = auth_user.did;
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
@@ -362,13 +345,16 @@ pub async fn list_missing_blobs(
             Ok(Some(b)) => b,
             _ => continue,
         };
-        let record_val: serde_json::Value = match serde_ipld_dagcbor::from_slice(&block_bytes) {
+        let record_ipld: Ipld = match serde_ipld_dagcbor::from_slice(&block_bytes) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                warn!("Failed to parse record {} as IPLD: {:?}", record_cid_str, e);
+                continue;
+            }
         };
-        let mut blobs = Vec::new();
-        find_blobs(&record_val, &mut blobs);
-        for blob_cid_str in blobs {
+        let blob_refs = find_blob_refs_ipld(&record_ipld, 0);
+        for blob_ref in blob_refs {
+            let blob_cid_str = blob_ref.cid;
             let exists = sqlx::query!(
                 "SELECT 1 as one FROM blobs WHERE cid = $1 AND created_by_user = $2",
                 blob_cid_str,

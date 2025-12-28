@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use reqwest::Client;
 use serde_json::json;
 use std::process::Stdio;
@@ -103,8 +103,7 @@ impl EmailSender {
     }
 
     pub fn format_email(&self, notification: &QueuedComms) -> String {
-        let subject =
-            mime_encode_header(notification.subject.as_deref().unwrap_or("Notification"));
+        let subject = mime_encode_header(notification.subject.as_deref().unwrap_or("Notification"));
         let recipient = sanitize_header_value(&notification.recipient);
         let from_header = if self.from_name.is_empty() {
             self.from_address.clone()

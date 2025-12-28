@@ -88,7 +88,10 @@ pub async fn delegation_auth(
         }
     };
 
-    if let Err(_) = db::set_request_did(&state.db, &form.request_uri, &delegated_did).await {
+    if db::set_request_did(&state.db, &form.request_uri, &delegated_did)
+        .await
+        .is_err()
+    {
         tracing::warn!("Failed to set delegated DID on authorization request");
     }
 
@@ -168,13 +171,11 @@ pub async fn delegation_auth(
         .into_response();
     }
 
-    let password_valid = match &controller.password_hash {
-        Some(hash) => match bcrypt::verify(&form.password, hash) {
-            Ok(valid) => valid,
-            Err(_) => false,
-        },
-        None => false,
-    };
+    let password_valid = controller
+        .password_hash
+        .as_ref()
+        .map(|hash| bcrypt::verify(&form.password, hash).unwrap_or_default())
+        .unwrap_or_default();
 
     if !password_valid {
         return Json(DelegationAuthResponse {
@@ -186,7 +187,9 @@ pub async fn delegation_auth(
         .into_response();
     }
 
-    if let Err(_) = db::set_controller_did(&state.db, &form.request_uri, &form.controller_did).await
+    if db::set_controller_did(&state.db, &form.request_uri, &form.controller_did)
+        .await
+        .is_err()
     {
         return Json(DelegationAuthResponse {
             success: false,

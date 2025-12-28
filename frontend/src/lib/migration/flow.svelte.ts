@@ -20,6 +20,16 @@ import {
   updateStep,
 } from "./storage";
 
+function migrationLog(stage: string, data?: Record<string, unknown>) {
+  const timestamp = new Date().toISOString();
+  const msg = `[MIGRATION ${timestamp}] ${stage}`;
+  if (data) {
+    console.log(msg, JSON.stringify(data, null, 2));
+  } else {
+    console.log(msg);
+  }
+}
+
 function createInitialProgress(): MigrationProgress {
   return {
     repoExported: false,
@@ -105,6 +115,8 @@ export function createInboundMigrationFlow() {
     password: string,
     twoFactorCode?: string,
   ): Promise<void> {
+    migrationLog("loginToSource START", { handle, has2FA: !!twoFactorCode });
+
     if (!state.sourcePdsUrl) {
       await resolveSourcePds(handle);
     }
@@ -114,7 +126,15 @@ export function createInboundMigrationFlow() {
     }
 
     try {
+      migrationLog("loginToSource: Calling createSession on OLD PDS", {
+        pdsUrl: state.sourcePdsUrl,
+      });
       const session = await sourceClient.login(handle, password, twoFactorCode);
+      migrationLog("loginToSource SUCCESS", {
+        did: session.did,
+        handle: session.handle,
+        pdsUrl: state.sourcePdsUrl,
+      });
       state.sourceAccessToken = session.accessJwt;
       state.sourceRefreshToken = session.refreshJwt;
       state.sourceDid = session.did;
@@ -123,9 +143,15 @@ export function createInboundMigrationFlow() {
       saveMigrationState(state);
     } catch (e) {
       const err = e as Error & { error?: string };
+      migrationLog("loginToSource FAILED", {
+        error: err.message,
+        errorCode: err.error,
+      });
       if (err.error === "AuthFactorTokenRequired") {
         state.requires2FA = true;
-        throw new Error("Two-factor authentication required. Please enter the code sent to your email.");
+        throw new Error(
+          "Two-factor authentication required. Please enter the code sent to your email.",
+        );
       }
       throw e;
     }
@@ -143,7 +169,10 @@ export function createInboundMigrationFlow() {
     }
   }
 
-  async function authenticateToLocal(email: string, password: string): Promise<void> {
+  async function authenticateToLocal(
+    email: string,
+    password: string,
+  ): Promise<void> {
     if (!localClient) {
       localClient = createLocalClient();
     }
@@ -151,7 +180,15 @@ export function createInboundMigrationFlow() {
   }
 
   async function startMigration(): Promise<void> {
+    migrationLog("startMigration START", {
+      sourceDid: state.sourceDid,
+      sourceHandle: state.sourceHandle,
+      targetHandle: state.targetHandle,
+      sourcePdsUrl: state.sourcePdsUrl,
+    });
+
     if (!sourceClient || !state.sourceAccessToken) {
+      migrationLog("startMigration ERROR: Not logged in to source PDS");
       throw new Error("Not logged in to source PDS");
     }
 
@@ -163,11 +200,18 @@ export function createInboundMigrationFlow() {
     setProgress({ currentOperation: "Getting service auth token..." });
 
     try {
+      migrationLog("startMigration: Loading local server info");
       const serverInfo = await loadLocalServerInfo();
+      migrationLog("startMigration: Got server info", {
+        serverDid: serverInfo.did,
+      });
+
+      migrationLog("startMigration: Getting service auth token from OLD PDS");
       const { token } = await sourceClient.getServiceAuth(
         serverInfo.did,
         "com.atproto.server.createAccount",
       );
+      migrationLog("startMigration: Got service auth token");
       state.serviceAuthToken = token;
 
       setProgress({ currentOperation: "Creating account on new PDS..." });
@@ -180,18 +224,45 @@ export function createInboundMigrationFlow() {
         inviteCode: state.inviteCode || undefined,
       };
 
+      migrationLog("startMigration: Creating account on NEW PDS", {
+        did: accountParams.did,
+        handle: accountParams.handle,
+      });
       const session = await localClient.createAccount(accountParams, token);
+      migrationLog("startMigration: Account created on NEW PDS", {
+        did: session.did,
+      });
       localClient.setAccessToken(session.accessJwt);
 
       setProgress({ currentOperation: "Exporting repository..." });
-
+      migrationLog("startMigration: Exporting repo from OLD PDS");
+      const exportStart = Date.now();
       const car = await sourceClient.getRepo(state.sourceDid);
-      setProgress({ repoExported: true, currentOperation: "Importing repository..." });
+      migrationLog("startMigration: Repo exported", {
+        durationMs: Date.now() - exportStart,
+        sizeBytes: car.byteLength,
+      });
+      setProgress({
+        repoExported: true,
+        currentOperation: "Importing repository...",
+      });
 
+      migrationLog("startMigration: Importing repo to NEW PDS");
+      const importStart = Date.now();
       await localClient.importRepo(car);
-      setProgress({ repoImported: true, currentOperation: "Counting blobs..." });
+      migrationLog("startMigration: Repo imported", {
+        durationMs: Date.now() - importStart,
+      });
+      setProgress({
+        repoImported: true,
+        currentOperation: "Counting blobs...",
+      });
 
       const accountStatus = await localClient.checkAccountStatus();
+      migrationLog("startMigration: Account status", {
+        expectedBlobs: accountStatus.expectedBlobs,
+        importedBlobs: accountStatus.importedBlobs,
+      });
       setProgress({
         blobsTotal: accountStatus.expectedBlobs,
         currentOperation: "Migrating blobs...",
@@ -202,10 +273,20 @@ export function createInboundMigrationFlow() {
       setProgress({ currentOperation: "Migrating preferences..." });
       await migratePreferences();
 
+      migrationLog(
+        "startMigration: Initial migration complete, waiting for email verification",
+      );
       setStep("email-verify");
     } catch (e) {
       const err = e as Error & { error?: string; status?: number };
-      const message = err.message || err.error || `Unknown error (status ${err.status || 'unknown'})`;
+      const message = err.message || err.error ||
+        `Unknown error (status ${err.status || "unknown"})`;
+      migrationLog("startMigration FAILED", {
+        error: message,
+        errorCode: err.error,
+        status: err.status,
+        stack: err.stack,
+      });
       setError(message);
       setStep("error");
     }
@@ -226,10 +307,15 @@ export function createInboundMigrationFlow() {
       for (const blob of blobs) {
         try {
           setProgress({
-            currentOperation: `Migrating blob ${migrated + 1}/${state.progress.blobsTotal}...`,
+            currentOperation: `Migrating blob ${
+              migrated + 1
+            }/${state.progress.blobsTotal}...`,
           });
 
-          const blobData = await sourceClient.getBlob(state.sourceDid, blob.cid);
+          const blobData = await sourceClient.getBlob(
+            state.sourceDid,
+            blob.cid,
+          );
           await localClient.uploadBlob(blobData, "application/octet-stream");
           migrated++;
           setProgress({ blobsMigrated: migrated });
@@ -253,7 +339,10 @@ export function createInboundMigrationFlow() {
     }
   }
 
-  async function submitEmailVerifyToken(token: string, localPassword?: string): Promise<void> {
+  async function submitEmailVerifyToken(
+    token: string,
+    localPassword?: string,
+  ): Promise<void> {
     if (!localClient) {
       localClient = createLocalClient();
     }
@@ -266,7 +355,9 @@ export function createInboundMigrationFlow() {
 
       if (!sourceClient) {
         setStep("source-login");
-        setError("Email verified! Please log in to your old account again to complete the migration.");
+        setError(
+          "Email verified! Please log in to your old account again to complete the migration.",
+        );
         return;
       }
 
@@ -285,7 +376,8 @@ export function createInboundMigrationFlow() {
       setStep("plc-token");
     } catch (e) {
       const err = e as Error & { error?: string; status?: number };
-      const message = err.message || err.error || `Unknown error (status ${err.status || 'unknown'})`;
+      const message = err.message || err.error ||
+        `Unknown error (status ${err.status || "unknown"})`;
       setError(message);
     }
   }
@@ -305,7 +397,10 @@ export function createInboundMigrationFlow() {
 
     checkingEmailVerification = true;
     try {
-      await localClient.loginDeactivated(state.targetEmail, state.targetPassword);
+      await localClient.loginDeactivated(
+        state.targetEmail,
+        state.targetPassword,
+      );
       await sourceClient.requestPlcOperationSignature();
       setStep("plc-token");
       return true;
@@ -321,7 +416,18 @@ export function createInboundMigrationFlow() {
   }
 
   async function submitPlcToken(token: string): Promise<void> {
+    migrationLog("submitPlcToken START", {
+      sourceDid: state.sourceDid,
+      sourceHandle: state.sourceHandle,
+      targetHandle: state.targetHandle,
+      sourcePdsUrl: state.sourcePdsUrl,
+    });
+
     if (!sourceClient || !localClient) {
+      migrationLog("submitPlcToken ERROR: Not connected to PDSes", {
+        hasSourceClient: !!sourceClient,
+        hasLocalClient: !!localClient,
+      });
       throw new Error("Not connected to PDSes");
     }
 
@@ -330,32 +436,92 @@ export function createInboundMigrationFlow() {
     setProgress({ currentOperation: "Signing PLC operation..." });
 
     try {
+      migrationLog("Step 1: Getting recommended DID credentials from NEW PDS");
       const credentials = await localClient.getRecommendedDidCredentials();
+      migrationLog("Step 1 COMPLETE: Got credentials", {
+        rotationKeys: credentials.rotationKeys,
+        alsoKnownAs: credentials.alsoKnownAs,
+        verificationMethods: credentials.verificationMethods,
+        services: credentials.services,
+      });
 
+      migrationLog("Step 2: Signing PLC operation on OLD PDS", {
+        sourcePdsUrl: state.sourcePdsUrl,
+      });
+      const signStart = Date.now();
       const { operation } = await sourceClient.signPlcOperation({
         token,
         ...credentials,
       });
+      migrationLog("Step 2 COMPLETE: PLC operation signed", {
+        durationMs: Date.now() - signStart,
+        operationType: operation.type,
+        operationPrev: operation.prev,
+      });
 
-      setProgress({ plcSigned: true, currentOperation: "Submitting PLC operation..." });
+      setProgress({
+        plcSigned: true,
+        currentOperation: "Submitting PLC operation...",
+      });
+      migrationLog("Step 3: Submitting PLC operation to NEW PDS");
+      const submitStart = Date.now();
       await localClient.submitPlcOperation(operation);
+      migrationLog("Step 3 COMPLETE: PLC operation submitted", {
+        durationMs: Date.now() - submitStart,
+      });
 
-      setProgress({ currentOperation: "Activating account (waiting for DID propagation)..." });
+      setProgress({
+        currentOperation: "Activating account (waiting for DID propagation)...",
+      });
+      migrationLog("Step 4: Activating account on NEW PDS");
+      const activateStart = Date.now();
       await localClient.activateAccount();
+      migrationLog("Step 4 COMPLETE: Account activated on NEW PDS", {
+        durationMs: Date.now() - activateStart,
+      });
       setProgress({ activated: true });
 
       setProgress({ currentOperation: "Deactivating old account..." });
+      migrationLog("Step 5: Deactivating account on OLD PDS", {
+        sourcePdsUrl: state.sourcePdsUrl,
+      });
+      const deactivateStart = Date.now();
       try {
         await sourceClient.deactivateAccount();
+        migrationLog("Step 5 COMPLETE: Account deactivated on OLD PDS", {
+          durationMs: Date.now() - deactivateStart,
+          success: true,
+        });
         setProgress({ deactivated: true });
-      } catch {
+      } catch (deactivateErr) {
+        const err = deactivateErr as Error & {
+          error?: string;
+          status?: number;
+        };
+        migrationLog("Step 5 FAILED: Could not deactivate on OLD PDS", {
+          durationMs: Date.now() - deactivateStart,
+          error: err.message,
+          errorCode: err.error,
+          status: err.status,
+        });
       }
 
+      migrationLog("submitPlcToken SUCCESS: Migration complete", {
+        sourceDid: state.sourceDid,
+        newHandle: state.targetHandle,
+      });
       setStep("success");
       clearMigrationState();
     } catch (e) {
       const err = e as Error & { error?: string; status?: number };
-      const message = err.message || err.error || `Unknown error (status ${err.status || 'unknown'})`;
+      const message = err.message || err.error ||
+        `Unknown error (status ${err.status || "unknown"})`;
+      migrationLog("submitPlcToken FAILED", {
+        error: message,
+        errorCode: err.error,
+        status: err.status,
+        stack: err.stack,
+      });
       state.step = "plc-token";
       state.error = message;
       saveMigrationState(state);
@@ -418,7 +584,9 @@ export function createInboundMigrationFlow() {
     state.step = "source-login";
   }
 
-  function getLocalSession(): { accessJwt: string; did: string; handle: string } | null {
+  function getLocalSession():
+    | { accessJwt: string; did: string; handle: string }
+    | null {
     if (!localClient) return null;
     const token = localClient.getAccessToken();
     if (!token) return null;
@@ -430,7 +598,9 @@ export function createInboundMigrationFlow() {
   }
 
   return {
-    get state() { return state; },
+    get state() {
+      return state;
+    },
     setStep,
     setError,
     loadLocalServerInfo,
@@ -513,7 +683,11 @@ export function createOutboundMigrationFlow() {
     }
   }
 
-  function initLocalClient(accessToken: string, did?: string, handle?: string): void {
+  function initLocalClient(
+    accessToken: string,
+    did?: string,
+    handle?: string,
+  ): void {
     localClient = createLocalClient();
     localClient.setAccessToken(accessToken);
     if (did) {
@@ -557,10 +731,16 @@ export function createOutboundMigrationFlow() {
       setProgress({ currentOperation: "Exporting repository..." });
 
       const car = await localClient.getRepo(currentDid);
-      setProgress({ repoExported: true, currentOperation: "Importing repository..." });
+      setProgress({
+        repoExported: true,
+        currentOperation: "Importing repository...",
+      });
 
       await targetClient.importRepo(car);
-      setProgress({ repoImported: true, currentOperation: "Counting blobs..." });
+      setProgress({
+        repoImported: true,
+        currentOperation: "Counting blobs...",
+      });
 
       const accountStatus = await targetClient.checkAccountStatus();
       setProgress({
@@ -579,7 +759,8 @@ export function createOutboundMigrationFlow() {
       setStep("plc-token");
     } catch (e) {
       const err = e as Error & { error?: string; status?: number };
-      const message = err.message || err.error || `Unknown error (status ${err.status || 'unknown'})`;
+      const message = err.message || err.error ||
+        `Unknown error (status ${err.status || "unknown"})`;
       setError(message);
       setStep("error");
     }
@@ -600,7 +781,9 @@ export function createOutboundMigrationFlow() {
       for (const blob of blobs) {
         try {
           setProgress({
-            currentOperation: `Migrating blob ${migrated + 1}/${state.progress.blobsTotal}...`,
+            currentOperation: `Migrating blob ${
+              migrated + 1
+            }/${state.progress.blobsTotal}...`,
           });
 
           const blobData = await localClient.getBlob(did, blob.cid);
@@ -644,7 +827,10 @@ export function createOutboundMigrationFlow() {
         ...credentials,
       });
 
-      setProgress({ plcSigned: true, currentOperation: "Submitting PLC operation..." });
+      setProgress({
+        plcSigned: true,
+        currentOperation: "Submitting PLC operation...",
+      });
 
       await targetClient.submitPlcOperation(operation);
 
@@ -660,7 +846,9 @@ export function createOutboundMigrationFlow() {
       }
 
       if (state.localDid.startsWith("did:web:")) {
-        setProgress({ currentOperation: "Updating DID document forwarding..." });
+        setProgress({
+          currentOperation: "Updating DID document forwarding...",
+        });
         try {
           await localClient.updateMigrationForwarding(state.targetPdsUrl);
         } catch (e) {
@@ -672,7 +860,8 @@ export function createOutboundMigrationFlow() {
       clearMigrationState();
     } catch (e) {
       const err = e as Error & { error?: string; status?: number };
-      const message = err.message || err.error || `Unknown error (status ${err.status || 'unknown'})`;
+      const message = err.message || err.error ||
+        `Unknown error (status ${err.status || "unknown"})`;
       setError(message);
       setStep("plc-token");
     }
@@ -711,7 +900,9 @@ export function createOutboundMigrationFlow() {
   }
 
   return {
-    get state() { return state; },
+    get state() {
+      return state;
+    },
     setStep,
     setError,
     validateTargetPds,
@@ -730,5 +921,9 @@ export function createOutboundMigrationFlow() {
   };
 }
 
-export type InboundMigrationFlow = ReturnType<typeof createInboundMigrationFlow>;
-export type OutboundMigrationFlow = ReturnType<typeof createOutboundMigrationFlow>;
+export type InboundMigrationFlow = ReturnType<
+  typeof createInboundMigrationFlow
+>;
+export type OutboundMigrationFlow = ReturnType<
+  typeof createOutboundMigrationFlow
+>;
