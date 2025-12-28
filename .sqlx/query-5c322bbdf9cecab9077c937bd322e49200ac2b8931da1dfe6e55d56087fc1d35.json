@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status\n            FROM repo_seq\n            WHERE seq = $1\n            ",
+  "query": "\n                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev\n                FROM repo_seq\n                WHERE seq > $1 AND seq < $2\n                ORDER BY seq ASC\n                ",
   "describe": {
     "columns": [
       {
@@ -67,10 +67,16 @@
         "ordinal": 12,
         "name": "status",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "rev",
+        "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
+        "Int8",
         "Int8"
       ]
     },
@@ -87,8 +93,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "44b78996f9799398f384d9aebb36d01c27738d4677b7cae7ea6697f3f5135388"
+  "hash": "5c322bbdf9cecab9077c937bd322e49200ac2b8931da1dfe6e55d56087fc1d35"
 }

@@ -1,0 +1,1 @@
+ALTER TABLE repo_seq ADD COLUMN rev TEXT;

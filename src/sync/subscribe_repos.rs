@@ -66,7 +66,7 @@ async fn handle_socket_inner(
             let events = sqlx::query_as!(
                 SequencedEvent,
                 r#"
-                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status
+                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
                 FROM repo_seq
                 WHERE seq > $1
                 ORDER BY seq ASC

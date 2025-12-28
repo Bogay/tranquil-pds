@@ -8,10 +8,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::verify;
+use cid::Cid;
 use chrono::{Duration, Utc};
+use jacquard_repo::commit::Commit;
+use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::str::FromStr;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -245,8 +249,24 @@ async fn assert_valid_did_document_for_service(
         }
     } else if did.starts_with("did:web:") {
         let client = reqwest::Client::new();
-        let did_path = &did[8..];
-        let url = format!("https://{}/.well-known/did.json", did_path.replace(':', "/"));
+        let host_and_path = &did[8..];
+        let decoded = host_and_path.replace("%3A", ":");
+        let parts: Vec<&str> = decoded.split(':').collect();
+        let (host, path_parts) = if parts.len() > 1 && parts[1].chars().all(|c| c.is_ascii_digit()) {
+            (format!("{}:{}", parts[0], parts[1]), parts[2..].to_vec())
+        } else {
+            (parts[0].to_string(), parts[1..].to_vec())
+        };
+        let scheme = if host.starts_with("localhost") || host.starts_with("127.") || host.contains(':') {
+            "http"
+        } else {
+            "https"
+        };
+        let url = if path_parts.is_empty() {
+            format!("{}://{}/.well-known/did.json", scheme, host)
+        } else {
+            format!("{}://{}/{}/did.json", scheme, host, path_parts.join("/"))
+        };
         let resp = client.get(&url).send().await.map_err(|e| {
             warn!("Failed to fetch did:web document for {}: {:?}", did, e);
             (
@@ -381,8 +401,17 @@ pub async fn activate_account(
             .ok()
             .flatten();
             if let Some(root_cid) = repo_root {
+                let rev = if let Ok(cid) = Cid::from_str(&root_cid) {
+                    if let Ok(Some(block)) = state.block_store.get(&cid).await {
+                        Commit::from_cbor(&block).ok().map(|c| c.rev().to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 if let Err(e) =
-                    crate::api::repo::record::sequence_sync_event(&state, &did, &root_cid).await
+                    crate::api::repo::record::sequence_sync_event(&state, &did, &root_cid, rev.as_deref()).await
                 {
                     warn!("Failed to sequence sync event for activation: {}", e);
                 }

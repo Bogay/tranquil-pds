@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO repo_seq (did, event_type, commit_cid)\n        VALUES ($1, 'sync', $2)\n        RETURNING seq\n        ",
+  "query": "\n        INSERT INTO repo_seq (did, event_type, commit_cid, rev)\n        VALUES ($1, 'sync', $2, $3)\n        RETURNING seq\n        ",
   "describe": {
     "columns": [
       {
@@ -12,6 +12,7 @@
     "parameters": {
       "Left": [
         "Text",
+        "Text",
         "Text"
       ]
     },
@@ -19,5 +20,5 @@
       false
     ]
   },
-  "hash": "3792c455a955b8cf2c70c8aa76635083354c87330101ea0ea69d30f2a5b4b960"
+  "hash": "48f2ff46677b5dc26a4ca9ac0b4e86ebdb3a9862d006aa0e21bfa2d7b25a8f71"
 }

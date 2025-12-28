@@ -10,7 +10,6 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::collections::BTreeMap;
-use std::str::FromStr;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

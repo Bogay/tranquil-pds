@@ -112,8 +112,12 @@ async fn format_sync_event(
         .get(&commit_cid)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Commit block not found"))?;
-    let rev = extract_rev_from_commit_bytes(&commit_bytes)
-        .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?;
+    let rev = if let Some(ref stored_rev) = event.rev {
+        stored_rev.clone()
+    } else {
+        extract_rev_from_commit_bytes(&commit_bytes)
+            .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?
+    };
     let car_bytes = write_car_blocks(commit_cid, Some(commit_bytes), BTreeMap::new()).await?;
     let frame = SyncFrame {
         did: event.did.clone(),
@@ -251,8 +255,12 @@ fn format_sync_event_with_prefetched(
     let commit_bytes = prefetched
         .get(&commit_cid)
         .ok_or_else(|| anyhow::anyhow!("Commit block not found in prefetched"))?;
-    let rev = extract_rev_from_commit_bytes(commit_bytes)
-        .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?;
+    let rev = if let Some(ref stored_rev) = event.rev {
+        stored_rev.clone()
+    } else {
+        extract_rev_from_commit_bytes(commit_bytes)
+            .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?
+    };
     let car_bytes = futures::executor::block_on(write_car_blocks(
         commit_cid,
         Some(commit_bytes.clone()),

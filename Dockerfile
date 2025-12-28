@@ -1,22 +1,23 @@
-# Stage 1: Build frontend with Deno
 FROM denoland/deno:alpine AS frontend-builder
 WORKDIR /frontend
 COPY frontend/ ./
 RUN deno task build
-# Stage 2: Build Rust backend
+
 FROM rust:1.92-alpine AS builder
-RUN apk add ca-certificates openssl openssl-dev pkgconfig
+RUN apk add ca-certificates openssl openssl-dev openssl-libs-static pkgconfig musl-dev
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
 COPY src ./src
 COPY tests ./tests
 COPY migrations ./migrations
 COPY .sqlx ./.sqlx
-RUN touch src/main.rs && cargo build --release
-# Stage 3: Final image
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release && \
+    cp target/release/tranquil-pds /tmp/tranquil-pds
+
 FROM alpine:3.23
-COPY --from=builder /app/target/release/tranquil-pds /usr/local/bin/tranquil-pds
+COPY --from=builder /tmp/tranquil-pds /usr/local/bin/tranquil-pds
 COPY --from=builder /app/migrations /app/migrations
 COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 WORKDIR /app

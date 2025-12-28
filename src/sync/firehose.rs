@@ -17,4 +17,5 @@ pub struct SequencedEvent {
     pub handle: Option<String>,
     pub active: Option<bool>,
     pub status: Option<String>,
+    pub rev: Option<String>,
 }

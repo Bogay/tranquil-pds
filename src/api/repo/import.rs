@@ -1,4 +1,5 @@
 use crate::api::ApiError;
+use crate::api::repo::record::create_signed_commit;
 use crate::state::AppState;
 use crate::sync::import::{ImportError, apply_import, parse_car};
 use crate::sync::verify::CarVerifier;
@@ -9,6 +10,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_repo::storage::BlockStore;
+use k256::ecdsa::SigningKey;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
@@ -312,14 +316,114 @@ pub async fn import_repo(
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_BLOCKS);
     match apply_import(&state.db, user_id, root, blocks, max_blocks).await {
-        Ok(records) => {
+        Ok(import_result) => {
             info!(
                 "Successfully imported {} records for user {}",
-                records.len(),
+                import_result.records.len(),
                 did
             );
+            let key_row = match sqlx::query!(
+                r#"SELECT uk.key_bytes, uk.encryption_version
+                   FROM user_keys uk
+                   JOIN users u ON uk.user_id = u.id
+                   WHERE u.did = $1"#,
+                did
+            )
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(Some(row)) => row,
+                Ok(None) => {
+                    error!("No signing key found for user {}", did);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError", "message": "Signing key not found"})),
+                    )
+                        .into_response();
+                }
+                Err(e) => {
+                    error!("DB error fetching signing key: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+            let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Failed to decrypt signing key: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+            let signing_key = match SigningKey::from_slice(&key_bytes) {
+                Ok(k) => k,
+                Err(e) => {
+                    error!("Invalid signing key: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+            let new_rev = Tid::now(LimitedU32::MIN);
+            let new_rev_str = new_rev.to_string();
+            let (commit_bytes, _sig) = match create_signed_commit(
+                did,
+                import_result.data_cid,
+                &new_rev_str,
+                None,
+                &signing_key,
+            ) {
+                Ok(result) => result,
+                Err(e) => {
+                    error!("Failed to create new commit: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+            let new_root_cid: cid::Cid = match state.block_store.put(&commit_bytes).await {
+                Ok(cid) => cid,
+                Err(e) => {
+                    error!("Failed to store new commit block: {:?}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "InternalError"})),
+                    )
+                        .into_response();
+                }
+            };
+            let new_root_str = new_root_cid.to_string();
+            if let Err(e) = sqlx::query!(
+                "UPDATE repos SET repo_root_cid = $1, updated_at = NOW() WHERE user_id = $2",
+                new_root_str,
+                user_id
+            )
+            .execute(&state.db)
+            .await
+            {
+                error!("Failed to update repo root: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            info!(
+                "Created new commit for imported repo: cid={}, rev={}",
+                new_root_str, new_rev_str
+            );
             if !is_migration {
-                if let Err(e) = sequence_import_event(&state, did, &root.to_string()).await {
+                if let Err(e) = sequence_import_event(&state, did, &new_root_str).await {
                     warn!("Failed to sequence import event: {:?}", e);
                 }
             }

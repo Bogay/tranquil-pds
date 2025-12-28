@@ -33,7 +33,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
     let events = sqlx::query_as!(
         SequencedEvent,
         r#"
-        SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status
+        SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
         FROM repo_seq
         WHERE seq > $1
         ORDER BY seq ASC
@@ -81,7 +81,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
             let gap_events = sqlx::query_as!(
                 SequencedEvent,
                 r#"
-                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status
+                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
                 FROM repo_seq
                 WHERE seq > $1 AND seq < $2
                 ORDER BY seq ASC
@@ -103,7 +103,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         let event = sqlx::query_as!(
             SequencedEvent,
             r#"
-            SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status
+            SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
             FROM repo_seq
             WHERE seq = $1
             "#,

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT uk.key_bytes, uk.encryption_version\n                   FROM user_keys uk\n                   JOIN users u ON uk.user_id = u.id\n                   WHERE u.did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key_bytes",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "encryption_version",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "1091e22985de9cd9d24f55975eaa8bb1ea40bbf5237b328a031ba9d3b3d5a5e0"
+}

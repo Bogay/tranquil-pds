@@ -255,6 +255,11 @@ pub struct CommitInfo {
     pub prev: Option<String>,
 }
 
+pub struct ImportResult {
+    pub records: Vec<ImportedRecord>,
+    pub data_cid: Cid,
+}
+
 fn extract_commit_info(commit: &Ipld) -> Result<(Cid, CommitInfo), ImportError> {
     let obj = match commit {
         Ipld::Map(m) => m,
@@ -299,7 +304,7 @@ pub async fn apply_import(
     root: Cid,
     blocks: HashMap<Cid, Bytes>,
     max_blocks: usize,
-) -> Result<Vec<ImportedRecord>, ImportError> {
+) -> Result<ImportResult, ImportError> {
     if blocks.len() > max_blocks {
         return Err(ImportError::SizeLimitExceeded);
     }
@@ -352,14 +357,6 @@ pub async fn apply_import(
             .await?;
         }
     }
-    let root_str = root.to_string();
-    sqlx::query!(
-        "UPDATE repos SET repo_root_cid = $1, updated_at = NOW() WHERE user_id = $2",
-        root_str,
-        user_id
-    )
-    .execute(&mut *tx)
-    .await?;
     sqlx::query!("DELETE FROM records WHERE repo_id = $1", user_id)
         .execute(&mut *tx)
         .await?;
@@ -385,7 +382,7 @@ pub async fn apply_import(
         blocks.len(),
         records.len()
     );
-    Ok(records)
+    Ok(ImportResult { records, data_cid })
 }
 
 #[cfg(test)]

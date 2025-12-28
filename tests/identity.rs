@@ -357,10 +357,10 @@ async fn test_get_recommended_did_credentials_success() {
     assert!(also_known_as[0].as_str().unwrap().starts_with("at://"));
     assert!(body["verificationMethods"]["atproto"].is_string());
     assert_eq!(
-        body["services"]["atprotoPds"]["type"],
+        body["services"]["atproto_pds"]["type"],
         "AtprotoPersonalDataServer"
     );
-    assert!(body["services"]["atprotoPds"]["endpoint"].is_string());
+    assert!(body["services"]["atproto_pds"]["endpoint"].is_string());
 }
 
 #[tokio::test]

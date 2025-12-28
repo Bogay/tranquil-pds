@@ -321,7 +321,7 @@ pub async fn commit_and_log(
         .await
         .map_err(|e| format!("Failed to commit transaction: {}", e))?;
     if is_account_active {
-        let _ = sequence_sync_event(state, did, &new_root_cid.to_string()).await;
+        let _ = sequence_sync_event(state, did, &new_root_cid.to_string(), Some(&rev_str)).await;
     }
     Ok(CommitResult {
         commit_cid: new_root_cid,
@@ -470,15 +470,17 @@ pub async fn sequence_sync_event(
     state: &AppState,
     did: &str,
     commit_cid: &str,
+    rev: Option<&str>,
 ) -> Result<i64, String> {
     let seq_row = sqlx::query!(
         r#"
-        INSERT INTO repo_seq (did, event_type, commit_cid)
-        VALUES ($1, 'sync', $2)
+        INSERT INTO repo_seq (did, event_type, commit_cid, rev)
+        VALUES ($1, 'sync', $2, $3)
         RETURNING seq
         "#,
         did,
         commit_cid,
+        rev,
     )
     .fetch_one(&state.db)
     .await
