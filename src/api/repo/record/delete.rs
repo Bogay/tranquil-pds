@@ -1,5 +1,5 @@
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
-use crate::api::repo::record::write::prepare_repo_write;
+use crate::api::repo::record::write::{CommitInfo, prepare_repo_write};
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -12,7 +12,7 @@ use axum::{
 use cid::Cid;
 use jacquard::types::string::Nsid;
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -27,6 +27,13 @@ pub struct DeleteRecordInput {
     pub swap_record: Option<String>,
     #[serde(rename = "swapCommit")]
     pub swap_commit: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteRecordOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<CommitInfo>,
 }
 
 pub async fn delete_record(
@@ -106,7 +113,11 @@ pub async fn delete_record(
     }
     let prev_record_cid = mst.get(&key).await.ok().flatten();
     if prev_record_cid.is_none() {
-        return (StatusCode::OK, Json(json!({}))).into_response();
+        return (
+            StatusCode::OK,
+            Json(DeleteRecordOutput { commit: None }),
+        )
+            .into_response();
     }
     let new_mst = match mst.delete(&key).await {
         Ok(m) => m,
@@ -158,7 +169,7 @@ pub async fn delete_record(
         .iter()
         .map(|c| c.to_string())
         .collect::<Vec<_>>();
-    if let Err(e) = commit_and_log(
+    let commit_result = match commit_and_log(
         &state,
         CommitParams {
             did: &did,
@@ -173,11 +184,14 @@ pub async fn delete_record(
     )
     .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": e})),
-        )
-            .into_response();
+        Ok(res) => res,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": e})),
+            )
+                .into_response();
+        }
     };
 
     if let Some(ref controller) = controller_did {
@@ -198,5 +212,14 @@ pub async fn delete_record(
         .await;
     }
 
-    (StatusCode::OK, Json(json!({}))).into_response()
+    (
+        StatusCode::OK,
+        Json(DeleteRecordOutput {
+            commit: Some(CommitInfo {
+                cid: commit_result.commit_cid.to_string(),
+                rev: commit_result.rev,
+            }),
+        }),
+    )
+        .into_response()
 }

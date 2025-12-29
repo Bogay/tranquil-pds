@@ -1,4 +1,5 @@
-use super::validation::validate_record_with_rkey;
+use super::validation::validate_record_with_status;
+use crate::validation::ValidationStatus;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
@@ -185,9 +186,19 @@ pub struct CreateRecordInput {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CommitInfo {
+    pub cid: String,
+    pub rev: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateRecordOutput {
     pub uri: String,
     pub cid: String,
+    pub commit: CommitInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_status: Option<String>,
 }
 pub async fn create_record(
     State(state): State<AppState>,
@@ -256,12 +267,20 @@ pub async fn create_record(
                 .into_response();
         }
     };
-    if input.validate.unwrap_or(true)
-        && let Err(err_response) =
-            validate_record_with_rkey(&input.record, &input.collection, input.rkey.as_deref())
-    {
-        return *err_response;
-    }
+    let validation_status = if input.validate == Some(false) {
+        None
+    } else {
+        let require_lexicon = input.validate == Some(true);
+        match validate_record_with_status(
+            &input.record,
+            &input.collection,
+            input.rkey.as_deref(),
+            require_lexicon,
+        ) {
+            Ok(status) => Some(status),
+            Err(err_response) => return *err_response,
+        }
+    };
     let rkey = input
         .rkey
         .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
@@ -336,7 +355,7 @@ pub async fn create_record(
         .map(|c| c.to_string())
         .collect::<Vec<_>>();
     let blob_cids = extract_blob_cids(&input.record);
-    if let Err(e) = commit_and_log(
+    let commit_result = match commit_and_log(
         &state,
         CommitParams {
             did: &did,
@@ -351,11 +370,14 @@ pub async fn create_record(
     )
     .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": e})),
-        )
-            .into_response();
+        Ok(res) => res,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": e})),
+            )
+                .into_response();
+        }
     };
 
     if let Some(ref controller) = controller_did {
@@ -381,6 +403,15 @@ pub async fn create_record(
         Json(CreateRecordOutput {
             uri: format!("at://{}/{}/{}", did, input.collection, rkey),
             cid: record_cid.to_string(),
+            commit: CommitInfo {
+                cid: commit_result.commit_cid.to_string(),
+                rev: commit_result.rev,
+            },
+            validation_status: validation_status.map(|s| match s {
+                ValidationStatus::Valid => "valid".to_string(),
+                ValidationStatus::Unknown => "unknown".to_string(),
+                ValidationStatus::Invalid => "invalid".to_string(),
+            }),
         }),
     )
         .into_response()
@@ -403,6 +434,10 @@ pub struct PutRecordInput {
 pub struct PutRecordOutput {
     pub uri: String,
     pub cid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<CommitInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_status: Option<String>,
 }
 pub async fn put_record(
     State(state): State<AppState>,
@@ -480,12 +515,20 @@ pub async fn put_record(
         }
     };
     let key = format!("{}/{}", collection_nsid, input.rkey);
-    if input.validate.unwrap_or(true)
-        && let Err(err_response) =
-            validate_record_with_rkey(&input.record, &input.collection, Some(&input.rkey))
-    {
-        return *err_response;
-    }
+    let validation_status = if input.validate == Some(false) {
+        None
+    } else {
+        let require_lexicon = input.validate == Some(true);
+        match validate_record_with_status(
+            &input.record,
+            &input.collection,
+            Some(&input.rkey),
+            require_lexicon,
+        ) {
+            Ok(status) => Some(status),
+            Err(err_response) => return *err_response,
+        }
+    };
     if let Some(swap_record_str) = &input.swap_record {
         let expected_cid = Cid::from_str(swap_record_str).ok();
         let actual_cid = mst.get(&key).await.ok().flatten();
@@ -512,6 +555,22 @@ pub async fn put_record(
                 .into_response();
         }
     };
+    if existing_cid == Some(record_cid) {
+        return (
+            StatusCode::OK,
+            Json(PutRecordOutput {
+                uri: format!("at://{}/{}/{}", did, input.collection, input.rkey),
+                cid: record_cid.to_string(),
+                commit: None,
+                validation_status: validation_status.map(|s| match s {
+                    ValidationStatus::Valid => "valid".to_string(),
+                    ValidationStatus::Unknown => "unknown".to_string(),
+                    ValidationStatus::Invalid => "invalid".to_string(),
+                }),
+            }),
+        )
+            .into_response();
+    }
     let new_mst = if existing_cid.is_some() {
         match mst.update(&key, record_cid).await {
             Ok(m) => m,
@@ -587,7 +646,7 @@ pub async fn put_record(
         .collect::<Vec<_>>();
     let is_update = existing_cid.is_some();
     let blob_cids = extract_blob_cids(&input.record);
-    if let Err(e) = commit_and_log(
+    let commit_result = match commit_and_log(
         &state,
         CommitParams {
             did: &did,
@@ -602,11 +661,14 @@ pub async fn put_record(
     )
     .await
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": e})),
-        )
-            .into_response();
+        Ok(res) => res,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": e})),
+            )
+                .into_response();
+        }
     };
 
     if let Some(ref controller) = controller_did {
@@ -632,6 +694,15 @@ pub async fn put_record(
         Json(PutRecordOutput {
             uri: format!("at://{}/{}/{}", did, input.collection, input.rkey),
             cid: record_cid.to_string(),
+            commit: Some(CommitInfo {
+                cid: commit_result.commit_cid.to_string(),
+                rev: commit_result.rev,
+            }),
+            validation_status: validation_status.map(|s| match s {
+                ValidationStatus::Valid => "valid".to_string(),
+                ValidationStatus::Unknown => "unknown".to_string(),
+                ValidationStatus::Invalid => "invalid".to_string(),
+            }),
         }),
     )
         .into_response()

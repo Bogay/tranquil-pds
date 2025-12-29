@@ -160,7 +160,7 @@ pub async fn get_record(
         _ => {
             return (
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "NotFound", "message": "Record not found"})),
+                Json(json!({"error": "RecordNotFound", "message": "Record not found"})),
             )
                 .into_response();
         }
@@ -170,7 +170,7 @@ pub async fn get_record(
     {
         return (
             StatusCode::NOT_FOUND,
-            Json(json!({"error": "NotFound", "message": "Record CID mismatch"})),
+            Json(json!({"error": "RecordNotFound", "message": "Record CID mismatch"})),
         )
             .into_response();
     }

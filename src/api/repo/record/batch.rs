@@ -1,5 +1,6 @@
-use super::validation::validate_record_with_rkey;
+use super::validation::validate_record_with_status;
 use super::write::has_verified_comms_channel;
+use crate::validation::ValidationStatus;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
@@ -56,9 +57,19 @@ pub struct ApplyWritesInput {
 #[serde(tag = "$type")]
 pub enum WriteResult {
     #[serde(rename = "com.atproto.repo.applyWrites#createResult")]
-    CreateResult { uri: String, cid: String },
+    CreateResult {
+        uri: String,
+        cid: String,
+        #[serde(rename = "validationStatus", skip_serializing_if = "Option::is_none")]
+        validation_status: Option<String>,
+    },
     #[serde(rename = "com.atproto.repo.applyWrites#updateResult")]
-    UpdateResult { uri: String, cid: String },
+    UpdateResult {
+        uri: String,
+        cid: String,
+        #[serde(rename = "validationStatus", skip_serializing_if = "Option::is_none")]
+        validation_status: Option<String>,
+    },
     #[serde(rename = "com.atproto.repo.applyWrites#deleteResult")]
     DeleteResult {},
 }
@@ -303,12 +314,20 @@ pub async fn apply_writes(
                 rkey,
                 value,
             } => {
-                if input.validate.unwrap_or(true)
-                    && let Err(err_response) =
-                        validate_record_with_rkey(value, collection, rkey.as_deref())
-                {
-                    return *err_response;
-                }
+                let validation_status = if input.validate == Some(false) {
+                    None
+                } else {
+                    let require_lexicon = input.validate == Some(true);
+                    match validate_record_with_status(
+                        value,
+                        collection,
+                        rkey.as_deref(),
+                        require_lexicon,
+                    ) {
+                        Ok(status) => Some(status),
+                        Err(err_response) => return *err_response,
+                    }
+                };
                 all_blob_cids.extend(extract_blob_cids(value));
                 let rkey = rkey
                     .clone()
@@ -345,6 +364,11 @@ pub async fn apply_writes(
                 results.push(WriteResult::CreateResult {
                     uri,
                     cid: record_cid.to_string(),
+                    validation_status: validation_status.map(|s| match s {
+                        ValidationStatus::Valid => "valid".to_string(),
+                        ValidationStatus::Unknown => "unknown".to_string(),
+                        ValidationStatus::Invalid => "invalid".to_string(),
+                    }),
                 });
                 ops.push(RecordOp::Create {
                     collection: collection.clone(),
@@ -357,12 +381,20 @@ pub async fn apply_writes(
                 rkey,
                 value,
             } => {
-                if input.validate.unwrap_or(true)
-                    && let Err(err_response) =
-                        validate_record_with_rkey(value, collection, Some(rkey))
-                {
-                    return *err_response;
-                }
+                let validation_status = if input.validate == Some(false) {
+                    None
+                } else {
+                    let require_lexicon = input.validate == Some(true);
+                    match validate_record_with_status(
+                        value,
+                        collection,
+                        Some(rkey),
+                        require_lexicon,
+                    ) {
+                        Ok(status) => Some(status),
+                        Err(err_response) => return *err_response,
+                    }
+                };
                 all_blob_cids.extend(extract_blob_cids(value));
                 let mut record_bytes = Vec::new();
                 if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
@@ -397,6 +429,11 @@ pub async fn apply_writes(
                 results.push(WriteResult::UpdateResult {
                     uri,
                     cid: record_cid.to_string(),
+                    validation_status: validation_status.map(|s| match s {
+                        ValidationStatus::Valid => "valid".to_string(),
+                        ValidationStatus::Unknown => "unknown".to_string(),
+                        ValidationStatus::Invalid => "invalid".to_string(),
+                    }),
                 });
                 ops.push(RecordOp::Update {
                     collection: collection.clone(),
