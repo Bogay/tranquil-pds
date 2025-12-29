@@ -30,6 +30,8 @@ pub struct RateLimiters {
     pub app_password: Arc<KeyedRateLimiter>,
     pub email_update: Arc<KeyedRateLimiter>,
     pub totp_verify: Arc<KeyedRateLimiter>,
+    pub handle_update: Arc<KeyedRateLimiter>,
+    pub handle_update_daily: Arc<KeyedRateLimiter>,
 }
 
 impl Default for RateLimiters {
@@ -78,6 +80,16 @@ impl RateLimiters {
                 Quota::with_period(std::time::Duration::from_secs(60))
                     .unwrap()
                     .allow_burst(NonZeroU32::new(5).unwrap()),
+            )),
+            handle_update: Arc::new(RateLimiter::keyed(
+                Quota::with_period(std::time::Duration::from_secs(30))
+                    .unwrap()
+                    .allow_burst(NonZeroU32::new(10).unwrap()),
+            )),
+            handle_update_daily: Arc::new(RateLimiter::keyed(
+                Quota::with_period(std::time::Duration::from_secs(1728))
+                    .unwrap()
+                    .allow_burst(NonZeroU32::new(50).unwrap()),
             )),
         }
     }

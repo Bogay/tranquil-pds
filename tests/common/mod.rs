@@ -430,7 +430,7 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
         if attempt > 0 {
             tokio::time::sleep(Duration::from_millis(100 * (attempt as u64 + 1))).await;
         }
-        let handle = format!("user_{}", uuid::Uuid::new_v4());
+        let handle = format!("user-{}", uuid::Uuid::new_v4());
         let payload = json!({
             "handle": handle,
             "email": format!("{}@example.com", handle),

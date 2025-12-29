@@ -11,7 +11,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn test_create_self_hosted_did_web() {
     let client = client();
-    let handle = format!("selfweb_{}", uuid::Uuid::new_v4());
+    let handle = format!("selfweb-{}", uuid::Uuid::new_v4());
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -98,7 +98,7 @@ async fn test_external_did_web_no_local_doc() {
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
     let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
-    let handle = format!("extweb_{}", uuid::Uuid::new_v4());
+    let handle = format!("extweb-{}", uuid::Uuid::new_v4());
     let pds_endpoint = base_url().await.replace("http://", "https://");
 
     let reserve_res = client
@@ -180,7 +180,7 @@ async fn test_external_did_web_no_local_doc() {
 #[tokio::test]
 async fn test_plc_operations_blocked_for_did_web() {
     let client = client();
-    let handle = format!("plcblock_{}", uuid::Uuid::new_v4());
+    let handle = format!("plcblock-{}", uuid::Uuid::new_v4());
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -245,7 +245,7 @@ async fn test_plc_operations_blocked_for_did_web() {
 #[tokio::test]
 async fn test_get_recommended_did_credentials_no_rotation_keys_for_did_web() {
     let client = client();
-    let handle = format!("creds_{}", uuid::Uuid::new_v4());
+    let handle = format!("creds-{}", uuid::Uuid::new_v4());
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -294,7 +294,7 @@ async fn test_get_recommended_did_credentials_no_rotation_keys_for_did_web() {
 #[tokio::test]
 async fn test_did_plc_still_works_with_did_type_param() {
     let client = client();
-    let handle = format!("plctype_{}", uuid::Uuid::new_v4());
+    let handle = format!("plctype-{}", uuid::Uuid::new_v4());
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -323,7 +323,7 @@ async fn test_did_plc_still_works_with_did_type_param() {
 #[tokio::test]
 async fn test_external_did_web_requires_did_field() {
     let client = client();
-    let handle = format!("nodid_{}", uuid::Uuid::new_v4());
+    let handle = format!("nodid-{}", uuid::Uuid::new_v4());
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -392,7 +392,7 @@ async fn test_did_web_byod_flow() {
         mock_addr.replace(":", "%3A"),
         unique_id
     );
-    let handle = format!("byod_{}", uuid::Uuid::new_v4());
+    let handle = format!("byod-{}", uuid::Uuid::new_v4());
     let pds_endpoint = base_url().await.replace("http://", "https://");
     let pds_did = format!("did:web:{}", pds_endpoint.trim_start_matches("https://"));
 

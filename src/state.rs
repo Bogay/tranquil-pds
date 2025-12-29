@@ -37,6 +37,8 @@ pub enum RateLimitKind {
     AppPassword,
     EmailUpdate,
     TotpVerify,
+    HandleUpdate,
+    HandleUpdateDaily,
 }
 
 impl RateLimitKind {
@@ -54,6 +56,8 @@ impl RateLimitKind {
             Self::AppPassword => "app_password",
             Self::EmailUpdate => "email_update",
             Self::TotpVerify => "totp_verify",
+            Self::HandleUpdate => "handle_update",
+            Self::HandleUpdateDaily => "handle_update_daily",
         }
     }
 
@@ -71,6 +75,8 @@ impl RateLimitKind {
             Self::AppPassword => (10, 60_000),
             Self::EmailUpdate => (5, 3_600_000),
             Self::TotpVerify => (5, 300_000),
+            Self::HandleUpdate => (10, 300_000),
+            Self::HandleUpdateDaily => (50, 86_400_000),
         }
     }
 }
@@ -191,6 +197,8 @@ impl AppState {
             RateLimitKind::AppPassword => &self.rate_limiters.app_password,
             RateLimitKind::EmailUpdate => &self.rate_limiters.email_update,
             RateLimitKind::TotpVerify => &self.rate_limiters.totp_verify,
+            RateLimitKind::HandleUpdate => &self.rate_limiters.handle_update,
+            RateLimitKind::HandleUpdateDaily => &self.rate_limiters.handle_update_daily,
         };
 
         let ok = limiter.check_key(&client_ip.to_string()).is_ok();

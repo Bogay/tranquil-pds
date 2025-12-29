@@ -110,6 +110,14 @@ impl DidResolver {
         Some(resolved)
     }
 
+    pub async fn refresh_did(&self, did: &str) -> Option<ResolvedService> {
+        {
+            let mut cache = self.did_cache.write().await;
+            cache.remove(did);
+        }
+        self.resolve_did(did).await
+    }
+
     async fn resolve_did_internal(&self, did: &str) -> Option<ResolvedService> {
         let did_doc = if did.starts_with("did:web:") {
             self.resolve_did_web(did).await

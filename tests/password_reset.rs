@@ -19,7 +19,7 @@ async fn test_request_password_reset_creates_code() {
     let client = common::client();
     let base_url = common::base_url().await;
     let pool = get_pool().await;
-    let handle = format!("pwreset_{}", uuid::Uuid::new_v4());
+    let handle = format!("pwreset-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
         "handle": handle,
@@ -81,7 +81,7 @@ async fn test_reset_password_with_valid_token() {
     let client = common::client();
     let base_url = common::base_url().await;
     let pool = get_pool().await;
-    let handle = format!("pwreset2_{}", uuid::Uuid::new_v4());
+    let handle = format!("pwreset2-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let old_password = "Oldpass123!";
     let new_password = "Newpass456!";
@@ -197,7 +197,7 @@ async fn test_reset_password_with_expired_token() {
     let client = common::client();
     let base_url = common::base_url().await;
     let pool = get_pool().await;
-    let handle = format!("pwreset3_{}", uuid::Uuid::new_v4());
+    let handle = format!("pwreset3-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
         "handle": handle,
@@ -261,7 +261,7 @@ async fn test_reset_password_invalidates_sessions() {
     let client = common::client();
     let base_url = common::base_url().await;
     let pool = get_pool().await;
-    let handle = format!("pwreset4_{}", uuid::Uuid::new_v4());
+    let handle = format!("pwreset4-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
         "handle": handle,
@@ -351,7 +351,7 @@ async fn test_reset_password_creates_notification() {
     let pool = get_pool().await;
     let client = common::client();
     let base_url = common::base_url().await;
-    let handle = format!("pwreset5_{}", uuid::Uuid::new_v4());
+    let handle = format!("pwreset5-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
         "handle": handle,

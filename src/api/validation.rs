@@ -35,12 +35,12 @@ impl std::fmt::Display for HandleValidationError {
             ),
             Self::InvalidCharacters => write!(
                 f,
-                "Handle contains invalid characters. Only alphanumeric, hyphens, and underscores are allowed"
+                "Handle contains invalid characters. Only alphanumeric characters and hyphens are allowed"
             ),
             Self::StartsWithInvalidChar => {
-                write!(f, "Handle cannot start with a hyphen or underscore")
+                write!(f, "Handle cannot start with a hyphen")
             }
-            Self::EndsWithInvalidChar => write!(f, "Handle cannot end with a hyphen or underscore"),
+            Self::EndsWithInvalidChar => write!(f, "Handle cannot end with a hyphen"),
             Self::ContainsSpaces => write!(f, "Handle cannot contain spaces"),
             Self::BannedWord => write!(f, "Inappropriate language in handle"),
         }
@@ -67,19 +67,19 @@ pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationErr
     }
 
     if let Some(first_char) = handle.chars().next()
-        && (first_char == '-' || first_char == '_')
+        && first_char == '-'
     {
         return Err(HandleValidationError::StartsWithInvalidChar);
     }
 
     if let Some(last_char) = handle.chars().last()
-        && (last_char == '-' || last_char == '_')
+        && last_char == '-'
     {
         return Err(HandleValidationError::EndsWithInvalidChar);
     }
 
     for c in handle.chars() {
-        if !c.is_ascii_alphanumeric() && c != '-' && c != '_' {
+        if !c.is_ascii_alphanumeric() && c != '-' {
             return Err(HandleValidationError::InvalidCharacters);
         }
     }
@@ -151,10 +151,6 @@ mod tests {
             Ok("user-name".to_string())
         );
         assert_eq!(
-            validate_short_handle("user_name"),
-            Ok("user_name".to_string())
-        );
-        assert_eq!(
             validate_short_handle("UPPERCASE"),
             Ok("uppercase".to_string())
         );
@@ -194,7 +190,7 @@ mod tests {
         );
         assert_eq!(
             validate_short_handle("_starts"),
-            Err(HandleValidationError::StartsWithInvalidChar)
+            Err(HandleValidationError::InvalidCharacters)
         );
         assert_eq!(
             validate_short_handle("ends-"),
@@ -202,7 +198,11 @@ mod tests {
         );
         assert_eq!(
             validate_short_handle("ends_"),
-            Err(HandleValidationError::EndsWithInvalidChar)
+            Err(HandleValidationError::InvalidCharacters)
+        );
+        assert_eq!(
+            validate_short_handle("user_name"),
+            Err(HandleValidationError::InvalidCharacters)
         );
         assert_eq!(
             validate_short_handle("test@user"),

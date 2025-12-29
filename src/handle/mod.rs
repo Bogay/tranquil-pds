@@ -93,6 +93,9 @@ pub async fn verify_handle_ownership(
 }
 
 pub fn is_service_domain_handle(handle: &str, hostname: &str) -> bool {
+    if !handle.contains('.') {
+        return true;
+    }
     let service_domains: Vec<String> = std::env::var("PDS_SERVICE_HANDLE_DOMAINS")
         .map(|s| s.split(',').map(|d| d.trim().to_string()).collect())
         .unwrap_or_else(|_| vec![hostname.to_string()]);
@@ -115,6 +118,7 @@ mod tests {
     fn test_is_service_domain_handle() {
         assert!(is_service_domain_handle("user.example.com", "example.com"));
         assert!(is_service_domain_handle("example.com", "example.com"));
+        assert!(is_service_domain_handle("myhandle", "example.com"));
         assert!(!is_service_domain_handle("user.other.com", "example.com"));
         assert!(!is_service_domain_handle("myhandle.xyz", "example.com"));
     }

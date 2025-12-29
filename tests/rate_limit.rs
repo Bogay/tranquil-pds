@@ -9,7 +9,7 @@ async fn test_login_rate_limiting() {
     let client = client();
     let url = format!("{}/xrpc/com.atproto.server.createSession", base_url().await);
     let payload = json!({
-        "identifier": "nonexistent_user_for_rate_limit_test",
+        "identifier": "nonexistent-user-for-rate-limit-test",
         "password": "wrongpassword"
     });
     let mut rate_limited_count = 0;
@@ -53,7 +53,7 @@ async fn test_password_reset_rate_limiting() {
     let mut success_count = 0;
     for i in 0..8 {
         let payload = json!({
-            "email": format!("ratelimit_test_{}@example.com", i)
+            "email": format!("ratelimit-test_{}@example.com", i)
         });
         let res = client
             .post(&url)
@@ -91,8 +91,8 @@ async fn test_account_creation_rate_limiting() {
     for i in 0..15 {
         let unique_id = uuid::Uuid::new_v4();
         let payload = json!({
-            "handle": format!("ratelimit_{}_{}", i, unique_id),
-            "email": format!("ratelimit_{}_{}@example.com", i, unique_id),
+            "handle": format!("ratelimit-{}_{}", i, unique_id),
+            "email": format!("ratelimit-{}_{}@example.com", i, unique_id),
             "password": "Testpass123!"
         });
         let res = client

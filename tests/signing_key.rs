@@ -174,7 +174,7 @@ async fn test_create_account_with_reserved_signing_key() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
     let signing_key = body["signingKey"].as_str().unwrap();
-    let handle = format!("reserved_key_user_{}", uuid::Uuid::new_v4());
+    let handle = format!("reserved-key-user-{}", uuid::Uuid::new_v4());
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
@@ -212,7 +212,7 @@ async fn test_create_account_with_reserved_signing_key() {
 async fn test_create_account_with_invalid_signing_key() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let handle = format!("bad_key_user_{}", uuid::Uuid::new_v4());
+    let handle = format!("bad-key-user-{}", uuid::Uuid::new_v4());
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
@@ -248,7 +248,7 @@ async fn test_create_account_cannot_reuse_signing_key() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
     let signing_key = body["signingKey"].as_str().unwrap();
-    let handle1 = format!("reuse_key_user1_{}", uuid::Uuid::new_v4());
+    let handle1 = format!("reuse-key-user1-{}", uuid::Uuid::new_v4());
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
@@ -264,7 +264,7 @@ async fn test_create_account_cannot_reuse_signing_key() {
         .await
         .expect("Failed to create first account");
     assert_eq!(res.status(), StatusCode::OK);
-    let handle2 = format!("reuse_key_user2_{}", uuid::Uuid::new_v4());
+    let handle2 = format!("reuse-key-user2-{}", uuid::Uuid::new_v4());
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
@@ -301,7 +301,7 @@ async fn test_reserved_key_tokens_work() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
     let signing_key = body["signingKey"].as_str().unwrap();
-    let handle = format!("token_test_user_{}", uuid::Uuid::new_v4());
+    let handle = format!("token-test-user-{}", uuid::Uuid::new_v4());
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",

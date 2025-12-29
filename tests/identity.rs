@@ -8,7 +8,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn test_resolve_handle_success() {
     let client = client();
-    let short_handle = format!("resolvetest_{}", uuid::Uuid::new_v4());
+    let short_handle = format!("resolvetest-{}", uuid::Uuid::new_v4());
     let payload = json!({
         "handle": short_handle,
         "email": format!("{}@example.com", short_handle),
@@ -98,7 +98,7 @@ async fn test_create_did_web_account_and_resolve() {
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
     let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
-    let handle = format!("webuser_{}", uuid::Uuid::new_v4());
+    let handle = format!("webuser-{}", uuid::Uuid::new_v4());
     let pds_endpoint = base_url().await.replace("http://", "https://");
 
     let reserve_res = client
@@ -183,7 +183,7 @@ async fn test_create_did_web_account_and_resolve() {
 #[tokio::test]
 async fn test_create_account_duplicate_handle() {
     let client = client();
-    let handle = format!("dupe_{}", uuid::Uuid::new_v4());
+    let handle = format!("dupe-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
         "handle": handle,
@@ -220,7 +220,7 @@ async fn test_did_web_lifecycle() {
     let mock_server = MockServer::start().await;
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
-    let handle = format!("lifecycle_{}", uuid::Uuid::new_v4());
+    let handle = format!("lifecycle-{}", uuid::Uuid::new_v4());
     let did = format!("did:web:{}:u:{}", mock_addr.replace(":", "%3A"), handle);
     let email = format!("{}@test.com", handle);
     let pds_endpoint = base_url().await.replace("http://", "https://");
@@ -377,4 +377,160 @@ async fn test_get_recommended_did_credentials_no_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = res.json().await.expect("Response was not valid JSON");
     assert_eq!(body["error"], "AuthenticationRequired");
+}
+
+#[tokio::test]
+async fn test_update_handle_to_same() {
+    let client = client();
+    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let session = client
+        .get(format!(
+            "{}/xrpc/com.atproto.server.getSession",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .expect("Failed to get session");
+    let session_body: Value = session.json().await.expect("Invalid JSON");
+    let current_handle = session_body["handle"].as_str().expect("No handle").to_string();
+    let short_handle = current_handle.split('.').next().unwrap_or(&current_handle);
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&json!({ "handle": short_handle }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_update_handle_no_auth() {
+    let client = client();
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .json(&json!({ "handle": "newhandle" }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "AuthenticationRequired");
+}
+
+#[tokio::test]
+async fn test_update_handle_invalid_characters() {
+    let client = client();
+    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&json!({ "handle": "invalid@handle!" }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "InvalidHandle");
+}
+
+#[tokio::test]
+async fn test_update_handle_empty() {
+    let client = client();
+    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&json!({ "handle": "" }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "InvalidRequest");
+}
+
+#[tokio::test]
+async fn test_update_handle_taken() {
+    let client = client();
+    let (access_jwt1, _did1) = create_account_and_login(&client).await;
+    let (access_jwt2, _did2) = create_account_and_login(&client).await;
+    let short_handle = format!("taken{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let update1 = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt1)
+        .json(&json!({ "handle": short_handle }))
+        .send()
+        .await
+        .expect("Failed to update handle");
+    assert_eq!(update1.status(), StatusCode::OK);
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt2)
+        .json(&json!({ "handle": short_handle }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "HandleTaken");
+}
+
+#[tokio::test]
+async fn test_update_handle_too_short() {
+    let client = client();
+    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&json!({ "handle": "ab" }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "InvalidHandle");
+    assert!(body["message"].as_str().unwrap().contains("short"));
+}
+
+#[tokio::test]
+async fn test_update_handle_too_long() {
+    let client = client();
+    let (access_jwt, _did) = create_account_and_login(&client).await;
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.identity.updateHandle",
+            base_url().await
+        ))
+        .bearer_auth(&access_jwt)
+        .json(&json!({ "handle": "thishandleiswaytoolongforservicedomain" }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "InvalidHandle");
+    assert!(body["message"].as_str().unwrap().contains("long"));
 }

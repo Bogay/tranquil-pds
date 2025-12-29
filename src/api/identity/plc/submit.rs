@@ -23,13 +23,11 @@ pub async fn submit_plc_operation(
     headers: axum::http::HeaderMap,
     Json(input): Json<SubmitPlcOperationInput>,
 ) -> Response {
-    info!("[MIGRATION] submitPlcOperation called");
     let bearer = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => {
-            info!("[MIGRATION] submitPlcOperation: No bearer token");
             return ApiError::AuthenticationRequired.into_response();
         }
     };
@@ -37,20 +35,14 @@ pub async fn submit_plc_operation(
         match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
             Ok(user) => user,
             Err(e) => {
-                info!("[MIGRATION] submitPlcOperation: Auth failed: {:?}", e);
                 return ApiError::from(e).into_response();
             }
         };
-    info!(
-        "[MIGRATION] submitPlcOperation: Authenticated user did={}",
-        auth_user.did
-    );
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
         auth_user.is_oauth,
         auth_user.scope.as_deref(),
         crate::oauth::scopes::IdentityAttr::Wildcard,
     ) {
-        info!("[MIGRATION] submitPlcOperation: Scope check failed");
         return e;
     }
     let did = &auth_user.did;
@@ -67,7 +59,7 @@ pub async fn submit_plc_operation(
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let public_url = format!("https://{}", hostname);
     let user = match sqlx::query!(
-        "SELECT id, handle, deactivated_at FROM users WHERE did = $1",
+        "SELECT id, handle FROM users WHERE did = $1",
         did
     )
     .fetch_optional(&state.db)
@@ -82,7 +74,6 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     };
-    let is_migration = user.deactivated_at.is_some();
     let key_row = match sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
         user.id
@@ -123,10 +114,9 @@ pub async fn submit_plc_operation(
         }
     };
     let user_did_key = signing_key_to_did_key(&signing_key);
-    if !is_migration && let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array())
-    {
-        let server_rotation_key =
-            std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
+    let server_rotation_key =
+        std::env::var("PLC_ROTATION_KEY").unwrap_or_else(|_| user_did_key.clone());
+    if let Some(rotation_keys) = op.get("rotationKeys").and_then(|v| v.as_array()) {
         let has_server_key = rotation_keys
             .iter()
             .any(|k| k.as_str() == Some(&server_rotation_key));
@@ -167,21 +157,20 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     }
-    if !is_migration {
-        if let Some(verification_methods) =
-            op.get("verificationMethods").and_then(|v| v.as_object())
-            && let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
-            && atproto_key != user_did_key
-        {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Incorrect signing key in verificationMethods"
-                })),
-            )
-                .into_response();
-        }
+    if let Some(verification_methods) = op.get("verificationMethods").and_then(|v| v.as_object())
+        && let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
+        && atproto_key != user_did_key
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "InvalidRequest",
+                "message": "Incorrect signing key in verificationMethods"
+            })),
+        )
+            .into_response();
+    }
+    if !user.handle.is_empty() {
         if let Some(also_known_as) = op.get("alsoKnownAs").and_then(|v| v.as_array()) {
             let expected_handle = format!("at://{}", user.handle);
             let first_aka = also_known_as.first().and_then(|v| v.as_str());
@@ -200,11 +189,6 @@ pub async fn submit_plc_operation(
     let plc_client = PlcClient::new(None);
     let operation_clone = input.operation.clone();
     let did_clone = did.clone();
-    info!(
-        "[MIGRATION] submitPlcOperation: Sending operation to PLC directory for did={}",
-        did
-    );
-    let plc_start = std::time::Instant::now();
     let result: Result<(), CircuitBreakerError<PlcError>> =
         with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
             plc_client
@@ -213,17 +197,9 @@ pub async fn submit_plc_operation(
         })
         .await;
     match result {
-        Ok(()) => {
-            info!(
-                "[MIGRATION] submitPlcOperation: PLC directory accepted operation in {:?}",
-                plc_start.elapsed()
-            );
-        }
+        Ok(()) => {}
         Err(CircuitBreakerError::CircuitOpen(e)) => {
-            warn!(
-                "[MIGRATION] submitPlcOperation: PLC directory circuit breaker open: {}",
-                e
-            );
+            warn!("PLC directory circuit breaker open: {}", e);
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(json!({
@@ -234,10 +210,7 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
         Err(CircuitBreakerError::OperationFailed(e)) => {
-            error!(
-                "[MIGRATION] submitPlcOperation: PLC operation failed: {:?}",
-                e
-            );
+            error!("PLC operation failed: {:?}", e);
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(json!({
@@ -248,10 +221,6 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     }
-    info!(
-        "[MIGRATION] submitPlcOperation: Sequencing identity event for did={}",
-        did
-    );
     match sqlx::query!(
         "INSERT INTO repo_seq (did, event_type) VALUES ($1, 'identity') RETURNING seq",
         did
@@ -260,27 +229,21 @@ pub async fn submit_plc_operation(
     .await
     {
         Ok(row) => {
-            info!(
-                "[MIGRATION] submitPlcOperation: Identity event sequenced with seq={}",
-                row.seq
-            );
             if let Err(e) = sqlx::query(&format!("NOTIFY repo_updates, '{}'", row.seq))
                 .execute(&state.db)
                 .await
             {
-                warn!(
-                    "[MIGRATION] submitPlcOperation: Failed to notify identity event: {:?}",
-                    e
-                );
+                warn!("Failed to notify identity event: {:?}", e);
             }
         }
         Err(e) => {
-            warn!(
-                "[MIGRATION] submitPlcOperation: Failed to sequence identity event: {:?}",
-                e
-            );
+            warn!("Failed to sequence identity event: {:?}", e);
         }
     }
-    info!("[MIGRATION] submitPlcOperation: SUCCESS for did={}", did);
+    let _ = state.cache.delete(&format!("handle:{}", user.handle)).await;
+    if state.did_resolver.refresh_did(did).await.is_none() {
+        warn!(did = %did, "Failed to refresh DID cache after PLC update");
+    }
+    info!(did = %did, "PLC operation submitted successfully");
     (StatusCode::OK, Json(json!({}))).into_response()
 }

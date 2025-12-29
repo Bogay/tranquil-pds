@@ -511,7 +511,14 @@ pub async fn get_recommended_did_credentials(
     let rotation_keys = if auth_user.did.starts_with("did:web:") {
         vec![]
     } else {
-        vec![did_key.clone()]
+        let server_rotation_key = match std::env::var("PLC_ROTATION_KEY") {
+            Ok(key) => key,
+            Err(_) => {
+                warn!("PLC_ROTATION_KEY not set, falling back to user's signing key for rotation key recommendation");
+                did_key.clone()
+            }
+        };
+        vec![server_rotation_key]
     };
     (
         StatusCode::OK,
@@ -559,20 +566,45 @@ pub async fn update_handle(
         return e;
     }
     let did = auth_user.did;
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
+    if !state
+        .check_rate_limit(crate::state::RateLimitKind::HandleUpdate, &did)
         .await
     {
-        Ok(Some(id)) => id,
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "RateLimitExceeded", "message": "Too many handle updates. Try again later."})),
+        )
+            .into_response();
+    }
+    if !state
+        .check_rate_limit(crate::state::RateLimitKind::HandleUpdateDaily, &did)
+        .await
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "RateLimitExceeded", "message": "Daily handle update limit exceeded."})),
+        )
+            .into_response();
+    }
+    let user_row = match sqlx::query!(
+        "SELECT id, handle FROM users WHERE did = $1",
+        did
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
         _ => return ApiError::InternalError.into_response(),
     };
-    let new_handle = input.handle.trim();
+    let user_id = user_row.id;
+    let current_handle = user_row.handle;
+    let new_handle = input.handle.trim().to_ascii_lowercase();
     if new_handle.is_empty() {
         return ApiError::InvalidRequest("handle is required".into()).into_response();
     }
     if !new_handle
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
     {
         return (
             StatusCode::BAD_REQUEST,
@@ -582,7 +614,23 @@ pub async fn update_handle(
         )
             .into_response();
     }
-    if crate::moderation::has_explicit_slur(new_handle) {
+    for segment in new_handle.split('.') {
+        if segment.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidHandle", "message": "Handle contains empty segment"})),
+            )
+                .into_response();
+        }
+        if segment.starts_with('-') || segment.ends_with('-') {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidHandle", "message": "Handle segment cannot start or end with hyphen"})),
+            )
+                .into_response();
+        }
+    }
+    if crate::moderation::has_explicit_slur(&new_handle) {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidHandle", "message": "Inappropriate language in handle"})),
@@ -591,13 +639,27 @@ pub async fn update_handle(
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let suffix = format!(".{}", hostname);
-    let is_service_domain = crate::handle::is_service_domain_handle(new_handle, &hostname);
+    let is_service_domain = crate::handle::is_service_domain_handle(&new_handle, &hostname);
     let handle = if is_service_domain {
         let short_part = if new_handle.ends_with(&suffix) {
-            new_handle.strip_suffix(&suffix).unwrap_or(new_handle)
+            new_handle.strip_suffix(&suffix).unwrap_or(&new_handle)
         } else {
-            new_handle
+            &new_handle
         };
+        let full_handle = if new_handle.ends_with(&suffix) {
+            new_handle.clone()
+        } else {
+            format!("{}.{}", new_handle, hostname)
+        };
+        if full_handle == current_handle {
+            if let Err(e) =
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle))
+                    .await
+            {
+                warn!("Failed to sequence identity event for handle update: {}", e);
+            }
+            return (StatusCode::OK, Json(json!({}))).into_response();
+        }
         if short_part.contains('.') {
             return (
                 StatusCode::BAD_REQUEST,
@@ -608,13 +670,32 @@ pub async fn update_handle(
             )
                 .into_response();
         }
-        if new_handle.ends_with(&suffix) {
-            new_handle.to_string()
-        } else {
-            format!("{}.{}", new_handle, hostname)
+        if short_part.len() < 3 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidHandle", "message": "Handle too short"})),
+            )
+                .into_response();
         }
+        if short_part.len() > 18 {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "InvalidHandle", "message": "Handle too long"})),
+            )
+                .into_response();
+        }
+        full_handle
     } else {
-        match crate::handle::verify_handle_ownership(new_handle, &did).await {
+        if new_handle == current_handle {
+            if let Err(e) =
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&new_handle))
+                    .await
+            {
+                warn!("Failed to sequence identity event for handle update: {}", e);
+            }
+            return (StatusCode::OK, Json(json!({}))).into_response();
+        }
+        match crate::handle::verify_handle_ownership(&new_handle, &did).await {
             Ok(()) => {}
             Err(crate::handle::HandleResolutionError::NotFound) => {
                 return (
@@ -649,13 +730,8 @@ pub async fn update_handle(
                     .into_response();
             }
         }
-        new_handle.to_string()
+        new_handle.clone()
     };
-    let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE id = $1", user_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten();
     let existing = sqlx::query!(
         "SELECT id FROM users WHERE handle = $1 AND id != $2",
         handle,
@@ -679,8 +755,8 @@ pub async fn update_handle(
     .await;
     match result {
         Ok(_) => {
-            if let Some(old) = old_handle {
-                let _ = state.cache.delete(&format!("handle:{}", old)).await;
+            if !current_handle.is_empty() {
+                let _ = state.cache.delete(&format!("handle:{}", current_handle)).await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             if let Err(e) =
