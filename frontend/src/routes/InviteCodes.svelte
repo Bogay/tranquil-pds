@@ -91,11 +91,13 @@
       <button onclick={dismissCreated}>{$_('common.done')}</button>
     </div>
   {/if}
-  <section class="create-section">
-    <button onclick={handleCreate} disabled={creating}>
-      {creating ? $_('inviteCodes.creating') : $_('inviteCodes.createNew')}
-    </button>
-  </section>
+  {#if auth.session?.isAdmin}
+    <section class="create-section">
+      <button onclick={handleCreate} disabled={creating}>
+        {creating ? $_('inviteCodes.creating') : $_('inviteCodes.createNew')}
+      </button>
+    </section>
+  {/if}
   <section class="list-section">
     <h2>{$_('inviteCodes.yourCodes')}</h2>
     {#if loading}

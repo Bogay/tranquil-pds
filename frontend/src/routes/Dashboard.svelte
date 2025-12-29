@@ -164,7 +164,7 @@
         <h3>{$_('dashboard.navSessions')}</h3>
         <p>{$_('dashboard.navSessionsDesc')}</p>
       </a>
-      {#if inviteCodesEnabled}
+      {#if inviteCodesEnabled && auth.session.isAdmin}
         <a href="#/invite-codes" class="nav-card">
           <h3>{$_('dashboard.navInviteCodes')}</h3>
           <p>{$_('dashboard.navInviteCodesDesc')}</p>

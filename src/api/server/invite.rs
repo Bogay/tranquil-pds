@@ -1,15 +1,36 @@
 use crate::api::ApiError;
+use crate::auth::extractor::BearerAuthAdmin;
 use crate::auth::BearerAuth;
 use crate::state::AppState;
-use crate::util::get_user_id_by_did;
 use axum::{
     Json,
     extract::State,
     response::{IntoResponse, Response},
 };
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tracing::error;
-use uuid::Uuid;
+
+const BASE32_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
+
+fn gen_random_token() -> String {
+    let mut rng = rand::thread_rng();
+    let mut token = String::with_capacity(11);
+    for i in 0..10 {
+        if i == 5 {
+            token.push('-');
+        }
+        let idx = rng.gen_range(0..32);
+        token.push(BASE32_ALPHABET[idx] as char);
+    }
+    token
+}
+
+fn gen_invite_code() -> String {
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_prefix = hostname.replace('.', "-");
+    format!("{}-{}", hostname_prefix, gen_random_token())
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,59 +46,33 @@ pub struct CreateInviteCodeOutput {
 
 pub async fn create_invite_code(
     State(state): State<AppState>,
-    BearerAuth(auth_user): BearerAuth,
+    BearerAuthAdmin(_auth_user): BearerAuthAdmin,
     Json(input): Json<CreateInviteCodeInput>,
 ) -> Response {
     if input.use_count < 1 {
         return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
-    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
-        Ok(id) => id,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
-    let creator_user_id = if let Some(for_account) = &input.for_account {
-        match sqlx::query!("SELECT id FROM users WHERE did = $1", for_account)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(row)) => row.id,
-            Ok(None) => return ApiError::AccountNotFound.into_response(),
-            Err(e) => {
-                error!("DB error looking up target account: {:?}", e);
-                return ApiError::InternalError.into_response();
-            }
-        }
-    } else {
-        user_id
-    };
-    let user_invites_disabled = sqlx::query_scalar!(
-        "SELECT invites_disabled FROM users WHERE did = $1",
-        auth_user.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        error!("DB error checking invites_disabled: {:?}", e);
-        ApiError::InternalError
-    })
-    .ok()
-    .flatten()
-    .flatten()
-    .unwrap_or(false);
-    if user_invites_disabled {
-        return ApiError::InvitesDisabled.into_response();
-    }
-    let code = Uuid::new_v4().to_string();
+
+    let for_account = input.for_account.unwrap_or_else(|| "admin".to_string());
+    let code = gen_invite_code();
+
     match sqlx::query!(
-        "INSERT INTO invite_codes (code, available_uses, created_by_user) VALUES ($1, $2, $3)",
+        "INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
+         SELECT $1, $2, id, $3 FROM users WHERE is_admin = true LIMIT 1",
         code,
         input.use_count,
-        creator_user_id
+        for_account
     )
     .execute(&state.db)
     .await
     {
-        Ok(_) => Json(CreateInviteCodeOutput { code }).into_response(),
+        Ok(result) => {
+            if result.rows_affected() == 0 {
+                error!("No admin user found to create invite code");
+                return ApiError::InternalError.into_response();
+            }
+            Json(CreateInviteCodeOutput { code }).into_response()
+        }
         Err(e) => {
             error!("DB error creating invite code: {:?}", e);
             ApiError::InternalError.into_response()
@@ -106,28 +101,48 @@ pub struct AccountCodes {
 
 pub async fn create_invite_codes(
     State(state): State<AppState>,
-    BearerAuth(auth_user): BearerAuth,
+    BearerAuthAdmin(_auth_user): BearerAuthAdmin,
     Json(input): Json<CreateInviteCodesInput>,
 ) -> Response {
     if input.use_count < 1 {
         return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
-    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
-        Ok(id) => id,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+
     let code_count = input.code_count.unwrap_or(1).max(1);
-    let for_accounts = input.for_accounts.unwrap_or_default();
+    let for_accounts = input
+        .for_accounts
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vec!["admin".to_string()]);
+
+    let admin_user_id = match sqlx::query_scalar!(
+        "SELECT id FROM users WHERE is_admin = true LIMIT 1"
+    )
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            error!("No admin user found to create invite codes");
+            return ApiError::InternalError.into_response();
+        }
+        Err(e) => {
+            error!("DB error looking up admin user: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+    };
+
     let mut result_codes = Vec::new();
-    if for_accounts.is_empty() {
+
+    for account in for_accounts {
         let mut codes = Vec::new();
         for _ in 0..code_count {
-            let code = Uuid::new_v4().to_string();
+            let code = gen_invite_code();
             if let Err(e) = sqlx::query!(
-                "INSERT INTO invite_codes (code, available_uses, created_by_user) VALUES ($1, $2, $3)",
+                "INSERT INTO invite_codes (code, available_uses, created_by_user, for_account) VALUES ($1, $2, $3, $4)",
                 code,
                 input.use_count,
-                user_id
+                admin_user_id,
+                account
             )
             .execute(&state.db)
             .await
@@ -137,47 +152,9 @@ pub async fn create_invite_codes(
             }
             codes.push(code);
         }
-        result_codes.push(AccountCodes {
-            account: "admin".to_string(),
-            codes,
-        });
-    } else {
-        for account_did in for_accounts {
-            let target_user_id =
-                match sqlx::query!("SELECT id FROM users WHERE did = $1", account_did)
-                    .fetch_optional(&state.db)
-                    .await
-                {
-                    Ok(Some(row)) => row.id,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        error!("DB error looking up target account: {:?}", e);
-                        return ApiError::InternalError.into_response();
-                    }
-                };
-            let mut codes = Vec::new();
-            for _ in 0..code_count {
-                let code = Uuid::new_v4().to_string();
-                if let Err(e) = sqlx::query!(
-                    "INSERT INTO invite_codes (code, available_uses, created_by_user) VALUES ($1, $2, $3)",
-                    code,
-                    input.use_count,
-                    target_user_id
-                )
-                .execute(&state.db)
-                .await
-                {
-                    error!("DB error creating invite code: {:?}", e);
-                    return ApiError::InternalError.into_response();
-                }
-                codes.push(code);
-            }
-            result_codes.push(AccountCodes {
-                account: account_did,
-                codes,
-            });
-        }
+        result_codes.push(AccountCodes { account, codes });
     }
+
     Json(CreateInviteCodesOutput {
         codes: result_codes,
     })
@@ -220,37 +197,45 @@ pub async fn get_account_invite_codes(
     BearerAuth(auth_user): BearerAuth,
     axum::extract::Query(params): axum::extract::Query<GetAccountInviteCodesParams>,
 ) -> Response {
-    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
-        Ok(id) => id,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
     let include_used = params.include_used.unwrap_or(true);
+
     let codes_rows = match sqlx::query!(
         r#"
-        SELECT code, available_uses, created_at, disabled
-        FROM invite_codes
-        WHERE created_by_user = $1
-        ORDER BY created_at DESC
+        SELECT
+            ic.code,
+            ic.available_uses,
+            ic.created_at,
+            ic.disabled,
+            ic.for_account,
+            (SELECT COUNT(*) FROM invite_code_uses icu WHERE icu.code = ic.code)::int as "use_count!"
+        FROM invite_codes ic
+        WHERE ic.for_account = $1
+        ORDER BY ic.created_at DESC
         "#,
-        user_id
+        auth_user.did
     )
     .fetch_all(&state.db)
     .await
     {
-        Ok(rows) => {
-            if include_used {
-                rows
-            } else {
-                rows.into_iter().filter(|r| r.available_uses > 0).collect()
-            }
-        }
+        Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching invite codes: {:?}", e);
             return ApiError::InternalError.into_response();
         }
     };
+
     let mut codes = Vec::new();
     for row in codes_rows {
+        let disabled = row.disabled.unwrap_or(false);
+        if disabled {
+            continue;
+        }
+
+        let use_count = row.use_count;
+        if !include_used && use_count >= row.available_uses {
+            continue;
+        }
+
         let uses = sqlx::query!(
             r#"
             SELECT u.did, icu.used_at
@@ -273,15 +258,17 @@ pub async fn get_account_invite_codes(
                 .collect()
         })
         .unwrap_or_default();
+
         codes.push(InviteCode {
             code: row.code,
             available: row.available_uses,
-            disabled: row.disabled.unwrap_or(false),
-            for_account: auth_user.did.clone(),
-            created_by: auth_user.did.clone(),
+            disabled,
+            for_account: row.for_account,
+            created_by: "admin".to_string(),
             created_at: row.created_at.to_rfc3339(),
             uses,
         });
     }
+
     Json(GetAccountInviteCodesOutput { codes }).into_response()
 }

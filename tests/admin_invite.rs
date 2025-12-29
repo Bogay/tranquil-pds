@@ -84,88 +84,6 @@ async fn test_admin_get_invite_codes_no_auth() {
 }
 
 #[tokio::test]
-async fn test_disable_account_invites_success() {
-    let client = client();
-    let (access_jwt, did) = create_admin_account_and_login(&client).await;
-    let payload = json!({
-        "account": did
-    });
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.admin.disableAccountInvites",
-            base_url().await
-        ))
-        .bearer_auth(&access_jwt)
-        .json(&payload)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let create_payload = json!({
-        "useCount": 1
-    });
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createInviteCode",
-            base_url().await
-        ))
-        .bearer_auth(&access_jwt)
-        .json(&create_payload)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    let body: Value = res.json().await.expect("Response was not valid JSON");
-    assert_eq!(body["error"], "InvitesDisabled");
-}
-
-#[tokio::test]
-async fn test_enable_account_invites_success() {
-    let client = client();
-    let (access_jwt, did) = create_admin_account_and_login(&client).await;
-    let disable_payload = json!({
-        "account": did
-    });
-    let _ = client
-        .post(format!(
-            "{}/xrpc/com.atproto.admin.disableAccountInvites",
-            base_url().await
-        ))
-        .bearer_auth(&access_jwt)
-        .json(&disable_payload)
-        .send()
-        .await;
-    let enable_payload = json!({
-        "account": did
-    });
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.admin.enableAccountInvites",
-            base_url().await
-        ))
-        .bearer_auth(&access_jwt)
-        .json(&enable_payload)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let create_payload = json!({
-        "useCount": 1
-    });
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createInviteCode",
-            base_url().await
-        ))
-        .bearer_auth(&access_jwt)
-        .json(&create_payload)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-}
-
-#[tokio::test]
 async fn test_disable_account_invites_no_auth() {
     let client = client();
     let payload = json!({
@@ -206,9 +124,10 @@ async fn test_disable_account_invites_not_found() {
 #[tokio::test]
 async fn test_disable_invite_codes_by_code() {
     let client = client();
-    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
+    let (access_jwt, admin_did) = create_admin_account_and_login(&client).await;
     let create_payload = json!({
-        "useCount": 5
+        "useCount": 5,
+        "forAccount": admin_did
     });
     let create_res = client
         .post(format!(
@@ -236,9 +155,10 @@ async fn test_disable_invite_codes_by_code() {
         .await
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
+
     let list_res = client
         .get(format!(
-            "{}/xrpc/com.atproto.server.getAccountInviteCodes",
+            "{}/xrpc/com.atproto.admin.getInviteCodes",
             base_url().await
         ))
         .bearer_auth(&access_jwt)
@@ -258,7 +178,8 @@ async fn test_disable_invite_codes_by_account() {
     let (access_jwt, did) = create_admin_account_and_login(&client).await;
     for _ in 0..3 {
         let create_payload = json!({
-            "useCount": 1
+            "useCount": 1,
+            "forAccount": did
         });
         let _ = client
             .post(format!(
@@ -284,9 +205,10 @@ async fn test_disable_invite_codes_by_account() {
         .await
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
+
     let list_res = client
         .get(format!(
-            "{}/xrpc/com.atproto.server.getAccountInviteCodes",
+            "{}/xrpc/com.atproto.admin.getInviteCodes",
             base_url().await
         ))
         .bearer_auth(&access_jwt)
@@ -295,7 +217,8 @@ async fn test_disable_invite_codes_by_account() {
         .expect("Failed to get invite codes");
     let list_body: Value = list_res.json().await.unwrap();
     let codes = list_body["codes"].as_array().unwrap();
-    for code in codes {
+    let admin_codes: Vec<_> = codes.iter().filter(|c| c["forAccount"].as_str() == Some(&did)).collect();
+    for code in admin_codes {
         assert_eq!(code["disabled"], true);
     }
 }

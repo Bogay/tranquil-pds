@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)\n         SELECT $1, $2, id, $3 FROM users WHERE is_admin = true LIMIT 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b3d44806b6351d788048e6afe7a6623882fac70b466bf09596cad8eae1fc9dac"
+}
