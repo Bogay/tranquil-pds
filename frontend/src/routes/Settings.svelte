@@ -56,21 +56,17 @@
       if (message?.text === text) message = null
     }, 5000)
   }
-  async function handleRequestEmailUpdate(e: Event) {
-    e.preventDefault()
-    if (!auth.session || !newEmail) return
+  async function handleRequestEmailUpdate() {
+    if (!auth.session) return
     emailLoading = true
     message = null
     try {
-      const result = await api.requestEmailUpdate(auth.session.accessJwt, newEmail)
+      const result = await api.requestEmailUpdate(auth.session.accessJwt)
       emailTokenRequired = result.tokenRequired
       if (emailTokenRequired) {
-        showMessage('success', $_('settings.messages.emailCodeSent'))
+        showMessage('success', $_('settings.messages.emailCodeSentToCurrent'))
       } else {
-        await api.updateEmail(auth.session.accessJwt, newEmail)
-        await refreshSession()
-        showMessage('success', $_('settings.messages.emailUpdated'))
-        newEmail = ''
+        emailTokenRequired = true
       }
     } catch (e) {
       showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
@@ -244,17 +240,6 @@
             required
           />
         </div>
-        <div class="actions">
-          <button type="submit" disabled={emailLoading || !emailToken}>
-            {emailLoading ? $_('settings.updating') : $_('settings.confirmEmailChange')}
-          </button>
-          <button type="button" class="secondary" onclick={() => { emailTokenRequired = false; emailToken = '' }}>
-            {$_('common.cancel')}
-          </button>
-        </div>
-      </form>
-    {:else}
-      <form onsubmit={handleRequestEmailUpdate}>
         <div class="field">
           <label for="new-email">{$_('settings.newEmail')}</label>
           <input
@@ -266,10 +251,19 @@
             required
           />
         </div>
-        <button type="submit" disabled={emailLoading || !newEmail}>
-          {emailLoading ? $_('settings.requesting') : $_('settings.changeEmailButton')}
-        </button>
+        <div class="actions">
+          <button type="submit" disabled={emailLoading || !emailToken || !newEmail}>
+            {emailLoading ? $_('settings.updating') : $_('settings.confirmEmailChange')}
+          </button>
+          <button type="button" class="secondary" onclick={() => { emailTokenRequired = false; emailToken = ''; newEmail = '' }}>
+            {$_('common.cancel')}
+          </button>
+        </div>
       </form>
+    {:else}
+      <button onclick={handleRequestEmailUpdate} disabled={emailLoading}>
+        {emailLoading ? $_('settings.requesting') : $_('settings.changeEmailButton')}
+      </button>
     {/if}
   </section>
   <section>

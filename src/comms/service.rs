@@ -380,6 +380,44 @@ pub async fn enqueue_email_update(
     .await
 }
 
+pub async fn enqueue_email_update_token(
+    db: &PgPool,
+    user_id: Uuid,
+    code: &str,
+    hostname: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let prefs = get_user_comms_prefs(db, user_id).await?;
+    let strings = get_strings(&prefs.locale);
+    let current_email = prefs.email.clone().unwrap_or_default();
+    let verify_page = format!("https://{}/#/verify?type=email-update", hostname);
+    let verify_link = format!(
+        "https://{}/#/verify?type=email-update&token={}",
+        hostname,
+        urlencoding::encode(code)
+    );
+    let body = format_message(
+        strings.email_update_body,
+        &[
+            ("handle", &prefs.handle),
+            ("code", code),
+            ("verify_page", &verify_page),
+            ("verify_link", &verify_link),
+        ],
+    );
+    let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
+    enqueue_comms(
+        db,
+        NewComms::email(
+            user_id,
+            super::types::CommsType::EmailUpdate,
+            current_email,
+            subject,
+            body,
+        ),
+    )
+    .await
+}
+
 pub async fn enqueue_account_deletion(
     db: &PgPool,
     user_id: Uuid,

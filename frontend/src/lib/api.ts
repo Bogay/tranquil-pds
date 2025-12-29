@@ -279,12 +279,10 @@ export const api = {
 
   async requestEmailUpdate(
     token: string,
-    email: string,
   ): Promise<{ tokenRequired: boolean }> {
     return xrpc("com.atproto.server.requestEmailUpdate", {
       method: "POST",
       token,
-      body: { email },
     });
   },
 

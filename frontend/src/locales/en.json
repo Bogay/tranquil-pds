@@ -234,6 +234,7 @@
     "deleting": "Deleting...",
     "messages": {
       "emailCodeSent": "Verification code sent to your notification channel",
+      "emailCodeSentToCurrent": "Verification code sent to your current email address",
       "emailUpdated": "Email updated successfully",
       "emailUpdateFailed": "Failed to update email",
       "handleUpdated": "Handle updated successfully",
@@ -659,6 +660,7 @@
     "codeResent": "Verification code resent!",
     "codeResentDetail": "Verification code sent! Check your inbox.",
     "backToLogin": "Back to Login",
+    "backToSettings": "Back to Settings",
     "verifyingAccount": "Verifying account: @{handle}",
     "startOver": "Start over with a different account",
     "noPending": "No pending verification found.",
@@ -671,7 +673,18 @@
     "continue": "Continue",
     "identifierLabel": "Email or Identifier",
     "identifierPlaceholder": "you@example.com",
-    "identifierHelp": "The email address or identifier the code was sent to"
+    "identifierHelp": "The email address or identifier the code was sent to",
+    "emailUpdateTitle": "Update Email Address",
+    "emailUpdateSubtitle": "Enter your new email address and the verification code sent to your current email.",
+    "emailUpdateRequiresAuth": "You must be signed in to update your email address.",
+    "emailUpdateFailed": "Failed to update email address",
+    "emailUpdateCodeHelp": "The code was sent to your current email address",
+    "newEmailLabel": "New Email Address",
+    "newEmailPlaceholder": "new@example.com",
+    "updateEmail": "Update Email",
+    "updating": "Updating...",
+    "emailUpdated": "Your email has been updated successfully.",
+    "emailUpdatedInfo": "You may need to verify your new email address."
   },
   "resetPassword": {
     "title": "Reset Password",

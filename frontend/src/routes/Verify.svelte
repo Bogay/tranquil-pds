@@ -13,9 +13,10 @@
     channel: string
   }
 
-  type VerificationMode = 'signup' | 'token'
+  type VerificationMode = 'signup' | 'token' | 'email-update'
 
   let mode = $state<VerificationMode>('signup')
+  let newEmail = $state('')
   let pendingVerification = $state<PendingVerification | null>(null)
   let verificationCode = $state('')
   let identifier = $state('')
@@ -50,7 +51,12 @@
   onMount(async () => {
     const params = parseQueryParams()
 
-    if (params.token) {
+    if (params.type === 'email-update') {
+      mode = 'email-update'
+      if (params.token) {
+        verificationCode = params.token
+      }
+    } else if (params.token) {
       mode = 'token'
       verificationCode = params.token
       if (params.identifier) {
@@ -134,6 +140,33 @@
     }
   }
 
+  async function handleEmailUpdate() {
+    if (!verificationCode.trim() || !newEmail.trim()) return
+
+    if (!auth.session) {
+      error = $_('verify.emailUpdateRequiresAuth')
+      return
+    }
+
+    submitting = true
+    error = null
+
+    try {
+      await api.updateEmail(auth.session.accessJwt, newEmail.trim(), verificationCode.trim())
+      success = true
+      successPurpose = 'email-update'
+      successChannel = 'email'
+    } catch (e: any) {
+      if (e instanceof ApiError) {
+        error = e.message
+      } else {
+        error = $_('verify.emailUpdateFailed')
+      }
+    } finally {
+      submitting = false
+    }
+  }
+
   async function handleResendCode() {
     if (mode === 'signup') {
       if (!pendingVerification || resendingCode) return
@@ -198,7 +231,13 @@
   {:else if success}
     <div class="success-container">
       <h1>{$_('verify.verified')}</h1>
-      {#if successPurpose === 'migration' || successPurpose === 'signup'}
+      {#if successPurpose === 'email-update'}
+        <p class="subtitle">{$_('verify.emailUpdated')}</p>
+        <p class="info-text">{$_('verify.emailUpdatedInfo')}</p>
+        <div class="actions">
+          <a href="#/settings" class="btn">{$_('verify.backToSettings')}</a>
+        </div>
+      {:else if successPurpose === 'migration' || successPurpose === 'signup'}
         <p class="subtitle">{$_('verify.channelVerified', { values: { channel: channelLabel(successChannel || '') } })}</p>
         <p class="info-text">{$_('verify.canNowSignIn')}</p>
         <div class="actions">
@@ -213,6 +252,58 @@
         </div>
       {/if}
     </div>
+  {:else if mode === 'email-update'}
+    <h1>{$_('verify.emailUpdateTitle')}</h1>
+    <p class="subtitle">{$_('verify.emailUpdateSubtitle')}</p>
+
+    {#if !auth.session}
+      <div class="message warning">{$_('verify.emailUpdateRequiresAuth')}</div>
+      <div class="actions">
+        <a href="#/login" class="btn">{$_('verify.signIn')}</a>
+      </div>
+    {:else}
+      {#if error}
+        <div class="message error">{error}</div>
+      {/if}
+
+      <form onsubmit={(e) => { e.preventDefault(); handleEmailUpdate(); }}>
+        <div class="field">
+          <label for="new-email">{$_('verify.newEmailLabel')}</label>
+          <input
+            id="new-email"
+            type="email"
+            bind:value={newEmail}
+            placeholder={$_('verify.newEmailPlaceholder')}
+            disabled={submitting}
+            required
+            autocomplete="email"
+          />
+        </div>
+
+        <div class="field">
+          <label for="verification-code">{$_('verify.codeLabel')}</label>
+          <input
+            id="verification-code"
+            type="text"
+            bind:value={verificationCode}
+            placeholder={$_('verify.codePlaceholder')}
+            disabled={submitting}
+            required
+            autocomplete="off"
+            class="token-input"
+          />
+          <p class="field-help">{$_('verify.emailUpdateCodeHelp')}</p>
+        </div>
+
+        <button type="submit" disabled={submitting || !verificationCode.trim() || !newEmail.trim()}>
+          {submitting ? $_('verify.updating') : $_('verify.updateEmail')}
+        </button>
+      </form>
+
+      <p class="link-text">
+        <a href="#/settings">{$_('verify.backToSettings')}</a>
+      </p>
+    {/if}
   {:else if mode === 'token'}
     <h1>{$_('verify.tokenTitle')}</h1>
     <p class="subtitle">{$_('verify.tokenSubtitle')}</p>
