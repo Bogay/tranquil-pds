@@ -62,6 +62,7 @@ pub struct AuthenticatedUser {
     pub key_bytes: Option<Vec<u8>>,
     pub is_oauth: bool,
     pub is_admin: bool,
+    pub is_takendown: bool,
     pub scope: Option<String>,
     pub controller_did: Option<String>,
 }
@@ -115,6 +116,13 @@ pub async fn validate_bearer_token_for_service_auth(
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
     validate_bearer_token_with_options_internal(db, None, token, true, true).await
+}
+
+pub async fn validate_bearer_token_allow_takendown(
+    db: &PgPool,
+    token: &str,
+) -> Result<AuthenticatedUser, TokenValidationError> {
+    validate_bearer_token_with_options_internal(db, None, token, false, true).await
 }
 
 async fn validate_bearer_token_with_options_internal(
@@ -254,6 +262,7 @@ async fn validate_bearer_token_with_options_internal(
                             key_bytes: Some(decrypted_key),
                             is_oauth: false,
                             is_admin,
+                            is_takendown: takedown_ref.is_some(),
                             scope: token_data.claims.scope.clone(),
                             controller_did,
                         });
@@ -286,7 +295,8 @@ async fn validate_bearer_token_with_options_internal(
             return Err(TokenValidationError::AccountDeactivated);
         }
 
-        if oauth_token.takedown_ref.is_some() {
+        let is_takendown = oauth_token.takedown_ref.is_some();
+        if !allow_takendown && is_takendown {
             return Err(TokenValidationError::AccountTakedown);
         }
 
@@ -304,6 +314,7 @@ async fn validate_bearer_token_with_options_internal(
                 key_bytes,
                 is_oauth: true,
                 is_admin: oauth_token.is_admin,
+                is_takendown,
                 scope: oauth_info.scope,
                 controller_did: oauth_info.controller_did,
             });
@@ -364,7 +375,8 @@ pub async fn validate_token_with_dpop(
             if !allow_deactivated && user_info.deactivated_at.is_some() {
                 return Err(TokenValidationError::AccountDeactivated);
             }
-            if user_info.takedown_ref.is_some() {
+            let is_takendown = user_info.takedown_ref.is_some();
+            if is_takendown {
                 return Err(TokenValidationError::AccountTakedown);
             }
             let key_bytes = if let (Some(kb), Some(ev)) =
@@ -379,6 +391,7 @@ pub async fn validate_token_with_dpop(
                 key_bytes,
                 is_oauth: true,
                 is_admin: user_info.is_admin,
+                is_takendown,
                 scope: result.scope,
                 controller_did: None,
             })

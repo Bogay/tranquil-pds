@@ -95,6 +95,7 @@ pub async fn get_service_auth(
                 did: result.did,
                 is_oauth: true,
                 is_admin: false,
+                is_takendown: false,
                 scope: result.scope,
                 key_bytes: None,
                 controller_did: None,
