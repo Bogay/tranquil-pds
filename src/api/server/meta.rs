@@ -35,17 +35,23 @@ pub async fn describe_server() -> impl IntoResponse {
     let privacy_policy = std::env::var("PRIVACY_POLICY_URL").ok();
     let terms_of_service = std::env::var("TERMS_OF_SERVICE_URL").ok();
     let contact_email = std::env::var("CONTACT_EMAIL").ok();
+    let mut links = serde_json::Map::new();
+    if let Some(pp) = privacy_policy {
+        links.insert("privacyPolicy".to_string(), json!(pp));
+    }
+    if let Some(tos) = terms_of_service {
+        links.insert("termsOfService".to_string(), json!(tos));
+    }
+    let mut contact = serde_json::Map::new();
+    if let Some(email) = contact_email {
+        contact.insert("email".to_string(), json!(email));
+    }
     Json(json!({
         "availableUserDomains": domains,
         "inviteCodeRequired": invite_code_required,
         "did": format!("did:web:{}", pds_hostname),
-        "links": {
-            "privacyPolicy": privacy_policy,
-            "termsOfService": terms_of_service
-        },
-        "contact": {
-            "email": contact_email
-        },
+        "links": links,
+        "contact": contact,
         "version": env!("CARGO_PKG_VERSION"),
         "availableCommsChannels": get_available_comms_channels()
     }))

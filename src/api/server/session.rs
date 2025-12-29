@@ -138,16 +138,16 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-    let (password_valid, app_password_scopes, app_password_controller) = if row
+    let (password_valid, app_password_name, app_password_scopes, app_password_controller) = if row
         .password_hash
         .as_ref()
         .map(|h| verify(&input.password, h).unwrap_or(false))
         .unwrap_or(false)
     {
-        (true, None, None)
+        (true, None, None, None)
     } else {
         let app_passwords = sqlx::query!(
-            "SELECT password_hash, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
+            "SELECT name, password_hash, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
             row.id
         )
         .fetch_all(&state.db)
@@ -159,10 +159,11 @@ pub async fn create_session(
         match matched {
             Some(app) => (
                 true,
+                Some(app.name.clone()),
                 app.scopes.clone(),
                 app.created_by_controller_did.clone(),
             ),
-            None => (false, None, None),
+            None => (false, None, None, None),
         }
     };
     if !password_valid {
@@ -236,7 +237,7 @@ pub async fn create_session(
     let did_resolver = state.did_resolver.clone();
     let (insert_result, did_doc) = tokio::join!(
         sqlx::query!(
-            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope, controller_did) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope, controller_did, app_password_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             row.did,
             access_meta.jti,
             refresh_meta.jti,
@@ -245,7 +246,8 @@ pub async fn create_session(
             is_legacy_login,
             false,
             app_password_scopes,
-            app_password_controller
+            app_password_controller,
+            app_password_name
         )
         .execute(&state.db),
         did_resolver.resolve_did_document(&did_for_doc)

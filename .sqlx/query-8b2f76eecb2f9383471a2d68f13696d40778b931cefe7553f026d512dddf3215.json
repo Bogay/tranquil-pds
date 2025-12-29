@@ -1,20 +1,25 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT password_hash, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
+  "query": "SELECT name, password_hash, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "password_hash",
+        "name": "name",
         "type_info": "Text"
       },
       {
         "ordinal": 1,
-        "name": "scopes",
+        "name": "password_hash",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
+        "name": "scopes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
         "name": "created_by_controller_did",
         "type_info": "Text"
       }
@@ -26,9 +31,10 @@
     },
     "nullable": [
       false,
+      false,
       true,
       true
     ]
   },
-  "hash": "1a156f5dd3deb0681f7f631321bae44c099eb2eb5d9d1337d22782fe73691a7b"
+  "hash": "8b2f76eecb2f9383471a2d68f13696d40778b931cefe7553f026d512dddf3215"
 }

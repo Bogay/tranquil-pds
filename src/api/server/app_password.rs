@@ -232,7 +232,30 @@ pub async fn revoke_app_password(
     if name.is_empty() {
         return ApiError::InvalidRequest("name is required".into()).into_response();
     }
-    match sqlx::query!(
+    let sessions_to_invalidate = sqlx::query_scalar!(
+        "SELECT access_jti FROM session_tokens WHERE did = $1 AND app_password_name = $2",
+        auth_user.did,
+        name
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    if let Err(e) = sqlx::query!(
+        "DELETE FROM session_tokens WHERE did = $1 AND app_password_name = $2",
+        auth_user.did,
+        name
+    )
+    .execute(&state.db)
+    .await
+    {
+        error!("DB error revoking sessions for app password: {:?}", e);
+        return ApiError::InternalError.into_response();
+    }
+    for jti in &sessions_to_invalidate {
+        let cache_key = format!("auth:session:{}:{}", auth_user.did, jti);
+        let _ = state.cache.delete(&cache_key).await;
+    }
+    if let Err(e) = sqlx::query!(
         "DELETE FROM app_passwords WHERE user_id = $1 AND name = $2",
         user_id,
         name
@@ -240,15 +263,8 @@ pub async fn revoke_app_password(
     .execute(&state.db)
     .await
     {
-        Ok(r) => {
-            if r.rows_affected() == 0 {
-                return ApiError::AppPasswordNotFound.into_response();
-            }
-            Json(json!({})).into_response()
-        }
-        Err(e) => {
-            error!("DB error revoking app password: {:?}", e);
-            ApiError::InternalError.into_response()
-        }
+        error!("DB error revoking app password: {:?}", e);
+        return ApiError::InternalError.into_response();
     }
+    Json(json!({})).into_response()
 }

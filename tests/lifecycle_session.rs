@@ -286,6 +286,142 @@ async fn test_app_password_lifecycle() {
 }
 
 #[tokio::test]
+async fn test_app_password_duplicate_name() {
+    let client = client();
+    let base = base_url().await;
+    let (jwt, _did) = create_account_and_login(&client).await;
+    let create_res = client
+        .post(format!("{}/xrpc/com.atproto.server.createAppPassword", base))
+        .bearer_auth(&jwt)
+        .json(&json!({ "name": "My App" }))
+        .send()
+        .await
+        .expect("Failed to create app password");
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let duplicate_res = client
+        .post(format!("{}/xrpc/com.atproto.server.createAppPassword", base))
+        .bearer_auth(&jwt)
+        .json(&json!({ "name": "My App" }))
+        .send()
+        .await
+        .expect("Failed to attempt duplicate");
+    assert_eq!(
+        duplicate_res.status(),
+        StatusCode::BAD_REQUEST,
+        "Duplicate app password name should fail"
+    );
+    let body: Value = duplicate_res.json().await.unwrap();
+    assert_eq!(body["error"], "DuplicateAppPassword");
+}
+
+#[tokio::test]
+async fn test_app_password_revoke_nonexistent() {
+    let client = client();
+    let base = base_url().await;
+    let (jwt, _did) = create_account_and_login(&client).await;
+    let revoke_res = client
+        .post(format!("{}/xrpc/com.atproto.server.revokeAppPassword", base))
+        .bearer_auth(&jwt)
+        .json(&json!({ "name": "Does Not Exist" }))
+        .send()
+        .await
+        .expect("Failed to revoke");
+    assert_eq!(
+        revoke_res.status(),
+        StatusCode::OK,
+        "Revoking non-existent app password should succeed silently"
+    );
+}
+
+#[tokio::test]
+async fn test_app_password_revoke_invalidates_sessions() {
+    let client = client();
+    let base = base_url().await;
+    let ts = Utc::now().timestamp_millis();
+    let handle = format!("apppass-inv-{}.test", ts);
+    let email = format!("apppass-inv-{}@test.com", ts);
+    let password = "ApppassInv123!";
+    let create_res = client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
+        .json(&json!({
+            "handle": handle,
+            "email": email,
+            "password": password
+        }))
+        .send()
+        .await
+        .expect("Failed to create account");
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let did = account["did"].as_str().unwrap();
+    let main_jwt = verify_new_account(&client, did).await;
+    let create_app_res = client
+        .post(format!("{}/xrpc/com.atproto.server.createAppPassword", base))
+        .bearer_auth(&main_jwt)
+        .json(&json!({ "name": "Session Test App" }))
+        .send()
+        .await
+        .expect("Failed to create app password");
+    assert_eq!(create_app_res.status(), StatusCode::OK);
+    let app_pass: Value = create_app_res.json().await.unwrap();
+    let app_password = app_pass["password"].as_str().unwrap();
+    let app_session_res = client
+        .post(format!("{}/xrpc/com.atproto.server.createSession", base))
+        .json(&json!({
+            "identifier": handle,
+            "password": app_password
+        }))
+        .send()
+        .await
+        .expect("Failed to login with app password");
+    assert_eq!(app_session_res.status(), StatusCode::OK);
+    let app_session: Value = app_session_res.json().await.unwrap();
+    let app_jwt = app_session["accessJwt"].as_str().unwrap();
+    let get_session_res = client
+        .get(format!("{}/xrpc/com.atproto.server.getSession", base))
+        .bearer_auth(app_jwt)
+        .send()
+        .await
+        .expect("Failed to get session");
+    assert_eq!(
+        get_session_res.status(),
+        StatusCode::OK,
+        "App password session should be valid before revocation"
+    );
+    let revoke_res = client
+        .post(format!("{}/xrpc/com.atproto.server.revokeAppPassword", base))
+        .bearer_auth(&main_jwt)
+        .json(&json!({ "name": "Session Test App" }))
+        .send()
+        .await
+        .expect("Failed to revoke app password");
+    assert_eq!(revoke_res.status(), StatusCode::OK);
+    let get_session_after = client
+        .get(format!("{}/xrpc/com.atproto.server.getSession", base))
+        .bearer_auth(app_jwt)
+        .send()
+        .await
+        .expect("Failed to check session after revoke");
+    assert!(
+        get_session_after.status() == StatusCode::UNAUTHORIZED
+            || get_session_after.status() == StatusCode::BAD_REQUEST,
+        "Session created with revoked app password should be invalid, got {}",
+        get_session_after.status()
+    );
+    let main_session_res = client
+        .get(format!("{}/xrpc/com.atproto.server.getSession", base))
+        .bearer_auth(&main_jwt)
+        .send()
+        .await
+        .expect("Failed to check main session");
+    assert_eq!(
+        main_session_res.status(),
+        StatusCode::OK,
+        "Main session should still be valid after revoking app password"
+    );
+}
+
+#[tokio::test]
 async fn test_account_deactivation_lifecycle() {
     let client = client();
     let ts = Utc::now().timestamp_millis();
