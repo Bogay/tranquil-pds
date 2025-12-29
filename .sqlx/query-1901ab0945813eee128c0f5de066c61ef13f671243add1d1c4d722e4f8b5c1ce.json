@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            u.id, u.did, u.handle, u.password_hash,\n            u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,\n            u.allow_legacy_login,\n            u.preferred_comms_channel as \"preferred_comms_channel: crate::comms::CommsChannel\",\n            k.key_bytes, k.encryption_version,\n            (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled\n        FROM users u\n        JOIN user_keys k ON u.id = k.user_id\n        WHERE u.handle = $1 OR u.email = $1 OR u.did = $1",
+  "query": "SELECT\n            u.id, u.did, u.handle, u.password_hash, u.email, u.deactivated_at, u.takedown_ref,\n            u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,\n            u.allow_legacy_login,\n            u.preferred_comms_channel as \"preferred_comms_channel: crate::comms::CommsChannel\",\n            k.key_bytes, k.encryption_version,\n            (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled\n        FROM users u\n        JOIN user_keys k ON u.id = k.user_id\n        WHERE u.handle = $1 OR u.email = $1 OR u.did = $1",
   "describe": {
     "columns": [
       {
@@ -25,31 +25,46 @@
       },
       {
         "ordinal": 4,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "takedown_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "email_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 5,
+        "ordinal": 8,
         "name": "discord_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 6,
+        "ordinal": 9,
         "name": "telegram_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 7,
+        "ordinal": 10,
         "name": "signal_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 8,
+        "ordinal": 11,
         "name": "allow_legacy_login",
         "type_info": "Bool"
       },
       {
-        "ordinal": 9,
+        "ordinal": 12,
         "name": "preferred_comms_channel: crate::comms::CommsChannel",
         "type_info": {
           "Custom": {
@@ -66,17 +81,17 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 13,
         "name": "key_bytes",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 11,
+        "ordinal": 14,
         "name": "encryption_version",
         "type_info": "Int4"
       },
       {
-        "ordinal": 12,
+        "ordinal": 15,
         "name": "totp_enabled",
         "type_info": "Bool"
       }
@@ -91,6 +106,9 @@
       false,
       false,
       true,
+      true,
+      true,
+      true,
       false,
       false,
       false,
@@ -102,5 +120,5 @@
       null
     ]
   },
-  "hash": "fe8f204d593dce319bb4624871a3a597ba1d3d9ea32855704b18948fd6bbae38"
+  "hash": "1901ab0945813eee128c0f5de066c61ef13f671243add1d1c4d722e4f8b5c1ce"
 }

@@ -29,6 +29,12 @@ struct CachedDid {
     resolved_at: Instant,
 }
 
+#[derive(Clone)]
+struct CachedDidDocument {
+    document: serde_json::Value,
+    resolved_at: Instant,
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedService {
     pub url: String,
@@ -37,6 +43,7 @@ pub struct ResolvedService {
 
 pub struct DidResolver {
     did_cache: RwLock<HashMap<String, CachedDid>>,
+    did_doc_cache: RwLock<HashMap<String, CachedDidDocument>>,
     client: Client,
     cache_ttl: Duration,
     plc_directory_url: String,
@@ -46,6 +53,7 @@ impl Clone for DidResolver {
     fn clone(&self) -> Self {
         Self {
             did_cache: RwLock::new(HashMap::new()),
+            did_doc_cache: RwLock::new(HashMap::new()),
             client: self.client.clone(),
             cache_ttl: self.cache_ttl,
             plc_directory_url: self.plc_directory_url.clone(),
@@ -74,10 +82,58 @@ impl DidResolver {
 
         Self {
             did_cache: RwLock::new(HashMap::new()),
+            did_doc_cache: RwLock::new(HashMap::new()),
             client,
             cache_ttl: Duration::from_secs(cache_ttl_secs),
             plc_directory_url,
         }
+    }
+
+    fn build_did_web_url(did: &str) -> Result<String, String> {
+        let host = did
+            .strip_prefix("did:web:")
+            .ok_or("Invalid did:web format")?;
+
+        let (host, path) = if host.contains(':') {
+            let decoded = host.replace("%3A", ":");
+            let parts: Vec<&str> = decoded.splitn(2, '/').collect();
+            if parts.len() > 1 {
+                (parts[0].to_string(), format!("/{}", parts[1]))
+            } else {
+                (decoded, String::new())
+            }
+        } else {
+            let parts: Vec<&str> = host.splitn(2, ':').collect();
+            if parts.len() > 1 && parts[1].contains('/') {
+                let path_parts: Vec<&str> = parts[1].splitn(2, '/').collect();
+                if path_parts.len() > 1 {
+                    (
+                        format!("{}:{}", parts[0], path_parts[0]),
+                        format!("/{}", path_parts[1]),
+                    )
+                } else {
+                    (host.to_string(), String::new())
+                }
+            } else {
+                (host.to_string(), String::new())
+            }
+        };
+
+        let scheme =
+            if host.starts_with("localhost") || host.starts_with("127.0.0.1") || host.contains(':')
+            {
+                "http"
+            } else {
+                "https"
+            };
+
+        let url = if path.is_empty() {
+            format!("{}://{}/.well-known/did.json", scheme, host)
+        } else {
+            format!("{}://{}{}/did.json", scheme, host, path)
+        };
+
+        Ok(url)
     }
 
     pub async fn resolve_did(&self, did: &str) -> Option<ResolvedService> {
@@ -140,48 +196,7 @@ impl DidResolver {
     }
 
     async fn resolve_did_web(&self, did: &str) -> Result<DidDocument, String> {
-        let host = did
-            .strip_prefix("did:web:")
-            .ok_or("Invalid did:web format")?;
-
-        let (host, path) = if host.contains(':') {
-            let decoded = host.replace("%3A", ":");
-            let parts: Vec<&str> = decoded.splitn(2, '/').collect();
-            if parts.len() > 1 {
-                (parts[0].to_string(), format!("/{}", parts[1]))
-            } else {
-                (decoded, String::new())
-            }
-        } else {
-            let parts: Vec<&str> = host.splitn(2, ':').collect();
-            if parts.len() > 1 && parts[1].contains('/') {
-                let path_parts: Vec<&str> = parts[1].splitn(2, '/').collect();
-                if path_parts.len() > 1 {
-                    (
-                        format!("{}:{}", parts[0], path_parts[0]),
-                        format!("/{}", path_parts[1]),
-                    )
-                } else {
-                    (host.to_string(), String::new())
-                }
-            } else {
-                (host.to_string(), String::new())
-            }
-        };
-
-        let scheme =
-            if host.starts_with("localhost") || host.starts_with("127.0.0.1") || host.contains(':')
-            {
-                "http"
-            } else {
-                "https"
-            };
-
-        let url = if path.is_empty() {
-            format!("{}://{}/.well-known/did.json", scheme, host)
-        } else {
-            format!("{}://{}{}/did.json", scheme, host, path)
-        };
+        let url = Self::build_did_web_url(did)?;
 
         debug!("Resolving did:web {} via {}", did, url);
 
@@ -286,9 +301,92 @@ impl DidResolver {
         None
     }
 
+    pub async fn resolve_did_document(&self, did: &str) -> Option<serde_json::Value> {
+        {
+            let cache = self.did_doc_cache.read().await;
+            if let Some(cached) = cache.get(did)
+                && cached.resolved_at.elapsed() < self.cache_ttl
+            {
+                return Some(cached.document.clone());
+            }
+        }
+
+        let result = if did.starts_with("did:web:") {
+            self.fetch_did_document_web(did).await
+        } else if did.starts_with("did:plc:") {
+            self.fetch_did_document_plc(did).await
+        } else {
+            warn!("Unsupported DID method for document resolution: {}", did);
+            return None;
+        };
+
+        match result {
+            Ok(doc) => {
+                let mut cache = self.did_doc_cache.write().await;
+                cache.insert(
+                    did.to_string(),
+                    CachedDidDocument {
+                        document: doc.clone(),
+                        resolved_at: Instant::now(),
+                    },
+                );
+                Some(doc)
+            }
+            Err(e) => {
+                warn!("Failed to resolve DID document for {}: {}", did, e);
+                None
+            }
+        }
+    }
+
+    async fn fetch_did_document_web(&self, did: &str) -> Result<serde_json::Value, String> {
+        let url = Self::build_did_web_url(did)?;
+
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+
+        resp.json::<serde_json::Value>()
+            .await
+            .map_err(|e| format!("Failed to parse DID document: {}", e))
+    }
+
+    async fn fetch_did_document_plc(&self, did: &str) -> Result<serde_json::Value, String> {
+        let url = format!("{}/{}", self.plc_directory_url, urlencoding::encode(did));
+
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err("DID not found".to_string());
+        }
+
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+
+        resp.json::<serde_json::Value>()
+            .await
+            .map_err(|e| format!("Failed to parse DID document: {}", e))
+    }
+
     pub async fn invalidate_cache(&self, did: &str) {
         let mut cache = self.did_cache.write().await;
         cache.remove(did);
+        drop(cache);
+        let mut doc_cache = self.did_doc_cache.write().await;
+        doc_cache.remove(did);
     }
 }
 

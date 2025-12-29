@@ -43,9 +43,12 @@ fn full_handle(stored_handle: &str, _pds_hostname: &str) -> String {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateSessionInput {
     pub identifier: String,
     pub password: String,
+    #[serde(default)]
+    pub allow_takendown: bool,
 }
 
 #[derive(Serialize)]
@@ -55,6 +58,16 @@ pub struct CreateSessionOutput {
     pub refresh_jwt: String,
     pub handle: String,
     pub did: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_doc: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_confirmed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 pub async fn create_session(
@@ -89,7 +102,7 @@ pub async fn create_session(
     );
     let row = match sqlx::query!(
         r#"SELECT
-            u.id, u.did, u.handle, u.password_hash,
+            u.id, u.did, u.handle, u.password_hash, u.email, u.deactivated_at, u.takedown_ref,
             u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,
             u.allow_legacy_login,
             u.preferred_comms_channel as "preferred_comms_channel: crate::comms::CommsChannel",
@@ -157,6 +170,18 @@ pub async fn create_session(
         return ApiError::AuthenticationFailedMsg("Invalid identifier or password".into())
             .into_response();
     }
+    let is_takendown = row.takedown_ref.is_some();
+    if is_takendown && !input.allow_takendown {
+        warn!("Login attempt for takendown account: {}", row.did);
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "AccountTakedown",
+                "message": "Account has been taken down"
+            })),
+        )
+            .into_response();
+    }
     let is_verified =
         row.email_verified || row.discord_verified || row.telegram_verified || row.signal_verified;
     let is_delegated = crate::delegation::is_delegated_account(&state.db, &row.did)
@@ -207,21 +232,25 @@ pub async fn create_session(
             return ApiError::InternalError.into_response();
         }
     };
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope, controller_did) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-        row.did,
-        access_meta.jti,
-        refresh_meta.jti,
-        access_meta.expires_at,
-        refresh_meta.expires_at,
-        is_legacy_login,
-        false,
-        app_password_scopes,
-        app_password_controller
-    )
-    .execute(&state.db)
-    .await
-    {
+    let did_for_doc = row.did.clone();
+    let did_resolver = state.did_resolver.clone();
+    let (insert_result, did_doc) = tokio::join!(
+        sqlx::query!(
+            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope, controller_did) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            row.did,
+            access_meta.jti,
+            refresh_meta.jti,
+            access_meta.expires_at,
+            refresh_meta.expires_at,
+            is_legacy_login,
+            false,
+            app_password_scopes,
+            app_password_controller
+        )
+        .execute(&state.db),
+        did_resolver.resolve_did_document(&did_for_doc)
+    );
+    if let Err(e) = insert_result {
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError.into_response();
     }
@@ -245,11 +274,24 @@ pub async fn create_session(
         }
     }
     let handle = full_handle(&row.handle, &pds_hostname);
+    let is_active = row.deactivated_at.is_none() && !is_takendown;
+    let status = if is_takendown {
+        Some("takendown".to_string())
+    } else if row.deactivated_at.is_some() {
+        Some("deactivated".to_string())
+    } else {
+        None
+    };
     Json(CreateSessionOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
         handle,
         did: row.did,
+        did_doc,
+        email: row.email,
+        email_confirmed: Some(row.email_verified),
+        active: Some(is_active),
+        status,
     })
     .into_response()
 }
@@ -261,17 +303,21 @@ pub async fn get_session(
     let permissions = auth_user.permissions();
     let can_read_email = permissions.allows_email_read();
 
-    match sqlx::query!(
-        r#"SELECT
-            handle, email, email_verified, is_admin, deactivated_at, preferred_locale,
-            preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
-            discord_verified, telegram_verified, signal_verified
-        FROM users WHERE did = $1"#,
-        auth_user.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let did_for_doc = auth_user.did.clone();
+    let did_resolver = state.did_resolver.clone();
+    let (db_result, did_doc) = tokio::join!(
+        sqlx::query!(
+            r#"SELECT
+                handle, email, email_verified, is_admin, deactivated_at, takedown_ref, preferred_locale,
+                preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
+                discord_verified, telegram_verified, signal_verified
+            FROM users WHERE did = $1"#,
+            auth_user.did
+        )
+        .fetch_optional(&state.db),
+        did_resolver.resolve_did_document(&did_for_doc)
+    );
+    match db_result {
         Ok(Some(row)) => {
             let (preferred_channel, preferred_channel_verified) = match row.preferred_channel {
                 crate::comms::CommsChannel::Email => ("email", row.email_verified),
@@ -282,26 +328,36 @@ pub async fn get_session(
             let pds_hostname =
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&row.handle, &pds_hostname);
-            let is_active = row.deactivated_at.is_none();
+            let is_takendown = row.takedown_ref.is_some();
+            let is_active = row.deactivated_at.is_none() && !is_takendown;
             let email_value = if can_read_email {
                 row.email.clone()
             } else {
                 None
             };
-            let email_verified_value = can_read_email && row.email_verified;
-            Json(json!({
+            let email_confirmed_value = can_read_email && row.email_verified;
+            let mut response = json!({
                 "handle": handle,
                 "did": auth_user.did,
-                "email": email_value,
-                "emailVerified": email_verified_value,
+                "active": is_active,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "preferredLocale": row.preferred_locale,
-                "isAdmin": row.is_admin,
-                "active": is_active,
-                "status": if is_active { "active" } else { "deactivated" },
-                "didDoc": {}
-            }))
+                "isAdmin": row.is_admin
+            });
+            if can_read_email {
+                response["email"] = json!(email_value);
+                response["emailConfirmed"] = json!(email_confirmed_value);
+            }
+            if is_takendown {
+                response["status"] = json!("takendown");
+            } else if row.deactivated_at.is_some() {
+                response["status"] = json!("deactivated");
+            }
+            if let Some(doc) = did_doc {
+                response["didDoc"] = doc;
+            }
+            Json(response)
             .into_response()
         }
         Ok(None) => ApiError::AuthenticationFailed.into_response(),
@@ -498,17 +554,21 @@ pub async fn refresh_session(
         error!("Failed to commit transaction: {:?}", e);
         return ApiError::InternalError.into_response();
     }
-    match sqlx::query!(
-        r#"SELECT
-            handle, email, email_verified, is_admin, preferred_locale,
-            preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
-            discord_verified, telegram_verified, signal_verified
-        FROM users WHERE did = $1"#,
-        session_row.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let did_for_doc = session_row.did.clone();
+    let did_resolver = state.did_resolver.clone();
+    let (db_result, did_doc) = tokio::join!(
+        sqlx::query!(
+            r#"SELECT
+                handle, email, email_verified, is_admin, preferred_locale, deactivated_at, takedown_ref,
+                preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
+                discord_verified, telegram_verified, signal_verified
+            FROM users WHERE did = $1"#,
+            session_row.did
+        )
+        .fetch_optional(&state.db),
+        did_resolver.resolve_did_document(&did_for_doc)
+    );
+    match db_result {
         Ok(Some(u)) => {
             let (preferred_channel, preferred_channel_verified) = match u.preferred_channel {
                 crate::comms::CommsChannel::Email => ("email", u.email_verified),
@@ -519,19 +579,30 @@ pub async fn refresh_session(
             let pds_hostname =
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&u.handle, &pds_hostname);
-            Json(json!({
+            let is_takendown = u.takedown_ref.is_some();
+            let is_active = u.deactivated_at.is_none() && !is_takendown;
+            let mut response = json!({
                 "accessJwt": new_access_meta.token,
                 "refreshJwt": new_refresh_meta.token,
                 "handle": handle,
                 "did": session_row.did,
                 "email": u.email,
-                "emailVerified": u.email_verified,
+                "emailConfirmed": u.email_verified,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "preferredLocale": u.preferred_locale,
                 "isAdmin": u.is_admin,
-                "active": true
-            }))
+                "active": is_active
+            });
+            if let Some(doc) = did_doc {
+                response["didDoc"] = doc;
+            }
+            if is_takendown {
+                response["status"] = json!("takendown");
+            } else if u.deactivated_at.is_some() {
+                response["status"] = json!("deactivated");
+            }
+            Json(response)
             .into_response()
         }
         Ok(None) => {

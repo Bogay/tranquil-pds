@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n            handle, email, email_verified, is_admin, preferred_locale,\n            preferred_comms_channel as \"preferred_channel: crate::comms::CommsChannel\",\n            discord_verified, telegram_verified, signal_verified\n        FROM users WHERE did = $1",
+  "query": "SELECT\n                handle, email, email_verified, is_admin, preferred_locale, deactivated_at, takedown_ref,\n                preferred_comms_channel as \"preferred_channel: crate::comms::CommsChannel\",\n                discord_verified, telegram_verified, signal_verified\n            FROM users WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -30,6 +30,16 @@
       },
       {
         "ordinal": 5,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "takedown_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "preferred_channel: crate::comms::CommsChannel",
         "type_info": {
           "Custom": {
@@ -46,17 +56,17 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "discord_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "telegram_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "signal_verified",
         "type_info": "Bool"
       }
@@ -72,11 +82,13 @@
       false,
       false,
       true,
+      true,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "7fea217210a7a97f02d981692ba1cdda4f8037c7feba39610e3dd4d4d2f7ee8c"
+  "hash": "d4e4c9de4330cc017f457eaec4195b0cf35607d2d0ef6b73e9bb5e94e7742e7a"
 }
