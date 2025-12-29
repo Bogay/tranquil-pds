@@ -101,6 +101,7 @@ pub struct CommitFrameBuilder {
     pub ops_json: serde_json::Value,
     pub blobs: Vec<String>,
     pub time: chrono::DateTime<chrono::Utc>,
+    pub rev: Option<String>,
 }
 
 impl CommitFrameBuilder {
@@ -122,7 +123,8 @@ impl CommitFrameBuilder {
             .iter()
             .filter_map(|s| Cid::from_str(s).ok())
             .collect();
-        let rev = placeholder_rev();
+        let rev = self.rev.unwrap_or_else(placeholder_rev);
+        let since = self.prev_cid_str.as_ref().map(|_| rev.clone());
         Ok(CommitFrame {
             seq: self.seq,
             rebase: false,
@@ -130,7 +132,7 @@ impl CommitFrameBuilder {
             repo: self.did,
             commit: commit_cid,
             rev,
-            since: self.prev_cid_str.as_ref().map(|_| placeholder_rev()),
+            since,
             blocks: Vec::new(),
             ops,
             blobs,
@@ -161,6 +163,7 @@ impl TryFrom<SequencedEvent> for CommitFrame {
             ops_json: event.ops.unwrap_or_default(),
             blobs: event.blobs.unwrap_or_default(),
             time: event.created_at,
+            rev: event.rev,
         };
         builder.build()
     }

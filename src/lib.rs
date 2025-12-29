@@ -15,6 +15,7 @@ pub mod oauth;
 pub mod plc;
 pub mod rate_limit;
 pub mod repo;
+pub mod scheduled;
 pub mod state;
 pub mod storage;
 pub mod sync;

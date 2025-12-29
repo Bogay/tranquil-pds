@@ -8,6 +8,7 @@ use serde_json::Value;
 async fn test_list_blobs_success() {
     let client = client();
     let (access_jwt, did) = create_account_and_login(&client).await;
+    let unique_content = format!("test blob content {}", uuid::Uuid::new_v4());
     let blob_res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.uploadBlob",
@@ -15,7 +16,7 @@ async fn test_list_blobs_success() {
         ))
         .header(header::CONTENT_TYPE, "text/plain")
         .bearer_auth(&access_jwt)
-        .body("test blob content")
+        .body(unique_content)
         .send()
         .await
         .expect("Failed to upload blob");

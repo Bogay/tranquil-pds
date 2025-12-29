@@ -83,14 +83,38 @@ pub async fn check_account_status(
         _ => None,
     };
     let repo_result = sqlx::query!(
-        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
+        "SELECT repo_root_cid, repo_rev FROM repos WHERE user_id = $1",
         user_id
     )
     .fetch_optional(&state.db)
     .await;
-    let repo_commit = match repo_result {
-        Ok(Some(row)) => row.repo_root_cid,
-        _ => String::new(),
+    let (repo_commit, repo_rev_from_db) = match repo_result {
+        Ok(Some(row)) => (row.repo_root_cid, row.repo_rev),
+        _ => (String::new(), None),
+    };
+    let block_count: i64 =
+        sqlx::query_scalar!("SELECT COUNT(*) FROM user_blocks WHERE user_id = $1", user_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(Some(0))
+            .unwrap_or(0);
+    let repo_rev = if let Some(rev) = repo_rev_from_db {
+        rev
+    } else if !repo_commit.is_empty() {
+        if let Ok(cid) = Cid::from_str(&repo_commit) {
+            if let Ok(Some(block)) = state.block_store.get(&cid).await {
+                Commit::from_cbor(&block)
+                    .ok()
+                    .map(|c| c.rev().to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
     };
     let record_count: i64 =
         sqlx::query_scalar!("SELECT COUNT(*) FROM records WHERE repo_id = $1", user_id)
@@ -106,15 +130,15 @@ pub async fn check_account_status(
     .await
     .unwrap_or(Some(0))
     .unwrap_or(0);
-    let valid_did = did.starts_with("did:");
+    let valid_did = is_valid_did_for_service(&state.db, &did).await;
     (
         StatusCode::OK,
         Json(CheckAccountStatusOutput {
             activated: deactivated_at.is_none(),
             valid_did,
             repo_commit: repo_commit.clone(),
-            repo_rev: chrono::Utc::now().timestamp_millis().to_string(),
-            repo_blocks: 0,
+            repo_rev,
+            repo_blocks: block_count as i64,
             indexed_records: record_count,
             private_state_values: 0,
             expected_blobs: blob_count,
@@ -124,9 +148,16 @@ pub async fn check_account_status(
         .into_response()
 }
 
+async fn is_valid_did_for_service(db: &sqlx::PgPool, did: &str) -> bool {
+    assert_valid_did_document_for_service(db, did, false)
+        .await
+        .is_ok()
+}
+
 async fn assert_valid_did_document_for_service(
     db: &sqlx::PgPool,
     did: &str,
+    with_retry: bool,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let expected_endpoint = format!("https://{}", hostname);
@@ -134,9 +165,10 @@ async fn assert_valid_did_document_for_service(
     if did.starts_with("did:plc:") {
         let plc_client = PlcClient::new(None);
 
+        let max_attempts = if with_retry { 5 } else { 1 };
         let mut last_error = None;
         let mut doc_data = None;
-        for attempt in 0..5 {
+        for attempt in 0..max_attempts {
             if attempt > 0 {
                 let delay_ms = 500 * (1 << (attempt - 1));
                 info!(
@@ -195,6 +227,28 @@ async fn assert_valid_did_document_for_service(
                 ));
             }
         };
+
+        let server_rotation_key = std::env::var("PLC_ROTATION_KEY").ok();
+        if let Some(ref expected_rotation_key) = server_rotation_key {
+            let rotation_keys = doc_data
+                .get("rotationKeys")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|k| k.as_str())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !rotation_keys.contains(&expected_rotation_key.as_str()) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "InvalidRequest",
+                        "message": "Server rotation key not included in PLC DID data"
+                    })),
+                ));
+            }
+        }
 
         let doc_signing_key = doc_data
             .get("verificationMethods")
@@ -378,7 +432,7 @@ pub async fn activate_account(
         did
     );
     let did_validation_start = std::time::Instant::now();
-    if let Err((status, json)) = assert_valid_did_document_for_service(&state.db, &did).await {
+    if let Err((status, json)) = assert_valid_did_document_for_service(&state.db, &did, true).await {
         info!(
             "[MIGRATION] activateAccount: DID document validation FAILED for {} (took {:?})",
             did,
@@ -511,7 +565,7 @@ pub struct DeactivateAccountInput {
 pub async fn deactivate_account(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    Json(_input): Json<DeactivateAccountInput>,
+    Json(input): Json<DeactivateAccountInput>,
 ) -> Response {
     let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
@@ -548,6 +602,12 @@ pub async fn deactivate_account(
         return e;
     }
 
+    let delete_after: Option<chrono::DateTime<chrono::Utc>> = input
+        .delete_after
+        .as_ref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
     let did = auth_user.did;
     let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
@@ -555,8 +615,9 @@ pub async fn deactivate_account(
         .ok()
         .flatten();
     let result = sqlx::query!(
-        "UPDATE users SET deactivated_at = NOW() WHERE did = $1",
-        did
+        "UPDATE users SET deactivated_at = NOW(), delete_after = $2 WHERE did = $1",
+        did,
+        delete_after
     )
     .execute(&state.db)
     .await;
@@ -690,6 +751,14 @@ pub async fn delete_account(
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidRequest", "message": "password is required"})),
+        )
+            .into_response();
+    }
+    const OLD_PASSWORD_MAX_LENGTH: usize = 512;
+    if password.len() > OLD_PASSWORD_MAX_LENGTH {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": "Invalid password length."})),
         )
             .into_response();
     }
@@ -842,18 +911,35 @@ pub async fn delete_account(
                 )
                     .into_response();
             }
-            if let Err(e) = crate::api::repo::record::sequence_account_event(
+            let account_seq = crate::api::repo::record::sequence_account_event(
                 &state,
                 did,
                 false,
                 Some("deleted"),
             )
-            .await
-            {
-                warn!(
-                    "Failed to sequence account deletion event for {}: {}",
-                    did, e
-                );
+            .await;
+            match account_seq {
+                Ok(seq) => {
+                    if let Err(e) = sqlx::query!(
+                        "DELETE FROM repo_seq WHERE did = $1 AND seq != $2",
+                        did,
+                        seq
+                    )
+                    .execute(&state.db)
+                    .await
+                    {
+                        warn!(
+                            "Failed to cleanup sequences for deleted account {}: {}",
+                            did, e
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to sequence account deletion event for {}: {}",
+                        did, e
+                    );
+                }
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             info!("Account {} deleted successfully", did);

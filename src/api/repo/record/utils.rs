@@ -173,13 +173,34 @@ pub async fn commit_and_log(
     .flatten()
     .unwrap_or(false);
     sqlx::query!(
-        "UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2",
+        "UPDATE repos SET repo_root_cid = $1, repo_rev = $2 WHERE user_id = $3",
         new_root_cid.to_string(),
+        &rev_str,
         user_id
     )
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (repos): {}", e))?;
+    let mut all_block_cids: Vec<Vec<u8>> = blocks_cids
+        .iter()
+        .filter_map(|s| Cid::from_str(s).ok())
+        .map(|c| c.to_bytes())
+        .collect();
+    all_block_cids.push(new_root_cid.to_bytes());
+    if !all_block_cids.is_empty() {
+        sqlx::query!(
+            r#"
+            INSERT INTO user_blocks (user_id, block_cid)
+            SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
+            ON CONFLICT (user_id, block_cid) DO NOTHING
+            "#,
+            user_id,
+            &all_block_cids
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("DB Error (user_blocks): {}", e))?;
+    }
     let mut upsert_collections: Vec<String> = Vec::new();
     let mut upsert_rkeys: Vec<String> = Vec::new();
     let mut upsert_cids: Vec<String> = Vec::new();
@@ -492,8 +513,8 @@ pub async fn sequence_sync_event(
 }
 
 pub async fn sequence_empty_commit_event(state: &AppState, did: &str) -> Result<i64, String> {
-    let repo_root = sqlx::query_scalar!(
-        "SELECT r.repo_root_cid FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
+    let repo_info = sqlx::query!(
+        "SELECT r.repo_root_cid, r.repo_rev FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
         did
     )
     .fetch_optional(&state.db)
@@ -503,17 +524,20 @@ pub async fn sequence_empty_commit_event(state: &AppState, did: &str) -> Result<
     let ops = serde_json::json!([]);
     let blobs: Vec<String> = vec![];
     let blocks_cids: Vec<String> = vec![];
+    let prev_cid: Option<&str> = None;
     let seq_row = sqlx::query!(
         r#"
-        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids)
-        VALUES ($1, 'commit', $2, $2, $3, $4, $5)
+        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, rev)
+        VALUES ($1, 'commit', $2, $3::TEXT, $4, $5, $6, $7)
         RETURNING seq
         "#,
         did,
-        repo_root,
+        repo_info.repo_root_cid,
+        prev_cid,
         ops,
         &blobs,
-        &blocks_cids
+        &blocks_cids,
+        repo_info.repo_rev
     )
     .fetch_one(&state.db)
     .await

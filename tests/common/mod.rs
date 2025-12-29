@@ -466,8 +466,11 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
                     .await
                     .expect("Failed to mark user as admin");
             }
+            let verification_required = body["verificationRequired"].as_bool().unwrap_or(true);
             if let Some(access_jwt) = body["accessJwt"].as_str() {
-                return (access_jwt.to_string(), did);
+                if !verification_required {
+                    return (access_jwt.to_string(), did);
+                }
             }
             let body_text: String = sqlx::query_scalar!(
                 "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",

@@ -32,10 +32,20 @@ pub async fn describe_server() -> impl IntoResponse {
     let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
+    let privacy_policy = std::env::var("PRIVACY_POLICY_URL").ok();
+    let terms_of_service = std::env::var("TERMS_OF_SERVICE_URL").ok();
+    let contact_email = std::env::var("CONTACT_EMAIL").ok();
     Json(json!({
         "availableUserDomains": domains,
         "inviteCodeRequired": invite_code_required,
         "did": format!("did:web:{}", pds_hostname),
+        "links": {
+            "privacyPolicy": privacy_policy,
+            "termsOfService": terms_of_service
+        },
+        "contact": {
+            "email": contact_email
+        },
         "version": env!("CARGO_PKG_VERSION"),
         "availableCommsChannels": get_available_comms_channels()
     }))

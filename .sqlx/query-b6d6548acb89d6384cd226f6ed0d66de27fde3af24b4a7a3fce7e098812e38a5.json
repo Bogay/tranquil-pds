@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM repo_seq WHERE did = $1 AND seq != $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b6d6548acb89d6384cd226f6ed0d66de27fde3af24b4a7a3fce7e098812e38a5"
+}

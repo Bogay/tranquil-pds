@@ -612,15 +612,37 @@ pub async fn create_passkey_account(
         }
     };
     let commit_cid_str = commit_cid.to_string();
+    let rev_str = rev.as_ref().to_string();
     if let Err(e) = sqlx::query!(
-        "INSERT INTO repos (user_id, repo_root_cid) VALUES ($1, $2)",
+        "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
         user_id,
-        commit_cid_str
+        commit_cid_str,
+        rev_str
     )
     .execute(&mut *tx)
     .await
     {
         error!("Error inserting repo: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+    let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
+    if let Err(e) = sqlx::query!(
+        r#"
+        INSERT INTO user_blocks (user_id, block_cid)
+        SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
+        ON CONFLICT (user_id, block_cid) DO NOTHING
+        "#,
+        user_id,
+        &genesis_block_cids
+    )
+    .execute(&mut *tx)
+    .await
+    {
+        error!("Error inserting user_blocks: {:?}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),

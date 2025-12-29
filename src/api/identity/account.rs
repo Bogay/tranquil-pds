@@ -57,9 +57,9 @@ pub struct CreateAccountOutput {
     pub handle: String,
     pub did: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub access_jwt: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub refresh_jwt: Option<String>,
+    pub did_doc: Option<serde_json::Value>,
+    pub access_jwt: String,
+    pub refresh_jwt: String,
     pub verification_required: bool,
     pub verification_channel: String,
 }
@@ -624,9 +624,10 @@ pub async fn create_account(
                     StatusCode::OK,
                     Json(CreateAccountOutput {
                         handle: handle.clone(),
-                        did,
-                        access_jwt: Some(access_meta.token),
-                        refresh_jwt: Some(refresh_meta.token),
+                        did: did.clone(),
+                        did_doc: state.did_resolver.resolve_did_document(&did).await,
+                        access_jwt: access_meta.token,
+                        refresh_jwt: refresh_meta.token,
                         verification_required: false,
                         verification_channel: "email".to_string(),
                     }),
@@ -912,15 +913,37 @@ pub async fn create_account(
         }
     };
     let commit_cid_str = commit_cid.to_string();
+    let rev_str = rev.as_ref().to_string();
     let repo_insert = sqlx::query!(
-        "INSERT INTO repos (user_id, repo_root_cid) VALUES ($1, $2)",
+        "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
         user_id,
-        commit_cid_str
+        commit_cid_str,
+        rev_str
     )
     .execute(&mut *tx)
     .await;
     if let Err(e) = repo_insert {
         error!("Error initializing repo: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+    let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
+    if let Err(e) = sqlx::query!(
+        r#"
+        INSERT INTO user_blocks (user_id, block_cid)
+        SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
+        ON CONFLICT (user_id, block_cid) DO NOTHING
+        "#,
+        user_id,
+        &genesis_block_cids
+    )
+    .execute(&mut *tx)
+    .await
+    {
+        error!("Error inserting user_blocks: {:?}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError"})),
@@ -964,6 +987,21 @@ pub async fn create_account(
             crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
         {
             warn!("Failed to sequence account event for {}: {}", did, e);
+        }
+        if let Err(e) =
+            crate::api::repo::record::sequence_empty_commit_event(&state, &did).await
+        {
+            warn!("Failed to sequence commit event for {}: {}", did, e);
+        }
+        if let Err(e) = crate::api::repo::record::sequence_sync_event(
+            &state,
+            &did,
+            &commit_cid_str,
+            Some(rev.as_ref()),
+        )
+        .await
+        {
+            warn!("Failed to sequence sync event for {}: {}", did, e);
         }
         let profile_record = json!({
             "$type": "app.bsky.actor.profile",
@@ -1023,71 +1061,50 @@ pub async fn create_account(
         }
     }
 
-    let (access_jwt, refresh_jwt) = if is_migration {
-        info!(
-            "[MIGRATION] createAccount: Creating session tokens for migration did={}",
-            did
-        );
-        let access_meta = match crate::auth::create_access_token_with_metadata(
-            &did,
-            &secret_key_bytes,
-        ) {
-            Ok(m) => m,
-            Err(e) => {
-                error!(
-                    "[MIGRATION] createAccount: Error creating access token for migration: {:?}",
-                    e
-                );
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
-        };
-        let refresh_meta = match crate::auth::create_refresh_token_with_metadata(
-            &did,
-            &secret_key_bytes,
-        ) {
-            Ok(m) => m,
-            Err(e) => {
-                error!(
-                    "[MIGRATION] createAccount: Error creating refresh token for migration: {:?}",
-                    e
-                );
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
-        };
-        if let Err(e) = sqlx::query!(
-            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
-            did,
-            access_meta.jti,
-            refresh_meta.jti,
-            access_meta.expires_at,
-            refresh_meta.expires_at
-        )
-        .execute(&state.db)
-        .await
-        {
-            error!("[MIGRATION] createAccount: Error creating session for migration: {:?}", e);
+    let access_meta = match crate::auth::create_access_token_with_metadata(&did, &secret_key_bytes)
+    {
+        Ok(m) => m,
+        Err(e) => {
+            error!("createAccount: Error creating access token: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
             )
                 .into_response();
         }
-        info!(
-            "[MIGRATION] createAccount: Session created successfully for did={}",
-            did
-        );
-        (Some(access_meta.token), Some(refresh_meta.token))
-    } else {
-        (None, None)
     };
+    let refresh_meta =
+        match crate::auth::create_refresh_token_with_metadata(&did, &secret_key_bytes) {
+            Ok(m) => m,
+            Err(e) => {
+                error!("createAccount: Error creating refresh token: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
+    if let Err(e) = sqlx::query!(
+        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
+        did,
+        access_meta.jti,
+        refresh_meta.jti,
+        access_meta.expires_at,
+        refresh_meta.expires_at
+    )
+    .execute(&state.db)
+    .await
+    {
+        error!("createAccount: Error creating session: {:?}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "InternalError"})),
+        )
+            .into_response();
+    }
+
+    let did_doc = state.did_resolver.resolve_did_document(&did).await;
 
     if is_migration {
         info!(
@@ -1101,11 +1118,13 @@ pub async fn create_account(
         Json(CreateAccountOutput {
             handle: handle.clone(),
             did,
-            access_jwt,
-            refresh_jwt,
+            did_doc,
+            access_jwt: access_meta.token,
+            refresh_jwt: refresh_meta.token,
             verification_required: !is_migration,
             verification_channel: verification_channel.to_string(),
         }),
     )
         .into_response()
 }
+

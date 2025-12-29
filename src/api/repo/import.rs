@@ -315,7 +315,7 @@ pub async fn import_repo(
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_BLOCKS);
-    match apply_import(&state.db, user_id, root, blocks, max_blocks).await {
+    match apply_import(&state.db, user_id, root, blocks.clone(), max_blocks).await {
         Ok(import_result) => {
             info!(
                 "Successfully imported {} records for user {}",
@@ -405,14 +405,36 @@ pub async fn import_repo(
             };
             let new_root_str = new_root_cid.to_string();
             if let Err(e) = sqlx::query!(
-                "UPDATE repos SET repo_root_cid = $1, updated_at = NOW() WHERE user_id = $2",
+                "UPDATE repos SET repo_root_cid = $1, repo_rev = $2, updated_at = NOW() WHERE user_id = $3",
                 new_root_str,
+                &new_rev_str,
                 user_id
             )
             .execute(&state.db)
             .await
             {
                 error!("Failed to update repo root: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            let mut all_block_cids: Vec<Vec<u8>> = blocks.keys().map(|c| c.to_bytes()).collect();
+            all_block_cids.push(new_root_cid.to_bytes());
+            if let Err(e) = sqlx::query!(
+                r#"
+                INSERT INTO user_blocks (user_id, block_cid)
+                SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
+                ON CONFLICT (user_id, block_cid) DO NOTHING
+                "#,
+                user_id,
+                &all_block_cids
+            )
+            .execute(&state.db)
+            .await
+            {
+                error!("Failed to insert user_blocks: {:?}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": "InternalError"})),

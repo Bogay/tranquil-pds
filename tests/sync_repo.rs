@@ -552,7 +552,8 @@ async fn test_sync_repo_export_lifecycle() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         create_post(&client, &did, &jwt, &format!("Export test post {}", i)).await;
     }
-    let blob_data = b"blob data for sync export test";
+    let blob_data = format!("blob data for sync export test {}", uuid::Uuid::new_v4());
+    let blob_bytes = blob_data.as_bytes().to_vec();
     let upload_res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.uploadBlob",
@@ -560,7 +561,7 @@ async fn test_sync_repo_export_lifecycle() {
         ))
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .bearer_auth(&jwt)
-        .body(blob_data.to_vec())
+        .body(blob_bytes.clone())
         .send()
         .await
         .expect("Failed to upload blob");
@@ -631,7 +632,7 @@ async fn test_sync_repo_export_lifecycle() {
     let retrieved_blob = get_blob_res.bytes().await.unwrap();
     assert_eq!(
         retrieved_blob.as_ref(),
-        blob_data,
+        blob_bytes.as_slice(),
         "Retrieved blob should match uploaded data"
     );
     let latest_commit_res = client

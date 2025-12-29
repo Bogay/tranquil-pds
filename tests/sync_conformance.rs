@@ -162,7 +162,7 @@ async fn test_list_repos_shows_status_field() {
 
     let res = client
         .get(format!(
-            "{}/xrpc/com.atproto.sync.listRepos",
+            "{}/xrpc/com.atproto.sync.listRepos?limit=1000",
             base_url().await
         ))
         .send()

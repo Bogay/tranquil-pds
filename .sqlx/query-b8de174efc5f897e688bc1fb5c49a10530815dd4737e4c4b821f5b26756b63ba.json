@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE repos SET repo_root_cid = $1 WHERE user_id = $2",
+  "query": "UPDATE repos SET repo_rev = $1 WHERE user_id = $2",
   "describe": {
     "columns": [],
     "parameters": {
@@ -11,5 +11,5 @@
     },
     "nullable": []
   },
-  "hash": "2588479ef83ed45a5d0dee599636f195ca38c5df164e225dcb1b829b497c8f14"
+  "hash": "b8de174efc5f897e688bc1fb5c49a10530815dd4737e4c4b821f5b26756b63ba"
 }

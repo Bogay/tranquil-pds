@@ -5,6 +5,7 @@ use tokio::sync::watch;
 use tracing::{error, info, warn};
 use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
 use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
+use tranquil_pds::scheduled::{backfill_repo_rev, backfill_user_blocks, start_scheduled_tasks};
 use tranquil_pds::state::AppState;
 
 #[tokio::main]
@@ -27,6 +28,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let backfill_db = state.db.clone();
+    let backfill_block_store = state.block_store.clone();
+    tokio::spawn(async move {
+        backfill_repo_rev(&backfill_db, backfill_block_store.clone()).await;
+        backfill_user_blocks(&backfill_db, backfill_block_store).await;
+    });
 
     let mut comms_service = CommsService::new(state.db.clone());
 
@@ -63,12 +71,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(tokio::spawn(start_crawlers_service(
             crawlers,
             firehose_rx,
-            shutdown_rx,
+            shutdown_rx.clone(),
         )))
     } else {
         warn!("Crawlers notification service disabled (PDS_HOSTNAME or CRAWLERS not set)");
         None
     };
+
+    let scheduled_handle = tokio::spawn(start_scheduled_tasks(
+        state.db.clone(),
+        state.blob_store.clone(),
+        shutdown_rx,
+    ));
 
     let app = tranquil_pds::app(state);
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -87,6 +101,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(handle) = crawlers_handle {
         handle.await.ok();
     }
+
+    scheduled_handle.await.ok();
 
     if let Err(e) = server_result {
         return Err(format!("Server error: {}", e).into());
