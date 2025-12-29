@@ -88,7 +88,7 @@ async fn test_update_subject_status_takedown_user() {
             "did": target_did
         },
         "takedown": {
-            "apply": true,
+            "applied": true,
             "ref": "mod-action-123"
         }
     });
@@ -134,7 +134,7 @@ async fn test_update_subject_status_remove_takedown() {
             "did": target_did
         },
         "takedown": {
-            "apply": true,
+            "applied": true,
             "ref": "mod-action-456"
         }
     });
@@ -153,7 +153,7 @@ async fn test_update_subject_status_remove_takedown() {
             "did": target_did
         },
         "takedown": {
-            "apply": false
+            "applied": false
         }
     });
     let res = client
@@ -197,7 +197,7 @@ async fn test_update_subject_status_deactivate_user() {
             "did": target_did
         },
         "deactivated": {
-            "apply": true
+            "applied": true
         }
     });
     let res = client
@@ -236,7 +236,7 @@ async fn test_update_subject_status_invalid_type() {
             "did": "did:plc:test"
         },
         "takedown": {
-            "apply": true
+            "applied": true
         }
     });
     let res = client
@@ -263,7 +263,7 @@ async fn test_update_subject_status_no_auth() {
             "did": "did:plc:test"
         },
         "takedown": {
-            "apply": true
+            "applied": true
         }
     });
     let res = client

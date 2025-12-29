@@ -135,6 +135,16 @@ pub async fn get_subject_status(
         }
     }
     if let Some(blob_cid) = &params.blob {
+        let did = match &params.did {
+            Some(d) => d,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "InvalidRequest", "message": "Must provide a did to request blob state"})),
+                )
+                    .into_response();
+            }
+        };
         let blob = sqlx::query!(
             "SELECT cid, takedown_ref FROM blobs WHERE cid = $1",
             blob_cid
@@ -152,7 +162,7 @@ pub async fn get_subject_status(
                     Json(SubjectStatus {
                         subject: json!({
                             "$type": "com.atproto.admin.defs#repoBlobRef",
-                            "did": "",
+                            "did": did,
                             "cid": row.cid
                         }),
                         takedown,
@@ -195,7 +205,7 @@ pub struct UpdateSubjectStatusInput {
 
 #[derive(Deserialize)]
 pub struct StatusAttrInput {
-    pub apply: bool,
+    pub applied: bool,
     pub r#ref: Option<String>,
 }
 
@@ -221,7 +231,7 @@ pub async fn update_subject_status(
                     }
                 };
                 if let Some(takedown) = &input.takedown {
-                    let takedown_ref = if takedown.apply {
+                    let takedown_ref = if takedown.applied {
                         takedown.r#ref.clone()
                     } else {
                         None
@@ -243,7 +253,7 @@ pub async fn update_subject_status(
                     }
                 }
                 if let Some(deactivated) = &input.deactivated {
-                    let result = if deactivated.apply {
+                    let result = if deactivated.applied {
                         sqlx::query!(
                             "UPDATE users SET deactivated_at = NOW() WHERE did = $1",
                             did
@@ -276,7 +286,7 @@ pub async fn update_subject_status(
                         .into_response();
                 }
                 if let Some(takedown) = &input.takedown {
-                    let status = if takedown.apply {
+                    let status = if takedown.applied {
                         Some("takendown")
                     } else {
                         None
@@ -284,7 +294,7 @@ pub async fn update_subject_status(
                     if let Err(e) = crate::api::repo::record::sequence_account_event(
                         &state,
                         did,
-                        !takedown.apply,
+                        !takedown.applied,
                         status,
                     )
                     .await
@@ -293,7 +303,7 @@ pub async fn update_subject_status(
                     }
                 }
                 if let Some(deactivated) = &input.deactivated {
-                    let status = if deactivated.apply {
+                    let status = if deactivated.applied {
                         Some("deactivated")
                     } else {
                         None
@@ -301,7 +311,7 @@ pub async fn update_subject_status(
                     if let Err(e) = crate::api::repo::record::sequence_account_event(
                         &state,
                         did,
-                        !deactivated.apply,
+                        !deactivated.applied,
                         status,
                     )
                     .await
@@ -321,11 +331,11 @@ pub async fn update_subject_status(
                     Json(json!({
                         "subject": input.subject,
                         "takedown": input.takedown.as_ref().map(|t| json!({
-                            "applied": t.apply,
+                            "applied": t.applied,
                             "ref": t.r#ref
                         })),
                         "deactivated": input.deactivated.as_ref().map(|d| json!({
-                            "applied": d.apply
+                            "applied": d.applied
                         }))
                     })),
                 )
@@ -336,7 +346,7 @@ pub async fn update_subject_status(
             let uri = input.subject.get("uri").and_then(|u| u.as_str());
             if let Some(uri) = uri {
                 if let Some(takedown) = &input.takedown {
-                    let takedown_ref = if takedown.apply {
+                    let takedown_ref = if takedown.applied {
                         takedown.r#ref.clone()
                     } else {
                         None
@@ -365,7 +375,7 @@ pub async fn update_subject_status(
                     Json(json!({
                         "subject": input.subject,
                         "takedown": input.takedown.as_ref().map(|t| json!({
-                            "applied": t.apply,
+                            "applied": t.applied,
                             "ref": t.r#ref
                         }))
                     })),
@@ -377,7 +387,7 @@ pub async fn update_subject_status(
             let cid = input.subject.get("cid").and_then(|c| c.as_str());
             if let Some(cid) = cid {
                 if let Some(takedown) = &input.takedown {
-                    let takedown_ref = if takedown.apply {
+                    let takedown_ref = if takedown.applied {
                         takedown.r#ref.clone()
                     } else {
                         None
@@ -403,7 +413,7 @@ pub async fn update_subject_status(
                     Json(json!({
                         "subject": input.subject,
                         "takedown": input.takedown.as_ref().map(|t| json!({
-                            "applied": t.apply,
+                            "applied": t.applied,
                             "ref": t.r#ref
                         }))
                     })),

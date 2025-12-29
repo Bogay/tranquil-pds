@@ -4,16 +4,6 @@ use chrono::Utc;
 use common::*;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sqlx::PgPool;
-
-async fn get_pool() -> PgPool {
-    let conn_str = get_db_connection_string().await;
-    sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&conn_str)
-        .await
-        .expect("Failed to connect to test database")
-}
 
 async fn create_verified_account(
     client: &reqwest::Client,
@@ -61,12 +51,12 @@ async fn test_delete_account_full_flow() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_pool().await;
+    let pool = get_test_db_pool().await;
     let row = sqlx::query!(
         "SELECT token FROM account_deletion_requests WHERE did = $1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to query deletion token");
     let token = row.token;
@@ -86,7 +76,7 @@ async fn test_delete_account_full_flow() {
         .expect("Failed to delete account");
     assert_eq!(delete_res.status(), StatusCode::OK);
     let user_row = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .expect("Failed to query user");
     assert!(user_row.is_none(), "User should be deleted from database");
@@ -118,12 +108,12 @@ async fn test_delete_account_wrong_password() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_pool().await;
+    let pool = get_test_db_pool().await;
     let row = sqlx::query!(
         "SELECT token FROM account_deletion_requests WHERE did = $1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to query deletion token");
     let token = row.token;
@@ -208,12 +198,12 @@ async fn test_delete_account_expired_token() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_pool().await;
+    let pool = get_test_db_pool().await;
     let row = sqlx::query!(
         "SELECT token FROM account_deletion_requests WHERE did = $1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to query deletion token");
     let token = row.token;
@@ -221,7 +211,7 @@ async fn test_delete_account_expired_token() {
         "UPDATE account_deletion_requests SET expires_at = NOW() - INTERVAL '1 hour' WHERE token = $1",
         token
     )
-    .execute(&pool)
+    .execute(pool)
     .await
     .expect("Failed to expire token");
     let delete_payload = json!({
@@ -267,12 +257,12 @@ async fn test_delete_account_token_mismatch() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_pool().await;
+    let pool = get_test_db_pool().await;
     let row = sqlx::query!(
         "SELECT token FROM account_deletion_requests WHERE did = $1",
         did1
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to query deletion token");
     let token = row.token;
@@ -328,12 +318,12 @@ async fn test_delete_account_with_app_password() {
         .await
         .expect("Failed to request account deletion");
     assert_eq!(request_delete_res.status(), StatusCode::OK);
-    let pool = get_pool().await;
+    let pool = get_test_db_pool().await;
     let row = sqlx::query!(
         "SELECT token FROM account_deletion_requests WHERE did = $1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to query deletion token");
     let token = row.token;
@@ -353,7 +343,7 @@ async fn test_delete_account_with_app_password() {
         .expect("Failed to delete account");
     assert_eq!(delete_res.status(), StatusCode::OK);
     let user_row = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&pool)
+        .fetch_optional(pool)
         .await
         .expect("Failed to query user");
     assert!(user_row.is_none(), "User should be deleted from database");

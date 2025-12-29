@@ -3,22 +3,12 @@ mod helpers;
 use helpers::verify_new_account;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sqlx::PgPool;
-
-async fn get_pool() -> PgPool {
-    let conn_str = common::get_db_connection_string().await;
-    sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&conn_str)
-        .await
-        .expect("Failed to connect to test database")
-}
 
 #[tokio::test]
 async fn test_request_password_reset_creates_code() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("pwreset-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
@@ -50,7 +40,7 @@ async fn test_request_password_reset_creates_code() {
         "SELECT password_reset_code, password_reset_code_expires_at FROM users WHERE email = $1",
         email
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("User not found");
     assert!(user.password_reset_code.is_some());
@@ -80,7 +70,7 @@ async fn test_request_password_reset_unknown_email_returns_ok() {
 async fn test_reset_password_with_valid_token() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("pwreset2-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let old_password = "Oldpass123!";
@@ -117,7 +107,7 @@ async fn test_reset_password_with_valid_token() {
         "SELECT password_reset_code FROM users WHERE email = $1",
         email
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("User not found");
     let token = user.password_reset_code.expect("No reset code");
@@ -138,7 +128,7 @@ async fn test_reset_password_with_valid_token() {
         "SELECT password_reset_code, password_reset_code_expires_at FROM users WHERE email = $1",
         email
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("User not found");
     assert!(user.password_reset_code.is_none());
@@ -196,7 +186,7 @@ async fn test_reset_password_with_invalid_token() {
 async fn test_reset_password_with_expired_token() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("pwreset3-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
@@ -228,7 +218,7 @@ async fn test_reset_password_with_expired_token() {
         "SELECT password_reset_code FROM users WHERE email = $1",
         email
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("User not found");
     let token = user.password_reset_code.expect("No reset code");
@@ -236,7 +226,7 @@ async fn test_reset_password_with_expired_token() {
         "UPDATE users SET password_reset_code_expires_at = NOW() - INTERVAL '1 hour' WHERE email = $1",
         email
     )
-    .execute(&pool)
+    .execute(pool)
     .await
     .expect("Failed to expire token");
     let res = client
@@ -260,7 +250,7 @@ async fn test_reset_password_with_expired_token() {
 async fn test_reset_password_invalidates_sessions() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("pwreset4-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let payload = json!({
@@ -302,7 +292,7 @@ async fn test_reset_password_invalidates_sessions() {
         "SELECT password_reset_code FROM users WHERE email = $1",
         email
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("User not found");
     let token = user.password_reset_code.expect("No reset code");
@@ -348,7 +338,7 @@ async fn test_request_password_reset_empty_email() {
 
 #[tokio::test]
 async fn test_reset_password_creates_notification() {
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let client = common::client();
     let base_url = common::base_url().await;
     let handle = format!("pwreset5-{}", uuid::Uuid::new_v4());
@@ -369,14 +359,14 @@ async fn test_reset_password_creates_notification() {
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
     let user = sqlx::query!("SELECT id FROM users WHERE email = $1", email)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .expect("User not found");
     let initial_count: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM comms_queue WHERE user_id = $1 AND comms_type = 'password_reset'",
         user.id
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to count")
     .unwrap_or(0);
@@ -394,7 +384,7 @@ async fn test_reset_password_creates_notification() {
         "SELECT COUNT(*) FROM comms_queue WHERE user_id = $1 AND comms_type = 'password_reset'",
         user.id
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to count")
     .unwrap_or(0);

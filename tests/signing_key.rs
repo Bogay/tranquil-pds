@@ -3,16 +3,6 @@ mod helpers;
 use helpers::verify_new_account;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use sqlx::PgPool;
-
-async fn get_pool() -> PgPool {
-    let conn_str = common::get_db_connection_string().await;
-    sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&conn_str)
-        .await
-        .expect("Failed to connect to test database")
-}
 
 #[tokio::test]
 async fn test_reserve_signing_key_without_did() {
@@ -41,7 +31,7 @@ async fn test_reserve_signing_key_without_did() {
 async fn test_reserve_signing_key_with_did() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let target_did = "did:plc:test123456";
     let res = client
         .post(format!(
@@ -60,7 +50,7 @@ async fn test_reserve_signing_key_with_did() {
         "SELECT did, public_key_did_key FROM reserved_signing_keys WHERE public_key_did_key = $1",
         signing_key
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Reserved key not found in database");
     assert_eq!(row.did.as_deref(), Some(target_did));
@@ -71,7 +61,7 @@ async fn test_reserve_signing_key_with_did() {
 async fn test_reserve_signing_key_stores_private_key() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.reserveSigningKey",
@@ -88,7 +78,7 @@ async fn test_reserve_signing_key_stores_private_key() {
         "SELECT private_key_bytes, expires_at, used_at FROM reserved_signing_keys WHERE public_key_did_key = $1",
         signing_key
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Reserved key not found in database");
     assert_eq!(
@@ -161,7 +151,7 @@ async fn test_reserve_signing_key_is_public() {
 async fn test_create_account_with_reserved_signing_key() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.reserveSigningKey",
@@ -199,7 +189,7 @@ async fn test_create_account_with_reserved_signing_key() {
         "SELECT used_at FROM reserved_signing_keys WHERE public_key_did_key = $1",
         signing_key
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Reserved key not found");
     assert!(

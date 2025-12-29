@@ -12,6 +12,7 @@ use tracing::error;
 
 #[derive(Deserialize)]
 pub struct SearchAccountsParams {
+    pub email: Option<String>,
     pub handle: Option<String>,
     pub cursor: Option<String>,
     #[serde(default = "default_limit")]
@@ -31,7 +32,7 @@ pub struct AccountView {
     pub email: Option<String>,
     pub indexed_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub email_verified_at: Option<String>,
+    pub email_confirmed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deactivated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +54,7 @@ pub async fn search_accounts(
 ) -> Response {
     let limit = params.limit.clamp(1, 100);
     let cursor_did = params.cursor.as_deref().unwrap_or("");
+    let email_filter = params.email.as_deref().map(|e| format!("%{}%", e));
     let handle_filter = params.handle.as_deref().map(|h| format!("%{}%", h));
     let result = sqlx::query_as::<
         _,
@@ -63,17 +65,21 @@ pub async fn search_accounts(
             chrono::DateTime<chrono::Utc>,
             bool,
             Option<chrono::DateTime<chrono::Utc>>,
+            Option<bool>,
         ),
     >(
         r#"
-        SELECT did, handle, email, created_at, email_verified, deactivated_at
+        SELECT did, handle, email, created_at, email_verified, deactivated_at, invites_disabled
         FROM users
-        WHERE did > $1 AND ($2::text IS NULL OR handle ILIKE $2)
+        WHERE did > $1
+          AND ($2::text IS NULL OR email ILIKE $2)
+          AND ($3::text IS NULL OR handle ILIKE $3)
         ORDER BY did ASC
-        LIMIT $3
+        LIMIT $4
         "#,
     )
     .bind(cursor_did)
+    .bind(&email_filter)
     .bind(&handle_filter)
     .bind(limit + 1)
     .fetch_all(&state.db)
@@ -85,19 +91,19 @@ pub async fn search_accounts(
                 .into_iter()
                 .take(limit as usize)
                 .map(
-                    |(did, handle, email, created_at, email_verified, deactivated_at)| {
+                    |(did, handle, email, created_at, email_verified, deactivated_at, invites_disabled)| {
                         AccountView {
                             did: did.clone(),
                             handle,
                             email,
                             indexed_at: created_at.to_rfc3339(),
-                            email_verified_at: if email_verified {
+                            email_confirmed_at: if email_verified {
                                 Some(created_at.to_rfc3339())
                             } else {
                                 None
                             },
                             deactivated_at: deactivated_at.map(|dt| dt.to_rfc3339()),
-                            invites_disabled: None,
+                            invites_disabled,
                         }
                     },
                 )

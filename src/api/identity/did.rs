@@ -780,7 +780,7 @@ pub async fn update_handle(
     }
 }
 
-async fn update_plc_handle(
+pub async fn update_plc_handle(
     state: &AppState,
     did: &str,
     new_handle: &str,

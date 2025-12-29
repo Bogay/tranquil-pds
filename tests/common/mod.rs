@@ -18,6 +18,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static APP_PORT: OnceLock<u16> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
+static TEST_DB_POOL: OnceLock<sqlx::PgPool> = OnceLock::new();
 
 #[cfg(not(feature = "external-infra"))]
 use testcontainers::core::ContainerPort;
@@ -237,7 +238,8 @@ async fn setup_mock_appview(_mock_server: &MockServer) {}
 async fn spawn_app(database_url: String) -> String {
     use tranquil_pds::rate_limit::RateLimiters;
     let pool = PgPoolOptions::new()
-        .max_connections(50)
+        .max_connections(3)
+        .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&database_url)
         .await
         .expect("Failed to connect to Postgres. Make sure the database is running.");
@@ -245,6 +247,13 @@ async fn spawn_app(database_url: String) -> String {
         .run(&pool)
         .await
         .expect("Failed to run migrations");
+    let test_pool = PgPoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&database_url)
+        .await
+        .expect("Failed to create test pool");
+    TEST_DB_POOL.set(test_pool).ok();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     APP_PORT.set(addr.port()).ok();
@@ -292,18 +301,19 @@ pub async fn get_db_connection_string() -> String {
 }
 
 #[allow(dead_code)]
+pub async fn get_test_db_pool() -> &'static sqlx::PgPool {
+    base_url().await;
+    TEST_DB_POOL.get().expect("TEST_DB_POOL not initialized")
+}
+
+#[allow(dead_code)]
 pub async fn verify_new_account(client: &Client, did: &str) -> String {
-    let conn_str = get_db_connection_string().await;
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
-        .connect(&conn_str)
-        .await
-        .expect("Failed to connect to test database");
+    let pool = get_test_db_pool().await;
     let body_text: String = sqlx::query_scalar!(
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Failed to get verification code");
 
@@ -454,15 +464,10 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
         if res.status() == StatusCode::OK {
             let body: Value = res.json().await.expect("Invalid JSON");
             let did = body["did"].as_str().expect("No did").to_string();
-            let conn_str = get_db_connection_string().await;
-            let pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(2)
-                .connect(&conn_str)
-                .await
-                .expect("Failed to connect to test database");
+            let pool = get_test_db_pool().await;
             if make_admin {
                 sqlx::query!("UPDATE users SET is_admin = TRUE WHERE did = $1", &did)
-                    .execute(&pool)
+                    .execute(pool)
                     .await
                     .expect("Failed to mark user as admin");
             }
@@ -476,7 +481,7 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
                 "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
                 &did
             )
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await
             .expect("Failed to get verification from comms_queue");
             let lines: Vec<&str> = body_text.lines().collect();

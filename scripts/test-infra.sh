@@ -41,7 +41,8 @@ start_infra() {
         -e POSTGRES_DB=postgres \
         -P \
         --label tranquil_pds_test=true \
-        postgres:18-alpine >/dev/null
+        postgres:18-alpine \
+        -c max_connections=500 >/dev/null
     echo "Starting MinIO..."
     $CONTAINER_CMD run -d \
         --name "${CONTAINER_PREFIX}-minio" \

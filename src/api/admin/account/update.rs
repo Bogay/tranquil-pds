@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Deserialize)]
 pub struct UpdateAccountEmailInput {
@@ -128,6 +128,15 @@ pub async fn update_account_handle(
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+            if let Err(e) =
+                crate::api::repo::record::sequence_identity_event(&state, did, Some(&handle)).await
+            {
+                warn!("Failed to sequence identity event for admin handle update: {}", e);
+            }
+            if let Err(e) = crate::api::identity::did::update_plc_handle(&state, did, &handle).await
+            {
+                warn!("Failed to update PLC handle for admin handle update: {}", e);
+            }
             (StatusCode::OK, Json(json!({}))).into_response()
         }
         Err(e) => {

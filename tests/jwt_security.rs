@@ -2,7 +2,7 @@
 mod common;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
-use common::{base_url, client, create_account_and_login, get_db_connection_string};
+use common::{base_url, client, create_account_and_login, get_test_db_pool};
 use k256::SecretKey;
 use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use rand::rngs::OsRng;
@@ -683,15 +683,11 @@ async fn test_refresh_token_replay_protection() {
     let account: Value = create_res.json().await.unwrap();
     let did = account["did"].as_str().unwrap();
 
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
-        .connect(&get_db_connection_string().await)
-        .await
-        .unwrap();
+    let pool = get_test_db_pool().await;
     let body_text: String = sqlx::query_scalar!(
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
         did
-    ).fetch_one(&pool).await.unwrap();
+    ).fetch_one(pool).await.unwrap();
     let lines: Vec<&str> = body_text.lines().collect();
     let code = lines
         .iter()

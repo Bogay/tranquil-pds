@@ -3,15 +3,6 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-async fn get_pool() -> PgPool {
-    let conn_str = common::get_db_connection_string().await;
-    sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&conn_str)
-        .await
-        .expect("Failed to connect to test database")
-}
-
 async fn get_email_update_token(pool: &PgPool, did: &str) -> String {
     let body_text: String = sqlx::query_scalar!(
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_update' ORDER BY created_at DESC LIMIT 1",
@@ -88,7 +79,7 @@ async fn test_request_email_update_returns_token_required() {
 async fn test_update_email_flow_success() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("emailup-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
     let (access_jwt, did) = create_verified_account(&client, &base_url, &handle, &email).await;
@@ -107,7 +98,7 @@ async fn test_update_email_flow_success() {
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["tokenRequired"], true);
 
-    let code = get_email_update_token(&pool, &did).await;
+    let code = get_email_update_token(pool, &did).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
@@ -122,7 +113,7 @@ async fn test_update_email_flow_success() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let user_email: Option<String> = sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did)
-        .fetch_one(&pool)
+        .fetch_one(pool)
         .await
         .expect("User not found");
     assert_eq!(user_email, Some(new_email));
@@ -244,7 +235,7 @@ async fn test_update_email_invalid_format() {
 async fn test_confirm_email_confirms_existing_email() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("emailconfirm-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
 
@@ -270,7 +261,7 @@ async fn test_confirm_email_confirms_existing_email() {
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Verification email not found");
 
@@ -296,7 +287,7 @@ async fn test_confirm_email_confirms_existing_email() {
         "SELECT email_verified FROM users WHERE did = $1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("User not found");
     assert!(verified);
@@ -306,7 +297,7 @@ async fn test_confirm_email_confirms_existing_email() {
 async fn test_confirm_email_rejects_wrong_email() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("emailconf-wrong-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
 
@@ -332,7 +323,7 @@ async fn test_confirm_email_rejects_wrong_email() {
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
         did
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .expect("Verification email not found");
 
@@ -400,7 +391,7 @@ async fn test_confirm_email_invalid_token() {
 async fn test_unverified_account_can_update_email_without_token() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
     let handle = format!("emailup-unverified-{}", uuid::Uuid::new_v4());
     let email = format!("{}@example.com", handle);
 
@@ -454,7 +445,7 @@ async fn test_unverified_account_can_update_email_without_token() {
 
     let user_email: Option<String> =
         sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did)
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await
             .expect("User not found");
     assert_eq!(user_email, Some(new_email));
@@ -464,7 +455,7 @@ async fn test_unverified_account_can_update_email_without_token() {
 async fn test_update_email_taken_by_another_user() {
     let client = common::client();
     let base_url = common::base_url().await;
-    let pool = get_pool().await;
+    let pool = common::get_test_db_pool().await;
 
     let handle1 = format!("emailup-dup1-{}", uuid::Uuid::new_v4());
     let email1 = format!("{}@example.com", handle1);
@@ -485,7 +476,7 @@ async fn test_update_email_taken_by_another_user() {
         .expect("Failed to request email update");
     assert_eq!(res.status(), StatusCode::OK);
 
-    let code = get_email_update_token(&pool, &did2).await;
+    let code = get_email_update_token(pool, &did2).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))

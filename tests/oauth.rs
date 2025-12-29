@@ -2,7 +2,7 @@ mod common;
 mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::Utc;
-use common::{base_url, client, get_db_connection_string};
+use common::{base_url, client, get_test_db_pool};
 use helpers::verify_new_account;
 use reqwest::{StatusCode, redirect};
 use serde_json::{Value, json};
@@ -449,15 +449,10 @@ async fn test_oauth_2fa_flow() {
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap();
     verify_new_account(&http_client, user_did).await;
-    let db_url = get_db_connection_string().await;
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&db_url)
-        .await
-        .unwrap();
+    let pool = get_test_db_pool().await;
     sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
         .bind(user_did)
-        .execute(&pool)
+        .execute(pool)
         .await
         .unwrap();
     let redirect_uri = "https://example.com/2fa-callback";
@@ -516,7 +511,7 @@ async fn test_oauth_2fa_flow() {
     let twofa_code: String =
         sqlx::query_scalar("SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1")
             .bind(request_uri)
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await
             .unwrap();
     let twofa_res = http_client
@@ -575,15 +570,10 @@ async fn test_oauth_2fa_lockout() {
     let account: Value = create_res.json().await.unwrap();
     let user_did = account["did"].as_str().unwrap();
     verify_new_account(&http_client, user_did).await;
-    let db_url = get_db_connection_string().await;
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&db_url)
-        .await
-        .unwrap();
+    let pool = get_test_db_pool().await;
     sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
         .bind(user_did)
-        .execute(&pool)
+        .execute(pool)
         .await
         .unwrap();
     let redirect_uri = "https://example.com/2fa-lockout-callback";
@@ -754,15 +744,10 @@ async fn test_account_selector_with_2fa() {
         .json::<Value>()
         .await
         .unwrap();
-    let db_url = get_db_connection_string().await;
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&db_url)
-        .await
-        .unwrap();
+    let pool = get_test_db_pool().await;
     sqlx::query("UPDATE users SET two_factor_enabled = true WHERE did = $1")
         .bind(&user_did)
-        .execute(&pool)
+        .execute(pool)
         .await
         .unwrap();
     let (code_verifier2, code_challenge2) = generate_pkce();
@@ -803,7 +788,7 @@ async fn test_account_selector_with_2fa() {
     let twofa_code: String =
         sqlx::query_scalar("SELECT code FROM oauth_2fa_challenge WHERE request_uri = $1")
             .bind(request_uri2)
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await
             .unwrap();
     let twofa_res = http_client
