@@ -669,9 +669,9 @@ async fn test_deactivated_account_behavior() {
 async fn test_refresh_token_replay_protection() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("rt-replay-jwt-{}", ts);
-    let email = format!("rt-replay-jwt-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("rr{}", suffix);
+    let email = format!("rr{}@example.com", suffix);
 
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))

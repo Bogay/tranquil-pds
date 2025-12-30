@@ -188,6 +188,13 @@ pub async fn create_account(
         };
         match crate::api::validation::validate_short_handle(handle_to_validate) {
             Ok(h) => h,
+            Err(crate::api::validation::HandleValidationError::Reserved) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "HandleNotAvailable", "message": "Reserved handle"})),
+                )
+                    .into_response();
+            }
             Err(e) => {
                 return (
                     StatusCode::BAD_REQUEST,

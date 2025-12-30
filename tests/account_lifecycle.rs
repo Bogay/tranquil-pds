@@ -154,7 +154,7 @@ async fn test_create_account_returns_did_doc() {
     let client = client();
     let base = base_url().await;
 
-    let handle = format!("diddoctest-{}", uuid::Uuid::new_v4());
+    let handle = format!("dd{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -185,7 +185,7 @@ async fn test_create_account_always_returns_tokens() {
     let client = client();
     let base = base_url().await;
 
-    let handle = format!("tokentest-{}", uuid::Uuid::new_v4());
+    let handle = format!("tt{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -243,7 +243,7 @@ async fn test_delete_account_password_max_length() {
     let client = client();
     let base = base_url().await;
 
-    let handle = format!("pwdlentest-{}", uuid::Uuid::new_v4());
+    let handle = format!("pl{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),

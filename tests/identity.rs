@@ -8,7 +8,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 #[tokio::test]
 async fn test_resolve_handle_success() {
     let client = client();
-    let short_handle = format!("resolvetest-{}", uuid::Uuid::new_v4());
+    let short_handle = format!("rt{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let payload = json!({
         "handle": short_handle,
         "email": format!("{}@example.com", short_handle),
@@ -98,7 +98,7 @@ async fn test_create_did_web_account_and_resolve() {
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
     let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
-    let handle = format!("webuser-{}", uuid::Uuid::new_v4());
+    let handle = format!("wu{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let pds_endpoint = base_url().await.replace("http://", "https://");
 
     let reserve_res = client
@@ -183,7 +183,7 @@ async fn test_create_did_web_account_and_resolve() {
 #[tokio::test]
 async fn test_create_account_duplicate_handle() {
     let client = client();
-    let handle = format!("dupe-{}", uuid::Uuid::new_v4());
+    let handle = format!("dp{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
     let payload = json!({
         "handle": handle,
@@ -220,7 +220,7 @@ async fn test_did_web_lifecycle() {
     let mock_server = MockServer::start().await;
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
-    let handle = format!("lifecycle-{}", uuid::Uuid::new_v4());
+    let handle = format!("lc{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let did = format!("did:web:{}:u:{}", mock_addr.replace(":", "%3A"), handle);
     let email = format!("{}@test.com", handle);
     let pds_endpoint = base_url().await.replace("http://", "https://");

@@ -1,9 +1,11 @@
+use crate::auth::{extract_bearer_token_from_header, validate_bearer_token_allow_takendown};
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
+use crate::sync::util::assert_repo_availability;
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use cid::Cid;
@@ -13,9 +15,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::Write;
 use std::str::FromStr;
-use tracing::error;
 
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
+
+async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &str) -> bool {
+    let token = match extract_bearer_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
+    ) {
+        Some(t) => t,
+        None => return false,
+    };
+    match validate_bearer_token_allow_takendown(&state.db, &token).await {
+        Ok(auth_user) => auth_user.is_admin || auth_user.did == did,
+        Err(_) => false,
+    }
+}
 
 #[derive(Deserialize)]
 pub struct GetHeadParams {
@@ -29,6 +43,7 @@ pub struct GetHeadOutput {
 
 pub async fn get_head(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<GetHeadParams>,
 ) -> Response {
     let did = params.did.trim();
@@ -39,38 +54,18 @@ pub async fn get_head(
         )
             .into_response();
     }
-    let result = sqlx::query!(
-        r#"
-        SELECT r.repo_root_cid
-        FROM repos r
-        JOIN users u ON r.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&state.db)
-    .await;
-    match result {
-        Ok(Some(row)) => (
-            StatusCode::OK,
-            Json(GetHeadOutput {
-                root: row.repo_root_cid,
-            }),
-        )
-            .into_response(),
-        Ok(None) => (
+    let is_admin_or_self = check_admin_or_self(&state, &headers, did).await;
+    let account = match assert_repo_availability(&state.db, did, is_admin_or_self).await {
+        Ok(a) => a,
+        Err(e) => return e.into_response(),
+    };
+    match account.repo_root_cid {
+        Some(root) => (StatusCode::OK, Json(GetHeadOutput { root })).into_response(),
+        None => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "HeadNotFound", "message": "Could not find root for DID"})),
+            Json(json!({"error": "HeadNotFound", "message": format!("Could not find root for DID: {}", did)})),
         )
             .into_response(),
-        Err(e) => {
-            error!("DB error in get_head: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
-        }
     }
 }
 
@@ -81,6 +76,7 @@ pub struct GetCheckoutParams {
 
 pub async fn get_checkout(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<GetCheckoutParams>,
 ) -> Response {
     let did = params.did.trim();
@@ -91,38 +87,19 @@ pub async fn get_checkout(
         )
             .into_response();
     }
-    let repo_row = sqlx::query!(
-        r#"
-        SELECT r.repo_root_cid
-        FROM repos r
-        JOIN users u ON u.id = r.user_id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    .unwrap_or(None);
-    let head_str = match repo_row {
-        Some(r) => r.repo_root_cid,
+    let is_admin_or_self = check_admin_or_self(&state, &headers, did).await;
+    let account = match assert_repo_availability(&state.db, did, is_admin_or_self).await {
+        Ok(a) => a,
+        Err(e) => return e.into_response(),
+    };
+    let head_str = match account.repo_root_cid {
+        Some(r) => r,
         None => {
-            let user_exists = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-                .fetch_optional(&state.db)
-                .await
-                .unwrap_or(None);
-            if user_exists.is_none() {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
-                )
-                    .into_response();
-            } else {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
-                )
-                    .into_response();
-            }
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
+            )
+                .into_response();
         }
     };
     let head_cid = match Cid::from_str(&head_str) {

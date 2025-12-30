@@ -6,6 +6,7 @@ const EMAIL_LOCAL_SPECIAL_CHARS: &str = ".!#$%&'*+/=?^_`{|}~-";
 
 pub const MIN_HANDLE_LENGTH: usize = 3;
 pub const MAX_HANDLE_LENGTH: usize = 253;
+pub const MAX_SERVICE_HANDLE_LOCAL_PART: usize = 18;
 
 #[derive(Debug, PartialEq)]
 pub enum HandleValidationError {
@@ -17,6 +18,7 @@ pub enum HandleValidationError {
     EndsWithInvalidChar,
     ContainsSpaces,
     BannedWord,
+    Reserved,
 }
 
 impl std::fmt::Display for HandleValidationError {
@@ -31,7 +33,7 @@ impl std::fmt::Display for HandleValidationError {
             Self::TooLong => write!(
                 f,
                 "Handle exceeds maximum length of {} characters",
-                MAX_HANDLE_LENGTH
+                MAX_SERVICE_HANDLE_LOCAL_PART
             ),
             Self::InvalidCharacters => write!(
                 f,
@@ -43,11 +45,19 @@ impl std::fmt::Display for HandleValidationError {
             Self::EndsWithInvalidChar => write!(f, "Handle cannot end with a hyphen"),
             Self::ContainsSpaces => write!(f, "Handle cannot contain spaces"),
             Self::BannedWord => write!(f, "Inappropriate language in handle"),
+            Self::Reserved => write!(f, "Reserved handle"),
         }
     }
 }
 
 pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationError> {
+    validate_service_handle(handle, false)
+}
+
+pub fn validate_service_handle(
+    handle: &str,
+    allow_reserved: bool,
+) -> Result<String, HandleValidationError> {
     let handle = handle.trim();
 
     if handle.is_empty() {
@@ -62,7 +72,7 @@ pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationErr
         return Err(HandleValidationError::TooShort);
     }
 
-    if handle.len() > MAX_HANDLE_LENGTH {
+    if handle.len() > MAX_SERVICE_HANDLE_LOCAL_PART {
         return Err(HandleValidationError::TooLong);
     }
 
@@ -86,6 +96,10 @@ pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationErr
 
     if crate::moderation::has_explicit_slur(handle) {
         return Err(HandleValidationError::BannedWord);
+    }
+
+    if !allow_reserved && crate::handle::reserved::is_reserved_subdomain(handle) {
+        return Err(HandleValidationError::Reserved);
     }
 
     Ok(handle.to_lowercase())
@@ -221,6 +235,68 @@ mod tests {
     #[test]
     fn test_handle_trimming() {
         assert_eq!(validate_short_handle("  alice  "), Ok("alice".to_string()));
+    }
+
+    #[test]
+    fn test_handle_max_length() {
+        assert_eq!(
+            validate_short_handle("exactly18charslol"),
+            Ok("exactly18charslol".to_string())
+        );
+        assert_eq!(
+            validate_short_handle("exactly18charslol1"),
+            Ok("exactly18charslol1".to_string())
+        );
+        assert_eq!(
+            validate_short_handle("exactly19characters"),
+            Err(HandleValidationError::TooLong)
+        );
+        assert_eq!(
+            validate_short_handle("waytoolongusername123456789"),
+            Err(HandleValidationError::TooLong)
+        );
+    }
+
+    #[test]
+    fn test_reserved_subdomains() {
+        assert_eq!(
+            validate_short_handle("admin"),
+            Err(HandleValidationError::Reserved)
+        );
+        assert_eq!(
+            validate_short_handle("api"),
+            Err(HandleValidationError::Reserved)
+        );
+        assert_eq!(
+            validate_short_handle("bsky"),
+            Err(HandleValidationError::Reserved)
+        );
+        assert_eq!(
+            validate_short_handle("barackobama"),
+            Err(HandleValidationError::Reserved)
+        );
+        assert_eq!(
+            validate_short_handle("ADMIN"),
+            Err(HandleValidationError::Reserved)
+        );
+        assert_eq!(validate_short_handle("alice"), Ok("alice".to_string()));
+        assert_eq!(
+            validate_short_handle("notreserved"),
+            Ok("notreserved".to_string())
+        );
+    }
+
+    #[test]
+    fn test_allow_reserved() {
+        assert_eq!(
+            validate_service_handle("admin", true),
+            Ok("admin".to_string())
+        );
+        assert_eq!(validate_service_handle("api", true), Ok("api".to_string()));
+        assert_eq!(
+            validate_service_handle("admin", false),
+            Err(HandleValidationError::Reserved)
+        );
     }
 
     #[test]

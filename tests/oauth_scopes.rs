@@ -58,9 +58,9 @@ async fn create_user_and_oauth_session_with_scope(
 ) -> (OAuthSession, MockServer) {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("{}-{}", handle_prefix, ts);
-    let email = format!("{}-{}@example.com", handle_prefix, ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let handle = format!("{}{}", handle_prefix, suffix);
+    let email = format!("{}{}@example.com", handle_prefix, suffix);
     let password = format!("{}Pass123!", handle_prefix);
 
     let create_res = http_client
@@ -345,7 +345,7 @@ async fn test_transition_generic_scope_allows_access() {
     let url = base_url().await;
     let http_client = client();
     let (session, _mock) = create_user_and_oauth_session_with_scope(
-        "scope-transition",
+        "scope-trans",
         "https://example.com/callback",
         "atproto transition:generic",
     )
@@ -380,9 +380,9 @@ async fn test_consent_endpoint_returns_scope_info() {
     let url = base_url().await;
     let http_client = client();
 
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("consent-test-{}", ts);
-    let email = format!("consent-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("ct{}", suffix);
+    let email = format!("ct{}@example.com", suffix);
     let password = "Consent123!";
     let redirect_uri = "https://consent-test.example.com/callback";
 
@@ -476,9 +476,9 @@ async fn test_consent_post_generates_code() {
     let url = base_url().await;
     let http_client = client();
 
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("consent-post-{}", ts);
-    let email = format!("consent-post-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("cp{}", suffix);
+    let email = format!("cp{}@example.com", suffix);
     let password = "ConsentPost123!";
     let redirect_uri = "https://consent-post.example.com/callback";
 
@@ -590,9 +590,9 @@ async fn test_consent_post_requires_atproto_scope() {
     let url = base_url().await;
     let http_client = client();
 
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("consent-req-{}", ts);
-    let email = format!("consent-req-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("cq{}", suffix);
+    let email = format!("cq{}@example.com", suffix);
     let password = "ConsentReq123!";
     let redirect_uri = "https://consent-req.example.com/callback";
 

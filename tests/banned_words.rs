@@ -31,13 +31,13 @@ fn decode(b64: &str) -> String {
 #[tokio::test]
 async fn test_handle_with_slur_rejected() {
     let client = client();
-    let timestamp = chrono::Utc::now().timestamp_millis();
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
     let slur = decode("bmlnZ2Vy");
-    let offensive_handle = format!("{}{}", slur, timestamp);
+    let offensive_handle = format!("{}{}", slur, suffix);
 
     let create_payload = json!({
         "handle": offensive_handle,
-        "email": format!("test{}@example.com", timestamp),
+        "email": format!("test{}@example.com", suffix),
         "password": "TestPassword123!"
     });
 
@@ -65,13 +65,13 @@ async fn test_handle_with_slur_rejected() {
 #[tokio::test]
 async fn test_handle_with_normalized_slur_rejected() {
     let client = client();
-    let timestamp = chrono::Utc::now().timestamp_millis();
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..6];
     let slur = decode("bi1pLWctZy1lLXI=");
-    let offensive_handle = format!("{}{}", slur, timestamp);
+    let offensive_handle = format!("{}{}", slur, suffix);
 
     let create_payload = json!({
         "handle": offensive_handle,
-        "email": format!("test{}@example.com", timestamp),
+        "email": format!("test{}@example.com", suffix),
         "password": "TestPassword123!"
     });
 

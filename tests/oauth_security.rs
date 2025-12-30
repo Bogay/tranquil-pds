@@ -41,8 +41,8 @@ async fn setup_mock_client_metadata(redirect_uri: &str) -> MockServer {
 }
 
 async fn get_oauth_tokens(http_client: &reqwest::Client, url: &str) -> (String, String, String) {
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("sec-test-{}", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("se{}", suffix);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Security123!" }))
         .send().await.unwrap();
@@ -255,8 +255,8 @@ async fn test_pkce_security() {
         StatusCode::BAD_REQUEST,
         "Missing PKCE challenge should be rejected"
     );
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("pkce-attack-{}", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("pa{}", suffix);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Pkce123pass!" }))
         .send().await.unwrap();
@@ -326,8 +326,8 @@ async fn test_pkce_security() {
 async fn test_replay_attacks() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("replay-{}", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("rp{}", suffix);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Replay123pass!" }))
         .send().await.unwrap();
@@ -532,8 +532,8 @@ async fn test_oauth_security_boundaries() {
         StatusCode::BAD_REQUEST,
         "Unregistered redirect_uri should be rejected"
     );
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("deact-{}", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("da{}", suffix);
     let create_res = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Deact123pass!" }))
         .send().await.unwrap();
@@ -576,8 +576,8 @@ async fn test_oauth_security_boundaries() {
     let client_id_a = mock_a.uri();
     let mock_b = setup_mock_client_metadata("https://app-b.com/callback").await;
     let client_id_b = mock_b.uri();
-    let ts2 = Utc::now().timestamp_millis();
-    let handle2 = format!("cross-{}", ts2);
+    let suffix2 = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle2 = format!("cr{}", suffix2);
     let create_res2 = http_client.post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle2, "email": format!("{}@example.com", handle2), "password": "Cross123pass!" }))
         .send().await.unwrap();
@@ -1110,11 +1110,11 @@ fn test_dpop_http_method_case() {
 async fn test_delegation_viewer_scope_cannot_write() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
 
     let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
 
-    let delegated_handle = format!("deleg-{}", ts);
+    let delegated_handle = format!("dg{}", suffix);
     let delegated_res = http_client
         .post(format!(
             "{}/xrpc/com.tranquil.delegation.createDelegatedAccount",

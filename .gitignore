@@ -5,6 +5,7 @@
 reference-pds-hailey/
 reference-pds-bsky/
 reference-relay-indigo/
+pds-moover/
 # Frontend build artifacts
 frontend/node_modules/
 frontend/dist/

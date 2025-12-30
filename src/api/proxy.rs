@@ -10,6 +10,29 @@ use axum::{
 use serde_json::json;
 use tracing::{error, info, warn};
 
+const PROTECTED_METHODS: &[&str] = &[
+    "com.atproto.admin.sendEmail",
+    "com.atproto.identity.requestPlcOperationSignature",
+    "com.atproto.identity.signPlcOperation",
+    "com.atproto.identity.updateHandle",
+    "com.atproto.server.activateAccount",
+    "com.atproto.server.confirmEmail",
+    "com.atproto.server.createAppPassword",
+    "com.atproto.server.deactivateAccount",
+    "com.atproto.server.getAccountInviteCodes",
+    "com.atproto.server.getSession",
+    "com.atproto.server.listAppPasswords",
+    "com.atproto.server.requestAccountDelete",
+    "com.atproto.server.requestEmailConfirmation",
+    "com.atproto.server.requestEmailUpdate",
+    "com.atproto.server.revokeAppPassword",
+    "com.atproto.server.updateEmail",
+];
+
+fn is_protected_method(method: &str) -> bool {
+    PROTECTED_METHODS.contains(&method)
+}
+
 pub async fn proxy_handler(
     State(state): State<AppState>,
     Path(method): Path<String>,
@@ -18,6 +41,18 @@ pub async fn proxy_handler(
     RawQuery(query): RawQuery,
     body: Bytes,
 ) -> Response {
+    if is_protected_method(&method) {
+        warn!(method = %method, "Attempted to proxy protected method");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "InvalidRequest",
+                "message": format!("Cannot proxy protected method: {}", method)
+            })),
+        )
+            .into_response();
+    }
+
     let proxy_header = match headers.get("atproto-proxy").and_then(|h| h.to_str().ok()) {
         Some(h) => h.to_string(),
         None => {

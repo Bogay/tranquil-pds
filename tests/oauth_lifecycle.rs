@@ -54,9 +54,9 @@ async fn create_user_and_oauth_session(
 ) -> (OAuthSession, MockServer) {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("{}-{}", handle_prefix, ts);
-    let email = format!("{}-{}@example.com", handle_prefix, ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    let handle = format!("{}{}", handle_prefix, suffix);
+    let email = format!("{}{}@example.com", handle_prefix, suffix);
     let password = format!("{}Pass123!", handle_prefix);
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -269,7 +269,7 @@ async fn test_oauth_full_post_lifecycle_create_edit_delete() {
     let url = base_url().await;
     let http_client = client();
     let (session, _mock) =
-        create_user_and_oauth_session("oauth-lifecycle", "https://example.com/callback").await;
+        create_user_and_oauth_session("oauthlife", "https://example.com/callback").await;
     let collection = "app.bsky.feed.post";
     let original_text = "Original post content";
     let create_res = http_client
@@ -439,7 +439,7 @@ async fn test_oauth_token_refresh_maintains_access() {
     let url = base_url().await;
     let http_client = client();
     let (session, _mock) =
-        create_user_and_oauth_session("oauth-refresh-access", "https://example.com/callback").await;
+        create_user_and_oauth_session("oauth-refr", "https://example.com/callback").await;
     let collection = "app.bsky.feed.post";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.repo.createRecord", url))
@@ -520,7 +520,7 @@ async fn test_oauth_revoked_token_cannot_access_resources() {
     let url = base_url().await;
     let http_client = client();
     let (session, _mock) =
-        create_user_and_oauth_session("oauth-revoke-access", "https://example.com/callback").await;
+        create_user_and_oauth_session("oauth-revo", "https://example.com/callback").await;
     let collection = "app.bsky.feed.post";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.repo.createRecord", url))
@@ -574,9 +574,9 @@ async fn test_oauth_revoked_token_cannot_access_resources() {
 async fn test_oauth_multiple_clients_same_user() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("multi-client-{}", ts);
-    let email = format!("multi-client-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("mc{}", suffix);
+    let email = format!("mc{}@example.com", suffix);
     let password = "MultiClient123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -949,7 +949,7 @@ async fn test_oauth_session_isolation_between_users() {
     let url = base_url().await;
     let http_client = client();
     let (alice, _mock_alice) =
-        create_user_and_oauth_session("alice-isolation", "https://alice.example.com/callback")
+        create_user_and_oauth_session("alice-isol", "https://alice.example.com/callback")
             .await;
     let (bob, _mock_bob) =
         create_user_and_oauth_session("bob-isolation", "https://bob.example.com/callback").await;

@@ -1,3 +1,5 @@
+pub mod reserved;
+
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
 use reqwest::Client;

@@ -81,6 +81,7 @@ pub async fn oauth_authorization_server(
             "atproto".to_string(),
             "transition:generic".to_string(),
             "transition:chat.bsky".to_string(),
+            "transition:email".to_string(),
             "repo:*".to_string(),
             "repo:*?action=create".to_string(),
             "repo:*?action=read".to_string(),

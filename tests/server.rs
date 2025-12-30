@@ -26,7 +26,7 @@ async fn test_server_basics() {
 async fn test_account_and_session_lifecycle() {
     let client = client();
     let base = base_url().await;
-    let handle = format!("user-{}", uuid::Uuid::new_v4());
+    let handle = format!("u{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let payload = json!({ "handle": handle, "email": format!("{}@example.com", handle), "password": "Testpass123!" });
     let create_res = client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", base))

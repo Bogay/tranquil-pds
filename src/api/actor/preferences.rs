@@ -5,12 +5,26 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const APP_BSKY_NAMESPACE: &str = "app.bsky";
 const MAX_PREFERENCES_COUNT: usize = 100;
 const MAX_PREFERENCE_SIZE: usize = 10_000;
+const PERSONAL_DETAILS_PREF: &str = "app.bsky.actor.defs#personalDetailsPref";
+const DECLARED_AGE_PREF: &str = "app.bsky.actor.defs#declaredAgePref";
+
+fn get_age_from_datestring(birth_date: &str) -> Option<i32> {
+    let bday = NaiveDate::parse_from_str(birth_date, "%Y-%m-%d").ok()?;
+    let today = Utc::now().date_naive();
+    let mut age = today.year() - bday.year();
+    let m = today.month() as i32 - bday.month() as i32;
+    if m < 0 || (m == 0 && today.day() < bday.day()) {
+        age -= 1;
+    }
+    Some(age)
+}
 
 #[derive(Serialize)]
 pub struct GetPreferencesOutput {
@@ -43,6 +57,7 @@ pub async fn get_preferences(
                     .into_response();
             }
         };
+    let has_full_access = auth_user.permissions().has_full_access();
     let user_id: uuid::Uuid =
         match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
             .fetch_optional(&state.db)
@@ -73,19 +88,39 @@ pub async fn get_preferences(
                 .into_response();
         }
     };
-    let preferences: Vec<Value> = prefs
+    let mut personal_details_pref: Option<Value> = None;
+    let mut preferences: Vec<Value> = prefs
         .into_iter()
         .filter(|row| {
             row.name == APP_BSKY_NAMESPACE
                 || row.name.starts_with(&format!("{}.", APP_BSKY_NAMESPACE))
         })
         .filter_map(|row| {
-            if row.name == "app.bsky.actor.defs#declaredAgePref" {
+            if row.name == DECLARED_AGE_PREF {
                 return None;
+            }
+            if row.name == PERSONAL_DETAILS_PREF {
+                if !has_full_access {
+                    return None;
+                }
+                personal_details_pref = serde_json::from_value(row.value_json.clone()).ok();
             }
             serde_json::from_value(row.value_json).ok()
         })
         .collect();
+    if let Some(ref pref) = personal_details_pref {
+        if let Some(birth_date) = pref.get("birthDate").and_then(|v| v.as_str()) {
+            if let Some(age) = get_age_from_datestring(birth_date) {
+                let declared_age_pref = json!({
+                    "$type": DECLARED_AGE_PREF,
+                    "isOverAge13": age >= 13,
+                    "isOverAge16": age >= 16,
+                    "isOverAge18": age >= 18,
+                });
+                preferences.push(declared_age_pref);
+            }
+        }
+    }
     (StatusCode::OK, Json(GetPreferencesOutput { preferences })).into_response()
 }
 
@@ -121,14 +156,15 @@ pub async fn put_preferences(
                     .into_response();
             }
         };
-    let (user_id, is_migration): (uuid::Uuid, bool) = match sqlx::query!(
-        "SELECT id, deactivated_at FROM users WHERE did = $1",
+    let has_full_access = auth_user.permissions().has_full_access();
+    let user_id: uuid::Uuid = match sqlx::query_scalar!(
+        "SELECT id FROM users WHERE did = $1",
         auth_user.did
     )
     .fetch_optional(&state.db)
     .await
     {
-        Ok(Some(row)) => (row.id, row.deactivated_at.is_some()),
+        Ok(Some(id)) => id,
         _ => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -144,6 +180,7 @@ pub async fn put_preferences(
         )
             .into_response();
     }
+    let mut forbidden_prefs: Vec<String> = Vec::new();
     for pref in &input.preferences {
         let pref_str = serde_json::to_string(pref).unwrap_or_default();
         if pref_str.len() > MAX_PREFERENCE_SIZE {
@@ -158,7 +195,7 @@ pub async fn put_preferences(
             None => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "Preference missing $type field"})),
+                    Json(json!({"error": "InvalidRequest", "message": "Preference is missing a $type"})),
                 )
                     .into_response();
             }
@@ -166,17 +203,20 @@ pub async fn put_preferences(
         if !pref_type.starts_with(APP_BSKY_NAMESPACE) {
             return (
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": format!("Invalid preference namespace: {}", pref_type)})),
+                Json(json!({"error": "InvalidRequest", "message": format!("Some preferences are not in the {} namespace", APP_BSKY_NAMESPACE)})),
             )
                 .into_response();
         }
-        if pref_type == "app.bsky.actor.defs#declaredAgePref" && !is_migration {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "declaredAgePref is read-only"})),
-            )
-                .into_response();
+        if pref_type == PERSONAL_DETAILS_PREF && !has_full_access {
+            forbidden_prefs.push(pref_type.to_string());
         }
+    }
+    if !forbidden_prefs.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "InvalidRequest", "message": format!("Do not have authorization to set preferences: {}", forbidden_prefs.join(", "))})),
+        )
+            .into_response();
     }
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -209,6 +249,9 @@ pub async fn put_preferences(
             Some(t) => t,
             None => continue,
         };
+        if pref_type == DECLARED_AGE_PREF {
+            continue;
+        }
         let insert_result = sqlx::query!(
             "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)",
             user_id,

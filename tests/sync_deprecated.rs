@@ -62,7 +62,7 @@ async fn test_get_head_comprehensive() {
         .expect("Failed to send request");
     assert_eq!(not_found_res.status(), StatusCode::BAD_REQUEST);
     let error_body: Value = not_found_res.json().await.unwrap();
-    assert_eq!(error_body["error"], "HeadNotFound");
+    assert_eq!(error_body["error"], "RepoNotFound");
     let missing_res = client
         .get(format!(
             "{}/xrpc/com.atproto.sync.getHead",
@@ -165,7 +165,7 @@ async fn test_get_checkout_comprehensive() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(not_found_res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(not_found_res.status(), StatusCode::BAD_REQUEST);
     let error_body: Value = not_found_res.json().await.unwrap();
     assert_eq!(error_body["error"], "RepoNotFound");
     let missing_res = client
@@ -187,4 +187,167 @@ async fn test_get_checkout_comprehensive() {
         .await
         .expect("Failed to send request");
     assert_eq!(empty_did_res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_get_head_deactivated_account_returns_error() {
+    let client = client();
+    let base = base_url().await;
+    let (did, jwt) = setup_new_user("deactheadtest").await;
+    let res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getHead", base))
+        .query(&[("did", did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    client
+        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .bearer_auth(&jwt)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    let deact_res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getHead", base))
+        .query(&[("did", did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deact_res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = deact_res.json().await.unwrap();
+    assert_eq!(body["error"], "RepoDeactivated");
+}
+
+#[tokio::test]
+async fn test_get_head_takendown_account_returns_error() {
+    let client = client();
+    let base = base_url().await;
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let (_, target_did) = create_account_and_login(&client).await;
+    let res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getHead", base))
+        .query(&[("did", target_did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    client
+        .post(format!("{}/xrpc/com.atproto.admin.updateSubjectStatus", base))
+        .bearer_auth(&admin_jwt)
+        .json(&serde_json::json!({
+            "subject": {
+                "$type": "com.atproto.admin.defs#repoRef",
+                "did": target_did
+            },
+            "takedown": {
+                "applied": true,
+                "ref": "test-takedown"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    let takedown_res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getHead", base))
+        .query(&[("did", target_did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(takedown_res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = takedown_res.json().await.unwrap();
+    assert_eq!(body["error"], "RepoTakendown");
+}
+
+#[tokio::test]
+async fn test_get_head_admin_can_access_deactivated() {
+    let client = client();
+    let base = base_url().await;
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let (user_jwt, did) = create_account_and_login(&client).await;
+    client
+        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .bearer_auth(&user_jwt)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    let res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getHead", base))
+        .bearer_auth(&admin_jwt)
+        .query(&[("did", did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_get_checkout_deactivated_account_returns_error() {
+    let client = client();
+    let base = base_url().await;
+    let (did, jwt) = setup_new_user("deactcheckouttest").await;
+    let res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getCheckout", base))
+        .query(&[("did", did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    client
+        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .bearer_auth(&jwt)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    let deact_res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getCheckout", base))
+        .query(&[("did", did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deact_res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = deact_res.json().await.unwrap();
+    assert_eq!(body["error"], "RepoDeactivated");
+}
+
+#[tokio::test]
+async fn test_get_checkout_takendown_account_returns_error() {
+    let client = client();
+    let base = base_url().await;
+    let (admin_jwt, _) = create_admin_account_and_login(&client).await;
+    let (_, target_did) = create_account_and_login(&client).await;
+    let res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getCheckout", base))
+        .query(&[("did", target_did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    client
+        .post(format!("{}/xrpc/com.atproto.admin.updateSubjectStatus", base))
+        .bearer_auth(&admin_jwt)
+        .json(&serde_json::json!({
+            "subject": {
+                "$type": "com.atproto.admin.defs#repoRef",
+                "did": target_did
+            },
+            "takedown": {
+                "applied": true,
+                "ref": "test-takedown"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    let takedown_res = client
+        .get(format!("{}/xrpc/com.atproto.sync.getCheckout", base))
+        .query(&[("did", target_did.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(takedown_res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = takedown_res.json().await.unwrap();
+    assert_eq!(body["error"], "RepoTakendown");
 }

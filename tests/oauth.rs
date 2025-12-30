@@ -191,9 +191,9 @@ async fn test_par_and_authorize() {
 async fn test_full_oauth_flow() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("oauth-test-{}", ts);
-    let email = format!("oauth-test-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("ot{}", suffix);
+    let email = format!("ot{}@example.com", suffix);
     let password = "Oauthtest123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -209,7 +209,7 @@ async fn test_full_oauth_flow() {
     let mock_client = setup_mock_client_metadata(redirect_uri).await;
     let client_id = mock_client.uri();
     let (code_verifier, code_challenge) = generate_pkce();
-    let state = format!("state-{}", ts);
+    let state = format!("state-{}", suffix);
     let par_res = http_client
         .post(format!("{}/oauth/par", url))
         .form(&[
@@ -349,9 +349,9 @@ async fn test_full_oauth_flow() {
 async fn test_oauth_error_cases() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("wrong-creds-{}", ts);
-    let email = format!("wrong-creds-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("wc{}", suffix);
+    let email = format!("wc{}@example.com", suffix);
     http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
         .json(&json!({ "handle": handle, "email": email, "password": "Correct123!" }))
@@ -435,9 +435,9 @@ async fn test_oauth_error_cases() {
 async fn test_oauth_2fa_flow() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("2fa-test-{}", ts);
-    let email = format!("2fa-test-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("ft{}", suffix);
+    let email = format!("ft{}@example.com", suffix);
     let password = "Twofa123test!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -557,9 +557,9 @@ async fn test_oauth_2fa_flow() {
 async fn test_oauth_2fa_lockout() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("2fa-lockout-{}", ts);
-    let email = format!("2fa-lockout-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("fl{}", suffix);
+    let email = format!("fl{}@example.com", suffix);
     let password = "Twofa123test!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -649,9 +649,9 @@ async fn test_oauth_2fa_lockout() {
 async fn test_account_selector_with_2fa() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("selector-2fa-{}", ts);
-    let email = format!("selector-2fa-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("sf{}", suffix);
+    let email = format!("sf{}@example.com", suffix);
     let password = "Selector2fa123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -835,9 +835,9 @@ async fn test_account_selector_with_2fa() {
 async fn test_oauth_state_encoding() {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("state-special-{}", ts);
-    let email = format!("state-special-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("ss{}", suffix);
+    let email = format!("ss{}@example.com", suffix);
     let password = "State123special!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
@@ -914,9 +914,9 @@ async fn test_oauth_state_encoding() {
 async fn get_oauth_token_with_scope(scope: &str) -> (String, String, String) {
     let url = base_url().await;
     let http_client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("scope-test-{}", ts);
-    let email = format!("scope-test-{}@example.com", ts);
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("st{}", suffix);
+    let email = format!("st{}@example.com", suffix);
     let password = "Scopetest123!";
     let create_res = http_client
         .post(format!("{}/xrpc/com.atproto.server.createAccount", url))

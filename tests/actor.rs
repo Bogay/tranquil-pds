@@ -140,7 +140,7 @@ async fn test_put_preferences_invalid_namespace() {
 }
 
 #[tokio::test]
-async fn test_put_preferences_read_only_rejected() {
+async fn test_put_preferences_read_only_silently_filtered() {
     let client = client();
     let base = base_url().await;
     let (token, _did) = create_account_and_login(&client).await;
@@ -149,6 +149,10 @@ async fn test_put_preferences_read_only_rejected() {
             {
                 "$type": "app.bsky.actor.defs#declaredAgePref",
                 "isOverAge18": true
+            },
+            {
+                "$type": "app.bsky.actor.defs#adultContentPref",
+                "enabled": true
             }
         ]
     });
@@ -159,9 +163,18 @@ async fn test_put_preferences_read_only_rejected() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 400);
-    let body: Value = resp.json().await.unwrap();
-    assert_eq!(body["error"], "InvalidRequest");
+    assert_eq!(resp.status(), 200);
+    let get_resp = client
+        .get(format!("{}/xrpc/app.bsky.actor.getPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get_resp.status(), 200);
+    let body: Value = get_resp.json().await.unwrap();
+    let prefs_arr = body["preferences"].as_array().unwrap();
+    assert_eq!(prefs_arr.len(), 1);
+    assert_eq!(prefs_arr[0]["$type"], "app.bsky.actor.defs#adultContentPref");
 }
 
 #[tokio::test]
@@ -327,4 +340,92 @@ async fn test_preferences_isolation_between_users() {
     assert_eq!(resp.status(), 200);
     let body: Value = resp.json().await.unwrap();
     assert!(body["preferences"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_declared_age_pref_computed_from_birth_date() {
+    let client = client();
+    let base = base_url().await;
+    let (token, _did) = create_account_and_login(&client).await;
+    let prefs = json!({
+        "preferences": [
+            {
+                "$type": "app.bsky.actor.defs#personalDetailsPref",
+                "birthDate": "1990-01-15"
+            }
+        ]
+    });
+    let resp = client
+        .post(format!("{}/xrpc/app.bsky.actor.putPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&prefs)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let get_resp = client
+        .get(format!("{}/xrpc/app.bsky.actor.getPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get_resp.status(), 200);
+    let body: Value = get_resp.json().await.unwrap();
+    let prefs_arr = body["preferences"].as_array().unwrap();
+    assert_eq!(prefs_arr.len(), 2);
+    let personal_details = prefs_arr
+        .iter()
+        .find(|p| p["$type"] == "app.bsky.actor.defs#personalDetailsPref");
+    assert!(personal_details.is_some());
+    assert_eq!(personal_details.unwrap()["birthDate"], "1990-01-15");
+    let declared_age = prefs_arr
+        .iter()
+        .find(|p| p["$type"] == "app.bsky.actor.defs#declaredAgePref");
+    assert!(declared_age.is_some());
+    let declared_age = declared_age.unwrap();
+    assert_eq!(declared_age["isOverAge13"], true);
+    assert_eq!(declared_age["isOverAge16"], true);
+    assert_eq!(declared_age["isOverAge18"], true);
+}
+
+#[tokio::test]
+async fn test_declared_age_pref_computed_under_18() {
+    let client = client();
+    let base = base_url().await;
+    let (token, _did) = create_account_and_login(&client).await;
+    let current_year = chrono::Utc::now().format("%Y").to_string().parse::<i32>().unwrap();
+    let birth_year = current_year - 15;
+    let prefs = json!({
+        "preferences": [
+            {
+                "$type": "app.bsky.actor.defs#personalDetailsPref",
+                "birthDate": format!("{}-06-15", birth_year)
+            }
+        ]
+    });
+    let resp = client
+        .post(format!("{}/xrpc/app.bsky.actor.putPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&prefs)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let get_resp = client
+        .get(format!("{}/xrpc/app.bsky.actor.getPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get_resp.status(), 200);
+    let body: Value = get_resp.json().await.unwrap();
+    let prefs_arr = body["preferences"].as_array().unwrap();
+    let declared_age = prefs_arr
+        .iter()
+        .find(|p| p["$type"] == "app.bsky.actor.defs#declaredAgePref");
+    assert!(declared_age.is_some());
+    let declared_age = declared_age.unwrap();
+    assert_eq!(declared_age["isOverAge13"], true);
+    assert_eq!(declared_age["isOverAge16"], false);
+    assert_eq!(declared_age["isOverAge18"], false);
 }
