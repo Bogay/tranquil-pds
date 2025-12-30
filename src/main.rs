@@ -5,7 +5,7 @@ use tokio::sync::watch;
 use tracing::{error, info, warn};
 use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
 use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
-use tranquil_pds::scheduled::{backfill_repo_rev, backfill_user_blocks, start_scheduled_tasks};
+use tranquil_pds::scheduled::{backfill_genesis_commit_blocks, backfill_repo_rev, backfill_user_blocks, start_scheduled_tasks};
 use tranquil_pds::state::AppState;
 
 #[tokio::main]
@@ -32,6 +32,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let backfill_db = state.db.clone();
     let backfill_block_store = state.block_store.clone();
     tokio::spawn(async move {
+        backfill_genesis_commit_blocks(&backfill_db, backfill_block_store.clone()).await;
         backfill_repo_rev(&backfill_db, backfill_block_store.clone()).await;
         backfill_user_blocks(&backfill_db, backfill_block_store).await;
     });

@@ -512,19 +512,18 @@ pub async fn sequence_sync_event(
     Ok(seq_row.seq)
 }
 
-pub async fn sequence_empty_commit_event(state: &AppState, did: &str) -> Result<i64, String> {
-    let repo_info = sqlx::query!(
-        "SELECT r.repo_root_cid, r.repo_rev FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("DB Error fetching repo root: {}", e))?
-    .ok_or_else(|| "Repo not found".to_string())?;
+pub async fn sequence_genesis_commit(
+    state: &AppState,
+    did: &str,
+    commit_cid: &Cid,
+    mst_root_cid: &Cid,
+    rev: &str,
+) -> Result<i64, String> {
     let ops = serde_json::json!([]);
     let blobs: Vec<String> = vec![];
-    let blocks_cids: Vec<String> = vec![];
+    let blocks_cids: Vec<String> = vec![mst_root_cid.to_string(), commit_cid.to_string()];
     let prev_cid: Option<&str> = None;
+    let commit_cid_str = commit_cid.to_string();
     let seq_row = sqlx::query!(
         r#"
         INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, rev)
@@ -532,16 +531,16 @@ pub async fn sequence_empty_commit_event(state: &AppState, did: &str) -> Result<
         RETURNING seq
         "#,
         did,
-        repo_info.repo_root_cid,
+        commit_cid_str,
         prev_cid,
         ops,
         &blobs,
         &blocks_cids,
-        repo_info.repo_rev
+        rev
     )
     .fetch_one(&state.db)
     .await
-    .map_err(|e| format!("DB Error (repo_seq empty commit): {}", e))?;
+    .map_err(|e| format!("DB Error (repo_seq genesis commit): {}", e))?;
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
         .execute(&state.db)
         .await

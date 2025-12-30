@@ -13,6 +13,103 @@ use tracing::{debug, error, info, warn};
 use crate::repo::PostgresBlockStore;
 use crate::storage::BlobStorage;
 
+pub async fn backfill_genesis_commit_blocks(db: &PgPool, block_store: PostgresBlockStore) {
+    let broken_genesis_commits = match sqlx::query!(
+        r#"
+        SELECT seq, did, commit_cid
+        FROM repo_seq
+        WHERE event_type = 'commit'
+          AND prev_cid IS NULL
+          AND (blocks_cids IS NULL OR array_length(blocks_cids, 1) IS NULL OR array_length(blocks_cids, 1) = 0)
+        "#
+    )
+    .fetch_all(db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to query repo_seq for genesis commit backfill: {}", e);
+            return;
+        }
+    };
+
+    if broken_genesis_commits.is_empty() {
+        debug!("No genesis commits need blocks_cids backfill");
+        return;
+    }
+
+    info!(
+        count = broken_genesis_commits.len(),
+        "Backfilling blocks_cids for genesis commits"
+    );
+
+    let mut success = 0;
+    let mut failed = 0;
+
+    for commit_row in broken_genesis_commits {
+        let commit_cid_str = match &commit_row.commit_cid {
+            Some(c) => c.clone(),
+            None => {
+                warn!(seq = commit_row.seq, "Genesis commit missing commit_cid");
+                failed += 1;
+                continue;
+            }
+        };
+
+        let commit_cid = match Cid::from_str(&commit_cid_str) {
+            Ok(c) => c,
+            Err(_) => {
+                warn!(seq = commit_row.seq, "Invalid commit CID");
+                failed += 1;
+                continue;
+            }
+        };
+
+        let block = match block_store.get(&commit_cid).await {
+            Ok(Some(b)) => b,
+            Ok(None) => {
+                warn!(seq = commit_row.seq, cid = %commit_cid_str, "Commit block not found in store");
+                failed += 1;
+                continue;
+            }
+            Err(e) => {
+                warn!(seq = commit_row.seq, error = %e, "Failed to fetch commit block");
+                failed += 1;
+                continue;
+            }
+        };
+
+        let commit = match Commit::from_cbor(&block) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(seq = commit_row.seq, error = %e, "Failed to parse commit");
+                failed += 1;
+                continue;
+            }
+        };
+
+        let mst_root_cid = commit.data;
+        let blocks_cids: Vec<String> = vec![mst_root_cid.to_string(), commit_cid.to_string()];
+
+        if let Err(e) = sqlx::query!(
+            "UPDATE repo_seq SET blocks_cids = $1 WHERE seq = $2",
+            &blocks_cids,
+            commit_row.seq
+        )
+        .execute(db)
+        .await
+        {
+            warn!(seq = commit_row.seq, error = %e, "Failed to update blocks_cids");
+            failed += 1;
+        } else {
+            info!(seq = commit_row.seq, did = %commit_row.did, "Fixed genesis commit blocks_cids");
+            success += 1;
+        }
+    }
+
+    info!(success, failed, "Completed genesis commit blocks_cids backfill");
+}
+
 pub async fn backfill_repo_rev(db: &PgPool, block_store: PostgresBlockStore) {
     let repos_missing_rev = match sqlx::query!(
         "SELECT user_id, repo_root_cid FROM repos WHERE repo_rev IS NULL"

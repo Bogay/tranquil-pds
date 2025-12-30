@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE repo_seq SET blocks_cids = $1 WHERE seq = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3b791fdb8e29043c980963d4d18e1e492c73c39818a8648a7af70555418fb5d1"
+}
