@@ -1,6 +1,7 @@
 use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::delegation::{self, DelegationActionType};
 use crate::state::AppState;
+use crate::util::get_max_blob_size;
 use axum::body::Bytes;
 use axum::{
     Json,
@@ -14,9 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use tracing::{debug, error};
-
-const MAX_BLOB_SIZE: usize = 10_000_000_000;
-const MAX_VIDEO_BLOB_SIZE: usize = 10_000_000_000;
 
 pub async fn upload_blob(
     State(state): State<AppState>,
@@ -38,7 +36,7 @@ pub async fn upload_blob(
 
     let is_service_auth = is_service_token(&token);
 
-    let (did, is_migration, controller_did) = if is_service_auth {
+    let (did, _is_migration, controller_did) = if is_service_auth {
         debug!("Verifying service token for blob upload");
         let verifier = ServiceTokenVerifier::new();
         match verifier
@@ -94,11 +92,7 @@ pub async fn upload_blob(
         }
     };
 
-    let max_size = if is_service_auth || is_migration {
-        MAX_VIDEO_BLOB_SIZE
-    } else {
-        MAX_BLOB_SIZE
-    };
+    let max_size = get_max_blob_size();
 
     if body.len() > max_size {
         return (

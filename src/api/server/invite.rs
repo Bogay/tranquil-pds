@@ -46,14 +46,14 @@ pub struct CreateInviteCodeOutput {
 
 pub async fn create_invite_code(
     State(state): State<AppState>,
-    BearerAuthAdmin(_auth_user): BearerAuthAdmin,
+    BearerAuthAdmin(auth_user): BearerAuthAdmin,
     Json(input): Json<CreateInviteCodeInput>,
 ) -> Response {
     if input.use_count < 1 {
         return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
 
-    let for_account = input.for_account.unwrap_or_else(|| "admin".to_string());
+    let for_account = input.for_account.unwrap_or_else(|| auth_user.did.clone());
     let code = gen_invite_code();
 
     match sqlx::query!(
@@ -101,7 +101,7 @@ pub struct AccountCodes {
 
 pub async fn create_invite_codes(
     State(state): State<AppState>,
-    BearerAuthAdmin(_auth_user): BearerAuthAdmin,
+    BearerAuthAdmin(auth_user): BearerAuthAdmin,
     Json(input): Json<CreateInviteCodesInput>,
 ) -> Response {
     if input.use_count < 1 {
@@ -112,7 +112,7 @@ pub async fn create_invite_codes(
     let for_accounts = input
         .for_accounts
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| vec!["admin".to_string()]);
+        .unwrap_or_else(|| vec![auth_user.did.clone()]);
 
     let admin_user_id = match sqlx::query_scalar!(
         "SELECT id FROM users WHERE is_admin = true LIMIT 1"
@@ -184,6 +184,8 @@ pub struct InviteCode {
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeUse {
     pub used_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used_by_handle: Option<String>,
     pub used_at: String,
 }
 
@@ -238,7 +240,7 @@ pub async fn get_account_invite_codes(
 
         let uses = sqlx::query!(
             r#"
-            SELECT u.did, icu.used_at
+            SELECT u.did, u.handle, icu.used_at
             FROM invite_code_uses icu
             JOIN users u ON icu.used_by_user = u.id
             WHERE icu.code = $1
@@ -253,6 +255,7 @@ pub async fn get_account_invite_codes(
                 .iter()
                 .map(|u| InviteCodeUse {
                     used_by: u.did.clone(),
+                    used_by_handle: Some(u.handle.clone()),
                     used_at: u.used_at.to_rfc3339(),
                 })
                 .collect()

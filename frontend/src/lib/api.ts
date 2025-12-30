@@ -105,7 +105,7 @@ export interface InviteCode {
   forAccount: string;
   createdBy: string;
   createdAt: string;
-  uses: { usedBy: string; usedAt: string }[];
+  uses: { usedBy: string; usedByHandle?: string; usedAt: string }[];
 }
 
 export type VerificationChannel = "email" | "discord" | "telegram" | "signal";

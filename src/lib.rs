@@ -24,6 +24,7 @@ pub mod validation;
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     http::Method,
     middleware,
     routing::{any, get, post},
@@ -618,6 +619,7 @@ pub fn app(state: AppState) -> Router {
             post(api::delegation::create_delegated_account),
         )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
+        .layer(DefaultBodyLimit::max(util::get_max_blob_size()))
         .layer(middleware::from_fn(metrics::metrics_middleware))
         .layer(
             CorsLayer::new()

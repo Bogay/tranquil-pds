@@ -1,9 +1,22 @@
 use axum::http::HeaderMap;
 use rand::Rng;
 use sqlx::PgPool;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
 const BASE32_ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz234567";
+const DEFAULT_MAX_BLOB_SIZE: usize = 10 * 1024 * 1024 * 1024;
+
+static MAX_BLOB_SIZE: OnceLock<usize> = OnceLock::new();
+
+pub fn get_max_blob_size() -> usize {
+    *MAX_BLOB_SIZE.get_or_init(|| {
+        std::env::var("MAX_BLOB_SIZE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MAX_BLOB_SIZE)
+    })
+}
 
 pub fn generate_token_code() -> String {
     generate_token_code_parts(2, 5)

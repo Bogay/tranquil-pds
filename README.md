@@ -8,7 +8,7 @@ This particular PDS thrives under harsh conditions. It is a dandelion growing th
 
 It has full compatibility with Bluesky's reference PDS: same endpoints, same behavior, same client compatibility. Everything works: repo operations, blob storage, firehose, OAuth, handle resolution, account migration, the lot.
 
-Another excellent PDS is [Cocoon](https://github.com/haileyok/cocoon), written in go.
+Another excellent PDS is [Cocoon](https://tangled.org/hailey.at/cocoon), written in go.
 
 ## What's different about Tranquil PDS
 

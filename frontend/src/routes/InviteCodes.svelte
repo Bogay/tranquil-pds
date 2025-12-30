@@ -12,6 +12,8 @@
   let error = $state<string | null>(null)
   let creating = $state(false)
   let createdCode = $state<string | null>(null)
+  let createdCodeCopied = $state(false)
+  let copiedCode = $state<string | null>(null)
   let inviteCodesEnabled = $state<boolean | null>(null)
 
   onMount(async () => {
@@ -65,9 +67,22 @@
   }
   function dismissCreated() {
     createdCode = null
+    createdCodeCopied = false
+  }
+  function copyCreatedCode() {
+    if (createdCode) {
+      navigator.clipboard.writeText(createdCode)
+      createdCodeCopied = true
+    }
   }
   function copyCode(code: string) {
     navigator.clipboard.writeText(code)
+    copiedCode = code
+    setTimeout(() => {
+      if (copiedCode === code) {
+        copiedCode = null
+      }
+    }, 2000)
   }
 </script>
 <div class="page">
@@ -86,7 +101,9 @@
       <h3>{$_('inviteCodes.created')}</h3>
       <div class="code-display">
         <code>{createdCode}</code>
-        <button class="copy" onclick={() => copyCode(createdCode!)}>{$_('inviteCodes.copy')}</button>
+        <button class="copy" onclick={copyCreatedCode}>
+          {createdCodeCopied ? $_('common.copied') : $_('common.copyToClipboard')}
+        </button>
       </div>
       <button onclick={dismissCreated}>{$_('common.done')}</button>
     </div>
@@ -110,8 +127,12 @@
           <li class:disabled={code.disabled} class:used={code.uses.length > 0 && code.available === 0}>
             <div class="code-main">
               <code>{code.code}</code>
-              <button class="copy-small" onclick={() => copyCode(code.code)} title={$_('inviteCodes.copy')}>
-                {$_('inviteCodes.copy')}
+              <button
+                class="copy-small"
+                onclick={() => copyCode(code.code)}
+                title={copiedCode === code.code ? $_('common.copied') : $_('inviteCodes.copy')}
+              >
+                {copiedCode === code.code ? $_('common.copied') : $_('inviteCodes.copy')}
               </button>
             </div>
             <div class="code-meta">
@@ -119,7 +140,7 @@
               {#if code.disabled}
                 <span class="status disabled">{$_('inviteCodes.disabled')}</span>
               {:else if code.uses.length > 0}
-                <span class="status used">{$_('inviteCodes.used', { values: { handle: code.uses[0].usedBy.split(':').pop() } })}</span>
+                <span class="status used">{$_('inviteCodes.used', { values: { handle: code.uses[0].usedByHandle || code.uses[0].usedBy.split(':').pop() } })}</span>
               {:else}
                 <span class="status available">{$_('inviteCodes.available')}</span>
               {/if}
