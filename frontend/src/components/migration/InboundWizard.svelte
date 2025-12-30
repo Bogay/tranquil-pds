@@ -22,6 +22,7 @@
   let checkingHandle = $state(false)
 
   const isResumedMigration = $derived(flow.state.progress.repoImported)
+  const isDidWeb = $derived(flow.state.sourceDid.startsWith("did:web:"))
 
   $effect(() => {
     if (flow.state.step === 'welcome' || flow.state.step === 'choose-handle') {
@@ -187,7 +188,20 @@
     }
   }
 
-  const steps = ['Login', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Verify PLC', 'Complete']
+  async function completeDidWeb() {
+    loading = true
+    try {
+      await flow.completeDidWebMigration()
+    } catch (err) {
+      flow.setError((err as Error).message)
+    } finally {
+      loading = false
+    }
+  }
+
+  const steps = $derived(isDidWeb
+    ? ['Login', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Update DID', 'Complete']
+    : ['Login', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Verify PLC', 'Complete'])
   function getCurrentStepIndex(): number {
     switch (flow.state.step) {
       case 'welcome':
@@ -197,6 +211,7 @@
       case 'migrating': return 3
       case 'email-verify': return 4
       case 'plc-token':
+      case 'did-web-update':
       case 'finalizing': return 5
       case 'success': return 6
       default: return 0
@@ -587,6 +602,46 @@
           </button>
         </div>
       </form>
+    </div>
+
+  {:else if flow.state.step === 'did-web-update'}
+    <div class="step-content">
+      <h2>{$_('migration.inbound.didWebUpdate.title')}</h2>
+      <p>{$_('migration.inbound.didWebUpdate.desc')}</p>
+
+      <div class="info-box">
+        <p>
+          {$_('migration.inbound.didWebUpdate.yourDid')} <code>{flow.state.sourceDid}</code>
+        </p>
+        <p style="margin-top: 12px;">
+          {$_('migration.inbound.didWebUpdate.updateInstructions')}
+        </p>
+      </div>
+
+      <div class="code-block">
+        <pre>{`{
+  "id": "${flow.state.sourceDid}",
+  "service": [
+    {
+      "id": "#atproto_pds",
+      "type": "AtprotoPersonalDataServer",
+      "serviceEndpoint": "${window.location.origin}"
+    }
+  ]
+}`}</pre>
+      </div>
+
+      <div class="warning-box">
+        <strong>{$_('migration.inbound.didWebUpdate.important')}</strong> {$_('migration.inbound.didWebUpdate.verifyFirst')}
+        {$_('migration.inbound.didWebUpdate.fileLocation')} <code>https://{flow.state.sourceDid.replace('did:web:', '')}/.well-known/did.json</code>
+      </div>
+
+      <div class="button-row">
+        <button class="ghost" onclick={() => flow.setStep('email-verify')} disabled={loading}>Back</button>
+        <button onclick={completeDidWeb} disabled={loading}>
+          {loading ? $_('migration.inbound.didWebUpdate.completing') : $_('migration.inbound.didWebUpdate.complete')}
+        </button>
+      </div>
     </div>
 
   {:else if flow.state.step === 'finalizing'}
@@ -1020,5 +1075,30 @@
     padding: var(--space-4);
     border-radius: var(--radius-lg);
     margin-bottom: var(--space-5);
+  }
+
+  .code-block {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    margin-bottom: var(--space-5);
+    overflow-x: auto;
+  }
+
+  .code-block pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    background: var(--bg-primary);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 0.9em;
   }
 </style>

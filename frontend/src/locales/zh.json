@@ -1106,6 +1106,17 @@
         "resend": "重新发送",
         "resending": "发送中..."
       },
+      "didWebUpdate": {
+        "title": "更新您的DID文档",
+        "desc": "由于您使用的是did:web身份，您需要更新DID文档以指向此PDS。",
+        "yourDid": "您的DID是：",
+        "updateInstructions": "更新您域名上的did.json文件，将atproto_pds服务端点指向此PDS：",
+        "important": "重要提示：",
+        "verifyFirst": "在完成迁移之前，请确保您的DID文档已更新并可公开访问。",
+        "fileLocation": "文件应位于：",
+        "complete": "完成迁移",
+        "completing": "完成中..."
+      },
       "finalizing": {
         "title": "正在完成迁移",
         "desc": "请稍候，正在完成迁移...",

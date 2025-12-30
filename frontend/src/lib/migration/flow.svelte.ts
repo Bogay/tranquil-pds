@@ -371,9 +371,13 @@ export function createInboundMigrationFlow() {
         return;
       }
 
-      setProgress({ currentOperation: "Requesting PLC operation token..." });
-      await sourceClient.requestPlcOperationSignature();
-      setStep("plc-token");
+      if (state.sourceDid.startsWith("did:web:")) {
+        setStep("did-web-update");
+      } else {
+        setProgress({ currentOperation: "Requesting PLC operation token..." });
+        await sourceClient.requestPlcOperationSignature();
+        setStep("plc-token");
+      }
     } catch (e) {
       const err = e as Error & { error?: string; status?: number };
       const message = err.message || err.error ||
@@ -401,8 +405,12 @@ export function createInboundMigrationFlow() {
         state.targetEmail,
         state.targetPassword,
       );
-      await sourceClient.requestPlcOperationSignature();
-      setStep("plc-token");
+      if (state.sourceDid.startsWith("did:web:")) {
+        setStep("did-web-update");
+      } else {
+        await sourceClient.requestPlcOperationSignature();
+        setStep("plc-token");
+      }
       return true;
     } catch (e) {
       const err = e as Error & { error?: string };
@@ -543,6 +551,55 @@ export function createInboundMigrationFlow() {
     await sourceClient.requestPlcOperationSignature();
   }
 
+  async function completeDidWebMigration(): Promise<void> {
+    migrationLog("completeDidWebMigration START", {
+      sourceDid: state.sourceDid,
+      sourceHandle: state.sourceHandle,
+      targetHandle: state.targetHandle,
+    });
+
+    if (!sourceClient || !localClient) {
+      migrationLog("completeDidWebMigration ERROR: Not connected to PDSes");
+      throw new Error("Not connected to PDSes");
+    }
+
+    setStep("finalizing");
+    setProgress({ currentOperation: "Activating account..." });
+
+    try {
+      migrationLog("Activating account on NEW PDS");
+      const activateStart = Date.now();
+      await localClient.activateAccount();
+      migrationLog("Account activated", { durationMs: Date.now() - activateStart });
+      setProgress({ activated: true });
+
+      setProgress({ currentOperation: "Deactivating old account..." });
+      migrationLog("Deactivating account on OLD PDS");
+      const deactivateStart = Date.now();
+      try {
+        await sourceClient.deactivateAccount();
+        migrationLog("Account deactivated on OLD PDS", {
+          durationMs: Date.now() - deactivateStart,
+        });
+        setProgress({ deactivated: true });
+      } catch (deactivateErr) {
+        const err = deactivateErr as Error & { error?: string };
+        migrationLog("Could not deactivate on OLD PDS", { error: err.message });
+      }
+
+      migrationLog("completeDidWebMigration SUCCESS");
+      setStep("success");
+      clearMigrationState();
+    } catch (e) {
+      const err = e as Error & { error?: string; status?: number };
+      const message = err.message || err.error ||
+        `Unknown error (status ${err.status || "unknown"})`;
+      migrationLog("completeDidWebMigration FAILED", { error: message });
+      setError(message);
+      setStep("did-web-update");
+    }
+  }
+
   function reset(): void {
     state = {
       direction: "inbound",
@@ -614,6 +671,7 @@ export function createInboundMigrationFlow() {
     requestPlcToken,
     submitPlcToken,
     resendPlcToken,
+    completeDidWebMigration,
     reset,
     resumeFromState,
     getLocalSession,

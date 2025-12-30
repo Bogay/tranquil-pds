@@ -1106,6 +1106,17 @@
         "resend": "Resend Token",
         "resending": "Resending..."
       },
+      "didWebUpdate": {
+        "title": "Update Your DID Document",
+        "desc": "Since you're using a did:web identity, you need to update your DID document to point to this PDS.",
+        "yourDid": "Your DID is:",
+        "updateInstructions": "Update the did.json file at your domain to point the atproto_pds service endpoint to this PDS:",
+        "important": "Important:",
+        "verifyFirst": "Make sure your DID document is updated and publicly accessible before completing the migration.",
+        "fileLocation": "The file should be at:",
+        "complete": "Complete Migration",
+        "completing": "Completing..."
+      },
       "finalizing": {
         "title": "Finalizing Migration",
         "desc": "Please wait while we complete the migration...",

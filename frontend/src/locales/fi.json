@@ -1106,6 +1106,17 @@
         "resend": "Lähetä uudelleen",
         "resending": "Lähetetään..."
       },
+      "didWebUpdate": {
+        "title": "Päivitä DID-dokumenttisi",
+        "desc": "Koska käytät did:web-identiteettiä, sinun täytyy päivittää DID-dokumenttisi osoittamaan tähän PDS:ään.",
+        "yourDid": "DID:si on:",
+        "updateInstructions": "Päivitä verkkotunnuksesi did.json-tiedosto niin, että atproto_pds-palvelun päätepiste osoittaa tähän PDS:ään:",
+        "important": "Tärkeää:",
+        "verifyFirst": "Varmista, että DID-dokumenttisi on päivitetty ja julkisesti saatavilla ennen siirron viimeistelyä.",
+        "fileLocation": "Tiedoston tulee sijaita:",
+        "complete": "Viimeistele siirto",
+        "completing": "Viimeistellään..."
+      },
       "finalizing": {
         "title": "Viimeistellään siirtoa",
         "desc": "Odota, kun viimeistelemme siirtoa...",

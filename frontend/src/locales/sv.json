@@ -1106,6 +1106,17 @@
         "resend": "Skicka igen",
         "resending": "Skickar..."
       },
+      "didWebUpdate": {
+        "title": "Uppdatera ditt DID-dokument",
+        "desc": "Eftersom du använder en did:web-identitet måste du uppdatera ditt DID-dokument för att peka på denna PDS.",
+        "yourDid": "Ditt DID är:",
+        "updateInstructions": "Uppdatera did.json-filen på din domän så att atproto_pds-tjänstens slutpunkt pekar på denna PDS:",
+        "important": "Viktigt:",
+        "verifyFirst": "Se till att ditt DID-dokument är uppdaterat och offentligt tillgängligt innan du slutför flytten.",
+        "fileLocation": "Filen ska finnas på:",
+        "complete": "Slutför flytt",
+        "completing": "Slutför..."
+      },
       "finalizing": {
         "title": "Slutför flytt",
         "desc": "Vänta medan vi slutför flytten...",

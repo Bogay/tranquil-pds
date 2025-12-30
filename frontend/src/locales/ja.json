@@ -1106,6 +1106,17 @@
         "resend": "再送信",
         "resending": "送信中..."
       },
+      "didWebUpdate": {
+        "title": "DIDドキュメントを更新",
+        "desc": "did:webアイデンティティを使用しているため、DIDドキュメントを更新してこのPDSを指すようにする必要があります。",
+        "yourDid": "あなたのDID：",
+        "updateInstructions": "ドメインのdid.jsonファイルを更新して、atproto_pdsサービスエンドポイントをこのPDSに向けてください：",
+        "important": "重要：",
+        "verifyFirst": "移行を完了する前に、DIDドキュメントが更新され、公開アクセス可能であることを確認してください。",
+        "fileLocation": "ファイルの場所：",
+        "complete": "移行を完了",
+        "completing": "完了中..."
+      },
       "finalizing": {
         "title": "移行を完了中",
         "desc": "移行を完了しています...",

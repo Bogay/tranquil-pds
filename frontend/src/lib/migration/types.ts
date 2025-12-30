@@ -6,6 +6,7 @@ export type InboundStep =
   | "migrating"
   | "email-verify"
   | "plc-token"
+  | "did-web-update"
   | "finalizing"
   | "success"
   | "error";

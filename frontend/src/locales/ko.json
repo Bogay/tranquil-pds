@@ -1106,6 +1106,17 @@
         "resend": "재전송",
         "resending": "전송 중..."
       },
+      "didWebUpdate": {
+        "title": "DID 문서 업데이트",
+        "desc": "did:web 아이덴티티를 사용하고 있으므로 DID 문서를 이 PDS를 가리키도록 업데이트해야 합니다.",
+        "yourDid": "당신의 DID:",
+        "updateInstructions": "도메인의 did.json 파일을 업데이트하여 atproto_pds 서비스 엔드포인트가 이 PDS를 가리키도록 하세요:",
+        "important": "중요:",
+        "verifyFirst": "마이그레이션을 완료하기 전에 DID 문서가 업데이트되고 공개적으로 접근 가능한지 확인하세요.",
+        "fileLocation": "파일 위치:",
+        "complete": "마이그레이션 완료",
+        "completing": "완료 중..."
+      },
       "finalizing": {
         "title": "마이그레이션 완료 중",
         "desc": "마이그레이션을 완료하는 중입니다...",

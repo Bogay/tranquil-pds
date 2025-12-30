@@ -495,10 +495,20 @@
   .back {
     color: var(--text-secondary);
     text-decoration: none;
+    padding: var(--space-1) var(--space-2);
+    margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast), color var(--transition-fast);
   }
 
   .back:hover {
     color: var(--accent);
+    background: var(--accent-muted);
+  }
+
+  .back:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .sep {
@@ -508,14 +518,23 @@
   .breadcrumb-link {
     background: none;
     border: none;
-    padding: 0;
+    padding: var(--space-1) var(--space-2);
+    margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
     color: var(--accent);
     cursor: pointer;
     font-size: inherit;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
   }
 
   .breadcrumb-link:hover {
+    background: var(--accent-muted);
     text-decoration: underline;
+  }
+
+  .breadcrumb-link:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .current {
@@ -683,17 +702,27 @@
     align-items: center;
     width: 100%;
     padding: var(--space-3);
-    background: var(--bg-card);
+    background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
     color: var(--text-primary);
-    transition: border-color var(--transition-fast);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
   }
 
   .collection-link:hover {
+    background: var(--bg-secondary);
     border-color: var(--accent);
+  }
+
+  .collection-link:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .collection-link:active {
+    background: var(--bg-tertiary);
   }
 
   .nsid {
@@ -703,6 +732,10 @@
 
   .arrow {
     color: var(--text-muted);
+  }
+
+  .collection-link:hover .arrow {
+    color: var(--accent);
   }
 
   .record-list {
@@ -718,17 +751,27 @@
     display: block;
     width: 100%;
     padding: var(--space-4);
-    background: var(--bg-card);
+    background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
     color: var(--text-primary);
-    transition: border-color var(--transition-fast);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
   }
 
   .record-item:hover {
+    background: var(--bg-secondary);
     border-color: var(--accent);
+  }
+
+  .record-item:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .record-item:active {
+    background: var(--bg-tertiary);
   }
 
   .record-info {
@@ -926,5 +969,15 @@
     background: var(--bg-secondary);
     padding: var(--space-6);
     border-radius: var(--radius-xl);
+  }
+
+  .page ::selection {
+    background: var(--accent);
+    color: var(--text-inverse);
+  }
+
+  .page ::-moz-selection {
+    background: var(--accent);
+    color: var(--text-inverse);
   }
 </style>
