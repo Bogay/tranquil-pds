@@ -57,6 +57,20 @@ pub async fn delete_record(
         return e;
     }
 
+    if crate::util::is_account_migrated(&state.db, &auth.did)
+        .await
+        .unwrap_or(false)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "AccountMigrated",
+                "message": "Account has been migrated. Repo operations are not allowed."
+            })),
+        )
+            .into_response();
+    }
+
     let did = auth.did;
     let user_id = auth.user_id;
     let current_root_cid = auth.current_root_cid;

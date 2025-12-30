@@ -144,6 +144,7 @@ export const mockData = {
       privacyPolicy: "https://example.com/privacy",
       termsOfService: "https://example.com/tos",
     },
+    selfHostedDidWebEnabled: true,
   }),
   describeRepo: (did: string) => ({
     handle: "testuser.test.tranquil.dev",

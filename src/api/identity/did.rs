@@ -11,9 +11,18 @@ use base64::Engine;
 use k256::SecretKey;
 use k256::elliptic_curve::sec1::ToEncodedPoint;
 use reqwest;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DidWebVerificationMethod {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub method_type: String,
+    pub public_key_multibase: String,
+}
 
 #[derive(Deserialize)]
 pub struct ResolveHandleParams {
@@ -170,6 +179,54 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
         )
             .into_response();
     }
+
+    let overrides = sqlx::query!(
+        "SELECT verification_methods, also_known_as FROM did_web_overrides WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
+
+    if let Some(ref ovr) = overrides {
+        if let Ok(parsed) =
+            serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
+        {
+            if !parsed.is_empty() {
+                let also_known_as = if !ovr.also_known_as.is_empty() {
+                    ovr.also_known_as.clone()
+                } else {
+                    vec![format!("at://{}", full_handle)]
+                };
+
+                return Json(json!({
+                    "@context": [
+                        "https://www.w3.org/ns/did/v1",
+                        "https://w3id.org/security/multikey/v1",
+                        "https://w3id.org/security/suites/secp256k1-2019/v1"
+                    ],
+                    "id": did,
+                    "alsoKnownAs": also_known_as,
+                    "verificationMethod": parsed.iter().map(|m| json!({
+                        "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
+                        "type": m.method_type,
+                        "controller": did,
+                        "publicKeyMultibase": m.public_key_multibase
+                    })).collect::<Vec<_>>(),
+                    "service": [{
+                        "id": "#atproto_pds",
+                        "type": "AtprotoPersonalDataServer",
+                        "serviceEndpoint": service_endpoint
+                    }]
+                }))
+                .into_response();
+            }
+        }
+    }
+
     let key_row = sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
         user_id
@@ -206,7 +263,17 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
                 .into_response();
         }
     };
-    let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
+
+    let also_known_as = if let Some(ref ovr) = overrides {
+        if !ovr.also_known_as.is_empty() {
+            ovr.also_known_as.clone()
+        } else {
+            vec![format!("at://{}", full_handle)]
+        }
+    } else {
+        vec![format!("at://{}", full_handle)]
+    };
+
     Json(json!({
         "@context": [
             "https://www.w3.org/ns/did/v1",
@@ -214,7 +281,7 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
             "https://w3id.org/security/suites/secp256k1-2019/v1"
         ],
         "id": did,
-        "alsoKnownAs": [format!("at://{}", handle)],
+        "alsoKnownAs": also_known_as,
         "verificationMethod": [{
             "id": format!("{}#atproto", did),
             "type": "Multikey",
@@ -272,6 +339,54 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         )
             .into_response();
     }
+
+    let overrides = sqlx::query!(
+        "SELECT verification_methods, also_known_as FROM did_web_overrides WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+
+    let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
+
+    if let Some(ref ovr) = overrides {
+        if let Ok(parsed) =
+            serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
+        {
+            if !parsed.is_empty() {
+                let also_known_as = if !ovr.also_known_as.is_empty() {
+                    ovr.also_known_as.clone()
+                } else {
+                    vec![format!("at://{}", full_handle)]
+                };
+
+                return Json(json!({
+                    "@context": [
+                        "https://www.w3.org/ns/did/v1",
+                        "https://w3id.org/security/multikey/v1",
+                        "https://w3id.org/security/suites/secp256k1-2019/v1"
+                    ],
+                    "id": did,
+                    "alsoKnownAs": also_known_as,
+                    "verificationMethod": parsed.iter().map(|m| json!({
+                        "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
+                        "type": m.method_type,
+                        "controller": did,
+                        "publicKeyMultibase": m.public_key_multibase
+                    })).collect::<Vec<_>>(),
+                    "service": [{
+                        "id": "#atproto_pds",
+                        "type": "AtprotoPersonalDataServer",
+                        "serviceEndpoint": service_endpoint
+                    }]
+                }))
+                .into_response();
+            }
+        }
+    }
+
     let key_row = sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
         user_id
@@ -308,7 +423,17 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
                 .into_response();
         }
     };
-    let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
+
+    let also_known_as = if let Some(ref ovr) = overrides {
+        if !ovr.also_known_as.is_empty() {
+            ovr.also_known_as.clone()
+        } else {
+            vec![format!("at://{}", full_handle)]
+        }
+    } else {
+        vec![format!("at://{}", full_handle)]
+    };
+
     Json(json!({
         "@context": [
             "https://www.w3.org/ns/did/v1",
@@ -316,7 +441,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
             "https://w3id.org/security/suites/secp256k1-2019/v1"
         ],
         "id": did,
-        "alsoKnownAs": [format!("at://{}", handle)],
+        "alsoKnownAs": also_known_as,
         "verificationMethod": [{
             "id": format!("{}#atproto", did),
             "type": "Multikey",

@@ -53,6 +53,7 @@ async fn test_create_invite_code_no_auth() {
 #[tokio::test]
 async fn test_create_invite_code_non_admin() {
     let client = client();
+    let _ = create_admin_account_and_login(&client).await;
     let (access_jwt, _did) = create_account_and_login(&client).await;
     let payload = json!({
         "useCount": 5
@@ -121,7 +122,7 @@ async fn test_create_invite_code_for_another_account() {
 #[tokio::test]
 async fn test_create_invite_codes_success() {
     let client = client();
-    let (access_jwt, _did) = create_admin_account_and_login(&client).await;
+    let (access_jwt, did) = create_admin_account_and_login(&client).await;
     let payload = json!({
         "useCount": 2,
         "codeCount": 3
@@ -141,7 +142,7 @@ async fn test_create_invite_codes_success() {
     assert!(body["codes"].is_array());
     let codes = body["codes"].as_array().unwrap();
     assert_eq!(codes.len(), 1);
-    assert_eq!(codes[0]["account"], "admin");
+    assert_eq!(codes[0]["account"], did);
     assert_eq!(codes[0]["codes"].as_array().unwrap().len(), 3);
 }
 

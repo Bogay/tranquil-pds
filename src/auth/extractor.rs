@@ -11,6 +11,7 @@ use super::{
     validate_bearer_token_cached_allow_deactivated, validate_token_with_dpop,
 };
 use crate::state::AppState;
+use crate::util::build_full_url;
 
 pub struct BearerAuth(pub AuthenticatedUser);
 
@@ -164,7 +165,7 @@ impl FromRequestParts<AppState> for BearerAuth {
         if extracted.is_dpop {
             let dpop_proof = parts.headers.get("dpop").and_then(|h| h.to_str().ok());
             let method = parts.method.as_str();
-            let uri = parts.uri.to_string();
+            let uri = build_full_url(&parts.uri.to_string());
 
             match validate_token_with_dpop(
                 &state.db,
@@ -217,7 +218,7 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
         if extracted.is_dpop {
             let dpop_proof = parts.headers.get("dpop").and_then(|h| h.to_str().ok());
             let method = parts.method.as_str();
-            let uri = parts.uri.to_string();
+            let uri = build_full_url(&parts.uri.to_string());
 
             match validate_token_with_dpop(
                 &state.db,
@@ -274,7 +275,7 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
         let user = if extracted.is_dpop {
             let dpop_proof = parts.headers.get("dpop").and_then(|h| h.to_str().ok());
             let method = parts.method.as_str();
-            let uri = parts.uri.to_string();
+            let uri = build_full_url(&parts.uri.to_string());
 
             match validate_token_with_dpop(
                 &state.db,

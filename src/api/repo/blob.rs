@@ -92,6 +92,20 @@ pub async fn upload_blob(
         }
     };
 
+    if crate::util::is_account_migrated(&state.db, &did)
+        .await
+        .unwrap_or(false)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "AccountMigrated",
+                "message": "Account has been migrated to another PDS. Blob operations are not allowed."
+            })),
+        )
+            .into_response();
+    }
+
     let max_size = get_max_blob_size();
 
     if body.len() > max_size {

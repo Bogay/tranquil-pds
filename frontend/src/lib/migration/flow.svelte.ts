@@ -906,20 +906,9 @@ export function createOutboundMigrationFlow() {
 
       setProgress({ currentOperation: "Deactivating old account..." });
       try {
-        await localClient.deactivateAccount();
+        await localClient.deactivateAccount(state.targetPdsUrl);
         setProgress({ deactivated: true });
       } catch {
-      }
-
-      if (state.localDid.startsWith("did:web:")) {
-        setProgress({
-          currentOperation: "Updating DID document forwarding...",
-        });
-        try {
-          await localClient.updateMigrationForwarding(state.targetPdsUrl);
-        } catch (e) {
-          console.warn("Failed to update migration forwarding:", e);
-        }
       }
 
       setStep("success");

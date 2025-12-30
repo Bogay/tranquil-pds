@@ -27,7 +27,8 @@ pub use invite::{create_invite_code, create_invite_codes, get_account_invite_cod
 pub use logo::get_logo;
 pub use meta::{describe_server, health, robots_txt};
 pub use migration::{
-    clear_migration_forwarding, get_migration_status, update_migration_forwarding,
+    clear_migration_forwarding, get_did_document, get_migration_status, update_did_document,
+    update_migration_forwarding,
 };
 pub use passkey_account::{
     complete_passkey_setup, create_passkey_account, recover_passkey_account,

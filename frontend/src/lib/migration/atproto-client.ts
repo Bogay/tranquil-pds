@@ -327,12 +327,19 @@ export class AtprotoClient {
     );
   }
 
-  async deactivateAccount(): Promise<void> {
-    apiLog("POST", `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount`);
+  async deactivateAccount(migratingTo?: string): Promise<void> {
+    apiLog("POST", `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount`, {
+      migratingTo,
+    });
     const start = Date.now();
     try {
+      const body: { migratingTo?: string } = {};
+      if (migratingTo) {
+        body.migratingTo = migratingTo;
+      }
       await this.xrpc("com.atproto.server.deactivateAccount", {
         httpMethod: "POST",
+        body,
       });
       apiLog(
         "POST",
@@ -340,6 +347,7 @@ export class AtprotoClient {
         {
           durationMs: Date.now() - start,
           success: true,
+          migratingTo,
         },
       );
     } catch (e) {
@@ -352,6 +360,7 @@ export class AtprotoClient {
           error: err.message,
           errorCode: err.error,
           status: err.status,
+          migratingTo,
         },
       );
       throw e;

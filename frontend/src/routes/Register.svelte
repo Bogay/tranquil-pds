@@ -13,6 +13,7 @@
     availableUserDomains: string[]
     inviteCodeRequired: boolean
     availableCommsChannels?: string[]
+    selfHostedDidWebEnabled?: boolean
   } | null>(null)
   let loadingServerInfo = $state(true)
   let serverInfoLoaded = false
@@ -237,11 +238,15 @@
                 </span>
               </label>
 
-              <label class="radio-label">
-                <input type="radio" name="didType" value="web" bind:group={flow.info.didType} disabled={flow.state.submitting} />
+              <label class="radio-label" class:disabled={serverInfo?.selfHostedDidWebEnabled === false}>
+                <input type="radio" name="didType" value="web" bind:group={flow.info.didType} disabled={flow.state.submitting || serverInfo?.selfHostedDidWebEnabled === false} />
                 <span class="radio-content">
                   <strong>{$_('register.didWeb')}</strong>
-                  <span class="radio-hint">{$_('register.didWebHint')}</span>
+                  {#if serverInfo?.selfHostedDidWebEnabled === false}
+                    <span class="radio-hint disabled-hint">{$_('register.didWebDisabledHint')}</span>
+                  {:else}
+                    <span class="radio-hint">{$_('register.didWebHint')}</span>
+                  {/if}
                 </span>
               </label>
 
@@ -548,6 +553,15 @@
   .radio-hint {
     font-size: var(--text-xs);
     color: var(--text-secondary);
+  }
+
+  .radio-label.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .radio-hint.disabled-hint {
+    color: var(--warning-text);
   }
 
   .warning-box {

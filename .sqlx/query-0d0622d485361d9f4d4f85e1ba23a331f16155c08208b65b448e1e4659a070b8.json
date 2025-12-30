@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                handle, email, email_verified, is_admin, deactivated_at, takedown_ref, preferred_locale,\n                preferred_comms_channel as \"preferred_channel: crate::comms::CommsChannel\",\n                discord_verified, telegram_verified, signal_verified\n            FROM users WHERE did = $1",
+  "query": "SELECT\n                handle, email, email_verified, is_admin, deactivated_at, takedown_ref, preferred_locale,\n                preferred_comms_channel as \"preferred_channel: crate::comms::CommsChannel\",\n                discord_verified, telegram_verified, signal_verified, migrated_to_pds, migrated_at\n            FROM users WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -69,6 +69,16 @@
         "ordinal": 10,
         "name": "signal_verified",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "migrated_to_pds",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "migrated_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -87,8 +97,10 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true
     ]
   },
-  "hash": "c36e3ae06df1d0f795771b2452df4cb3d78b00fdb7ed44b9adbc105cd2cb2782"
+  "hash": "0d0622d485361d9f4d4f85e1ba23a331f16155c08208b65b448e1e4659a070b8"
 }

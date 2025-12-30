@@ -129,6 +129,19 @@ pub async fn apply_writes(
         )
             .into_response();
     }
+    if crate::util::is_account_migrated(&state.db, &did)
+        .await
+        .unwrap_or(false)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "AccountMigrated",
+                "message": "Account has been migrated to another PDS. Repo operations are not allowed."
+            })),
+        )
+            .into_response();
+    }
     let is_verified = has_verified_comms_channel(&state.db, &did)
         .await
         .unwrap_or(false);

@@ -33,6 +33,7 @@
   import DelegationAudit from './routes/DelegationAudit.svelte'
   import ActAs from './routes/ActAs.svelte'
   import Migration from './routes/Migration.svelte'
+  import DidDocumentEditor from './routes/DidDocumentEditor.svelte'
   import Home from './routes/Home.svelte'
 
   initI18n()
@@ -116,6 +117,8 @@
         return ActAs
       case '/migrate':
         return Migration
+      case '/did-document':
+        return DidDocumentEditor
       default:
         return Home
     }

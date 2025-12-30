@@ -24,6 +24,12 @@ pub async fn robots_txt() -> impl IntoResponse {
         "# Hello!\n\n# Crawling the public API is allowed\nUser-agent: *\nAllow: /\n",
     )
 }
+pub fn is_self_hosted_did_web_enabled() -> bool {
+    std::env::var("ENABLE_SELF_HOSTED_DID_WEB")
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(true)
+}
+
 pub async fn describe_server() -> impl IntoResponse {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let domains_str =
@@ -53,7 +59,8 @@ pub async fn describe_server() -> impl IntoResponse {
         "links": links,
         "contact": contact,
         "version": env!("CARGO_PKG_VERSION"),
-        "availableCommsChannels": get_available_comms_channels()
+        "availableCommsChannels": get_available_comms_channels(),
+        "selfHostedDidWebEnabled": is_self_hosted_did_web_enabled()
     }))
 }
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {

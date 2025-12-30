@@ -355,6 +355,16 @@ pub async fn create_account(
     let did_type = input.did_type.as_deref().unwrap_or("plc");
     let did = match did_type {
         "web" => {
+            if !crate::api::server::meta::is_self_hosted_did_web_enabled() {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "SelfHostedDidWebDisabled",
+                        "message": "This PDS does not offer self-hosted did:web identities. Please use did:plc or bring your own did:web."
+                    })),
+                )
+                    .into_response();
+            }
             let subdomain_host = format!("{}.{}", input.handle, hostname);
             let encoded_subdomain = subdomain_host.replace(':', "%3A");
             let self_hosted_did = format!("did:web:{}", encoded_subdomain);

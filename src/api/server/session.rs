@@ -104,7 +104,7 @@ pub async fn create_session(
         r#"SELECT
             u.id, u.did, u.handle, u.password_hash, u.email, u.deactivated_at, u.takedown_ref,
             u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,
-            u.allow_legacy_login,
+            u.allow_legacy_login, u.migrated_to_pds,
             u.preferred_comms_channel as "preferred_comms_channel: crate::comms::CommsChannel",
             k.key_bytes, k.encryption_version,
             (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled
@@ -276,9 +276,12 @@ pub async fn create_session(
         }
     }
     let handle = full_handle(&row.handle, &pds_hostname);
+    let is_migrated = row.deactivated_at.is_some() && row.migrated_to_pds.is_some();
     let is_active = row.deactivated_at.is_none() && !is_takendown;
     let status = if is_takendown {
         Some("takendown".to_string())
+    } else if is_migrated {
+        Some("migrated".to_string())
     } else if row.deactivated_at.is_some() {
         Some("deactivated".to_string())
     } else {
@@ -312,7 +315,7 @@ pub async fn get_session(
             r#"SELECT
                 handle, email, email_verified, is_admin, deactivated_at, takedown_ref, preferred_locale,
                 preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
-                discord_verified, telegram_verified, signal_verified
+                discord_verified, telegram_verified, signal_verified, migrated_to_pds, migrated_at
             FROM users WHERE did = $1"#,
             auth_user.did
         )
@@ -331,6 +334,8 @@ pub async fn get_session(
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&row.handle, &pds_hostname);
             let is_takendown = row.takedown_ref.is_some();
+            let is_migrated =
+                row.deactivated_at.is_some() && row.migrated_to_pds.is_some();
             let is_active = row.deactivated_at.is_none() && !is_takendown;
             let email_value = if can_read_email {
                 row.email.clone()
@@ -353,6 +358,10 @@ pub async fn get_session(
             }
             if is_takendown {
                 response["status"] = json!("takendown");
+            } else if is_migrated {
+                response["status"] = json!("migrated");
+                response["migratedToPds"] = json!(row.migrated_to_pds);
+                response["migratedAt"] = json!(row.migrated_at);
             } else if row.deactivated_at.is_some() {
                 response["status"] = json!("deactivated");
             }

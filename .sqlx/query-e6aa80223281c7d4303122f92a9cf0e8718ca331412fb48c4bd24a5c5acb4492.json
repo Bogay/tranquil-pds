@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT verification_methods, also_known_as FROM did_web_overrides WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "verification_methods",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "also_known_as",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "e6aa80223281c7d4303122f92a9cf0e8718ca331412fb48c4bd24a5c5acb4492"
+}

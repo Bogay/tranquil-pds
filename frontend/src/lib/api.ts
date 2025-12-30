@@ -86,9 +86,34 @@ export interface Session {
   preferredChannelVerified?: boolean;
   isAdmin?: boolean;
   active?: boolean;
-  status?: "active" | "deactivated";
+  status?: "active" | "deactivated" | "migrated";
+  migratedToPds?: string;
+  migratedAt?: string;
   accessJwt: string;
   refreshJwt: string;
+}
+
+export interface VerificationMethod {
+  id: string;
+  type: string;
+  publicKeyMultibase: string;
+}
+
+export interface DidDocument {
+  "@context": string[];
+  id: string;
+  alsoKnownAs: string[];
+  verificationMethod: Array<{
+    id: string;
+    type: string;
+    controller: string;
+    publicKeyMultibase: string;
+  }>;
+  service: Array<{
+    id: string;
+    type: string;
+    serviceEndpoint: string;
+  }>;
 }
 
 export interface AppPassword {
@@ -330,6 +355,7 @@ export const api = {
     links?: { privacyPolicy?: string; termsOfService?: string };
     version?: string;
     availableCommsChannels?: string[];
+    selfHostedDidWebEnabled?: boolean;
   }> {
     return xrpc("com.atproto.server.describeServer");
   },
@@ -1055,6 +1081,63 @@ export const api = {
       method: "POST",
       body: { token, identifier },
       token: accessToken,
+    });
+  },
+
+  async getDidDocument(token: string): Promise<DidDocument> {
+    return xrpc("com.tranquil.account.getDidDocument", { token });
+  },
+
+  async updateDidDocument(
+    token: string,
+    params: {
+      verificationMethods?: VerificationMethod[];
+      alsoKnownAs?: string[];
+      serviceEndpoint?: string;
+    },
+  ): Promise<{ success: boolean }> {
+    return xrpc("com.tranquil.account.updateDidDocument", {
+      method: "POST",
+      token,
+      body: params,
+    });
+  },
+
+  async deactivateAccount(
+    token: string,
+    deleteAfter?: string,
+    migratingTo?: string,
+  ): Promise<void> {
+    await xrpc("com.atproto.server.deactivateAccount", {
+      method: "POST",
+      token,
+      body: { deleteAfter, migratingTo },
+    });
+  },
+
+  async getMigrationStatus(token: string): Promise<{
+    migratedToPds?: string;
+    migratedAt?: string;
+    forwardingEnabled: boolean;
+  }> {
+    return xrpc("com.tranquil.account.getMigrationStatus", { token });
+  },
+
+  async updateMigrationForwarding(
+    token: string,
+    forwardingPds?: string,
+  ): Promise<{ success: boolean }> {
+    return xrpc("com.tranquil.account.updateMigrationForwarding", {
+      method: "POST",
+      token,
+      body: { forwardingPds },
+    });
+  },
+
+  async clearMigrationForwarding(token: string): Promise<{ success: boolean }> {
+    return xrpc("com.tranquil.account.clearMigrationForwarding", {
+      method: "POST",
+      token,
     });
   },
 };

@@ -99,7 +99,12 @@
       </div>
     </header>
 
-    {#if auth.session.status === 'deactivated' || auth.session.active === false}
+    {#if auth.session.status === 'migrated'}
+      <div class="migrated-banner">
+        <strong>{$_('dashboard.migratedTitle')}</strong>
+        <p>{$_('dashboard.migratedMessage', { values: { pds: auth.session.migratedToPds || 'another PDS' } })}</p>
+      </div>
+    {:else if auth.session.status === 'deactivated' || auth.session.active === false}
       <div class="deactivated-banner">
         <strong>{$_('dashboard.deactivatedTitle')}</strong>
         <p>{$_('dashboard.deactivatedMessage')}</p>
@@ -115,7 +120,9 @@
           {#if auth.session.isAdmin}
             <span class="badge admin">{$_('dashboard.admin')}</span>
           {/if}
-          {#if auth.session.status === 'deactivated' || auth.session.active === false}
+          {#if auth.session.status === 'migrated'}
+            <span class="badge migrated">{$_('dashboard.migrated')}</span>
+          {:else if auth.session.status === 'deactivated' || auth.session.active === false}
             <span class="badge deactivated">{$_('dashboard.deactivated')}</span>
           {/if}
         </dd>
@@ -156,49 +163,68 @@
     </section>
 
     <nav class="nav-grid">
-      <a href="#/app-passwords" class="nav-card">
-        <h3>{$_('dashboard.navAppPasswords')}</h3>
-        <p>{$_('dashboard.navAppPasswordsDesc')}</p>
-      </a>
-      <a href="#/sessions" class="nav-card">
-        <h3>{$_('dashboard.navSessions')}</h3>
-        <p>{$_('dashboard.navSessionsDesc')}</p>
-      </a>
-      {#if inviteCodesEnabled && auth.session.isAdmin}
-        <a href="#/invite-codes" class="nav-card">
-          <h3>{$_('dashboard.navInviteCodes')}</h3>
-          <p>{$_('dashboard.navInviteCodesDesc')}</p>
+      {#if auth.session.status === 'migrated'}
+        <a href="#/did-document" class="nav-card migrated-card">
+          <h3>{$_('dashboard.navDidDocument')}</h3>
+          <p>{$_('dashboard.navDidDocumentDesc')}</p>
         </a>
-      {/if}
-      <a href="#/settings" class="nav-card">
-        <h3>{$_('dashboard.navSettings')}</h3>
-        <p>{$_('dashboard.navSettingsDesc')}</p>
-      </a>
-      <a href="#/security" class="nav-card">
-        <h3>{$_('dashboard.navSecurity')}</h3>
-        <p>{$_('dashboard.navSecurityDesc')}</p>
-      </a>
-      <a href="#/comms" class="nav-card">
-        <h3>{$_('dashboard.navComms')}</h3>
-        <p>{$_('dashboard.navCommsDesc')}</p>
-      </a>
-      <a href="#/repo" class="nav-card">
-        <h3>{$_('dashboard.navRepo')}</h3>
-        <p>{$_('dashboard.navRepoDesc')}</p>
-      </a>
-      <a href="#/controllers" class="nav-card">
-        <h3>{$_('dashboard.navDelegation')}</h3>
-        <p>{$_('dashboard.navDelegationDesc')}</p>
-      </a>
-      <a href="#/migrate" class="nav-card">
-        <h3>{$_('migration.navTitle')}</h3>
-        <p>{$_('migration.navDesc')}</p>
-      </a>
-      {#if auth.session.isAdmin}
-        <a href="#/admin" class="nav-card admin-card">
-          <h3>{$_('dashboard.navAdmin')}</h3>
-          <p>{$_('dashboard.navAdminDesc')}</p>
+        <a href="#/sessions" class="nav-card">
+          <h3>{$_('dashboard.navSessions')}</h3>
+          <p>{$_('dashboard.navSessionsDesc')}</p>
         </a>
+        <a href="#/security" class="nav-card">
+          <h3>{$_('dashboard.navSecurity')}</h3>
+          <p>{$_('dashboard.navSecurityDesc')}</p>
+        </a>
+        <a href="#/migrate" class="nav-card">
+          <h3>{$_('dashboard.navMigrateAgain')}</h3>
+          <p>{$_('dashboard.navMigrateAgainDesc')}</p>
+        </a>
+      {:else}
+        <a href="#/app-passwords" class="nav-card">
+          <h3>{$_('dashboard.navAppPasswords')}</h3>
+          <p>{$_('dashboard.navAppPasswordsDesc')}</p>
+        </a>
+        <a href="#/sessions" class="nav-card">
+          <h3>{$_('dashboard.navSessions')}</h3>
+          <p>{$_('dashboard.navSessionsDesc')}</p>
+        </a>
+        {#if inviteCodesEnabled && auth.session.isAdmin}
+          <a href="#/invite-codes" class="nav-card">
+            <h3>{$_('dashboard.navInviteCodes')}</h3>
+            <p>{$_('dashboard.navInviteCodesDesc')}</p>
+          </a>
+        {/if}
+        <a href="#/settings" class="nav-card">
+          <h3>{$_('dashboard.navSettings')}</h3>
+          <p>{$_('dashboard.navSettingsDesc')}</p>
+        </a>
+        <a href="#/security" class="nav-card">
+          <h3>{$_('dashboard.navSecurity')}</h3>
+          <p>{$_('dashboard.navSecurityDesc')}</p>
+        </a>
+        <a href="#/comms" class="nav-card">
+          <h3>{$_('dashboard.navComms')}</h3>
+          <p>{$_('dashboard.navCommsDesc')}</p>
+        </a>
+        <a href="#/repo" class="nav-card">
+          <h3>{$_('dashboard.navRepo')}</h3>
+          <p>{$_('dashboard.navRepoDesc')}</p>
+        </a>
+        <a href="#/controllers" class="nav-card">
+          <h3>{$_('dashboard.navDelegation')}</h3>
+          <p>{$_('dashboard.navDelegationDesc')}</p>
+        </a>
+        <a href="#/migrate" class="nav-card">
+          <h3>{$_('migration.navTitle')}</h3>
+          <p>{$_('migration.navDesc')}</p>
+        </a>
+        {#if auth.session.isAdmin}
+          <a href="#/admin" class="nav-card admin-card">
+            <h3>{$_('dashboard.navAdmin')}</h3>
+            <p>{$_('dashboard.navAdminDesc')}</p>
+          </a>
+        {/if}
       {/if}
     </nav>
   </div>
@@ -374,6 +400,12 @@
     border: 1px solid var(--warning-border);
   }
 
+  .badge.migrated {
+    background: var(--info-bg, #e0f2fe);
+    color: var(--info-text, #0369a1);
+    border: 1px solid var(--info-border, #7dd3fc);
+  }
+
   .nav-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -439,5 +471,37 @@
     margin: var(--space-3) 0 0 0;
     color: var(--warning-text);
     font-size: var(--text-sm);
+  }
+
+  .migrated-banner {
+    background: var(--info-bg, #e0f2fe);
+    border: 1px solid var(--info-border, #7dd3fc);
+    border-radius: var(--radius-xl);
+    padding: var(--space-5) var(--space-6);
+    margin-bottom: var(--space-7);
+  }
+
+  .migrated-banner strong {
+    color: var(--info-text, #0369a1);
+    font-size: var(--text-base);
+  }
+
+  .migrated-banner p {
+    margin: var(--space-3) 0 0 0;
+    color: var(--info-text, #0369a1);
+    font-size: var(--text-sm);
+  }
+
+  .nav-card.migrated-card {
+    border-color: var(--info-border, #7dd3fc);
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--info-bg, #e0f2fe) 100%);
+  }
+
+  .nav-card.migrated-card:hover {
+    box-shadow: 0 2px 12px var(--info-bg, #e0f2fe);
+  }
+
+  .nav-card.migrated-card h3 {
+    color: var(--info-text, #0369a1);
   }
 </style>

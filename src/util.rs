@@ -86,6 +86,16 @@ pub async fn get_user_by_identifier(
     .ok_or(DbLookupError::NotFound)
 }
 
+pub async fn is_account_migrated(db: &PgPool, did: &str) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query!(
+        r#"SELECT (migrated_to_pds IS NOT NULL AND deactivated_at IS NOT NULL) as "migrated!: bool" FROM users WHERE did = $1"#,
+        did
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|r| r.migrated).unwrap_or(false))
+}
+
 pub fn parse_repeated_query_param(query: Option<&str>, key: &str) -> Vec<String> {
     query
         .map(|q| {
@@ -126,6 +136,18 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
         return value.trim().to_string();
     }
     "unknown".to_string()
+}
+
+pub fn pds_hostname() -> String {
+    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+}
+
+pub fn pds_public_url() -> String {
+    format!("https://{}", pds_hostname())
+}
+
+pub fn build_full_url(path: &str) -> String {
+    format!("{}{}", pds_public_url(), path)
 }
 
 #[cfg(test)]

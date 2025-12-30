@@ -257,7 +257,7 @@ impl FromRequestParts<AppState> for OAuthUser {
             });
         }
         let http_method = parts.method.as_str();
-        let http_uri = parts.uri.to_string();
+        let http_uri = crate::util::build_full_url(&parts.uri.to_string());
         match verify_oauth_access_token(&state.db, token, dpop_proof, http_method, &http_uri).await
         {
             Ok(result) => {

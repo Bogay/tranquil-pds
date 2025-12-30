@@ -5,14 +5,14 @@
 ### Migration tool
 Seamless account migration built into the UI, inspired by pdsmoover. Users shouldn't need external tools or brain surgery on half-done account states.
 
-- [ ] Add `migratingTo` parameter to `deactivateAccount` endpoint
-- [ ] For self-hosted did:web users: set `migrated_to_pds`, update DID doc serviceEndpoint
-- [ ] "Migrated" account state for self-hosted did:web: can authenticate but no repo operations
-- [ ] Migrated did:web user UI: minimal dashboard with "update forwarding PDS" setting, or full migration wizard to handle PDS 2 -> PDS 3 moves automatically
-- [ ] Outbound UI wizard: new PDS URL -> export repo -> guide account creation -> complete migration
-- [ ] Inbound UI wizard: login to old PDS -> choose handle -> import -> PLC token flow
-- [ ] Support `createAccount` with existing DID + service auth token
-- [ ] Progress tracking with resume capability
+- [x] Add `migratingTo` parameter to `deactivateAccount` endpoint
+- [x] For self-hosted did:web users: set `migrated_to_pds`, update DID doc serviceEndpoint
+- [x] "Migrated" account state for self-hosted did:web: can authenticate but no repo operations
+- [x] Migrated did:web user UI: minimal dashboard with "update forwarding PDS" setting, or full migration wizard to handle PDS 2 -> PDS 3 moves automatically
+- [x] Outbound UI wizard: new PDS URL -> export repo -> guide account creation -> complete migration
+- [x] Inbound UI wizard: login to old PDS -> choose handle -> import -> PLC token flow
+- [x] Support `createAccount` with existing DID + service auth token
+- [x] Progress tracking with resume capability
 - [ ] Scheduled automatic backups (CAR export)
 - [ ] One-click restore from backup
 

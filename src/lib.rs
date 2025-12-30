@@ -296,6 +296,14 @@ pub fn app(state: AppState) -> Router {
             post(api::server::clear_migration_forwarding),
         )
         .route(
+            "/xrpc/com.tranquil.account.updateDidDocument",
+            post(api::server::update_did_document),
+        )
+        .route(
+            "/xrpc/com.tranquil.account.getDidDocument",
+            get(api::server::get_did_document),
+        )
+        .route(
             "/xrpc/com.atproto.server.requestEmailUpdate",
             post(api::server::request_email_update),
         )

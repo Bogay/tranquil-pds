@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (migrated_to_pds IS NOT NULL AND deactivated_at IS NOT NULL) as \"migrated!: bool\" FROM users WHERE did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "migrated!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d91efadf413a90b907727cffd1ce13eb68c3ef017a34e69629df1255de312317"
+}
