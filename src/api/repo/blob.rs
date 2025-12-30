@@ -1,7 +1,6 @@
 use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::delegation::{self, DelegationActionType};
 use crate::state::AppState;
-use crate::sync::import::find_blob_refs_ipld;
 use axum::body::Bytes;
 use axum::{
     Json,
@@ -10,14 +9,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cid::Cid;
-use ipld_core::ipld::Ipld;
-use jacquard_repo::storage::BlockStore;
 use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::str::FromStr;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 const MAX_BLOB_SIZE: usize = 10_000_000_000;
 const MAX_VIDEO_BLOB_SIZE: usize = 10_000_000_000;
@@ -303,26 +299,26 @@ pub async fn list_missing_blobs(
         }
     };
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
-    let cursor_str = params.cursor.unwrap_or_default();
-    let (cursor_collection, cursor_rkey) = if cursor_str.contains('|') {
-        let parts: Vec<&str> = cursor_str.split('|').collect();
-        (parts[0].to_string(), parts[1].to_string())
-    } else {
-        (String::new(), String::new())
-    };
-    let records_query = sqlx::query!(
-        "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1 AND (collection, rkey) > ($2, $3) ORDER BY collection, rkey LIMIT $4",
+    let cursor_cid = params.cursor.as_deref().unwrap_or("");
+    let missing_query = sqlx::query!(
+        r#"
+        SELECT rb.blob_cid, rb.record_uri
+        FROM record_blobs rb
+        LEFT JOIN blobs b ON rb.blob_cid = b.cid AND b.created_by_user = rb.repo_id
+        WHERE rb.repo_id = $1 AND b.cid IS NULL AND rb.blob_cid > $2
+        ORDER BY rb.blob_cid
+        LIMIT $3
+        "#,
         user_id,
-        cursor_collection,
-        cursor_rkey,
-        limit
+        cursor_cid,
+        limit + 1
     )
     .fetch_all(&state.db)
     .await;
-    let records = match records_query {
+    let rows = match missing_query {
         Ok(r) => r,
         Err(e) => {
-            error!("DB error fetching records: {:?}", e);
+            error!("DB error fetching missing blobs: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "InternalError"})),
@@ -330,65 +326,25 @@ pub async fn list_missing_blobs(
                 .into_response();
         }
     };
-    let mut missing_blobs = Vec::new();
-    let mut last_cursor = None;
-    for row in &records {
-        let collection = &row.collection;
-        let rkey = &row.rkey;
-        let record_cid_str = &row.record_cid;
-        last_cursor = Some(format!("{}|{}", collection, rkey));
-        let record_cid = match Cid::from_str(record_cid_str) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        let block_bytes = match state.block_store.get(&record_cid).await {
-            Ok(Some(b)) => b,
-            _ => continue,
-        };
-        let record_ipld: Ipld = match serde_ipld_dagcbor::from_slice(&block_bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("Failed to parse record {} as IPLD: {:?}", record_cid_str, e);
-                continue;
-            }
-        };
-        let blob_refs = find_blob_refs_ipld(&record_ipld, 0);
-        for blob_ref in blob_refs {
-            let blob_cid_str = blob_ref.cid;
-            let exists = sqlx::query!(
-                "SELECT 1 as one FROM blobs WHERE cid = $1 AND created_by_user = $2",
-                blob_cid_str,
-                user_id
-            )
-            .fetch_optional(&state.db)
-            .await;
-            match exists {
-                Ok(None) => {
-                    missing_blobs.push(RecordBlob {
-                        cid: blob_cid_str,
-                        record_uri: format!("at://{}/{}/{}", did, collection, rkey),
-                    });
-                }
-                Err(e) => {
-                    error!("DB error checking blob existence: {:?}", e);
-                }
-                _ => {}
-            }
-        }
-    }
-    // if we fetched fewer records than limit, we are done, so cursor is None.
-    // otherwise, cursor is the last one we saw.
-    // ...right?
-    let next_cursor = if records.len() < limit as usize {
-        None
+    let has_more = rows.len() > limit as usize;
+    let blobs: Vec<RecordBlob> = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(|row| RecordBlob {
+            cid: row.blob_cid,
+            record_uri: row.record_uri,
+        })
+        .collect();
+    let next_cursor = if has_more {
+        blobs.last().map(|b| b.cid.clone())
     } else {
-        last_cursor
+        None
     };
     (
         StatusCode::OK,
         Json(ListMissingBlobsOutput {
             cursor: next_cursor,
-            blobs: missing_blobs,
+            blobs,
         }),
     )
         .into_response()

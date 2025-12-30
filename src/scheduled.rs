@@ -293,6 +293,112 @@ pub async fn backfill_user_blocks(db: &PgPool, block_store: PostgresBlockStore) 
     info!(success, failed, "Completed user_blocks backfill");
 }
 
+pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore) {
+    let users_needing_backfill = match sqlx::query!(
+        r#"
+        SELECT DISTINCT u.id as user_id, u.did
+        FROM users u
+        JOIN records r ON r.repo_id = u.id
+        WHERE NOT EXISTS (SELECT 1 FROM record_blobs rb WHERE rb.repo_id = u.id)
+        LIMIT 100
+        "#
+    )
+    .fetch_all(db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to query users for record_blobs backfill: {}", e);
+            return;
+        }
+    };
+
+    if users_needing_backfill.is_empty() {
+        debug!("No users need record_blobs backfill");
+        return;
+    }
+
+    info!(
+        count = users_needing_backfill.len(),
+        "Backfilling record_blobs for existing repos"
+    );
+
+    let mut success = 0;
+    let mut failed = 0;
+
+    for user in users_needing_backfill {
+        let records = match sqlx::query!(
+            "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1",
+            user.user_id
+        )
+        .fetch_all(db)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(user_id = %user.user_id, error = %e, "Failed to fetch records for backfill");
+                failed += 1;
+                continue;
+            }
+        };
+
+        let mut blob_refs_found = 0;
+        for record in records {
+            let record_cid = match Cid::from_str(&record.record_cid) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let block_bytes = match block_store.get(&record_cid).await {
+                Ok(Some(b)) => b,
+                _ => continue,
+            };
+
+            let record_ipld: Ipld = match serde_ipld_dagcbor::from_slice(&block_bytes) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let blob_refs = crate::sync::import::find_blob_refs_ipld(&record_ipld, 0);
+            for blob_ref in blob_refs {
+                let record_uri = format!(
+                    "at://{}/{}/{}",
+                    user.did, record.collection, record.rkey
+                );
+                if let Err(e) = sqlx::query!(
+                    r#"
+                    INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
+                    "#,
+                    user.user_id,
+                    record_uri,
+                    blob_ref.cid
+                )
+                .execute(db)
+                .await
+                {
+                    warn!(error = %e, "Failed to insert record_blob during backfill");
+                } else {
+                    blob_refs_found += 1;
+                }
+            }
+        }
+
+        if blob_refs_found > 0 {
+            info!(
+                user_id = %user.user_id,
+                did = %user.did,
+                blob_refs = blob_refs_found,
+                "Backfilled record_blobs"
+            );
+        }
+        success += 1;
+    }
+
+    info!(success, failed, "Completed record_blobs backfill");
+}
+
 pub async fn start_scheduled_tasks(
     db: PgPool,
     blob_store: Arc<dyn BlobStorage>,

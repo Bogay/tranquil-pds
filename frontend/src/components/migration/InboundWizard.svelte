@@ -621,6 +621,14 @@
       <div class="code-block">
         <pre>{`{
   "id": "${flow.state.sourceDid}",
+  "verificationMethod": [
+    {
+      "id": "${flow.state.sourceDid}#atproto",
+      "type": "Multikey",
+      "controller": "${flow.state.sourceDid}",
+      "publicKeyMultibase": "${flow.state.targetVerificationMethod?.replace('did:key:', '') || '...'}"
+    }
+  ],
   "service": [
     {
       "id": "#atproto_pds",

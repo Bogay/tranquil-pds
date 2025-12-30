@@ -222,8 +222,9 @@ pub async fn submit_plc_operation(
         }
     }
     match sqlx::query!(
-        "INSERT INTO repo_seq (did, event_type) VALUES ($1, 'identity') RETURNING seq",
-        did
+        "INSERT INTO repo_seq (did, event_type, handle) VALUES ($1, 'identity', $2) RETURNING seq",
+        did,
+        user.handle
     )
     .fetch_one(&state.db)
     .await

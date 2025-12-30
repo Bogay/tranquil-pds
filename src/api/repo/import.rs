@@ -322,6 +322,32 @@ pub async fn import_repo(
                 import_result.records.len(),
                 did
             );
+            let mut blob_ref_count = 0;
+            for record in &import_result.records {
+                for blob_ref in &record.blob_refs {
+                    let record_uri = format!("at://{}/{}/{}", did, record.collection, record.rkey);
+                    if let Err(e) = sqlx::query!(
+                        r#"
+                        INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
+                        "#,
+                        user_id,
+                        record_uri,
+                        blob_ref.cid
+                    )
+                    .execute(&state.db)
+                    .await
+                    {
+                        warn!("Failed to insert record_blob for {}: {:?}", record_uri, e);
+                    } else {
+                        blob_ref_count += 1;
+                    }
+                }
+            }
+            if blob_ref_count > 0 {
+                info!("Recorded {} blob references for imported repo", blob_ref_count);
+            }
             let key_row = match sqlx::query!(
                 r#"SELECT uk.key_bytes, uk.encryption_version
                    FROM user_keys uk

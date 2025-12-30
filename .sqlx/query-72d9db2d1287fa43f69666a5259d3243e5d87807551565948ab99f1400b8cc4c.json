@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1 AND (collection, rkey) > ($2, $3) ORDER BY collection, rkey LIMIT $4",
+  "query": "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1",
   "describe": {
     "columns": [
       {
@@ -21,10 +21,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -33,5 +30,5 @@
       false
     ]
   },
-  "hash": "ff7899984ea138f1e608fa862def47402369a428ac9116c653890e5fcaa0015b"
+  "hash": "72d9db2d1287fa43f69666a5259d3243e5d87807551565948ab99f1400b8cc4c"
 }

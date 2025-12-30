@@ -56,6 +56,7 @@ export interface InboundMigrationState {
   error: string | null;
   requires2FA: boolean;
   twoFactorCode: string;
+  targetVerificationMethod: string | null;
 }
 
 export interface OutboundMigrationState {

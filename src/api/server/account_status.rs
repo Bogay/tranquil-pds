@@ -122,8 +122,16 @@ pub async fn check_account_status(
             .await
             .unwrap_or(Some(0))
             .unwrap_or(0);
-    let blob_count: i64 = sqlx::query_scalar!(
+    let imported_blobs: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM blobs WHERE created_by_user = $1",
+        user_id
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(Some(0))
+    .unwrap_or(0);
+    let expected_blobs: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(DISTINCT blob_cid) FROM record_blobs WHERE repo_id = $1",
         user_id
     )
     .fetch_one(&state.db)
@@ -141,8 +149,8 @@ pub async fn check_account_status(
             repo_blocks: block_count as i64,
             indexed_records: record_count,
             private_state_values: 0,
-            expected_blobs: blob_count,
-            imported_blobs: blob_count,
+            expected_blobs,
+            imported_blobs,
         }),
     )
         .into_response()

@@ -65,6 +65,7 @@ export function createInboundMigrationFlow() {
     error: null,
     requires2FA: false,
     twoFactorCode: "",
+    targetVerificationMethod: null,
   });
 
   let sourceClient: AtprotoClient | null = null;
@@ -372,6 +373,9 @@ export function createInboundMigrationFlow() {
       }
 
       if (state.sourceDid.startsWith("did:web:")) {
+        const credentials = await localClient.getRecommendedDidCredentials();
+        state.targetVerificationMethod =
+          credentials.verificationMethods?.atproto || null;
         setStep("did-web-update");
       } else {
         setProgress({ currentOperation: "Requesting PLC operation token..." });
@@ -406,6 +410,9 @@ export function createInboundMigrationFlow() {
         state.targetPassword,
       );
       if (state.sourceDid.startsWith("did:web:")) {
+        const credentials = await localClient.getRecommendedDidCredentials();
+        state.targetVerificationMethod =
+          credentials.verificationMethods?.atproto || null;
         setStep("did-web-update");
       } else {
         await sourceClient.requestPlcOperationSignature();
@@ -620,6 +627,7 @@ export function createInboundMigrationFlow() {
       error: null,
       requires2FA: false,
       twoFactorCode: "",
+      targetVerificationMethod: null,
     };
     sourceClient = null;
     clearMigrationState();

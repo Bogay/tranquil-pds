@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        INSERT INTO record_blobs (repo_id, record_uri, blob_cid)\n                        VALUES ($1, $2, $3)\n                        ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "297e5495004fa601f86b3ada9e512815d4b7d73aacf3f3654628c93e5db8b791"
+}
