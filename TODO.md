@@ -5,32 +5,31 @@
 ### Migration tool
 Seamless account migration built into the UI, inspired by pdsmoover. Users shouldn't need external tools or brain surgery on half-done account states.
 
-- [x] Add `migratingTo` parameter to `deactivateAccount` endpoint
-- [x] For self-hosted did:web users: set `migrated_to_pds`, update DID doc serviceEndpoint
-- [x] "Migrated" account state for self-hosted did:web: can authenticate but no repo operations
-- [x] Migrated did:web user UI: minimal dashboard with "update forwarding PDS" setting, or full migration wizard to handle PDS 2 -> PDS 3 moves automatically
-- [x] Outbound UI wizard: new PDS URL -> export repo -> guide account creation -> complete migration
 - [x] Inbound UI wizard: login to old PDS -> choose handle -> import -> PLC token flow
 - [x] Support `createAccount` with existing DID + service auth token
 - [x] Progress tracking with resume capability
 - [ ] Scheduled automatic backups (CAR export)
 - [ ] One-click restore from backup
 
-### Plugin system
-Extensible architecture allowing third-party plugins to add functionality, like minecraft mods or browser extensions.
+Outbound migration wizard exists but is disabled. Rethinking the approach: instead of a managed flow with `migratingTo` state, pds-hosted did:web users should just have direct control over their DID document. They can independently update serviceEndpoint, add/remove keys, export their repo, deactivate their account.
 
-- [ ] Research: survey Fabric/Forge, VS Code, Grafana, Caddy plugin architectures
-- [ ] Evaluate rust approaches: WASM, dynamic linking, subprocess IPC, embedded scripting (Lua/Rhai)
-- [ ] Define security model (sandboxing, permissions, resource limits)
+- [ ] Remove `migratingTo` field and related state machine
+- [ ] Let did:web users edit their DID doc fields (serviceEndpoint, keys) whenever
+- [ ] Repo export as standalone feature, not tied to migration wizard
+
+### Plugin system
+Extensible architecture allowing third-party plugins to add functionality. Going with wasm-based rather than scripting language.
+
 - [ ] Plugin manifest format (name, version, deps, permissions, hooks)
-- [ ] Plugin discovery, loading, lifecycle (enable/disable/hot reload)
-- [ ] Error isolation (bad plugin shouldn't crash PDS)
+- [ ] Plugin loading and lifecycle (enable/disable/hot reload)
+- [ ] WASM host bindings for PDS APIs (database, storage, http, etc.)
+- [ ] Resource limits (memory, cpu time, capability restrictions)
 - [ ] Extension points: request middleware, record lifecycle hooks, custom XRPC endpoints
 - [ ] Extension points: custom lexicons, storage backends, auth providers, notification channels
 - [ ] Extension points: firehose consumers (react to repo events)
-- [ ] Plugin SDK crate with traits and helpers
-- [ ] Example plugins: custom feed algorithm, content filter, S3 backup
-- [ ] Plugin registry with signature verification and version compatibility
+- [ ] Plugin sdk crate with traits and helpers?
+- [ ] Example plugins: cdc, extra logging to 3rd party, content filter, better S3 backup
+- [ ] Plugin registry with signature verification?
 
 ### Plugin: Private/encrypted data
 Records that only authorized parties can see and decrypt. Requires key federation between PDSes. Implemented as a plugin using the plugin system above.
@@ -51,7 +50,7 @@ Records that only authorized parties can see and decrypt. Requires key federatio
 
 Core ATProto: Health, describeServer, all session endpoints, full repo CRUD, applyWrites, blob upload, importRepo, firehose with cursor replay, CAR export, blob sync, crawler notifications, handle resolution, PLC operations, full admin API, moderation reports.
 
-did:web support: Self-hosted did:web (subdomain format `did:web:handle.pds.com`), external/BYOD did:web, DID document serving via `/.well-known/did.json`, migration tracking for did:web users who leave (serviceEndpoint redirect), clear registration warnings about did:web trade-offs vs did:plc.
+did:web support: Self-hosted did:web (subdomain format `did:web:handle.pds.com`), external/BYOD did:web, DID document serving via `/.well-known/did.json`, clear registration warnings about did:web trade-offs vs did:plc.
 
 OAuth 2.1: Authorization server metadata, JWKS, PAR, authorize endpoint with login UI, token endpoint (auth code + refresh), revocation, introspection, DPoP, PKCE S256, client metadata validation, private_key_jwt verification.
 
