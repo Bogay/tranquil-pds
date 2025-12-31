@@ -110,8 +110,10 @@ describe("Settings", () => {
         capturedBody = JSON.parse((options?.body as string) || "{}");
         return jsonResponse({});
       });
-      mockEndpoint("com.atproto.server.getSession", () =>
-        jsonResponse(mockData.session()));
+      mockEndpoint(
+        "com.atproto.server.getSession",
+        () => jsonResponse(mockData.session()),
+      );
       render(Settings);
       await waitFor(() => {
         expect(screen.getByRole("button", { name: /change email/i }))
@@ -144,8 +146,10 @@ describe("Settings", () => {
         () => jsonResponse({ tokenRequired: true }),
       );
       mockEndpoint("com.atproto.server.updateEmail", () => jsonResponse({}));
-      mockEndpoint("com.atproto.server.getSession", () =>
-        jsonResponse(mockData.session()));
+      mockEndpoint(
+        "com.atproto.server.getSession",
+        () => jsonResponse(mockData.session()),
+      );
       render(Settings);
       await waitFor(() => {
         expect(screen.getByRole("button", { name: /change email/i }))
@@ -188,7 +192,9 @@ describe("Settings", () => {
         expect(screen.getByRole("button", { name: /cancel/i }))
           .toBeInTheDocument();
       });
-      const emailSection = screen.getByRole("heading", { name: /change email/i })
+      const emailSection = screen.getByRole("heading", {
+        name: /change email/i,
+      })
         .closest("section");
       const cancelButton = emailSection?.querySelector("button.secondary");
       if (cancelButton) {
@@ -220,8 +226,10 @@ describe("Settings", () => {
   describe("handle change", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
-      mockEndpoint("com.atproto.server.describeServer", () =>
-        jsonResponse(mockData.describeServer()));
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
     });
     it("displays current handle", async () => {
       render(Settings);
@@ -255,8 +263,10 @@ describe("Settings", () => {
     });
     it("shows success message after handle change", async () => {
       mockEndpoint("com.atproto.identity.updateHandle", () => jsonResponse({}));
-      mockEndpoint("com.atproto.server.getSession", () =>
-        jsonResponse(mockData.session()));
+      mockEndpoint(
+        "com.atproto.server.getSession",
+        () => jsonResponse(mockData.session()),
+      );
       render(Settings);
       await waitFor(() => {
         expect(screen.getByLabelText(/new handle/i)).toBeInTheDocument();

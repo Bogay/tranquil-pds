@@ -706,6 +706,25 @@ pub async fn create_passkey_account(
         .await;
     }
 
+    if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok() {
+        let birthdate_pref = json!({
+            "$type": "app.bsky.actor.defs#personalDetailsPref",
+            "birthDate": "1998-05-06T00:00:00.000Z"
+        });
+        if let Err(e) = sqlx::query!(
+            "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, name) DO NOTHING",
+            user_id,
+            "app.bsky.actor.defs#personalDetailsPref",
+            birthdate_pref
+        )
+        .execute(&mut *tx)
+        .await
+        {
+            warn!("Failed to set default birthdate preference: {:?}", e);
+        }
+    }
+
     if let Err(e) = tx.commit().await {
         error!("Error committing transaction: {:?}", e);
         return (

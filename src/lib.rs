@@ -626,6 +626,14 @@ pub fn app(state: AppState) -> Router {
             "/xrpc/com.tranquil.delegation.createDelegatedAccount",
             post(api::delegation::create_delegated_account),
         )
+        .route(
+            "/xrpc/app.bsky.ageassurance.getState",
+            get(api::age_assurance::get_state),
+        )
+        .route(
+            "/xrpc/app.bsky.unspecced.getAgeAssuranceState",
+            get(api::age_assurance::get_age_assurance_state),
+        )
         .route("/xrpc/{*method}", any(api::proxy::proxy_handler))
         .layer(DefaultBodyLimit::max(util::get_max_blob_size()))
         .layer(middleware::from_fn(metrics::metrics_middleware))

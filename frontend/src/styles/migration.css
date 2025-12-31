@@ -352,7 +352,9 @@ label.auth-option {
   border-radius: var(--radius-lg);
   cursor: pointer;
   margin-bottom: 0;
-  transition: border-color var(--transition-normal), background-color var(--transition-normal);
+  transition:
+    border-color var(--transition-normal),
+    background-color var(--transition-normal);
 }
 
 .auth-option:hover {

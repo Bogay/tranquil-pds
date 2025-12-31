@@ -2,7 +2,6 @@ import type {
   InboundMigrationState,
   InboundStep,
   MigrationProgress,
-  OAuthServerMetadata,
   OutboundMigrationState,
   OutboundStep,
   PasskeyAccountSetup,
@@ -86,7 +85,6 @@ export function createInboundMigrationFlow() {
   let sourceClient: AtprotoClient | null = null;
   let localClient: AtprotoClient | null = null;
   let localServerInfo: ServerDescription | null = null;
-  let sourceOAuthMetadata: OAuthServerMetadata | null = null;
 
   function setStep(step: InboundStep) {
     state.step = step;
@@ -271,10 +269,14 @@ export function createInboundMigrationFlow() {
         if (state.authMethod === "passkey" && state.passkeySetupToken) {
           localClient = createLocalClient();
           setStep("passkey-setup");
-          migrationLog("handleOAuthCallback: Resuming passkey flow at passkey-setup");
+          migrationLog(
+            "handleOAuthCallback: Resuming passkey flow at passkey-setup",
+          );
         } else {
           setStep("email-verify");
-          migrationLog("handleOAuthCallback: Resuming at email-verify for re-auth");
+          migrationLog(
+            "handleOAuthCallback: Resuming at email-verify for re-auth",
+          );
         }
       } else {
         setStep(targetStep);
@@ -337,7 +339,9 @@ export function createInboundMigrationFlow() {
         serverDid: serverInfo.did,
       });
 
-      migrationLog("startMigration: Getting service auth token from source PDS");
+      migrationLog(
+        "startMigration: Getting service auth token from source PDS",
+      );
       const { token } = await sourceClient.getServiceAuth(
         serverInfo.did,
         "com.atproto.server.createAccount",
@@ -361,7 +365,10 @@ export function createInboundMigrationFlow() {
           inviteCode: passkeyParams.inviteCode,
           stateInviteCode: state.inviteCode,
         });
-        passkeySetup = await localClient.createPasskeyAccount(passkeyParams, token);
+        passkeySetup = await localClient.createPasskeyAccount(
+          passkeyParams,
+          token,
+        );
         migrationLog("startMigration: Passkey account created on NEW PDS", {
           did: passkeySetup.did,
           hasAccessJwt: !!passkeySetup.accessJwt,
@@ -743,7 +750,9 @@ export function createInboundMigrationFlow() {
       migrationLog("Activating account on NEW PDS");
       const activateStart = Date.now();
       await localClient.activateAccount();
-      migrationLog("Account activated", { durationMs: Date.now() - activateStart });
+      migrationLog("Account activated", {
+        durationMs: Date.now() - activateStart,
+      });
       setProgress({ activated: true });
 
       setProgress({ currentOperation: "Deactivating old account..." });
@@ -757,7 +766,9 @@ export function createInboundMigrationFlow() {
         setProgress({ deactivated: true });
       } catch (deactivateErr) {
         const err = deactivateErr as Error & { error?: string };
-        migrationLog("Could not deactivate on source PDS", { error: err.message });
+        migrationLog("Could not deactivate on source PDS", {
+          error: err.message,
+        });
       }
 
       migrationLog("completeDidWebMigration SUCCESS");

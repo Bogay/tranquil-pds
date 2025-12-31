@@ -63,7 +63,9 @@ describe("migration/types", () => {
     });
 
     it("can check if error is MigrationError", () => {
-      const error = new MigrationError("Test", "ERR_TEST", true, { foo: "bar" });
+      const error = new MigrationError("Test", "ERR_TEST", true, {
+        foo: "bar",
+      });
 
       if (error instanceof MigrationError) {
         expect(error.code).toBe("ERR_TEST");

@@ -77,7 +77,8 @@ describe("Dashboard", () => {
       setupAuthenticatedUser({ isAdmin: true });
       mockEndpoint(
         "com.atproto.server.describeServer",
-        () => jsonResponse(mockData.describeServer({ inviteCodeRequired: true })),
+        () =>
+          jsonResponse(mockData.describeServer({ inviteCodeRequired: true })),
       );
       render(Dashboard);
       await waitFor(() => {

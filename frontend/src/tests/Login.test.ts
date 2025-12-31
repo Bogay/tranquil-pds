@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import Login from "../routes/Login.svelte";
 import {
@@ -15,8 +15,9 @@ describe("Login", () => {
     clearMocks();
     setupFetchMock();
     globalThis.location.hash = "";
-    mockEndpoint("/oauth/par", () =>
-      jsonResponse({ request_uri: "urn:mock:request" })
+    mockEndpoint(
+      "/oauth/par",
+      () => jsonResponse({ request_uri: "urn:mock:request" }),
     );
   });
 
@@ -85,8 +86,11 @@ describe("Login", () => {
         error: null,
         savedAccounts,
       });
-      mockEndpoint("com.atproto.server.getSession", () =>
-        jsonResponse(mockData.session({ handle: "alice.test.tranquil.dev" })));
+      mockEndpoint(
+        "com.atproto.server.getSession",
+        () =>
+          jsonResponse(mockData.session({ handle: "alice.test.tranquil.dev" })),
+      );
     });
 
     it("displays saved accounts list", async () => {

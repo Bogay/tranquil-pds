@@ -1,5 +1,6 @@
 pub mod actor;
 pub mod admin;
+pub mod age_assurance;
 pub mod delegation;
 pub mod error;
 pub mod identity;

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   base64UrlDecode,
   base64UrlEncode,
@@ -351,7 +351,13 @@ describe("migration/atproto-client", () => {
 
       it("returns null and clears storage for expired key (> 24 hours)", async () => {
         const stored = {
-          privateJwk: { kty: "EC", crv: "P-256", x: "test", y: "test", d: "test" },
+          privateJwk: {
+            kty: "EC",
+            crv: "P-256",
+            x: "test",
+            y: "test",
+            d: "test",
+          },
           publicJwk: { kty: "EC", crv: "P-256", x: "test", y: "test" },
           thumbprint: "test-thumb",
           createdAt: Date.now() - 25 * 60 * 60 * 1000,

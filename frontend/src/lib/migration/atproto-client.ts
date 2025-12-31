@@ -131,10 +131,12 @@ export class AtprotoClient {
         error: "Unknown",
         message: res.statusText,
       }));
-      const error = new Error(err.message || err.error || res.statusText) as Error & {
-        status: number;
-        error: string;
-      };
+      const error = new Error(err.message || err.error || res.statusText) as
+        & Error
+        & {
+          status: number;
+          error: string;
+        };
       error.status = res.status;
       error.error = err.error;
       throw error;
@@ -272,10 +274,12 @@ export class AtprotoClient {
         error: "Unknown",
         message: res.statusText,
       }));
-      const error = new Error(err.message || err.error || res.statusText) as Error & {
-        status: number;
-        error: string;
-      };
+      const error = new Error(err.message || err.error || res.statusText) as
+        & Error
+        & {
+          status: number;
+          error: string;
+        };
       error.status = res.status;
       error.error = err.error;
       throw error;
@@ -369,9 +373,13 @@ export class AtprotoClient {
   }
 
   async deactivateAccount(migratingTo?: string): Promise<void> {
-    apiLog("POST", `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount`, {
-      migratingTo,
-    });
+    apiLog(
+      "POST",
+      `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount`,
+      {
+        migratingTo,
+      },
+    );
     const start = Date.now();
     try {
       const body: { migratingTo?: string } = {};
@@ -503,10 +511,12 @@ export class AtprotoClient {
         error: "Unknown",
         message: res.statusText,
       }));
-      const error = new Error(err.message || err.error || res.statusText) as Error & {
-        status: number;
-        error: string;
-      };
+      const error = new Error(err.message || err.error || res.statusText) as
+        & Error
+        & {
+          status: number;
+          error: string;
+        };
       error.status = res.status;
       error.error = err.error;
       throw error;
@@ -549,7 +559,8 @@ export async function getOAuthServerMetadata(
       return directRes.json();
     }
 
-    const protectedResourceUrl = `${pdsUrl}/.well-known/oauth-protected-resource`;
+    const protectedResourceUrl =
+      `${pdsUrl}/.well-known/oauth-protected-resource`;
     const protectedRes = await fetch(protectedResourceUrl);
     if (!protectedRes.ok) {
       return null;
@@ -561,7 +572,9 @@ export async function getOAuthServerMetadata(
       return null;
     }
 
-    const authServerUrl = `${authServers[0]}/.well-known/oauth-authorization-server`;
+    const authServerUrl = `${
+      authServers[0]
+    }/.well-known/oauth-authorization-server`;
     const authServerRes = await fetch(authServerUrl);
     if (!authServerRes.ok) {
       return null;
@@ -595,7 +608,10 @@ export function base64UrlEncode(buffer: Uint8Array | ArrayBuffer): string {
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
+    /=+$/,
+    "",
+  );
 }
 
 export function base64UrlDecode(base64url: string): Uint8Array {
@@ -730,14 +746,17 @@ export async function exchangeOAuthCode(
             error_description: res.statusText,
           }));
           throw new Error(
-            retryErr.error_description || retryErr.error || "Token exchange failed",
+            retryErr.error_description || retryErr.error ||
+              "Token exchange failed",
           );
         }
         return res.json();
       }
     }
 
-    throw new Error(err.error_description || err.error || "Token exchange failed");
+    throw new Error(
+      err.error_description || err.error || "Token exchange failed",
+    );
   }
 
   return res.json();

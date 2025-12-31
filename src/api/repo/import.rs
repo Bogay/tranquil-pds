@@ -478,6 +478,27 @@ pub async fn import_repo(
             {
                 warn!("Failed to sequence import event: {:?}", e);
             }
+            if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok() {
+                let birthdate_pref = json!({
+                    "$type": "app.bsky.actor.defs#personalDetailsPref",
+                    "birthDate": "1998-05-06T00:00:00.000Z"
+                });
+                if let Err(e) = sqlx::query!(
+                    "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
+                     ON CONFLICT (user_id, name) DO NOTHING",
+                    user_id,
+                    "app.bsky.actor.defs#personalDetailsPref",
+                    birthdate_pref
+                )
+                .execute(&state.db)
+                .await
+                {
+                    warn!(
+                        "Failed to set default birthdate preference for migrated user: {:?}",
+                        e
+                    );
+                }
+            }
             (StatusCode::OK, Json(json!({}))).into_response()
         }
         Err(ImportError::SizeLimitExceeded) => (
