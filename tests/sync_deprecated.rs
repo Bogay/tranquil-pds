@@ -202,7 +202,10 @@ async fn test_get_head_deactivated_account_returns_error() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&serde_json::json!({}))
         .send()
@@ -233,7 +236,10 @@ async fn test_get_head_takendown_account_returns_error() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     client
-        .post(format!("{}/xrpc/com.atproto.admin.updateSubjectStatus", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.admin.updateSubjectStatus",
+            base
+        ))
         .bearer_auth(&admin_jwt)
         .json(&serde_json::json!({
             "subject": {
@@ -266,7 +272,10 @@ async fn test_get_head_admin_can_access_deactivated() {
     let (admin_jwt, _) = create_admin_account_and_login(&client).await;
     let (user_jwt, did) = create_account_and_login(&client).await;
     client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
         .bearer_auth(&user_jwt)
         .json(&serde_json::json!({}))
         .send()
@@ -295,7 +304,10 @@ async fn test_get_checkout_deactivated_account_returns_error() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&serde_json::json!({}))
         .send()
@@ -326,7 +338,10 @@ async fn test_get_checkout_takendown_account_returns_error() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     client
-        .post(format!("{}/xrpc/com.atproto.admin.updateSubjectStatus", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.admin.updateSubjectStatus",
+            base
+        ))
         .bearer_auth(&admin_jwt)
         .json(&serde_json::json!({
             "subject": {

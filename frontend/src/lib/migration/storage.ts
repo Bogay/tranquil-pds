@@ -3,6 +3,7 @@ import type {
   MigrationState,
   StoredMigrationState,
 } from "./types";
+import { clearDPoPKey } from "./atproto-client";
 
 const STORAGE_KEY = "tranquil_migration_state";
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -15,14 +16,18 @@ export function saveMigrationState(state: MigrationState): void {
     startedAt: new Date().toISOString(),
     sourcePdsUrl: state.direction === "inbound"
       ? state.sourcePdsUrl
-      : window.location.origin,
+      : globalThis.location.origin,
     targetPdsUrl: state.direction === "inbound"
-      ? window.location.origin
+      ? globalThis.location.origin
       : state.targetPdsUrl,
     sourceDid: state.direction === "inbound" ? state.sourceDid : "",
     sourceHandle: state.direction === "inbound" ? state.sourceHandle : "",
     targetHandle: state.targetHandle,
     targetEmail: state.targetEmail,
+    authMethod: state.direction === "inbound" ? state.authMethod : undefined,
+    passkeySetupToken: state.direction === "inbound"
+      ? state.passkeySetupToken ?? undefined
+      : undefined,
     progress: {
       repoExported: state.progress.repoExported,
       repoImported: state.progress.repoImported,
@@ -36,19 +41,21 @@ export function saveMigrationState(state: MigrationState): void {
   };
 
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(storedState));
-  } catch {
-  }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(storedState));
+  } catch { /* localStorage unavailable */ }
 }
 
 export function loadMigrationState(): StoredMigrationState | null {
   try {
-    const stored = sessionStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return null;
 
     const state = JSON.parse(stored) as StoredMigrationState;
 
-    if (state.version !== 1) return null;
+    if (state.version !== 1) {
+      clearMigrationState();
+      return null;
+    }
 
     const startedAt = new Date(state.startedAt).getTime();
     if (Date.now() - startedAt > MAX_AGE_MS) {
@@ -58,15 +65,16 @@ export function loadMigrationState(): StoredMigrationState | null {
 
     return state;
   } catch {
+    clearMigrationState();
     return null;
   }
 }
 
 export function clearMigrationState(): void {
   try {
-    sessionStorage.removeItem(STORAGE_KEY);
-  } catch {
-  }
+    localStorage.removeItem(STORAGE_KEY);
+    clearDPoPKey();
+  } catch { /* localStorage unavailable */ }
 }
 
 export function hasPendingMigration(): boolean {
@@ -79,6 +87,8 @@ export function getResumeInfo(): {
   targetHandle: string;
   sourcePdsUrl: string;
   targetPdsUrl: string;
+  targetEmail: string;
+  authMethod?: "password" | "passkey";
   progressSummary: string;
   step: string;
 } | null {
@@ -102,6 +112,8 @@ export function getResumeInfo(): {
     targetHandle: state.targetHandle,
     sourcePdsUrl: state.sourcePdsUrl,
     targetPdsUrl: state.targetPdsUrl,
+    targetEmail: state.targetEmail,
+    authMethod: state.authMethod,
     progressSummary: progressParts.length > 0
       ? progressParts.join(", ")
       : "just started",
@@ -117,9 +129,8 @@ export function updateProgress(
 
   state.progress = { ...state.progress, ...updates };
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-  }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch { /* localStorage unavailable */ }
 }
 
 export function updateStep(step: string): void {
@@ -128,9 +139,8 @@ export function updateStep(step: string): void {
 
   state.step = step;
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-  }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch { /* localStorage unavailable */ }
 }
 
 export function setError(error: string, step: string): void {
@@ -140,7 +150,6 @@ export function setError(error: string, step: string): void {
   state.lastError = error;
   state.lastErrorStep = step;
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-  }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch { /* localStorage unavailable */ }
 }

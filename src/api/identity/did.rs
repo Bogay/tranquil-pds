@@ -191,40 +191,39 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
 
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
 
-    if let Some(ref ovr) = overrides {
-        if let Ok(parsed) =
-            serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
-        {
-            if !parsed.is_empty() {
-                let also_known_as = if !ovr.also_known_as.is_empty() {
-                    ovr.also_known_as.clone()
-                } else {
-                    vec![format!("at://{}", full_handle)]
-                };
+    if let Some((ovr, parsed)) = overrides.as_ref().and_then(|ovr| {
+        serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
+            .ok()
+            .filter(|p| !p.is_empty())
+            .map(|p| (ovr, p))
+    }) {
+        let also_known_as = if !ovr.also_known_as.is_empty() {
+            ovr.also_known_as.clone()
+        } else {
+            vec![format!("at://{}", full_handle)]
+        };
 
-                return Json(json!({
-                    "@context": [
-                        "https://www.w3.org/ns/did/v1",
-                        "https://w3id.org/security/multikey/v1",
-                        "https://w3id.org/security/suites/secp256k1-2019/v1"
-                    ],
-                    "id": did,
-                    "alsoKnownAs": also_known_as,
-                    "verificationMethod": parsed.iter().map(|m| json!({
-                        "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
-                        "type": m.method_type,
-                        "controller": did,
-                        "publicKeyMultibase": m.public_key_multibase
-                    })).collect::<Vec<_>>(),
-                    "service": [{
-                        "id": "#atproto_pds",
-                        "type": "AtprotoPersonalDataServer",
-                        "serviceEndpoint": service_endpoint
-                    }]
-                }))
-                .into_response();
-            }
-        }
+        return Json(json!({
+            "@context": [
+                "https://www.w3.org/ns/did/v1",
+                "https://w3id.org/security/multikey/v1",
+                "https://w3id.org/security/suites/secp256k1-2019/v1"
+            ],
+            "id": did,
+            "alsoKnownAs": also_known_as,
+            "verificationMethod": parsed.iter().map(|m| json!({
+                "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
+                "type": m.method_type,
+                "controller": did,
+                "publicKeyMultibase": m.public_key_multibase
+            })).collect::<Vec<_>>(),
+            "service": [{
+                "id": "#atproto_pds",
+                "type": "AtprotoPersonalDataServer",
+                "serviceEndpoint": service_endpoint
+            }]
+        }))
+        .into_response();
     }
 
     let key_row = sqlx::query!(
@@ -351,40 +350,39 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
 
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
 
-    if let Some(ref ovr) = overrides {
-        if let Ok(parsed) =
-            serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
-        {
-            if !parsed.is_empty() {
-                let also_known_as = if !ovr.also_known_as.is_empty() {
-                    ovr.also_known_as.clone()
-                } else {
-                    vec![format!("at://{}", full_handle)]
-                };
+    if let Some((ovr, parsed)) = overrides.as_ref().and_then(|ovr| {
+        serde_json::from_value::<Vec<DidWebVerificationMethod>>(ovr.verification_methods.clone())
+            .ok()
+            .filter(|p| !p.is_empty())
+            .map(|p| (ovr, p))
+    }) {
+        let also_known_as = if !ovr.also_known_as.is_empty() {
+            ovr.also_known_as.clone()
+        } else {
+            vec![format!("at://{}", full_handle)]
+        };
 
-                return Json(json!({
-                    "@context": [
-                        "https://www.w3.org/ns/did/v1",
-                        "https://w3id.org/security/multikey/v1",
-                        "https://w3id.org/security/suites/secp256k1-2019/v1"
-                    ],
-                    "id": did,
-                    "alsoKnownAs": also_known_as,
-                    "verificationMethod": parsed.iter().map(|m| json!({
-                        "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
-                        "type": m.method_type,
-                        "controller": did,
-                        "publicKeyMultibase": m.public_key_multibase
-                    })).collect::<Vec<_>>(),
-                    "service": [{
-                        "id": "#atproto_pds",
-                        "type": "AtprotoPersonalDataServer",
-                        "serviceEndpoint": service_endpoint
-                    }]
-                }))
-                .into_response();
-            }
-        }
+        return Json(json!({
+            "@context": [
+                "https://www.w3.org/ns/did/v1",
+                "https://w3id.org/security/multikey/v1",
+                "https://w3id.org/security/suites/secp256k1-2019/v1"
+            ],
+            "id": did,
+            "alsoKnownAs": also_known_as,
+            "verificationMethod": parsed.iter().map(|m| json!({
+                "id": format!("{}{}", did, if m.id.starts_with('#') { m.id.clone() } else { format!("#{}", m.id) }),
+                "type": m.method_type,
+                "controller": did,
+                "publicKeyMultibase": m.public_key_multibase
+            })).collect::<Vec<_>>(),
+            "service": [{
+                "id": "#atproto_pds",
+                "type": "AtprotoPersonalDataServer",
+                "serviceEndpoint": service_endpoint
+            }]
+        }))
+        .into_response();
     }
 
     let key_row = sqlx::query!(
@@ -637,7 +635,9 @@ pub async fn get_recommended_did_credentials(
         let server_rotation_key = match std::env::var("PLC_ROTATION_KEY") {
             Ok(key) => key,
             Err(_) => {
-                warn!("PLC_ROTATION_KEY not set, falling back to user's signing key for rotation key recommendation");
+                warn!(
+                    "PLC_ROTATION_KEY not set, falling back to user's signing key for rotation key recommendation"
+                );
                 did_key.clone()
             }
         };
@@ -709,12 +709,9 @@ pub async fn update_handle(
         )
             .into_response();
     }
-    let user_row = match sqlx::query!(
-        "SELECT id, handle FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
+    let user_row = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
     {
         Ok(Some(row)) => row,
         _ => return ApiError::InternalError.into_response(),
@@ -879,7 +876,10 @@ pub async fn update_handle(
     match result {
         Ok(_) => {
             if !current_handle.is_empty() {
-                let _ = state.cache.delete(&format!("handle:{}", current_handle)).await;
+                let _ = state
+                    .cache
+                    .delete(&format!("handle:{}", current_handle))
+                    .await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             if let Err(e) =

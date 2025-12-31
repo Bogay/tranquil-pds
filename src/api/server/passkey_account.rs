@@ -84,6 +84,8 @@ pub struct CreatePasskeyAccountResponse {
     pub handle: String,
     pub setup_token: String,
     pub setup_expires_at: chrono::DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_jwt: Option<String>,
 }
 
 pub async fn create_passkey_account(
@@ -378,42 +380,79 @@ pub async fn create_passkey_account(
             d.to_string()
         }
         _ => {
-            let rotation_key = std::env::var("PLC_ROTATION_KEY")
-                .unwrap_or_else(|_| crate::plc::signing_key_to_did_key(&secret_key));
-
-            let genesis_result = match crate::plc::create_genesis_operation(
-                &secret_key,
-                &rotation_key,
-                &handle,
-                &pds_endpoint,
-            ) {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("Error creating PLC genesis operation: {:?}", e);
+            if let Some(ref auth_did) = byod_auth {
+                if let Some(ref provided_did) = input.did {
+                    if provided_did.starts_with("did:plc:") {
+                        if provided_did != auth_did {
+                            return (
+                                StatusCode::FORBIDDEN,
+                                Json(json!({
+                                    "error": "AuthorizationError",
+                                    "message": format!("Service token issuer {} does not match DID {}", auth_did, provided_did)
+                                })),
+                            )
+                                .into_response();
+                        }
+                        info!(did = %provided_did, "Creating BYOD did:plc passkey account (migration)");
+                        provided_did.clone()
+                    } else {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": "InvalidRequest",
+                                "message": "BYOD migration requires a did:plc or did:web DID"
+                            })),
+                        )
+                            .into_response();
+                    }
+                } else {
                     return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": "InvalidRequest",
+                            "message": "BYOD migration requires the 'did' field"
+                        })),
                     )
                         .into_response();
                 }
-            };
+            } else {
+                let rotation_key = std::env::var("PLC_ROTATION_KEY")
+                    .unwrap_or_else(|_| crate::plc::signing_key_to_did_key(&secret_key));
 
-            let plc_client = crate::plc::PlcClient::new(None);
-            if let Err(e) = plc_client
-                .send_operation(&genesis_result.did, &genesis_result.signed_operation)
-                .await
-            {
-                error!("Failed to submit PLC genesis operation: {:?}", e);
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({
-                        "error": "UpstreamError",
-                        "message": format!("Failed to register DID with PLC directory: {}", e)
-                    })),
-                )
-                    .into_response();
+                let genesis_result = match crate::plc::create_genesis_operation(
+                    &secret_key,
+                    &rotation_key,
+                    &handle,
+                    &pds_endpoint,
+                ) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        error!("Error creating PLC genesis operation: {:?}", e);
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
+                        )
+                            .into_response();
+                    }
+                };
+
+                let plc_client = crate::plc::PlcClient::new(None);
+                if let Err(e) = plc_client
+                    .send_operation(&genesis_result.did, &genesis_result.signed_operation)
+                    .await
+                {
+                    error!("Failed to submit PLC genesis operation: {:?}", e);
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(json!({
+                            "error": "UpstreamError",
+                            "message": format!("Failed to register DID with PLC directory: {}", e)
+                        })),
+                    )
+                        .into_response();
+                }
+                genesis_result.did
             }
-            genesis_result.did
         }
     };
 
@@ -726,11 +765,46 @@ pub async fn create_passkey_account(
 
     info!(did = %did, handle = %handle, "Passkey-only account created, awaiting setup completion");
 
+    let access_jwt = if byod_auth.is_some() {
+        match crate::auth::token::create_access_token_with_metadata(&did, &secret_key_bytes) {
+            Ok(token_meta) => {
+                let refresh_jti = uuid::Uuid::new_v4().to_string();
+                let refresh_expires = chrono::Utc::now() + chrono::Duration::hours(24);
+                let no_scope: Option<String> = None;
+                if let Err(e) = sqlx::query!(
+                    "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    did,
+                    token_meta.jti,
+                    refresh_jti,
+                    token_meta.expires_at,
+                    refresh_expires,
+                    false,
+                    false,
+                    no_scope
+                )
+                .execute(&state.db)
+                .await
+                {
+                    warn!(did = %did, "Failed to insert migration session: {:?}", e);
+                }
+                info!(did = %did, "Generated migration access token for BYOD passkey account");
+                Some(token_meta.token)
+            }
+            Err(e) => {
+                warn!(did = %did, "Failed to generate migration access token: {:?}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     Json(CreatePasskeyAccountResponse {
         did,
         handle,
         setup_token,
         setup_expires_at,
+        access_jwt,
     })
     .into_response()
 }

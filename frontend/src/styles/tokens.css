@@ -48,9 +48,12 @@
   --transition-normal: 0.15s ease;
   --transition-slow: 0.25s ease;
 
+  --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+
   --bg-primary: #f9fafa;
   --bg-secondary: #f1f3f3;
   --bg-tertiary: #e8ebeb;
+  --bg-hover: #e8ebeb;
   --bg-card: #ffffff;
   --bg-input: #ffffff;
   --bg-input-disabled: #f1f3f3;
@@ -93,6 +96,7 @@
     --bg-primary: #0a0c0c;
     --bg-secondary: #131616;
     --bg-tertiary: #1a1d1d;
+    --bg-hover: #1a1d1d;
     --bg-card: #131616;
     --bg-input: #1a1d1d;
     --bg-input-disabled: #131616;

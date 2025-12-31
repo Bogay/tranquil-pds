@@ -92,12 +92,14 @@ pub async fn check_account_status(
         Ok(Some(row)) => (row.repo_root_cid, row.repo_rev),
         _ => (String::new(), None),
     };
-    let block_count: i64 =
-        sqlx::query_scalar!("SELECT COUNT(*) FROM user_blocks WHERE user_id = $1", user_id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(Some(0))
-            .unwrap_or(0);
+    let block_count: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM user_blocks WHERE user_id = $1",
+        user_id
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(Some(0))
+    .unwrap_or(0);
     let repo_rev = if let Some(rev) = repo_rev_from_db {
         rev
     } else if !repo_commit.is_empty() {
@@ -241,11 +243,7 @@ async fn assert_valid_did_document_for_service(
             let rotation_keys = doc_data
                 .get("rotationKeys")
                 .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|k| k.as_str())
-                        .collect::<Vec<_>>()
-                })
+                .map(|arr| arr.iter().filter_map(|k| k.as_str()).collect::<Vec<_>>())
                 .unwrap_or_default();
             if !rotation_keys.contains(&expected_rotation_key.as_str()) {
                 return Err((
@@ -440,7 +438,8 @@ pub async fn activate_account(
         did
     );
     let did_validation_start = std::time::Instant::now();
-    if let Err((status, json)) = assert_valid_did_document_for_service(&state.db, &did, true).await {
+    if let Err((status, json)) = assert_valid_did_document_for_service(&state.db, &did, true).await
+    {
         info!(
             "[MIGRATION] activateAccount: DID document validation FAILED for {} (took {:?})",
             did,

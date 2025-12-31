@@ -334,8 +334,7 @@ pub async fn get_session(
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&row.handle, &pds_hostname);
             let is_takendown = row.takedown_ref.is_some();
-            let is_migrated =
-                row.deactivated_at.is_some() && row.migrated_to_pds.is_some();
+            let is_migrated = row.deactivated_at.is_some() && row.migrated_to_pds.is_some();
             let is_active = row.deactivated_at.is_none() && !is_takendown;
             let email_value = if can_read_email {
                 row.email.clone()
@@ -368,8 +367,7 @@ pub async fn get_session(
             if let Some(doc) = did_doc {
                 response["didDoc"] = doc;
             }
-            Json(response)
-            .into_response()
+            Json(response).into_response()
         }
         Ok(None) => ApiError::AuthenticationFailed.into_response(),
         Err(e) => {
@@ -613,8 +611,7 @@ pub async fn refresh_session(
             } else if u.deactivated_at.is_some() {
                 response["status"] = json!("deactivated");
             }
-            Json(response)
-            .into_response()
+            Json(response).into_response()
         }
         Ok(None) => {
             error!("User not found for existing session: {}", session_row.did);

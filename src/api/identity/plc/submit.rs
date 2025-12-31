@@ -58,12 +58,9 @@ pub async fn submit_plc_operation(
     let op = &input.operation;
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let public_url = format!("https://{}", hostname);
-    let user = match sqlx::query!(
-        "SELECT id, handle FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
+    let user = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
+        .fetch_optional(&state.db)
+        .await
     {
         Ok(Some(row)) => row,
         _ => {
@@ -170,20 +167,21 @@ pub async fn submit_plc_operation(
         )
             .into_response();
     }
-    if !user.handle.is_empty() {
-        if let Some(also_known_as) = op.get("alsoKnownAs").and_then(|v| v.as_array()) {
-            let expected_handle = format!("at://{}", user.handle);
-            let first_aka = also_known_as.first().and_then(|v| v.as_str());
-            if first_aka != Some(&expected_handle) {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": "Incorrect handle in alsoKnownAs"
-                    })),
-                )
-                    .into_response();
-            }
+    if let Some(also_known_as) = (!user.handle.is_empty())
+        .then(|| op.get("alsoKnownAs").and_then(|v| v.as_array()))
+        .flatten()
+    {
+        let expected_handle = format!("at://{}", user.handle);
+        let first_aka = also_known_as.first().and_then(|v| v.as_str());
+        if first_aka != Some(&expected_handle) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "InvalidRequest",
+                    "message": "Incorrect handle in alsoKnownAs"
+                })),
+            )
+                .into_response();
         }
     }
     let plc_client = PlcClient::new(None);

@@ -25,9 +25,15 @@ async fn test_create_invite_code_success() {
     assert!(body["code"].is_string());
     let code = body["code"].as_str().unwrap();
     assert!(!code.is_empty());
-    assert!(code.contains('-'), "Code should be in hostname-xxxxx-xxxxx format");
+    assert!(
+        code.contains('-'),
+        "Code should be in hostname-xxxxx-xxxxx format"
+    );
     let parts: Vec<&str> = code.split('-').collect();
-    assert!(parts.len() >= 3, "Code should have at least 3 parts (hostname + 2 random parts)");
+    assert!(
+        parts.len() >= 3,
+        "Code should have at least 3 parts (hostname + 2 random parts)"
+    );
 }
 
 #[tokio::test]
@@ -363,6 +369,10 @@ async fn test_get_account_invite_codes_filters_disabled() {
     let body: Value = res.json().await.expect("Response was not valid JSON");
     let codes = body["codes"].as_array().unwrap();
     for c in codes {
-        assert_ne!(c["code"].as_str().unwrap(), code, "Disabled code should be filtered out");
+        assert_ne!(
+            c["code"].as_str().unwrap(),
+            code,
+            "Disabled code should be filtered out"
+        );
     }
 }

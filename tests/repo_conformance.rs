@@ -23,7 +23,10 @@ async fn test_create_record_response_schema() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -35,16 +38,31 @@ async fn test_create_record_response_schema() {
 
     assert!(body["uri"].is_string(), "response must have uri");
     assert!(body["cid"].is_string(), "response must have cid");
-    assert!(body["cid"].as_str().unwrap().starts_with("bafy"), "cid must be valid");
+    assert!(
+        body["cid"].as_str().unwrap().starts_with("bafy"),
+        "cid must be valid"
+    );
 
-    assert!(body["commit"].is_object(), "response must have commit object");
+    assert!(
+        body["commit"].is_object(),
+        "response must have commit object"
+    );
     let commit = &body["commit"];
     assert!(commit["cid"].is_string(), "commit must have cid");
-    assert!(commit["cid"].as_str().unwrap().starts_with("bafy"), "commit.cid must be valid");
+    assert!(
+        commit["cid"].as_str().unwrap().starts_with("bafy"),
+        "commit.cid must be valid"
+    );
     assert!(commit["rev"].is_string(), "commit must have rev");
 
-    assert!(body["validationStatus"].is_string(), "response must have validationStatus when validate defaults to true");
-    assert_eq!(body["validationStatus"], "valid", "validationStatus should be 'valid'");
+    assert!(
+        body["validationStatus"].is_string(),
+        "response must have validationStatus when validate defaults to true"
+    );
+    assert_eq!(
+        body["validationStatus"], "valid",
+        "validationStatus should be 'valid'"
+    );
 }
 
 #[tokio::test]
@@ -65,7 +83,10 @@ async fn test_create_record_no_validation_status_when_validate_false() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -77,7 +98,10 @@ async fn test_create_record_no_validation_status_when_validate_false() {
 
     assert!(body["uri"].is_string());
     assert!(body["commit"].is_object());
-    assert!(body["validationStatus"].is_null(), "validationStatus should be omitted when validate=false");
+    assert!(
+        body["validationStatus"].is_null(),
+        "validationStatus should be omitted when validate=false"
+    );
 }
 
 #[tokio::test]
@@ -98,7 +122,10 @@ async fn test_put_record_response_schema() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -111,12 +138,18 @@ async fn test_put_record_response_schema() {
     assert!(body["uri"].is_string(), "response must have uri");
     assert!(body["cid"].is_string(), "response must have cid");
 
-    assert!(body["commit"].is_object(), "response must have commit object");
+    assert!(
+        body["commit"].is_object(),
+        "response must have commit object"
+    );
     let commit = &body["commit"];
     assert!(commit["cid"].is_string(), "commit must have cid");
     assert!(commit["rev"].is_string(), "commit must have rev");
 
-    assert_eq!(body["validationStatus"], "valid", "validationStatus should be 'valid'");
+    assert_eq!(
+        body["validationStatus"], "valid",
+        "validationStatus should be 'valid'"
+    );
 }
 
 #[tokio::test]
@@ -136,7 +169,10 @@ async fn test_delete_record_response_schema() {
         }
     });
     let create_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&create_payload)
         .send()
@@ -150,7 +186,10 @@ async fn test_delete_record_response_schema() {
         "rkey": "to-delete"
     });
     let delete_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.deleteRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&delete_payload)
         .send()
@@ -160,7 +199,10 @@ async fn test_delete_record_response_schema() {
     assert_eq!(delete_res.status(), StatusCode::OK);
     let body: Value = delete_res.json().await.unwrap();
 
-    assert!(body["commit"].is_object(), "response must have commit object when record was deleted");
+    assert!(
+        body["commit"].is_object(),
+        "response must have commit object when record was deleted"
+    );
     let commit = &body["commit"];
     assert!(commit["cid"].is_string(), "commit must have cid");
     assert!(commit["rev"].is_string(), "commit must have rev");
@@ -177,7 +219,10 @@ async fn test_delete_record_noop_response() {
         "rkey": "nonexistent-record"
     });
     let delete_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.deleteRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&delete_payload)
         .send()
@@ -187,7 +232,10 @@ async fn test_delete_record_noop_response() {
     assert_eq!(delete_res.status(), StatusCode::OK);
     let body: Value = delete_res.json().await.unwrap();
 
-    assert!(body["commit"].is_null(), "commit should be omitted on no-op delete");
+    assert!(
+        body["commit"].is_null(),
+        "commit should be omitted on no-op delete"
+    );
 }
 
 #[tokio::test]
@@ -223,7 +271,10 @@ async fn test_apply_writes_response_schema() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.applyWrites", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.applyWrites",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -233,19 +284,28 @@ async fn test_apply_writes_response_schema() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.unwrap();
 
-    assert!(body["commit"].is_object(), "response must have commit object");
+    assert!(
+        body["commit"].is_object(),
+        "response must have commit object"
+    );
     let commit = &body["commit"];
     assert!(commit["cid"].is_string(), "commit must have cid");
     assert!(commit["rev"].is_string(), "commit must have rev");
 
-    assert!(body["results"].is_array(), "response must have results array");
+    assert!(
+        body["results"].is_array(),
+        "response must have results array"
+    );
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 2, "should have 2 results");
 
     for result in results {
         assert!(result["uri"].is_string(), "result must have uri");
         assert!(result["cid"].is_string(), "result must have cid");
-        assert_eq!(result["validationStatus"], "valid", "result must have validationStatus");
+        assert_eq!(
+            result["validationStatus"], "valid",
+            "result must have validationStatus"
+        );
         assert_eq!(result["$type"], "com.atproto.repo.applyWrites#createResult");
     }
 }
@@ -267,7 +327,10 @@ async fn test_apply_writes_update_and_delete_results() {
         }
     });
     client
-        .post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&create_payload)
         .send()
@@ -296,7 +359,10 @@ async fn test_apply_writes_update_and_delete_results() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.applyWrites", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.applyWrites",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -310,16 +376,31 @@ async fn test_apply_writes_update_and_delete_results() {
     assert_eq!(results.len(), 2);
 
     let update_result = &results[0];
-    assert_eq!(update_result["$type"], "com.atproto.repo.applyWrites#updateResult");
+    assert_eq!(
+        update_result["$type"],
+        "com.atproto.repo.applyWrites#updateResult"
+    );
     assert!(update_result["uri"].is_string());
     assert!(update_result["cid"].is_string());
     assert_eq!(update_result["validationStatus"], "valid");
 
     let delete_result = &results[1];
-    assert_eq!(delete_result["$type"], "com.atproto.repo.applyWrites#deleteResult");
-    assert!(delete_result["uri"].is_null(), "delete result should not have uri");
-    assert!(delete_result["cid"].is_null(), "delete result should not have cid");
-    assert!(delete_result["validationStatus"].is_null(), "delete result should not have validationStatus");
+    assert_eq!(
+        delete_result["$type"],
+        "com.atproto.repo.applyWrites#deleteResult"
+    );
+    assert!(
+        delete_result["uri"].is_null(),
+        "delete result should not have uri"
+    );
+    assert!(
+        delete_result["cid"].is_null(),
+        "delete result should not have cid"
+    );
+    assert!(
+        delete_result["validationStatus"].is_null(),
+        "delete result should not have validationStatus"
+    );
 }
 
 #[tokio::test]
@@ -328,7 +409,10 @@ async fn test_get_record_error_code() {
     let (did, _jwt) = setup_new_user("conform-get-err").await;
 
     let res = client
-        .get(format!("{}/xrpc/com.atproto.repo.getRecord", base_url().await))
+        .get(format!(
+            "{}/xrpc/com.atproto.repo.getRecord",
+            base_url().await
+        ))
         .query(&[
             ("repo", did.as_str()),
             ("collection", "app.bsky.feed.post"),
@@ -340,7 +424,10 @@ async fn test_get_record_error_code() {
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let body: Value = res.json().await.unwrap();
-    assert_eq!(body["error"], "RecordNotFound", "error code should be RecordNotFound per atproto spec");
+    assert_eq!(
+        body["error"], "RecordNotFound",
+        "error code should be RecordNotFound per atproto spec"
+    );
 }
 
 #[tokio::test]
@@ -358,20 +445,30 @@ async fn test_create_record_unknown_lexicon_default_validation() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
         .await
         .expect("Failed to create record");
 
-    assert_eq!(res.status(), StatusCode::OK, "unknown lexicon should be allowed with default validation");
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "unknown lexicon should be allowed with default validation"
+    );
     let body: Value = res.json().await.unwrap();
 
     assert!(body["uri"].is_string());
     assert!(body["cid"].is_string());
     assert!(body["commit"].is_object());
-    assert_eq!(body["validationStatus"], "unknown", "validationStatus should be 'unknown' for unknown lexicons");
+    assert_eq!(
+        body["validationStatus"], "unknown",
+        "validationStatus should be 'unknown' for unknown lexicons"
+    );
 }
 
 #[tokio::test]
@@ -390,17 +487,30 @@ async fn test_create_record_unknown_lexicon_strict_validation() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
         .await
         .expect("Failed to send request");
 
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "unknown lexicon should fail with validate=true");
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "unknown lexicon should fail with validate=true"
+    );
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRecord");
-    assert!(body["message"].as_str().unwrap().contains("Lexicon not found"), "error should mention lexicon not found");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("Lexicon not found"),
+        "error should mention lexicon not found"
+    );
 }
 
 #[tokio::test]
@@ -423,7 +533,10 @@ async fn test_put_record_noop_same_content() {
     });
 
     let first_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -431,10 +544,16 @@ async fn test_put_record_noop_same_content() {
         .expect("Failed to put record");
     assert_eq!(first_res.status(), StatusCode::OK);
     let first_body: Value = first_res.json().await.unwrap();
-    assert!(first_body["commit"].is_object(), "first put should have commit");
+    assert!(
+        first_body["commit"].is_object(),
+        "first put should have commit"
+    );
 
     let second_res = client
-        .post(format!("{}/xrpc/com.atproto.repo.putRecord", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.putRecord",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -443,8 +562,14 @@ async fn test_put_record_noop_same_content() {
     assert_eq!(second_res.status(), StatusCode::OK);
     let second_body: Value = second_res.json().await.unwrap();
 
-    assert!(second_body["commit"].is_null(), "second put with same content should have no commit (no-op)");
-    assert_eq!(first_body["cid"], second_body["cid"], "CID should be the same for identical content");
+    assert!(
+        second_body["commit"].is_null(),
+        "second put with same content should have no commit (no-op)"
+    );
+    assert_eq!(
+        first_body["cid"], second_body["cid"],
+        "CID should be the same for identical content"
+    );
 }
 
 #[tokio::test]
@@ -468,7 +593,10 @@ async fn test_apply_writes_unknown_lexicon() {
     });
 
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.applyWrites", base_url().await))
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.applyWrites",
+            base_url().await
+        ))
         .bearer_auth(&jwt)
         .json(&payload)
         .send()
@@ -480,5 +608,8 @@ async fn test_apply_writes_unknown_lexicon() {
 
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["validationStatus"], "unknown", "unknown lexicon should have 'unknown' status");
+    assert_eq!(
+        results[0]["validationStatus"], "unknown",
+        "unknown lexicon should have 'unknown' status"
+    );
 }

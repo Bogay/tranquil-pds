@@ -1,32 +1,59 @@
 <script lang="ts">
   import type { InboundMigrationFlow } from '../../lib/migration'
-  import type { ServerDescription } from '../../lib/migration/types'
+  import type { AuthMethod, ServerDescription } from '../../lib/migration/types'
+  import { getErrorMessage } from '../../lib/migration/types'
+  import { base64UrlEncode, prepareWebAuthnCreationOptions } from '../../lib/migration/atproto-client'
   import { _ } from '../../lib/i18n'
+  import '../../styles/migration.css'
+
+  interface ResumeInfo {
+    direction: 'inbound' | 'outbound'
+    sourceHandle: string
+    targetHandle: string
+    sourcePdsUrl: string
+    targetPdsUrl: string
+    targetEmail: string
+    authMethod?: AuthMethod
+    progressSummary: string
+    step: string
+  }
 
   interface Props {
     flow: InboundMigrationFlow
+    resumeInfo?: ResumeInfo | null
     onBack: () => void
     onComplete: () => void
   }
 
-  let { flow, onBack, onComplete }: Props = $props()
+  let { flow, resumeInfo = null, onBack, onComplete }: Props = $props()
 
   let serverInfo = $state<ServerDescription | null>(null)
   let loading = $state(false)
   let handleInput = $state('')
-  let passwordInput = $state('')
   let localPasswordInput = $state('')
   let understood = $state(false)
   let selectedDomain = $state('')
   let handleAvailable = $state<boolean | null>(null)
   let checkingHandle = $state(false)
+  let selectedAuthMethod = $state<AuthMethod>('password')
+  let passkeyName = $state('')
+  let appPasswordCopied = $state(false)
+  let appPasswordAcknowledged = $state(false)
 
-  const isResumedMigration = $derived(flow.state.progress.repoImported)
+  const isResuming = $derived(flow.state.needsReauth === true)
   const isDidWeb = $derived(flow.state.sourceDid.startsWith("did:web:"))
 
   $effect(() => {
     if (flow.state.step === 'welcome' || flow.state.step === 'choose-handle') {
       loadServerInfo()
+    }
+    if (flow.state.step === 'choose-handle') {
+      handleInput = ''
+      handleAvailable = null
+    }
+    if (flow.state.step === 'source-handle' && resumeInfo) {
+      handleInput = resumeInfo.sourceHandle
+      selectedAuthMethod = resumeInfo.authMethod ?? 'password'
     }
   })
 
@@ -58,46 +85,6 @@
       if (serverInfo.availableUserDomains.length > 0) {
         selectedDomain = serverInfo.availableUserDomains[0]
       }
-    }
-  }
-
-  async function handleLogin(e: Event) {
-    e.preventDefault()
-    loading = true
-    flow.updateField('error', null)
-
-    try {
-      await flow.loginToSource(handleInput, passwordInput, flow.state.twoFactorCode || undefined)
-      const username = flow.state.sourceHandle.split('.')[0]
-      handleInput = username
-      flow.updateField('targetPassword', passwordInput)
-
-      if (flow.state.progress.repoImported) {
-        if (!localPasswordInput) {
-          flow.setError('Please enter your password for your new account on this PDS')
-          return
-        }
-        await flow.loadLocalServerInfo()
-
-        try {
-          await flow.authenticateToLocal(flow.state.targetEmail, localPasswordInput)
-          await flow.requestPlcToken()
-          flow.setStep('plc-token')
-        } catch (err) {
-          const error = err as Error & { error?: string }
-          if (error.error === 'AccountNotVerified') {
-            flow.setStep('email-verify')
-          } else {
-            throw err
-          }
-        }
-      } else {
-        flow.setStep('choose-handle')
-      }
-    } catch (err) {
-      flow.setError((err as Error).message)
-    } finally {
-      loading = false
     }
   }
 
@@ -134,7 +121,7 @@
     try {
       await flow.startMigration()
     } catch (err) {
-      flow.setError((err as Error).message)
+      flow.setError(getErrorMessage(err))
     } finally {
       loading = false
     }
@@ -146,7 +133,7 @@
     try {
       await flow.submitEmailVerifyToken(flow.state.emailVerifyToken, localPasswordInput || undefined)
     } catch (err) {
-      flow.setError((err as Error).message)
+      flow.setError(getErrorMessage(err))
     } finally {
       loading = false
     }
@@ -158,7 +145,7 @@
       await flow.resendEmailVerification()
       flow.setError(null)
     } catch (err) {
-      flow.setError((err as Error).message)
+      flow.setError(getErrorMessage(err))
     } finally {
       loading = false
     }
@@ -170,7 +157,7 @@
     try {
       await flow.submitPlcToken(flow.state.plcToken)
     } catch (err) {
-      flow.setError((err as Error).message)
+      flow.setError(getErrorMessage(err))
     } finally {
       loading = false
     }
@@ -182,7 +169,7 @@
       await flow.resendPlcToken()
       flow.setError(null)
     } catch (err) {
-      flow.setError((err as Error).message)
+      flow.setError(getErrorMessage(err))
     } finally {
       loading = false
     }
@@ -193,43 +180,141 @@
     try {
       await flow.completeDidWebMigration()
     } catch (err) {
-      flow.setError((err as Error).message)
+      flow.setError(getErrorMessage(err))
     } finally {
       loading = false
     }
   }
 
+  async function registerPasskey() {
+    loading = true
+    flow.setError(null)
+
+    try {
+      if (!window.PublicKeyCredential) {
+        throw new Error('Passkeys are not supported in this browser. Please use a modern browser with WebAuthn support.')
+      }
+
+      const { options } = await flow.startPasskeyRegistration()
+
+      const publicKeyOptions = prepareWebAuthnCreationOptions(
+        options as { publicKey: Record<string, unknown> }
+      )
+      const credential = await navigator.credentials.create({
+        publicKey: publicKeyOptions,
+      })
+
+      if (!credential) {
+        throw new Error('Passkey creation was cancelled')
+      }
+
+      const publicKeyCredential = credential as PublicKeyCredential
+      const response = publicKeyCredential.response as AuthenticatorAttestationResponse
+
+      const credentialData = {
+        id: publicKeyCredential.id,
+        rawId: base64UrlEncode(publicKeyCredential.rawId),
+        type: publicKeyCredential.type,
+        response: {
+          clientDataJSON: base64UrlEncode(response.clientDataJSON),
+          attestationObject: base64UrlEncode(response.attestationObject),
+        },
+      }
+
+      await flow.completePasskeyRegistration(credentialData, passkeyName || undefined)
+    } catch (err) {
+      const message = getErrorMessage(err)
+      if (message.includes('cancelled') || message.includes('AbortError')) {
+        flow.setError('Passkey registration was cancelled. Please try again.')
+      } else {
+        flow.setError(message)
+      }
+    } finally {
+      loading = false
+    }
+  }
+
+  function copyAppPassword() {
+    if (flow.state.generatedAppPassword) {
+      navigator.clipboard.writeText(flow.state.generatedAppPassword)
+      appPasswordCopied = true
+    }
+  }
+
+  async function handleProceedFromAppPassword() {
+    loading = true
+    try {
+      await flow.proceedFromAppPassword()
+    } catch (err) {
+      flow.setError(getErrorMessage(err))
+    } finally {
+      loading = false
+    }
+  }
+
+  async function handleSourceHandleSubmit(e: Event) {
+    e.preventDefault()
+    loading = true
+    flow.updateField('error', null)
+
+    try {
+      await flow.initiateOAuthLogin(handleInput)
+    } catch (err) {
+      flow.setError(getErrorMessage(err))
+    } finally {
+      loading = false
+    }
+  }
+
+  function proceedToReviewWithAuth() {
+    const fullHandle = handleInput.includes('.')
+      ? handleInput
+      : `${handleInput}.${selectedDomain}`
+
+    flow.updateField('targetHandle', fullHandle)
+    flow.updateField('authMethod', selectedAuthMethod)
+    flow.setStep('review')
+  }
+
   const steps = $derived(isDidWeb
-    ? ['Login', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Update DID', 'Complete']
-    : ['Login', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Verify PLC', 'Complete'])
+    ? ['Authenticate', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Update DID', 'Complete']
+    : flow.state.authMethod === 'passkey'
+      ? ['Authenticate', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Passkey', 'App Password', 'Verify PLC', 'Complete']
+      : ['Authenticate', 'Handle', 'Review', 'Transfer', 'Verify Email', 'Verify PLC', 'Complete'])
+
   function getCurrentStepIndex(): number {
+    const isPasskey = flow.state.authMethod === 'passkey'
     switch (flow.state.step) {
       case 'welcome':
-      case 'source-login': return 0
+      case 'source-handle': return 0
       case 'choose-handle': return 1
       case 'review': return 2
       case 'migrating': return 3
       case 'email-verify': return 4
+      case 'passkey-setup': return isPasskey ? 5 : 4
+      case 'app-password': return 6
       case 'plc-token':
       case 'did-web-update':
-      case 'finalizing': return 5
-      case 'success': return 6
+      case 'finalizing': return isPasskey ? 7 : 5
+      case 'success': return isPasskey ? 8 : 6
       default: return 0
     }
   }
 </script>
 
-<div class="inbound-wizard">
+<div class="migration-wizard">
   <div class="step-indicator">
-    {#each steps as stepName, i}
+    {#each steps as _, i}
       <div class="step" class:active={i === getCurrentStepIndex()} class:completed={i < getCurrentStepIndex()}>
         <div class="step-dot">{i < getCurrentStepIndex() ? '✓' : i + 1}</div>
-        <span class="step-label">{stepName}</span>
       </div>
       {#if i < steps.length - 1}
         <div class="step-line" class:completed={i < getCurrentStepIndex()}></div>
       {/if}
     {/each}
+  </div>
+  <div class="current-step-label">
+    <strong>{steps[getCurrentStepIndex()]}</strong> · Step {getCurrentStepIndex() + 1} of {steps.length}
   </div>
 
   {#if flow.state.error}
@@ -238,116 +323,86 @@
 
   {#if flow.state.step === 'welcome'}
     <div class="step-content">
-      <h2>Migrate Your Account Here</h2>
-      <p>This wizard will help you move your AT Protocol account from another PDS to this one.</p>
+      <h2>{$_('migration.inbound.welcome.title')}</h2>
+      <p>{$_('migration.inbound.welcome.desc')}</p>
 
       <div class="info-box">
-        <h3>What will happen:</h3>
+        <h3>{$_('migration.inbound.common.whatWillHappen')}</h3>
         <ol>
-          <li>Log in to your current PDS</li>
-          <li>Choose your new handle on this server</li>
-          <li>Your repository and blobs will be transferred</li>
-          <li>Verify the migration via email</li>
-          <li>Your identity will be updated to point here</li>
+          <li>{$_('migration.inbound.common.step1')}</li>
+          <li>{$_('migration.inbound.common.step2')}</li>
+          <li>{$_('migration.inbound.common.step3')}</li>
+          <li>{$_('migration.inbound.common.step4')}</li>
+          <li>{$_('migration.inbound.common.step5')}</li>
         </ol>
       </div>
 
       <div class="warning-box">
-        <strong>Before you proceed:</strong>
+        <strong>{$_('migration.inbound.common.beforeProceed')}</strong>
         <ul>
-          <li>You need access to the email registered with your current account</li>
-          <li>Large accounts may take several minutes to transfer</li>
-          <li>Your old account will be deactivated after migration</li>
+          <li>{$_('migration.inbound.common.warning1')}</li>
+          <li>{$_('migration.inbound.common.warning2')}</li>
+          <li>{$_('migration.inbound.common.warning3')}</li>
         </ul>
       </div>
 
       <label class="checkbox-label">
         <input type="checkbox" bind:checked={understood} />
-        <span>I understand the risks and want to proceed with migration</span>
+        <span>{$_('migration.inbound.welcome.understand')}</span>
       </label>
 
       <div class="button-row">
-        <button class="ghost" onclick={onBack}>Cancel</button>
-        <button disabled={!understood} onclick={() => flow.setStep('source-login')}>
-          Continue
+        <button class="ghost" onclick={onBack}>{$_('migration.inbound.common.cancel')}</button>
+        <button disabled={!understood} onclick={() => flow.setStep('source-handle')}>
+          {$_('migration.inbound.common.continue')}
         </button>
       </div>
     </div>
 
-  {:else if flow.state.step === 'source-login'}
+  {:else if flow.state.step === 'source-handle'}
     <div class="step-content">
-      <h2>{isResumedMigration ? 'Resume Migration' : 'Log In to Your Current PDS'}</h2>
-      <p>{isResumedMigration ? 'Enter your credentials to continue the migration.' : 'Enter your credentials for the account you want to migrate.'}</p>
+      <h2>{isResuming ? $_('migration.inbound.sourceAuth.titleResume') : $_('migration.inbound.sourceAuth.title')}</h2>
+      <p>{isResuming ? $_('migration.inbound.sourceAuth.descResume') : $_('migration.inbound.sourceAuth.desc')}</p>
 
-      {#if isResumedMigration}
-        <div class="info-box">
-          <p>Your migration was interrupted. Log in to both accounts to resume.</p>
-          <p class="hint" style="margin-top: 8px;">Migrating: <strong>{flow.state.sourceHandle}</strong> → <strong>{flow.state.targetHandle}</strong></p>
+      {#if isResuming && resumeInfo}
+        <div class="info-box resume-info">
+          <h3>{$_('migration.inbound.sourceAuth.resumeTitle')}</h3>
+          <div class="resume-details">
+            <div class="resume-row">
+              <span class="label">{$_('migration.inbound.sourceAuth.resumeFrom')}:</span>
+              <span class="value">@{resumeInfo.sourceHandle}</span>
+            </div>
+            <div class="resume-row">
+              <span class="label">{$_('migration.inbound.sourceAuth.resumeTo')}:</span>
+              <span class="value">@{resumeInfo.targetHandle}</span>
+            </div>
+            <div class="resume-row">
+              <span class="label">{$_('migration.inbound.sourceAuth.resumeProgress')}:</span>
+              <span class="value">{resumeInfo.progressSummary}</span>
+            </div>
+          </div>
+          <p class="resume-note">{$_('migration.inbound.sourceAuth.resumeOAuthNote')}</p>
         </div>
       {/if}
 
-      <form onsubmit={handleLogin}>
+      <form onsubmit={handleSourceHandleSubmit}>
         <div class="field">
-          <label for="handle">{isResumedMigration ? 'Old Account Handle' : 'Handle'}</label>
+          <label for="source-handle">{$_('migration.inbound.sourceAuth.handle')}</label>
           <input
-            id="handle"
+            id="source-handle"
             type="text"
-            placeholder="alice.bsky.social"
+            placeholder={$_('migration.inbound.sourceAuth.handlePlaceholder')}
             bind:value={handleInput}
-            disabled={loading}
+            disabled={loading || isResuming}
             required
           />
-          <p class="hint">Your current handle on your existing PDS</p>
+          <p class="hint">{$_('migration.inbound.sourceAuth.handleHint')}</p>
         </div>
-
-        <div class="field">
-          <label for="password">{isResumedMigration ? 'Old Account Password' : 'Password'}</label>
-          <input
-            id="password"
-            type="password"
-            bind:value={passwordInput}
-            disabled={loading}
-            required
-          />
-          <p class="hint">Your account password (not an app password)</p>
-        </div>
-
-        {#if flow.state.requires2FA}
-          <div class="field">
-            <label for="2fa">Two-Factor Code</label>
-            <input
-              id="2fa"
-              type="text"
-              placeholder="Enter code from email"
-              bind:value={flow.state.twoFactorCode}
-              disabled={loading}
-              required
-            />
-            <p class="hint">Check your email for the verification code</p>
-          </div>
-        {/if}
-
-        {#if isResumedMigration}
-          <hr style="margin: 24px 0; border: none; border-top: 1px solid var(--border);" />
-
-          <div class="field">
-            <label for="local-password">New Account Password</label>
-            <input
-              id="local-password"
-              type="password"
-              placeholder="Password for your new account"
-              bind:value={localPasswordInput}
-              disabled={loading}
-              required
-            />
-            <p class="hint">The password you set for your account on this PDS</p>
-          </div>
-        {/if}
 
         <div class="button-row">
-          <button type="button" class="ghost" onclick={onBack} disabled={loading}>Back</button>
-          <button type="submit" disabled={loading}>
-            {loading ? 'Logging in...' : (isResumedMigration ? 'Continue Migration' : 'Log In')}
+          <button type="button" class="ghost" onclick={() => flow.setStep('welcome')} disabled={loading}>{$_('migration.inbound.common.back')}</button>
+          <button type="submit" disabled={loading || !handleInput.trim()}>
+            {loading ? $_('migration.inbound.sourceAuth.connecting') : (isResuming ? $_('migration.inbound.sourceAuth.reauthenticate') : $_('migration.inbound.sourceAuth.continue'))}
           </button>
         </div>
       </form>
@@ -355,16 +410,16 @@
 
   {:else if flow.state.step === 'choose-handle'}
     <div class="step-content">
-      <h2>Choose Your New Handle</h2>
-      <p>Select a handle for your account on this PDS.</p>
+      <h2>{$_('migration.inbound.chooseHandle.title')}</h2>
+      <p>{$_('migration.inbound.chooseHandle.desc')}</p>
 
       <div class="current-info">
-        <span class="label">Migrating from:</span>
+        <span class="label">{$_('migration.inbound.chooseHandle.migratingFrom')}:</span>
         <span class="value">{flow.state.sourceHandle}</span>
       </div>
 
       <div class="field">
-        <label for="new-handle">New Handle</label>
+        <label for="new-handle">{$_('migration.inbound.chooseHandle.newHandle')}</label>
         <div class="handle-input-group">
           <input
             id="new-handle"
@@ -383,18 +438,18 @@
         </div>
 
         {#if checkingHandle}
-          <p class="hint">Checking availability...</p>
+          <p class="hint">{$_('migration.inbound.chooseHandle.checkingAvailability')}</p>
         {:else if handleAvailable === true}
-          <p class="hint success">Handle is available!</p>
+          <p class="hint" style="color: var(--success-text)">{$_('migration.inbound.chooseHandle.handleAvailable')}</p>
         {:else if handleAvailable === false}
-          <p class="hint error">Handle is already taken</p>
+          <p class="hint error">{$_('migration.inbound.chooseHandle.handleTaken')}</p>
         {:else}
-          <p class="hint">You can also use your own domain by entering the full handle (e.g., alice.mydomain.com)</p>
+          <p class="hint">{$_('migration.inbound.chooseHandle.handleHint')}</p>
         {/if}
       </div>
 
       <div class="field">
-        <label for="email">Email Address</label>
+        <label for="email">{$_('migration.inbound.chooseHandle.email')}</label>
         <input
           id="email"
           type="email"
@@ -406,22 +461,58 @@
       </div>
 
       <div class="field">
-        <label for="new-password">Password</label>
-        <input
-          id="new-password"
-          type="password"
-          placeholder="Password for your new account"
-          bind:value={flow.state.targetPassword}
-          oninput={(e) => flow.updateField('targetPassword', (e.target as HTMLInputElement).value)}
-          required
-          minlength="8"
-        />
-        <p class="hint">At least 8 characters</p>
+        <label>{$_('migration.inbound.chooseHandle.authMethod')}</label>
+        <div class="auth-method-options">
+          <label class="auth-option" class:selected={selectedAuthMethod === 'password'}>
+            <input
+              type="radio"
+              name="auth-method"
+              value="password"
+              bind:group={selectedAuthMethod}
+            />
+            <div class="auth-option-content">
+              <strong>{$_('migration.inbound.chooseHandle.authPassword')}</strong>
+              <span>{$_('migration.inbound.chooseHandle.authPasswordDesc')}</span>
+            </div>
+          </label>
+          <label class="auth-option" class:selected={selectedAuthMethod === 'passkey'}>
+            <input
+              type="radio"
+              name="auth-method"
+              value="passkey"
+              bind:group={selectedAuthMethod}
+            />
+            <div class="auth-option-content">
+              <strong>{$_('migration.inbound.chooseHandle.authPasskey')}</strong>
+              <span>{$_('migration.inbound.chooseHandle.authPasskeyDesc')}</span>
+            </div>
+          </label>
+        </div>
       </div>
+
+      {#if selectedAuthMethod === 'password'}
+        <div class="field">
+          <label for="new-password">{$_('migration.inbound.chooseHandle.password')}</label>
+          <input
+            id="new-password"
+            type="password"
+            placeholder="Password for your new account"
+            bind:value={flow.state.targetPassword}
+            oninput={(e) => flow.updateField('targetPassword', (e.target as HTMLInputElement).value)}
+            required
+            minlength="8"
+          />
+          <p class="hint">{$_('migration.inbound.chooseHandle.passwordHint')}</p>
+        </div>
+      {:else}
+        <div class="info-box">
+          <p>{$_('migration.inbound.chooseHandle.passkeyInfo')}</p>
+        </div>
+      {/if}
 
       {#if serverInfo?.inviteCodeRequired}
         <div class="field">
-          <label for="invite">Invite Code</label>
+          <label for="invite">{$_('migration.inbound.chooseHandle.inviteCode')}</label>
           <input
             id="invite"
             type="text"
@@ -434,82 +525,85 @@
       {/if}
 
       <div class="button-row">
-        <button class="ghost" onclick={() => flow.setStep('source-login')}>Back</button>
+        <button class="ghost" onclick={() => flow.setStep('source-handle')}>{$_('migration.inbound.common.back')}</button>
         <button
-                   disabled={!handleInput.trim() || !flow.state.targetEmail || !flow.state.targetPassword || handleAvailable === false}
-          onclick={proceedToReview}
+          disabled={!handleInput.trim() || !flow.state.targetEmail || (selectedAuthMethod === 'password' && !flow.state.targetPassword) || handleAvailable === false}
+          onclick={proceedToReviewWithAuth}
         >
-          Continue
+          {$_('migration.inbound.common.continue')}
         </button>
       </div>
     </div>
 
   {:else if flow.state.step === 'review'}
     <div class="step-content">
-      <h2>Review Migration</h2>
-      <p>Please confirm the details of your migration.</p>
+      <h2>{$_('migration.inbound.review.title')}</h2>
+      <p>{$_('migration.inbound.review.desc')}</p>
 
       <div class="review-card">
         <div class="review-row">
-          <span class="label">Current Handle:</span>
+          <span class="label">{$_('migration.inbound.review.currentHandle')}:</span>
           <span class="value">{flow.state.sourceHandle}</span>
         </div>
         <div class="review-row">
-          <span class="label">New Handle:</span>
+          <span class="label">{$_('migration.inbound.review.newHandle')}:</span>
           <span class="value">{flow.state.targetHandle}</span>
         </div>
         <div class="review-row">
-          <span class="label">DID:</span>
+          <span class="label">{$_('migration.inbound.review.did')}:</span>
           <span class="value mono">{flow.state.sourceDid}</span>
         </div>
         <div class="review-row">
-          <span class="label">From PDS:</span>
+          <span class="label">{$_('migration.inbound.review.sourcePds')}:</span>
           <span class="value">{flow.state.sourcePdsUrl}</span>
         </div>
         <div class="review-row">
-          <span class="label">To PDS:</span>
+          <span class="label">{$_('migration.inbound.review.targetPds')}:</span>
           <span class="value">{window.location.origin}</span>
         </div>
         <div class="review-row">
-          <span class="label">Email:</span>
+          <span class="label">{$_('migration.inbound.review.email')}:</span>
           <span class="value">{flow.state.targetEmail}</span>
+        </div>
+        <div class="review-row">
+          <span class="label">{$_('migration.inbound.review.authentication')}:</span>
+          <span class="value">{flow.state.authMethod === 'passkey' ? $_('migration.inbound.review.authPasskey') : $_('migration.inbound.review.authPassword')}</span>
         </div>
       </div>
 
       <div class="warning-box">
-        <strong>Final confirmation:</strong> After you click "Start Migration", your repository and data will begin
-        transferring. This process cannot be easily undone.
+        {$_('migration.inbound.review.warning')}
       </div>
 
       <div class="button-row">
-        <button class="ghost" onclick={() => flow.setStep('choose-handle')} disabled={loading}>Back</button>
+        <button class="ghost" onclick={() => flow.setStep('choose-handle')} disabled={loading}>{$_('migration.inbound.common.back')}</button>
         <button onclick={startMigration} disabled={loading}>
-          {loading ? 'Starting...' : 'Start Migration'}
+          {loading ? $_('migration.inbound.review.starting') : $_('migration.inbound.review.startMigration')}
         </button>
       </div>
     </div>
 
   {:else if flow.state.step === 'migrating'}
     <div class="step-content">
-      <h2>Migration in Progress</h2>
-      <p>Please wait while your account is being transferred...</p>
+      <h2>{$_('migration.inbound.migrating.title')}</h2>
+      <p>{$_('migration.inbound.migrating.desc')}</p>
 
       <div class="progress-section">
         <div class="progress-item" class:completed={flow.state.progress.repoExported}>
           <span class="icon">{flow.state.progress.repoExported ? '✓' : '○'}</span>
-          <span>Export repository</span>
+          <span>{$_('migration.inbound.migrating.exportRepo')}</span>
         </div>
         <div class="progress-item" class:completed={flow.state.progress.repoImported}>
           <span class="icon">{flow.state.progress.repoImported ? '✓' : '○'}</span>
-          <span>Import repository</span>
+          <span>{$_('migration.inbound.migrating.importRepo')}</span>
         </div>
         <div class="progress-item" class:active={flow.state.progress.repoImported && !flow.state.progress.prefsMigrated}>
           <span class="icon">{flow.state.progress.blobsMigrated === flow.state.progress.blobsTotal && flow.state.progress.blobsTotal > 0 ? '✓' : '○'}</span>
-          <span>Migrate blobs ({flow.state.progress.blobsMigrated}/{flow.state.progress.blobsTotal})</span>
+          <span>{$_('migration.inbound.migrating.migrateBlobs')} ({flow.state.progress.blobsMigrated}/{flow.state.progress.blobsTotal})</span>
         </div>
         <div class="progress-item" class:completed={flow.state.progress.prefsMigrated}>
           <span class="icon">{flow.state.progress.prefsMigrated ? '✓' : '○'}</span>
-          <span>Migrate preferences</span>
+          <span>{$_('migration.inbound.migrating.migratePrefs')}</span>
         </div>
       </div>
 
@@ -525,6 +619,68 @@
       <p class="status-text">{flow.state.progress.currentOperation}</p>
     </div>
 
+  {:else if flow.state.step === 'passkey-setup'}
+    <div class="step-content">
+      <h2>{$_('migration.inbound.passkeySetup.title')}</h2>
+      <p>{$_('migration.inbound.passkeySetup.desc')}</p>
+
+      {#if flow.state.error}
+        <div class="message error">
+          {flow.state.error}
+        </div>
+      {/if}
+
+      <div class="field">
+        <label for="passkey-name">{$_('migration.inbound.passkeySetup.nameLabel')}</label>
+        <input
+          id="passkey-name"
+          type="text"
+          placeholder={$_('migration.inbound.passkeySetup.namePlaceholder')}
+          bind:value={passkeyName}
+          disabled={loading}
+        />
+        <p class="hint">{$_('migration.inbound.passkeySetup.nameHint')}</p>
+      </div>
+
+      <div class="passkey-section">
+        <p>{$_('migration.inbound.passkeySetup.instructions')}</p>
+        <button class="primary" onclick={registerPasskey} disabled={loading}>
+          {loading ? $_('migration.inbound.passkeySetup.registering') : $_('migration.inbound.passkeySetup.register')}
+        </button>
+      </div>
+    </div>
+
+  {:else if flow.state.step === 'app-password'}
+    <div class="step-content">
+      <h2>{$_('migration.inbound.appPassword.title')}</h2>
+      <p>{$_('migration.inbound.appPassword.desc')}</p>
+
+      <div class="warning-box">
+        <strong>{$_('migration.inbound.appPassword.warning')}</strong>
+      </div>
+
+      <div class="app-password-display">
+        <div class="app-password-label">
+          {$_('migration.inbound.appPassword.label')}: <strong>{flow.state.generatedAppPasswordName}</strong>
+        </div>
+        <code class="app-password-code">{flow.state.generatedAppPassword}</code>
+        <button type="button" class="copy-btn" onclick={copyAppPassword}>
+          {appPasswordCopied ? $_('common.copied') : $_('common.copyToClipboard')}
+        </button>
+      </div>
+
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={appPasswordAcknowledged} />
+        <span>{$_('migration.inbound.appPassword.saved')}</span>
+      </label>
+
+      <div class="button-row">
+        <button onclick={handleProceedFromAppPassword} disabled={!appPasswordAcknowledged || loading}>
+          {loading ? $_('migration.inbound.common.continue') : $_('migration.inbound.appPassword.continue')}
+        </button>
+      </div>
+    </div>
+
   {:else if flow.state.step === 'email-verify'}
     <div class="step-content">
       <h2>{$_('migration.inbound.emailVerify.title')}</h2>
@@ -537,7 +693,7 @@
       </div>
 
       {#if flow.state.error}
-        <div class="error-box">
+        <div class="message error">
           {flow.state.error}
         </div>
       {/if}
@@ -569,23 +725,20 @@
 
   {:else if flow.state.step === 'plc-token'}
     <div class="step-content">
-      <h2>Verify Migration</h2>
-      <p>A verification code has been sent to the email registered with your old account.</p>
+      <h2>{$_('migration.inbound.plcToken.title')}</h2>
+      <p>{$_('migration.inbound.plcToken.desc')}</p>
 
       <div class="info-box">
-        <p>
-          This code confirms you have access to the account and authorizes updating your identity
-          to point to this PDS.
-        </p>
+        <p>{$_('migration.inbound.plcToken.info')}</p>
       </div>
 
       <form onsubmit={submitPlcToken}>
         <div class="field">
-          <label for="plc-token">Verification Code</label>
+          <label for="plc-token">{$_('migration.inbound.plcToken.tokenLabel')}</label>
           <input
             id="plc-token"
             type="text"
-            placeholder="Enter code from email"
+            placeholder={$_('migration.inbound.plcToken.tokenPlaceholder')}
             bind:value={flow.state.plcToken}
             oninput={(e) => flow.updateField('plcToken', (e.target as HTMLInputElement).value)}
             disabled={loading}
@@ -595,10 +748,10 @@
 
         <div class="button-row">
           <button type="button" class="ghost" onclick={resendToken} disabled={loading}>
-            Resend Code
+            {$_('migration.inbound.plcToken.resend')}
           </button>
           <button type="submit" disabled={loading || !flow.state.plcToken}>
-            {loading ? 'Verifying...' : 'Complete Migration'}
+            {loading ? $_('migration.inbound.plcToken.completing') : $_('migration.inbound.plcToken.complete')}
           </button>
         </div>
       </form>
@@ -653,7 +806,7 @@
       </div>
 
       <div class="button-row">
-        <button class="ghost" onclick={() => flow.setStep('email-verify')} disabled={loading}>Back</button>
+        <button class="ghost" onclick={() => flow.setStep('email-verify')} disabled={loading}>{$_('migration.inbound.common.back')}</button>
         <button onclick={completeDidWeb} disabled={loading}>
           {loading ? $_('migration.inbound.didWebUpdate.completing') : $_('migration.inbound.didWebUpdate.complete')}
         </button>
@@ -662,21 +815,21 @@
 
   {:else if flow.state.step === 'finalizing'}
     <div class="step-content">
-      <h2>Finalizing Migration</h2>
-      <p>Please wait while we complete the migration...</p>
+      <h2>{$_('migration.inbound.finalizing.title')}</h2>
+      <p>{$_('migration.inbound.finalizing.desc')}</p>
 
       <div class="progress-section">
         <div class="progress-item" class:completed={flow.state.progress.plcSigned}>
           <span class="icon">{flow.state.progress.plcSigned ? '✓' : '○'}</span>
-          <span>Sign identity update</span>
+          <span>{$_('migration.inbound.finalizing.signingPlc')}</span>
         </div>
         <div class="progress-item" class:completed={flow.state.progress.activated}>
           <span class="icon">{flow.state.progress.activated ? '✓' : '○'}</span>
-          <span>Activate new account</span>
+          <span>{$_('migration.inbound.finalizing.activating')}</span>
         </div>
         <div class="progress-item" class:completed={flow.state.progress.deactivated}>
           <span class="icon">{flow.state.progress.deactivated ? '✓' : '○'}</span>
-          <span>Deactivate old account</span>
+          <span>{$_('migration.inbound.finalizing.deactivating')}</span>
         </div>
       </div>
 
@@ -686,435 +839,107 @@
   {:else if flow.state.step === 'success'}
     <div class="step-content success-content">
       <div class="success-icon">✓</div>
-      <h2>Migration Complete!</h2>
-      <p>Your account has been successfully migrated to this PDS.</p>
+      <h2>{$_('migration.inbound.success.title')}</h2>
+      <p>{$_('migration.inbound.success.desc')}</p>
 
       <div class="success-details">
         <div class="detail-row">
-          <span class="label">Your new handle:</span>
+          <span class="label">{$_('migration.inbound.success.yourNewHandle')}:</span>
           <span class="value">{flow.state.targetHandle}</span>
         </div>
         <div class="detail-row">
-          <span class="label">DID:</span>
+          <span class="label">{$_('migration.inbound.success.did')}:</span>
           <span class="value mono">{flow.state.sourceDid}</span>
         </div>
       </div>
 
       {#if flow.state.progress.blobsFailed.length > 0}
-        <div class="warning-box">
-          <strong>Note:</strong> {flow.state.progress.blobsFailed.length} blobs could not be migrated.
-          These may be images or other media that are no longer available.
+        <div class="message warning">
+          {$_('migration.inbound.success.blobsWarning', { values: { count: flow.state.progress.blobsFailed.length } })}
         </div>
       {/if}
 
-      <p class="redirect-text">Redirecting to dashboard...</p>
+      <p class="redirect-text">{$_('migration.inbound.success.redirecting')}</p>
     </div>
 
   {:else if flow.state.step === 'error'}
     <div class="step-content">
-      <h2>Migration Error</h2>
-      <p>An error occurred during migration.</p>
+      <h2>{$_('migration.inbound.error.title')}</h2>
+      <p>{$_('migration.inbound.error.desc')}</p>
 
-      <div class="error-box">
-        {flow.state.error}
+      <div class="message error">
+        {flow.state.error || 'An unknown error occurred. Please check the browser console for details.'}
       </div>
 
       <div class="button-row">
-        <button class="ghost" onclick={onBack}>Start Over</button>
+        <button class="ghost" onclick={onBack}>{$_('migration.inbound.error.startOver')}</button>
       </div>
     </div>
   {/if}
 </div>
 
 <style>
-  .inbound-wizard {
-    max-width: 600px;
-    margin: 0 auto;
+  .passkey-section {
+    margin-top: 16px;
   }
-
-  .step-indicator {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: var(--space-8);
-    padding: 0 var(--space-4);
+  .passkey-section button {
+    width: 100%;
+    margin-top: 12px;
   }
-
-  .step {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .step-dot {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--bg-secondary);
-    border: 2px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--text-secondary);
-  }
-
-  .step.active .step-dot {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--text-inverse);
-  }
-
-  .step.completed .step-dot {
-    background: var(--success-bg);
-    border-color: var(--success-text);
-    color: var(--success-text);
-  }
-
-  .step-label {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-  }
-
-  .step.active .step-label {
-    color: var(--accent);
-    font-weight: var(--font-medium);
-  }
-
-  .step-line {
-    flex: 1;
-    height: 2px;
-    background: var(--border);
-    margin: 0 var(--space-2);
-    margin-bottom: var(--space-6);
-    min-width: 20px;
-  }
-
-  .step-line.completed {
-    background: var(--success-text);
-  }
-
-  .step-content {
-    background: var(--bg-secondary);
+  .app-password-display {
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
     border-radius: var(--radius-xl);
     padding: var(--space-6);
+    text-align: center;
+    margin: var(--space-4) 0;
   }
-
-  .step-content h2 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .step-content > p {
+  .app-password-label {
+    font-size: var(--text-sm);
     color: var(--text-secondary);
-    margin: 0 0 var(--space-5) 0;
+    margin-bottom: var(--space-4);
   }
-
-  .info-box {
-    background: var(--accent-muted);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-lg);
+  .app-password-code {
+    display: block;
+    font-size: var(--text-xl);
+    font-family: ui-monospace, monospace;
+    letter-spacing: 0.1em;
     padding: var(--space-5);
+    background: var(--bg-input);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
+    user-select: all;
+  }
+  .copy-btn {
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm);
+  }
+  .resume-info {
     margin-bottom: var(--space-5);
   }
-
-  .info-box h3 {
+  .resume-info h3 {
     margin: 0 0 var(--space-3) 0;
     font-size: var(--text-base);
   }
-
-  .info-box ol, .info-box ul {
-    margin: 0;
-    padding-left: var(--space-5);
-  }
-
-  .info-box li {
-    margin-bottom: var(--space-2);
-    color: var(--text-secondary);
-  }
-
-  .info-box p {
-    margin: 0;
-    color: var(--text-secondary);
-  }
-
-  .warning-box {
-    background: var(--warning-bg);
-    border: 1px solid var(--warning-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5);
-    margin-bottom: var(--space-5);
-    font-size: var(--text-sm);
-  }
-
-  .warning-box strong {
-    color: var(--warning-text);
-  }
-
-  .warning-box ul {
-    margin: var(--space-3) 0 0 0;
-    padding-left: var(--space-5);
-  }
-
-  .error-box {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5);
-    margin-bottom: var(--space-5);
-    color: var(--error-text);
-  }
-
-  .checkbox-label {
-    display: inline-flex;
-    align-items: flex-start;
-    gap: var(--space-3);
-    cursor: pointer;
-    margin-bottom: var(--space-5);
-    text-align: left;
-  }
-
-  .checkbox-label input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    margin: 0;
-    flex-shrink: 0;
-  }
-
-  .button-row {
+  .resume-details {
     display: flex;
-    gap: var(--space-3);
-    justify-content: flex-end;
-    margin-top: var(--space-5);
-  }
-
-  .field {
-    margin-bottom: var(--space-5);
-  }
-
-  .field label {
-    display: block;
-    margin-bottom: var(--space-2);
-    font-weight: var(--font-medium);
-  }
-
-  .field input, .field select {
-    width: 100%;
-    padding: var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-  }
-
-  .field input:focus, .field select:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
-  .hint {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: var(--space-2) 0 0 0;
-  }
-
-  .hint.success {
-    color: var(--success-text);
-  }
-
-  .hint.error {
-    color: var(--error-text);
-  }
-
-  .handle-input-group {
-    display: flex;
+    flex-direction: column;
     gap: var(--space-2);
   }
-
-  .handle-input-group input {
-    flex: 1;
-  }
-
-  .handle-input-group select {
-    width: auto;
-  }
-
-  .current-info {
-    background: var(--bg-primary);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    margin-bottom: var(--space-5);
+  .resume-row {
     display: flex;
     justify-content: space-between;
-  }
-
-  .current-info .label {
-    color: var(--text-secondary);
-  }
-
-  .current-info .value {
-    font-weight: var(--font-medium);
-  }
-
-  .review-card {
-    background: var(--bg-primary);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    margin-bottom: var(--space-5);
-  }
-
-  .review-row {
-    display: flex;
-    justify-content: space-between;
-    padding: var(--space-3) 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .review-row:last-child {
-    border-bottom: none;
-  }
-
-  .review-row .label {
-    color: var(--text-secondary);
-  }
-
-  .review-row .value {
-    font-weight: var(--font-medium);
-    text-align: right;
-    word-break: break-all;
-  }
-
-  .review-row .value.mono {
-    font-family: var(--font-mono);
     font-size: var(--text-sm);
   }
-
-  .progress-section {
-    margin-bottom: var(--space-5);
-  }
-
-  .progress-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) 0;
+  .resume-row .label {
     color: var(--text-secondary);
   }
-
-  .progress-item.completed {
-    color: var(--success-text);
-  }
-
-  .progress-item.active {
-    color: var(--accent);
-  }
-
-  .progress-item .icon {
-    width: 24px;
-    text-align: center;
-  }
-
-  .progress-bar {
-    height: 8px;
-    background: var(--bg-primary);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: var(--space-4);
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: var(--accent);
-    transition: width 0.3s ease;
-  }
-
-  .status-text {
-    text-align: center;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .success-content {
-    text-align: center;
-  }
-
-  .success-icon {
-    width: 64px;
-    height: 64px;
-    background: var(--success-bg);
-    color: var(--success-text);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--text-2xl);
-    margin: 0 auto var(--space-5) auto;
-  }
-
-  .success-details {
-    background: var(--bg-primary);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    margin: var(--space-5) 0;
-    text-align: left;
-  }
-
-  .success-details .detail-row {
-    display: flex;
-    justify-content: space-between;
-    padding: var(--space-2) 0;
-  }
-
-  .success-details .label {
-    color: var(--text-secondary);
-  }
-
-  .success-details .value {
+  .resume-row .value {
     font-weight: var(--font-medium);
   }
-
-  .success-details .value.mono {
-    font-family: var(--font-mono);
+  .resume-note {
+    margin-top: var(--space-3);
     font-size: var(--text-sm);
-  }
-
-  .redirect-text {
-    color: var(--text-secondary);
     font-style: italic;
-  }
-
-  .message.error {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-    padding: var(--space-4);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--space-5);
-  }
-
-  .code-block {
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    margin-bottom: var(--space-5);
-    overflow-x: auto;
-  }
-
-  .code-block pre {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  code {
-    font-family: var(--font-mono);
-    background: var(--bg-primary);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    font-size: 0.9em;
   }
 </style>

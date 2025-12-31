@@ -1,6 +1,6 @@
 use crate::api::ApiError;
-use crate::auth::extractor::BearerAuthAdmin;
 use crate::auth::BearerAuth;
+use crate::auth::extractor::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -114,22 +114,21 @@ pub async fn create_invite_codes(
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| vec![auth_user.did.clone()]);
 
-    let admin_user_id = match sqlx::query_scalar!(
-        "SELECT id FROM users WHERE is_admin = true LIMIT 1"
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            error!("No admin user found to create invite codes");
-            return ApiError::InternalError.into_response();
-        }
-        Err(e) => {
-            error!("DB error looking up admin user: {:?}", e);
-            return ApiError::InternalError.into_response();
-        }
-    };
+    let admin_user_id =
+        match sqlx::query_scalar!("SELECT id FROM users WHERE is_admin = true LIMIT 1")
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                error!("No admin user found to create invite codes");
+                return ApiError::InternalError.into_response();
+            }
+            Err(e) => {
+                error!("DB error looking up admin user: {:?}", e);
+                return ApiError::InternalError.into_response();
+            }
+        };
 
     let mut result_codes = Vec::new();
 

@@ -569,7 +569,10 @@ async fn test_deactivate_with_migrating_to() {
     let jwt = verify_new_account(&client, &did).await;
     let target_pds = "https://pds2.example.com";
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&json!({ "migratingTo": target_pds }))
         .send()
@@ -633,7 +636,10 @@ async fn test_migrated_account_blocked_from_repo_ops() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&json!({ "migratingTo": "https://pds2.example.com" }))
         .send()
@@ -770,7 +776,10 @@ async fn test_migrated_session_status() {
     );
     let target_pds = "https://pds3.example.com";
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&json!({ "migratingTo": target_pds }))
         .send()
@@ -785,7 +794,10 @@ async fn test_migrated_session_status() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Response was not JSON");
-    assert_eq!(body["active"], false, "Migrated account should not be active");
+    assert_eq!(
+        body["active"], false,
+        "Migrated account should not be active"
+    );
     assert_eq!(
         body["status"], "migrated",
         "Status should be 'migrated' after migration"
@@ -819,7 +831,10 @@ async fn test_migrating_to_ignored_for_did_plc() {
     assert!(did.starts_with("did:plc:"), "Should be did:plc account");
     let jwt = verify_new_account(&client, &did).await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.server.deactivateAccount", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&json!({ "migratingTo": "https://pds2.example.com" }))
         .send()

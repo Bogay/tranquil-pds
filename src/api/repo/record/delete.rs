@@ -127,11 +127,7 @@ pub async fn delete_record(
     }
     let prev_record_cid = mst.get(&key).await.ok().flatten();
     if prev_record_cid.is_none() {
-        return (
-            StatusCode::OK,
-            Json(DeleteRecordOutput { commit: None }),
-        )
-            .into_response();
+        return (StatusCode::OK, Json(DeleteRecordOutput { commit: None })).into_response();
     }
     let new_mst = match mst.delete(&key).await {
         Ok(m) => m,

@@ -393,7 +393,10 @@ async fn test_update_handle_to_same() {
         .await
         .expect("Failed to get session");
     let session_body: Value = session.json().await.expect("Invalid JSON");
-    let current_handle = session_body["handle"].as_str().expect("No handle").to_string();
+    let current_handle = session_body["handle"]
+        .as_str()
+        .expect("No handle")
+        .to_string();
     let short_handle = current_handle.split('.').next().unwrap_or(&current_handle);
     let res = client
         .post(format!(

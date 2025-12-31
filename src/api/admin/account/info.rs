@@ -125,10 +125,7 @@ pub async fn get_account_info(
     }
 }
 
-async fn get_invited_by(
-    db: &sqlx::PgPool,
-    user_id: uuid::Uuid,
-) -> Option<InviteCodeInfo> {
+async fn get_invited_by(db: &sqlx::PgPool, user_id: uuid::Uuid) -> Option<InviteCodeInfo> {
     let use_row = sqlx::query!(
         r#"
         SELECT icu.code

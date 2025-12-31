@@ -2,20 +2,8 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 const ATP_SPECIFIC: &[&str] = &[
-    "at",
-    "atp",
-    "plc",
-    "pds",
-    "did",
-    "repo",
-    "tid",
-    "nsid",
-    "xrpc",
-    "lex",
-    "lexicon",
-    "bsky",
-    "bluesky",
-    "handle",
+    "at", "atp", "plc", "pds", "did", "repo", "tid", "nsid", "xrpc", "lex", "lexicon", "bsky",
+    "bluesky", "handle",
 ];
 
 const COMMONLY_RESERVED: &[&str] = &[

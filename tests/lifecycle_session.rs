@@ -291,7 +291,10 @@ async fn test_app_password_duplicate_name() {
     let base = base_url().await;
     let (jwt, _did) = create_account_and_login(&client).await;
     let create_res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAppPassword", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAppPassword",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&json!({ "name": "My App" }))
         .send()
@@ -299,7 +302,10 @@ async fn test_app_password_duplicate_name() {
         .expect("Failed to create app password");
     assert_eq!(create_res.status(), StatusCode::OK);
     let duplicate_res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAppPassword", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAppPassword",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&json!({ "name": "My App" }))
         .send()
@@ -320,7 +326,10 @@ async fn test_app_password_revoke_nonexistent() {
     let base = base_url().await;
     let (jwt, _did) = create_account_and_login(&client).await;
     let revoke_res = client
-        .post(format!("{}/xrpc/com.atproto.server.revokeAppPassword", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.revokeAppPassword",
+            base
+        ))
         .bearer_auth(&jwt)
         .json(&json!({ "name": "Does Not Exist" }))
         .send()
@@ -356,7 +365,10 @@ async fn test_app_password_revoke_invalidates_sessions() {
     let did = account["did"].as_str().unwrap();
     let main_jwt = verify_new_account(&client, did).await;
     let create_app_res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAppPassword", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAppPassword",
+            base
+        ))
         .bearer_auth(&main_jwt)
         .json(&json!({ "name": "Session Test App" }))
         .send()
@@ -389,7 +401,10 @@ async fn test_app_password_revoke_invalidates_sessions() {
         "App password session should be valid before revocation"
     );
     let revoke_res = client
-        .post(format!("{}/xrpc/com.atproto.server.revokeAppPassword", base))
+        .post(format!(
+            "{}/xrpc/com.atproto.server.revokeAppPassword",
+            base
+        ))
         .bearer_auth(&main_jwt)
         .json(&json!({ "name": "Session Test App" }))
         .send()

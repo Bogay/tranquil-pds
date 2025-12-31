@@ -85,10 +85,7 @@ async fn test_moderation_report_invalid_reason_type() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
-    assert!(body["message"]
-        .as_str()
-        .unwrap()
-        .contains("reasonType"));
+    assert!(body["message"].as_str().unwrap().contains("reasonType"));
 }
 
 #[tokio::test]
@@ -266,8 +263,5 @@ async fn test_moderation_report_takendown_user_cannot_file_non_appeal() {
     );
     let body: Value = report_res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidRequest");
-    assert!(body["message"]
-        .as_str()
-        .unwrap()
-        .contains("takendown"));
+    assert!(body["message"].as_str().unwrap().contains("takendown"));
 }

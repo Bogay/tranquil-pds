@@ -104,7 +104,7 @@ export function createRegistrationFlow(
         state.externalDidWeb.reservedSigningKey = result.signingKey;
         publicKeyMultibase = result.signingKey.replace("did:key:", "");
       } else {
-        const keypair = await generateKeypair();
+        const keypair = generateKeypair();
         state.externalDidWeb.byodPrivateKey = keypair.privateKey;
         state.externalDidWeb.byodPublicKeyMultibase =
           keypair.publicKeyMultibase;

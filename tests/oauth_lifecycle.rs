@@ -949,8 +949,7 @@ async fn test_oauth_session_isolation_between_users() {
     let url = base_url().await;
     let http_client = client();
     let (alice, _mock_alice) =
-        create_user_and_oauth_session("alice-isol", "https://alice.example.com/callback")
-            .await;
+        create_user_and_oauth_session("alice-isol", "https://alice.example.com/callback").await;
     let (bob, _mock_bob) =
         create_user_and_oauth_session("bob-isolation", "https://bob.example.com/callback").await;
     let collection = "app.bsky.feed.post";

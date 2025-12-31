@@ -1,5 +1,5 @@
 let currentPath = $state(
-  getPathWithoutQuery(window.location.hash.slice(1) || "/"),
+  getPathWithoutQuery(globalThis.location.hash.slice(1) || "/"),
 );
 
 function getPathWithoutQuery(hash: string): string {
@@ -7,13 +7,13 @@ function getPathWithoutQuery(hash: string): string {
   return queryIndex === -1 ? hash : hash.slice(0, queryIndex);
 }
 
-window.addEventListener("hashchange", () => {
-  currentPath = getPathWithoutQuery(window.location.hash.slice(1) || "/");
+globalThis.addEventListener("hashchange", () => {
+  currentPath = getPathWithoutQuery(globalThis.location.hash.slice(1) || "/");
 });
 
 export function navigate(path: string) {
   currentPath = path;
-  window.location.hash = path;
+  globalThis.location.hash = path;
 }
 
 export function getCurrentPath() {

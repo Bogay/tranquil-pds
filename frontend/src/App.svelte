@@ -36,6 +36,11 @@
   import DidDocumentEditor from './routes/DidDocumentEditor.svelte'
   import Home from './routes/Home.svelte'
 
+  if (window.location.pathname === '/migrate') {
+    const newUrl = `${window.location.origin}/${window.location.search}#/migrate`
+    window.location.replace(newUrl)
+  }
+
   initI18n()
 
   const auth = getAuthState()
@@ -43,6 +48,9 @@
   let oauthCallbackPending = $state(hasOAuthCallback())
 
   function hasOAuthCallback(): boolean {
+    if (window.location.hash === '#/migrate') {
+      return false
+    }
     const params = new URLSearchParams(window.location.search)
     return !!(params.get('code') && params.get('state'))
   }

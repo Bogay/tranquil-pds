@@ -15,14 +15,14 @@ describe("AppPasswords", () => {
   beforeEach(() => {
     clearMocks();
     setupFetchMock();
-    window.confirm = vi.fn(() => true);
+    globalThis.confirm = vi.fn(() => true);
   });
   describe("authentication guard", () => {
     it("redirects to login when not authenticated", async () => {
       setupUnauthenticatedUser();
       render(AppPasswords);
       await waitFor(() => {
-        expect(window.location.hash).toBe("#/login");
+        expect(globalThis.location.hash).toBe("#/login");
       });
     });
   });
@@ -97,8 +97,8 @@ describe("AppPasswords", () => {
       await waitFor(() => {
         expect(screen.getByText("Graysky")).toBeInTheDocument();
         expect(screen.getByText("Skeets")).toBeInTheDocument();
-        expect(screen.getByText(/created.*1\/15\/2024/i)).toBeInTheDocument();
-        expect(screen.getByText(/created.*2\/20\/2024/i)).toBeInTheDocument();
+        expect(screen.getByText(/created.*2024-01-15/i)).toBeInTheDocument();
+        expect(screen.getByText(/created.*2024-02-20/i)).toBeInTheDocument();
         expect(screen.getAllByRole("button", { name: /revoke/i })).toHaveLength(
           2,
         );
@@ -199,9 +199,9 @@ describe("AppPasswords", () => {
       await fireEvent.input(input, { target: { value: "MyApp" } });
       await fireEvent.click(screen.getByRole("button", { name: /create/i }));
       await waitFor(() => {
-        expect(screen.getByText(/app password created/i)).toBeInTheDocument();
+        expect(screen.getByText(/save this app password/i)).toBeInTheDocument();
         expect(screen.getByText("abcd-efgh-ijkl-mnop")).toBeInTheDocument();
-        expect(screen.getByText(/name: myapp/i)).toBeInTheDocument();
+        expect(screen.getByText("MyApp")).toBeInTheDocument();
         expect(input.value).toBe("");
       });
     });
@@ -221,11 +221,14 @@ describe("AppPasswords", () => {
       });
       await fireEvent.click(screen.getByRole("button", { name: /create/i }));
       await waitFor(() => {
-        expect(screen.getByText(/app password created/i)).toBeInTheDocument();
+        expect(screen.getByText(/save this app password/i)).toBeInTheDocument();
       });
+      await fireEvent.click(
+        screen.getByLabelText(/i have saved my app password/i),
+      );
       await fireEvent.click(screen.getByRole("button", { name: /done/i }));
       await waitFor(() => {
-        expect(screen.queryByText(/app password created/i)).not
+        expect(screen.queryByText(/save this app password/i)).not
           .toBeInTheDocument();
       });
     });
@@ -255,7 +258,7 @@ describe("AppPasswords", () => {
     });
     it("shows confirmation dialog before revoking", async () => {
       const confirmSpy = vi.fn(() => false);
-      window.confirm = confirmSpy;
+      globalThis.confirm = confirmSpy;
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
         () => jsonResponse({ passwords: [testPassword] }),
@@ -270,7 +273,7 @@ describe("AppPasswords", () => {
       );
     });
     it("does not revoke when confirmation is cancelled", async () => {
-      window.confirm = vi.fn(() => false);
+      globalThis.confirm = vi.fn(() => false);
       let revokeCalled = false;
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
@@ -288,7 +291,7 @@ describe("AppPasswords", () => {
       expect(revokeCalled).toBe(false);
     });
     it("calls revokeAppPassword with correct name", async () => {
-      window.confirm = vi.fn(() => true);
+      globalThis.confirm = vi.fn(() => true);
       let capturedName: string | null = null;
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
@@ -309,7 +312,7 @@ describe("AppPasswords", () => {
       });
     });
     it("shows loading state while revoking", async () => {
-      window.confirm = vi.fn(() => true);
+      globalThis.confirm = vi.fn(() => true);
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
         () => jsonResponse({ passwords: [testPassword] }),
@@ -328,7 +331,7 @@ describe("AppPasswords", () => {
       expect(screen.getByRole("button", { name: /revoking/i })).toBeDisabled();
     });
     it("reloads password list after successful revocation", async () => {
-      window.confirm = vi.fn(() => true);
+      globalThis.confirm = vi.fn(() => true);
       let listCallCount = 0;
       mockEndpoint("com.atproto.server.listAppPasswords", () => {
         listCallCount++;
@@ -352,7 +355,7 @@ describe("AppPasswords", () => {
       });
     });
     it("shows error when revocation fails", async () => {
-      window.confirm = vi.fn(() => true);
+      globalThis.confirm = vi.fn(() => true);
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
         () => jsonResponse({ passwords: [testPassword] }),

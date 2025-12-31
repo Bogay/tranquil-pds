@@ -8,9 +8,9 @@ const SCOPES = [
   "blob:*/*",
 ].join(" ");
 const CLIENT_ID = !(import.meta.env.DEV)
-  ? `${window.location.origin}/oauth/client-metadata.json`
+  ? `${globalThis.location.origin}/oauth/client-metadata.json`
   : `http://localhost/?scope=${SCOPES}`;
-const REDIRECT_URI = `${window.location.origin}/`;
+const REDIRECT_URI = `${globalThis.location.origin}/`;
 
 interface OAuthState {
   state: string;
@@ -106,11 +106,11 @@ export async function startOAuthLogin(): Promise<void> {
 
   const { request_uri } = await parResponse.json();
 
-  const authorizeUrl = new URL("/oauth/authorize", window.location.origin);
+  const authorizeUrl = new URL("/oauth/authorize", globalThis.location.origin);
   authorizeUrl.searchParams.set("client_id", CLIENT_ID);
   authorizeUrl.searchParams.set("request_uri", request_uri);
 
-  window.location.href = authorizeUrl.toString();
+  globalThis.location.href = authorizeUrl.toString();
 }
 
 export interface OAuthTokens {
@@ -191,7 +191,11 @@ export async function refreshOAuthToken(
 export function checkForOAuthCallback():
   | { code: string; state: string }
   | null {
-  const params = new URLSearchParams(window.location.search);
+  if (globalThis.location.hash === "#/migrate") {
+    return null;
+  }
+
+  const params = new URLSearchParams(globalThis.location.search);
   const code = params.get("code");
   const state = params.get("state");
 
@@ -203,7 +207,7 @@ export function checkForOAuthCallback():
 }
 
 export function clearOAuthCallbackParams(): void {
-  const url = new URL(window.location.href);
+  const url = new URL(globalThis.location.href);
   url.search = "";
-  window.history.replaceState({}, "", url.toString());
+  globalThis.history.replaceState({}, "", url.toString());
 }

@@ -86,25 +86,23 @@ pub async fn request_email_update(
             "email_update",
             &current_email.to_lowercase(),
         );
-        let formatted_code =
-            crate::auth::verification_token::format_token_for_display(&code);
+        let formatted_code = crate::auth::verification_token::format_token_for_display(&code);
 
-        let hostname =
-            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-        if let Err(e) = crate::comms::enqueue_email_update_token(
-            &state.db,
-            user.id,
-            &formatted_code,
-            &hostname,
-        )
-        .await
+        let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        if let Err(e) =
+            crate::comms::enqueue_email_update_token(&state.db, user.id, &formatted_code, &hostname)
+                .await
         {
             warn!("Failed to enqueue email update notification: {:?}", e);
         }
     }
 
     info!("Email update requested for user {}", user.id);
-    (StatusCode::OK, Json(json!({ "tokenRequired": token_required }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({ "tokenRequired": token_required })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]

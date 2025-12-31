@@ -131,7 +131,10 @@ pub async fn update_account_handle(
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, did, Some(&handle)).await
             {
-                warn!("Failed to sequence identity event for admin handle update: {}", e);
+                warn!(
+                    "Failed to sequence identity event for admin handle update: {}",
+                    e
+                );
             }
             if let Err(e) = crate::api::identity::did::update_plc_handle(&state, did, &handle).await
             {

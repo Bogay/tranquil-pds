@@ -1,6 +1,14 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, vi } from "vitest";
-import { _testReset } from "../lib/auth.svelte";
+import { init, register, waitLocale } from "svelte-i18n";
+import { _testResetState } from "../lib/auth.svelte";
+
+register("en", () => import("../locales/en.json"));
+
+init({
+  fallbackLocale: "en",
+  initialLocale: "en",
+});
 
 let locationHash = "";
 
@@ -24,12 +32,11 @@ Object.defineProperty(window, "location", {
   configurable: true,
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  localStorage.clear();
-  sessionStorage.clear();
   locationHash = "";
-  _testReset();
+  _testResetState();
+  await waitLocale();
 });
 
 afterEach(() => {

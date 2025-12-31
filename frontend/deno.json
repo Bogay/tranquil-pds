@@ -9,5 +9,13 @@
     "test:ui": "deno run -A npm:vitest --ui",
     "test:coverage": "deno run -A npm:vitest run --coverage"
   },
-  "nodeModulesDir": "auto"
+  "nodeModulesDir": "auto",
+  "lint": {
+    "rules": {
+      "exclude": [
+        "require-await",
+        "prefer-const"
+      ]
+    }
+  }
 }

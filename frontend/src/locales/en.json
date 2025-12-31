@@ -902,6 +902,10 @@
   "reauth": {
     "title": "Re-authentication Required",
     "subtitle": "Please verify your identity to continue.",
+    "password": "Password",
+    "totp": "TOTP",
+    "passkey": "Passkey",
+    "authenticatorCode": "Authenticator Code",
     "usePassword": "Use Password",
     "usePasskey": "Use Passkey",
     "useTotp": "Use Authenticator",
@@ -909,6 +913,8 @@
     "totpPlaceholder": "Enter 6-digit code",
     "verify": "Verify",
     "verifying": "Verifying...",
+    "authenticating": "Authenticating...",
+    "passkeyPrompt": "Click the button below to authenticate with your passkey.",
     "cancel": "Cancel"
   },
   "delegation": {
@@ -1071,6 +1077,10 @@
     "beforeMigrate4": "Your old PDS will be notified to deactivate your account",
     "importantWarning": "Account migration is a significant action. Make sure you trust the destination PDS and understand that your data will be moved. If something goes wrong, recovery may require manual intervention.",
     "learnMore": "Learn more about migration risks",
+    "comingSoon": "Coming soon",
+    "oauthCompleting": "Completing authentication...",
+    "oauthFailed": "Authentication Failed",
+    "tryAgain": "Try Again",
     "resume": {
       "title": "Resume Migration?",
       "incomplete": "You have an incomplete migration in progress:",
@@ -1090,44 +1100,85 @@
         "desc": "Move your existing AT Protocol account to this server.",
         "understand": "I understand the risks and want to proceed"
       },
-      "sourceLogin": {
-        "title": "Sign In to Your Current PDS",
-        "desc": "Enter your credentials for the account you want to migrate.",
+      "sourceAuth": {
+        "title": "Enter Your Current Handle",
+        "titleResume": "Resume Migration",
+        "desc": "Enter the handle of the account you want to migrate.",
+        "descResume": "Re-authenticate to your source PDS to continue the migration.",
         "handle": "Handle",
-        "handlePlaceholder": "you.bsky.social",
-        "password": "Password",
-        "twoFactorCode": "Two-Factor Code",
-        "twoFactorRequired": "Two-factor authentication required",
-        "signIn": "Sign In & Continue"
+        "handlePlaceholder": "alice.bsky.social",
+        "handleHint": "Your current handle on your existing PDS",
+        "continue": "Continue",
+        "connecting": "Connecting...",
+        "reauthenticate": "Re-authenticate",
+        "resumeTitle": "Migration in Progress",
+        "resumeFrom": "From",
+        "resumeTo": "To",
+        "resumeProgress": "Progress",
+        "resumeOAuthNote": "You need to re-authenticate via OAuth to continue."
       },
       "chooseHandle": {
         "title": "Choose Your New Handle",
         "desc": "Select a handle for your account on this PDS.",
-        "handleHint": "Your full handle will be: @{handle}"
+        "migratingFrom": "Migrating from",
+        "newHandle": "New Handle",
+        "checkingAvailability": "Checking availability...",
+        "handleAvailable": "Handle is available!",
+        "handleTaken": "Handle is already taken",
+        "handleHint": "You can also use your own domain by entering the full handle (e.g., alice.mydomain.com)",
+        "email": "Email Address",
+        "authMethod": "Authentication Method",
+        "authPassword": "Password",
+        "authPasswordDesc": "Traditional password-based login",
+        "authPasskey": "Passkey",
+        "authPasskeyDesc": "Passwordless login using biometrics or security key",
+        "password": "Password",
+        "passwordHint": "At least 8 characters",
+        "passkeyInfo": "You'll set up a passkey after your account is created. Your device will prompt you to use biometrics (fingerprint, Face ID) or a security key.",
+        "inviteCode": "Invite Code"
       },
       "review": {
         "title": "Review Migration",
-        "desc": "Please review and confirm your migration details.",
+        "desc": "Please confirm the details of your migration.",
         "currentHandle": "Current Handle",
         "newHandle": "New Handle",
-        "sourcePds": "Source PDS",
-        "targetPds": "This PDS",
+        "did": "DID",
+        "sourcePds": "From PDS",
+        "targetPds": "To PDS",
         "email": "Email",
+        "authentication": "Authentication",
+        "authPasskey": "Passkey (passwordless)",
+        "authPassword": "Password",
         "inviteCode": "Invite Code",
-        "confirm": "I confirm I want to migrate my account",
-        "startMigration": "Start Migration"
+        "warning": "After you click \"Start Migration\", your repository and data will begin transferring. This process cannot be easily undone.",
+        "startMigration": "Start Migration",
+        "starting": "Starting..."
       },
       "migrating": {
-        "title": "Migrating Your Account",
-        "desc": "Please wait while we transfer your data...",
-        "gettingServiceAuth": "Getting service authorization...",
-        "creatingAccount": "Creating account on new PDS...",
-        "exportingRepo": "Exporting repository...",
-        "importingRepo": "Importing repository...",
-        "countingBlobs": "Counting blobs...",
-        "migratingBlobs": "Migrating blobs ({current}/{total})...",
-        "migratingPrefs": "Migrating preferences...",
-        "requestingPlc": "Requesting PLC operation..."
+        "title": "Migration in Progress",
+        "desc": "Please wait while your account is being transferred...",
+        "exportRepo": "Export repository",
+        "importRepo": "Import repository",
+        "migrateBlobs": "Migrate blobs",
+        "migratePrefs": "Migrate preferences"
+      },
+      "passkeySetup": {
+        "title": "Set Up Your Passkey",
+        "desc": "Your email has been verified. Now set up your passkey for secure, passwordless login.",
+        "nameLabel": "Passkey Name (optional)",
+        "namePlaceholder": "e.g., MacBook Pro, iPhone",
+        "nameHint": "A friendly name to identify this passkey",
+        "instructions": "Click the button below to register your passkey. Your device will prompt you to use biometrics (fingerprint, Face ID) or a security key.",
+        "register": "Register Passkey",
+        "registering": "Registering..."
+      },
+      "appPassword": {
+        "title": "Save Your App Password",
+        "desc": "Your passkey has been created. An app password has been generated for you to use with apps that don't support passkeys yet.",
+        "warning": "This app password is required to sign into apps that don't support passkeys yet (like bsky.app). You will only see this password once.",
+        "label": "App Password for",
+        "saved": "I have saved my app password in a secure location",
+        "continue": "Continue"
       },
       "emailVerify": {
         "title": "Verify Your Email",
@@ -1140,12 +1191,14 @@
         "verifying": "Verifying..."
       },
       "plcToken": {
-        "title": "Verify Your Identity",
-        "desc": "A verification code has been sent to your email on your current PDS.",
-        "tokenLabel": "Verification Token",
-        "tokenPlaceholder": "Enter the token from your email",
-        "resend": "Resend Token",
-        "resending": "Resending..."
+        "title": "Verify Migration",
+        "desc": "A verification code has been sent to the email registered with your old account.",
+        "info": "This code confirms you have access to the account and authorizes updating your identity to point to this PDS.",
+        "tokenLabel": "Verification Code",
+        "tokenPlaceholder": "Enter code from email",
+        "resend": "Resend Code",
+        "complete": "Complete Migration",
+        "completing": "Verifying..."
       },
       "didWebUpdate": {
         "title": "Update Your DID Document",
@@ -1168,9 +1221,30 @@
       "success": {
         "title": "Migration Complete!",
         "desc": "Your account has been successfully migrated to this PDS.",
-        "newHandle": "New Handle",
+        "yourNewHandle": "Your new handle",
         "did": "DID",
-        "goToDashboard": "Go to Dashboard"
+        "blobsWarning": "{count} blobs could not be migrated. These may be images or other media that are no longer available.",
+        "redirecting": "Redirecting to dashboard..."
+      },
+      "error": {
+        "title": "Migration Error",
+        "desc": "An error occurred during migration.",
+        "startOver": "Start Over"
+      },
+      "common": {
+        "back": "Back",
+        "cancel": "Cancel",
+        "continue": "Continue",
+        "whatWillHappen": "What will happen:",
+        "step1": "Log in to your current PDS",
+        "step2": "Choose your new handle on this server",
+        "step3": "Your repository and blobs will be transferred",
+        "step4": "Verify the migration via email",
+        "step5": "Your identity will be updated to point here",
+        "beforeProceed": "Before you proceed:",
+        "warning1": "You need access to the email registered with your current account",
+        "warning2": "Large accounts may take several minutes to transfer",
+        "warning3": "Your old account will be deactivated after migration"
       }
     },
     "outbound": {

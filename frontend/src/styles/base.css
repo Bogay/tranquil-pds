@@ -229,7 +229,7 @@ fieldset legend + * {
 }
 
 code {
-  font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--bg-tertiary);
   padding: var(--space-1) var(--space-2);
@@ -237,7 +237,7 @@ code {
 }
 
 pre {
-  font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   background: var(--bg-tertiary);
   padding: var(--space-4);
@@ -400,7 +400,7 @@ hr {
 }
 
 .mono {
-  font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+  font-family: var(--font-mono);
 }
 
 .mt-4 {

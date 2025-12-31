@@ -74,7 +74,7 @@ export async function initServerConfig(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
-  darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  darkModeQuery = globalThis.matchMedia("(prefers-color-scheme: dark)");
   darkModeQuery.addEventListener("change", applyColors);
 
   try {

@@ -8,20 +8,20 @@ import {
   mockData,
   mockEndpoint,
   setupAuthenticatedUser,
-  setupFetchMock,
+  setupDefaultMocks,
   setupUnauthenticatedUser,
 } from "./mocks";
 describe("Comms", () => {
   beforeEach(() => {
     clearMocks();
-    setupFetchMock();
+    setupDefaultMocks();
   });
   describe("authentication guard", () => {
     it("redirects to login when not authenticated", async () => {
       setupUnauthenticatedUser();
       render(Comms);
       await waitFor(() => {
-        expect(window.location.hash).toBe("#/login");
+        expect(globalThis.location.hash).toBe("#/login");
       });
     });
   });
@@ -32,19 +32,26 @@ describe("Comms", () => {
         "com.tranquil.account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("displays all page elements and sections", async () => {
       render(Comms);
       await waitFor(() => {
         expect(
           screen.getByRole("heading", {
-            name: /notification preferences/i,
+            name: /communication preferences|notification preferences/i,
             level: 1,
           }),
         ).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /dashboard/i }))
           .toHaveAttribute("href", "#/dashboard");
-        expect(screen.getByText(/password resets/i)).toBeInTheDocument();
         expect(screen.getByRole("heading", { name: /preferred channel/i }))
           .toBeInTheDocument();
         expect(screen.getByRole("heading", { name: /channel configuration/i }))
@@ -55,6 +62,14 @@ describe("Comms", () => {
   describe("loading state", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("shows loading text while fetching preferences", async () => {
       mockEndpoint("com.tranquil.account.getNotificationPrefs", async () => {
@@ -68,6 +83,14 @@ describe("Comms", () => {
   describe("channel options", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("displays all four channel options", async () => {
       mockEndpoint(
@@ -127,7 +150,7 @@ describe("Comms", () => {
       );
       render(Comms);
       await waitFor(() => {
-        expect(screen.getAllByText(/configure below to enable/i).length)
+        expect(screen.getAllByText(/configure.*to enable/i).length)
           .toBeGreaterThan(0);
       });
     });
@@ -151,6 +174,14 @@ describe("Comms", () => {
   describe("channel configuration", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("displays email as readonly with current value", async () => {
       mockEndpoint(
@@ -179,14 +210,14 @@ describe("Comms", () => {
       render(Comms);
       await waitFor(() => {
         expect(
-          (screen.getByLabelText(/discord user id/i) as HTMLInputElement).value,
+          (screen.getByLabelText(/discord.*id/i) as HTMLInputElement).value,
         ).toBe("123456789");
         expect(
-          (screen.getByLabelText(/telegram username/i) as HTMLInputElement)
+          (screen.getByLabelText(/telegram.*username/i) as HTMLInputElement)
             .value,
         ).toBe("testuser");
         expect(
-          (screen.getByLabelText(/signal phone number/i) as HTMLInputElement)
+          (screen.getByLabelText(/signal.*number/i) as HTMLInputElement)
             .value,
         ).toBe("+1234567890");
       });
@@ -195,6 +226,14 @@ describe("Comms", () => {
   describe("verification status badges", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("shows Primary badge for email", async () => {
       mockEndpoint(
@@ -250,6 +289,14 @@ describe("Comms", () => {
   describe("save preferences", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("calls updateNotificationPrefs with correct data", async () => {
       let capturedBody: Record<string, unknown> | null = null;
@@ -266,9 +313,9 @@ describe("Comms", () => {
       );
       render(Comms);
       await waitFor(() => {
-        expect(screen.getByLabelText(/discord user id/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/discord.*id/i)).toBeInTheDocument();
       });
-      await fireEvent.input(screen.getByLabelText(/discord user id/i), {
+      await fireEvent.input(screen.getByLabelText(/discord.*id/i), {
         target: { value: "999888777" },
       });
       await fireEvent.click(
@@ -319,7 +366,7 @@ describe("Comms", () => {
         screen.getByRole("button", { name: /save preferences/i }),
       );
       await waitFor(() => {
-        expect(screen.getByText(/notification preferences saved/i))
+        expect(screen.getByText(/preferences saved/i))
           .toBeInTheDocument();
       });
     });
@@ -378,6 +425,14 @@ describe("Comms", () => {
   describe("channel selection interaction", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("enables discord channel after entering discord ID", async () => {
       mockEndpoint(
@@ -388,7 +443,7 @@ describe("Comms", () => {
       await waitFor(() => {
         expect(screen.getByRole("radio", { name: /discord/i })).toBeDisabled();
       });
-      await fireEvent.input(screen.getByLabelText(/discord user id/i), {
+      await fireEvent.input(screen.getByLabelText(/discord.*id/i), {
         target: { value: "123456789" },
       });
       await waitFor(() => {
@@ -420,6 +475,14 @@ describe("Comms", () => {
   describe("error handling", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer()),
+      );
+      mockEndpoint(
+        "com.tranquil.account.getNotificationHistory",
+        () => jsonResponse({ notifications: [] }),
+      );
     });
     it("shows error when loading preferences fails", async () => {
       mockEndpoint(

@@ -1,15 +1,19 @@
 export type InboundStep =
   | "welcome"
-  | "source-login"
+  | "source-handle"
   | "choose-handle"
   | "review"
   | "migrating"
+  | "passkey-setup"
+  | "app-password"
   | "email-verify"
   | "plc-token"
   | "did-web-update"
   | "finalizing"
   | "success"
   | "error";
+
+export type AuthMethod = "password" | "passkey";
 
 export type OutboundStep =
   | "welcome"
@@ -54,9 +58,14 @@ export interface InboundMigrationState {
   plcToken: string;
   progress: MigrationProgress;
   error: string | null;
-  requires2FA: boolean;
-  twoFactorCode: string;
   targetVerificationMethod: string | null;
+  authMethod: AuthMethod;
+  passkeySetupToken: string | null;
+  oauthCodeVerifier: string | null;
+  generatedAppPassword: string | null;
+  generatedAppPasswordName: string | null;
+  needsReauth?: boolean;
+  resumeToStep?: InboundStep;
 }
 
 export interface OutboundMigrationState {
@@ -92,6 +101,8 @@ export interface StoredMigrationState {
   sourceHandle: string;
   targetHandle: string;
   targetEmail: string;
+  authMethod?: AuthMethod;
+  passkeySetupToken?: string;
   progress: {
     repoExported: boolean;
     repoImported: boolean;
@@ -199,6 +210,51 @@ export interface CreateAccountParams {
   recoveryKey?: string;
 }
 
+export interface CreatePasskeyAccountParams {
+  did?: string;
+  handle: string;
+  email: string;
+  inviteCode?: string;
+}
+
+export interface PasskeyAccountSetup {
+  setupToken: string;
+  did: string;
+  handle: string;
+  setupExpiresAt: string;
+  accessJwt?: string;
+}
+
+export interface CompletePasskeySetupResponse {
+  did: string;
+  handle: string;
+  appPassword: string;
+  appPasswordName: string;
+}
+
+export interface StartPasskeyRegistrationResponse {
+  options: unknown;
+}
+
+export interface OAuthServerMetadata {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  scopes_supported?: string[];
+  response_types_supported?: string[];
+  grant_types_supported?: string[];
+  code_challenge_methods_supported?: string[];
+  dpop_signing_alg_values_supported?: string[];
+}
+
+export interface OAuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in?: number;
+  refresh_token?: string;
+  scope?: string;
+}
+
 export interface Preferences {
   preferences: unknown[];
 }
@@ -213,4 +269,14 @@ export class MigrationError extends Error {
     super(message);
     this.name = "MigrationError";
   }
+}
+
+export function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === "string") {
+    return err;
+  }
+  return String(err);
 }

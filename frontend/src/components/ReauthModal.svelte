@@ -170,12 +170,12 @@
   <div class="modal-backdrop" onclick={handleClose} onkeydown={(e) => e.key === 'Escape' && handleClose()} role="presentation">
     <div class="modal" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">
-        <h2>Re-authentication Required</h2>
+        <h2>{$_('reauth.title')}</h2>
         <button class="close-btn" onclick={handleClose} aria-label="Close">&times;</button>
       </div>
 
       <p class="modal-description">
-        This action requires you to verify your identity.
+        {$_('reauth.subtitle')}
       </p>
 
       {#if error}
@@ -190,7 +190,7 @@
               class:active={activeMethod === 'password'}
               onclick={() => activeMethod = 'password'}
             >
-              Password
+              {$_('reauth.password')}
             </button>
           {/if}
           {#if availableMethods.includes('totp')}
@@ -199,7 +199,7 @@
               class:active={activeMethod === 'totp'}
               onclick={() => activeMethod = 'totp'}
             >
-              TOTP
+              {$_('reauth.totp')}
             </button>
           {/if}
           {#if availableMethods.includes('passkey')}
@@ -208,7 +208,7 @@
               class:active={activeMethod === 'passkey'}
               onclick={() => activeMethod = 'passkey'}
             >
-              Passkey
+              {$_('reauth.passkey')}
             </button>
           {/if}
         </div>
@@ -218,7 +218,7 @@
         {#if activeMethod === 'password'}
           <form onsubmit={handlePasswordSubmit}>
             <div class="form-group">
-              <label for="reauth-password">Password</label>
+              <label for="reauth-password">{$_('reauth.password')}</label>
               <input
                 id="reauth-password"
                 type="password"
@@ -228,13 +228,13 @@
               />
             </div>
             <button type="submit" class="btn-primary" disabled={loading || !password}>
-              {loading ? 'Verifying...' : 'Verify'}
+              {loading ? $_('reauth.verifying') : $_('reauth.verify')}
             </button>
           </form>
         {:else if activeMethod === 'totp'}
           <form onsubmit={handleTotpSubmit}>
             <div class="form-group">
-              <label for="reauth-totp">Authenticator Code</label>
+              <label for="reauth-totp">{$_('reauth.authenticatorCode')}</label>
               <input
                 id="reauth-totp"
                 type="text"
@@ -247,18 +247,18 @@
               />
             </div>
             <button type="submit" class="btn-primary" disabled={loading || !totpCode}>
-              {loading ? 'Verifying...' : 'Verify'}
+              {loading ? $_('reauth.verifying') : $_('reauth.verify')}
             </button>
           </form>
         {:else if activeMethod === 'passkey'}
           <div class="passkey-auth">
-            <p>Click the button below to authenticate with your passkey.</p>
+            <p>{$_('reauth.passkeyPrompt')}</p>
             <button
               class="btn-primary"
               onclick={handlePasskeyAuth}
               disabled={loading}
             >
-              {loading ? 'Authenticating...' : 'Use Passkey'}
+              {loading ? $_('reauth.authenticating') : $_('reauth.usePasskey')}
             </button>
           </div>
         {/if}
@@ -266,7 +266,7 @@
 
       <div class="modal-footer">
         <button class="btn-secondary" onclick={handleClose} disabled={loading}>
-          Cancel
+          {$_('reauth.cancel')}
         </button>
       </div>
     </div>

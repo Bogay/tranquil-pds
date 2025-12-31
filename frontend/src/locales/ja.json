@@ -189,19 +189,31 @@
     "title": "DID ドキュメントエディター",
     "preview": "現在の DID ドキュメント",
     "verificationMethods": "検証方法（署名キー）",
+    "verificationMethodsDesc": "DIDの代わりに動作できる署名キー。新しいPDSに移行する際は、そのPDSの署名キーをここに追加してください。",
     "addKey": "キーを追加",
     "removeKey": "削除",
     "keyId": "キー ID",
     "keyIdPlaceholder": "#atproto",
     "publicKey": "公開キー（Multibase）",
     "publicKeyPlaceholder": "zQ3sh...",
+    "noKeys": "検証方法が設定されていません。ローカルPDSキーを使用しています。",
     "alsoKnownAs": "別名（ハンドル）",
+    "alsoKnownAsDesc": "DIDを指すハンドル。新しいPDSでハンドルが変更されたら更新してください。",
     "addHandle": "ハンドルを追加",
+    "removeHandle": "削除",
+    "handle": "ハンドル",
     "handlePlaceholder": "at://handle.pds.com",
-    "serviceEndpoint": "サービスエンドポイント（現在の PDS）",
+    "noHandles": "ハンドルが設定されていません。ローカルハンドルを使用しています。",
+    "serviceEndpoint": "サービスエンドポイント",
+    "serviceEndpointDesc": "アカウントデータを現在ホストしているPDS。移行時に更新してください。",
+    "currentPds": "現在のPDS URL",
     "save": "変更を保存",
     "saving": "保存中...",
     "success": "DID ドキュメントを更新しました",
+    "saveFailed": "DIDドキュメントの保存に失敗しました",
+    "loadFailed": "DIDドキュメントの読み込みに失敗しました",
+    "invalidMultibase": "公開キーは'z'で始まる有効なmultibase文字列である必要があります",
+    "invalidHandle": "ハンドルはat:// URIである必要があります（例：at://handle.example.com）",
     "helpTitle": "これは何ですか？",
     "helpText": "別の PDS に移行すると、その PDS が新しい署名キーを生成します。ここで DID ドキュメントを更新して、新しいキーと場所を指すようにしてください。"
   },
@@ -890,6 +902,10 @@
   "reauth": {
     "title": "再認証が必要です",
     "subtitle": "続行するには本人確認を行ってください。",
+    "password": "パスワード",
+    "totp": "TOTP",
+    "passkey": "パスキー",
+    "authenticatorCode": "認証コード",
     "usePassword": "パスワードを使用",
     "usePasskey": "パスキーを使用",
     "useTotp": "認証アプリを使用",
@@ -897,6 +913,8 @@
     "totpPlaceholder": "6桁のコードを入力",
     "verify": "確認",
     "verifying": "確認中...",
+    "authenticating": "認証中...",
+    "passkeyPrompt": "下のボタンをクリックしてパスキーで認証してください。",
     "cancel": "キャンセル"
   },
   "verifyChannel": {
@@ -1059,6 +1077,10 @@
     "beforeMigrate4": "古いPDSにアカウントの無効化が通知されます",
     "importantWarning": "アカウント移行は重要な操作です。移行先のPDSを信頼し、データが移動されることを理解してください。問題が発生した場合、手動での復旧が必要になる可能性があります。",
     "learnMore": "移行のリスクについて詳しく",
+    "comingSoon": "近日公開",
+    "oauthCompleting": "認証を完了しています...",
+    "oauthFailed": "認証に失敗しました",
+    "tryAgain": "再試行",
     "resume": {
       "title": "移行を再開しますか？",
       "incomplete": "未完了の移行があります：",
@@ -1078,44 +1100,85 @@
         "desc": "既存のAT Protocolアカウントをこのサーバーに移動します。",
         "understand": "リスクを理解し、続行します"
       },
-      "sourceLogin": {
-        "title": "現在のPDSにサインイン",
-        "desc": "移行するアカウントの認証情報を入力してください。",
+      "sourceAuth": {
+        "title": "現在のハンドルを入力",
+        "titleResume": "移行を再開",
+        "desc": "移行するアカウントのハンドルを入力してください。",
+        "descResume": "移行を続行するには、元のPDSに再認証してください。",
         "handle": "ハンドル",
-        "handlePlaceholder": "you.bsky.social",
-        "password": "パスワード",
-        "twoFactorCode": "2要素認証コード",
-        "twoFactorRequired": "2要素認証が必要です",
-        "signIn": "サインインして続行"
+        "handlePlaceholder": "alice.bsky.social",
+        "handleHint": "現在のPDSでのハンドル",
+        "continue": "続行",
+        "connecting": "接続中...",
+        "reauthenticate": "再認証",
+        "resumeTitle": "移行中",
+        "resumeFrom": "移行元",
+        "resumeTo": "移行先",
+        "resumeProgress": "進行状況",
+        "resumeOAuthNote": "続行するにはOAuthで再認証が必要です。"
       },
       "chooseHandle": {
         "title": "新しいハンドルを選択",
         "desc": "このPDSでのアカウントのハンドルを選択してください。",
-        "handleHint": "完全なハンドル: @{handle}"
+        "migratingFrom": "移行元",
+        "newHandle": "新しいハンドル",
+        "checkingAvailability": "利用可能か確認中...",
+        "handleAvailable": "ハンドルは利用可能です！",
+        "handleTaken": "このハンドルは既に使用されています",
+        "handleHint": "フルハンドル（例：alice.mydomain.com）を入力して独自ドメインを使用することもできます",
+        "email": "メールアドレス",
+        "authMethod": "認証方法",
+        "authPassword": "パスワード",
+        "authPasswordDesc": "従来のパスワードベースのログイン",
+        "authPasskey": "パスキー",
+        "authPasskeyDesc": "生体認証やセキュリティキーを使用したパスワードレスログイン",
+        "password": "パスワード",
+        "passwordHint": "8文字以上",
+        "passkeyInfo": "アカウント作成後にパスキーを設定します。デバイスが生体認証（指紋、Face ID）またはセキュリティキーの使用を促します。",
+        "inviteCode": "招待コード"
       },
       "review": {
         "title": "移行の確認",
         "desc": "移行の詳細を確認してください。",
         "currentHandle": "現在のハンドル",
         "newHandle": "新しいハンドル",
+        "did": "DID",
         "sourcePds": "移行元PDS",
-        "targetPds": "このPDS",
+        "targetPds": "移行先PDS",
         "email": "メール",
+        "authentication": "認証",
+        "authPasskey": "パスキー（パスワードレス）",
+        "authPassword": "パスワード",
         "inviteCode": "招待コード",
-        "confirm": "アカウントを移行することを確認します",
-        "startMigration": "移行を開始"
+        "warning": "「移行を開始」をクリックすると、リポジトリとデータの転送が始まります。このプロセスは簡単に元に戻すことができません。",
+        "startMigration": "移行を開始",
+        "starting": "開始中..."
       },
       "migrating": {
-        "title": "アカウントを移行中",
-        "desc": "データを転送しています...",
-        "gettingServiceAuth": "サービス認証を取得中...",
-        "creatingAccount": "新しいPDSにアカウントを作成中...",
-        "exportingRepo": "リポジトリをエクスポート中...",
-        "importingRepo": "リポジトリをインポート中...",
-        "countingBlobs": "blobをカウント中...",
-        "migratingBlobs": "blobを移行中 ({current}/{total})...",
-        "migratingPrefs": "設定を移行中...",
-        "requestingPlc": "PLC操作をリクエスト中..."
+        "title": "移行中",
+        "desc": "アカウントを転送しています...",
+        "exportRepo": "リポジトリをエクスポート",
+        "importRepo": "リポジトリをインポート",
+        "migrateBlobs": "blobを移行",
+        "migratePrefs": "設定を移行"
+      },
+      "passkeySetup": {
+        "title": "パスキーを設定",
+        "desc": "メールが確認されました。安全なパスワードレスログインのためにパスキーを設定してください。",
+        "nameLabel": "パスキー名（任意）",
+        "namePlaceholder": "例：MacBook Pro、iPhone",
+        "nameHint": "このパスキーを識別するためのわかりやすい名前",
+        "instructions": "下のボタンをクリックしてパスキーを登録してください。デバイスが生体認証（指紋、Face ID）またはセキュリティキーの使用を促します。",
+        "register": "パスキーを登録",
+        "registering": "登録中..."
+      },
+      "appPassword": {
+        "title": "アプリパスワードを保存",
+        "desc": "パスキーが作成されました。パスキーをまだサポートしていないアプリで使用するためのアプリパスワードが生成されました。",
+        "warning": "このアプリパスワードは、パスキーをまだサポートしていないアプリ（bsky.appなど）へのサインインに必要です。このパスワードは一度しか表示されません。",
+        "label": "アプリパスワード：",
+        "saved": "アプリパスワードを安全な場所に保存しました",
+        "continue": "続ける"
       },
       "emailVerify": {
         "title": "メールアドレスを確認",
@@ -1128,12 +1191,14 @@
         "verifying": "確認中..."
       },
       "plcToken": {
-        "title": "本人確認",
-        "desc": "現在のPDSに登録されているメールアドレスに確認コードが送信されました。",
-        "tokenLabel": "確認トークン",
-        "tokenPlaceholder": "メールに記載されたトークンを入力",
-        "resend": "再送信",
-        "resending": "送信中..."
+        "title": "移行を確認",
+        "desc": "古いアカウントに登録されているメールアドレスに確認コードが送信されました。",
+        "info": "このコードはアカウントへのアクセス権を確認し、このPDSを指すようにアイデンティティを更新することを承認します。",
+        "tokenLabel": "確認コード",
+        "tokenPlaceholder": "メールに記載されたコードを入力",
+        "resend": "コードを再送信",
+        "complete": "移行を完了",
+        "completing": "確認中..."
       },
       "didWebUpdate": {
         "title": "DIDドキュメントを更新",
@@ -1156,9 +1221,30 @@
       "success": {
         "title": "移行完了！",
         "desc": "アカウントはこのPDSに正常に移行されました。",
-        "newHandle": "新しいハンドル",
+        "yourNewHandle": "新しいハンドル",
         "did": "DID",
-        "goToDashboard": "ダッシュボードへ"
+        "blobsWarning": "{count}個のblobを移行できませんでした。これらは利用できなくなった画像やその他のメディアの可能性があります。",
+        "redirecting": "ダッシュボードにリダイレクト中..."
+      },
+      "error": {
+        "title": "移行エラー",
+        "desc": "移行中にエラーが発生しました。",
+        "startOver": "最初からやり直す"
+      },
+      "common": {
+        "back": "戻る",
+        "cancel": "キャンセル",
+        "continue": "続行",
+        "whatWillHappen": "何が起こるか：",
+        "step1": "現在のPDSにログイン",
+        "step2": "このサーバーでの新しいハンドルを選択",
+        "step3": "リポジトリとblobが転送されます",
+        "step4": "メールで移行を確認",
+        "step5": "アイデンティティがここを指すように更新されます",
+        "beforeProceed": "続行する前に：",
+        "warning1": "現在のアカウントに登録されているメールへのアクセスが必要です",
+        "warning2": "大きなアカウントの転送には数分かかる場合があります",
+        "warning3": "移行後、古いアカウントは無効化されます"
       }
     },
     "outbound": {

@@ -10,7 +10,7 @@ export interface Keypair {
   publicKeyDidKey: string;
 }
 
-export async function generateKeypair(): Promise<Keypair> {
+export function generateKeypair(): Keypair {
   const privateKey = secp.utils.randomPrivateKey();
   const publicKey = secp.getPublicKey(privateKey, true);
 

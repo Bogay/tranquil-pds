@@ -174,7 +174,10 @@ async fn test_put_preferences_read_only_silently_filtered() {
     let body: Value = get_resp.json().await.unwrap();
     let prefs_arr = body["preferences"].as_array().unwrap();
     assert_eq!(prefs_arr.len(), 1);
-    assert_eq!(prefs_arr[0]["$type"], "app.bsky.actor.defs#adultContentPref");
+    assert_eq!(
+        prefs_arr[0]["$type"],
+        "app.bsky.actor.defs#adultContentPref"
+    );
 }
 
 #[tokio::test]
@@ -393,7 +396,11 @@ async fn test_declared_age_pref_computed_under_18() {
     let client = client();
     let base = base_url().await;
     let (token, _did) = create_account_and_login(&client).await;
-    let current_year = chrono::Utc::now().format("%Y").to_string().parse::<i32>().unwrap();
+    let current_year = chrono::Utc::now()
+        .format("%Y")
+        .to_string()
+        .parse::<i32>()
+        .unwrap();
     let birth_year = current_year - 15;
     let prefs = json!({
         "preferences": [

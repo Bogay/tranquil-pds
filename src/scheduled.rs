@@ -1,7 +1,7 @@
 use cid::Cid;
+use ipld_core::ipld::Ipld;
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
-use ipld_core::ipld::Ipld;
 use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -107,22 +107,24 @@ pub async fn backfill_genesis_commit_blocks(db: &PgPool, block_store: PostgresBl
         }
     }
 
-    info!(success, failed, "Completed genesis commit blocks_cids backfill");
+    info!(
+        success,
+        failed, "Completed genesis commit blocks_cids backfill"
+    );
 }
 
 pub async fn backfill_repo_rev(db: &PgPool, block_store: PostgresBlockStore) {
-    let repos_missing_rev = match sqlx::query!(
-        "SELECT user_id, repo_root_cid FROM repos WHERE repo_rev IS NULL"
-    )
-    .fetch_all(db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            error!("Failed to query repos for backfill: {}", e);
-            return;
-        }
-    };
+    let repos_missing_rev =
+        match sqlx::query!("SELECT user_id, repo_root_cid FROM repos WHERE repo_rev IS NULL")
+            .fetch_all(db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                error!("Failed to query repos for backfill: {}", e);
+                return;
+            }
+        };
 
     if repos_missing_rev.is_empty() {
         debug!("No repos need repo_rev backfill");
@@ -244,20 +246,18 @@ pub async fn backfill_user_blocks(db: &PgPool, block_store: PostgresBlockStore) 
                 if let Some(prev) = commit.prev {
                     to_visit.push(prev);
                 }
-            } else if let Ok(ipld) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
-                if let Ipld::Map(ref obj) = ipld {
-                    if let Some(Ipld::Link(left_cid)) = obj.get("l") {
-                        to_visit.push(*left_cid);
-                    }
-                    if let Some(Ipld::List(entries)) = obj.get("e") {
-                        for entry in entries {
-                            if let Ipld::Map(entry_obj) = entry {
-                                if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
-                                    to_visit.push(*tree_cid);
-                                }
-                                if let Some(Ipld::Link(val_cid)) = entry_obj.get("v") {
-                                    to_visit.push(*val_cid);
-                                }
+            } else if let Ok(Ipld::Map(ref obj)) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
+                if let Some(Ipld::Link(left_cid)) = obj.get("l") {
+                    to_visit.push(*left_cid);
+                }
+                if let Some(Ipld::List(entries)) = obj.get("e") {
+                    for entry in entries {
+                        if let Ipld::Map(entry_obj) = entry {
+                            if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
+                                to_visit.push(*tree_cid);
+                            }
+                            if let Some(Ipld::Link(val_cid)) = entry_obj.get("v") {
+                                to_visit.push(*val_cid);
                             }
                         }
                     }
@@ -361,10 +361,7 @@ pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore)
 
             let blob_refs = crate::sync::import::find_blob_refs_ipld(&record_ipld, 0);
             for blob_ref in blob_refs {
-                let record_uri = format!(
-                    "at://{}/{}/{}",
-                    user.did, record.collection, record.rkey
-                );
+                let record_uri = format!("at://{}/{}/{}", user.did, record.collection, record.rkey);
                 if let Err(e) = sqlx::query!(
                     r#"
                     INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
@@ -490,13 +487,10 @@ async fn delete_account_data(
     did: &str,
     _handle: &str,
 ) -> Result<(), String> {
-    let user_id: uuid::Uuid = sqlx::query_scalar!(
-        "SELECT id FROM users WHERE did = $1",
-        did
-    )
-    .fetch_one(db)
-    .await
-    .map_err(|e| format!("DB error fetching user: {}", e))?;
+    let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+        .fetch_one(db)
+        .await
+        .map_err(|e| format!("DB error fetching user: {}", e))?;
 
     let blob_storage_keys: Vec<String> = sqlx::query_scalar!(
         r#"SELECT storage_key as "storage_key!" FROM blobs WHERE created_by_user = $1"#,

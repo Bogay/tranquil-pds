@@ -1,14 +1,19 @@
 import type {
   AccountStatus,
   BlobRef,
+  CompletePasskeySetupResponse,
   CreateAccountParams,
+  CreatePasskeyAccountParams,
   DidCredentials,
   DidDocument,
-  MigrationError,
+  OAuthServerMetadata,
+  OAuthTokenResponse,
+  PasskeyAccountSetup,
   PlcOperation,
   Preferences,
   ServerDescription,
   Session,
+  StartPasskeyRegistrationResponse,
 } from "./types";
 
 function apiLog(
@@ -28,6 +33,8 @@ function apiLog(
 export class AtprotoClient {
   private baseUrl: string;
   private accessToken: string | null = null;
+  private dpopKeyPair: DPoPKeyPair | null = null;
+  private dpopNonce: string | null = null;
 
   constructor(pdsUrl: string) {
     this.baseUrl = pdsUrl.replace(/\/$/, "");
@@ -39,6 +46,10 @@ export class AtprotoClient {
 
   getAccessToken(): string | null {
     return this.accessToken;
+  }
+
+  setDPoPKeyPair(keyPair: DPoPKeyPair | null) {
+    this.dpopKeyPair = keyPair;
   }
 
   private async xrpc<T>(
@@ -67,41 +78,71 @@ export class AtprotoClient {
       url += `?${searchParams}`;
     }
 
-    const headers: Record<string, string> = {};
-    const token = authToken ?? this.accessToken;
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+    const makeRequest = async (nonce?: string): Promise<Response> => {
+      const headers: Record<string, string> = {};
+      const token = authToken ?? this.accessToken;
+      if (token) {
+        if (this.dpopKeyPair) {
+          headers["Authorization"] = `DPoP ${token}`;
+          const tokenHash = await computeAccessTokenHash(token);
+          const dpopProof = await createDPoPProof(
+            this.dpopKeyPair,
+            httpMethod,
+            url.split("?")[0],
+            nonce,
+            tokenHash,
+          );
+          headers["DPoP"] = dpopProof;
+        } else {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+      }
 
-    let requestBody: BodyInit | undefined;
-    if (rawBody) {
-      headers["Content-Type"] = contentType ?? "application/octet-stream";
-      requestBody = rawBody;
-    } else if (body) {
-      headers["Content-Type"] = "application/json";
-      requestBody = JSON.stringify(body);
-    } else if (httpMethod === "POST") {
-      headers["Content-Type"] = "application/json";
-    }
+      let requestBody: BodyInit | undefined;
+      if (rawBody) {
+        headers["Content-Type"] = contentType ?? "application/octet-stream";
+        requestBody = rawBody;
+      } else if (body) {
+        headers["Content-Type"] = "application/json";
+        requestBody = JSON.stringify(body);
+      } else if (httpMethod === "POST") {
+        headers["Content-Type"] = "application/json";
+      }
 
-    const res = await fetch(url, {
-      method: httpMethod,
-      headers,
-      body: requestBody,
-    });
+      return fetch(url, {
+        method: httpMethod,
+        headers,
+        body: requestBody,
+      });
+    };
+
+    let res = await makeRequest(this.dpopNonce ?? undefined);
+
+    if (!res.ok && this.dpopKeyPair) {
+      const dpopNonce = res.headers.get("DPoP-Nonce");
+      if (dpopNonce && dpopNonce !== this.dpopNonce) {
+        this.dpopNonce = dpopNonce;
+        res = await makeRequest(dpopNonce);
+      }
+    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({
         error: "Unknown",
         message: res.statusText,
       }));
-      const error = new Error(err.message) as Error & {
+      const error = new Error(err.message || err.error || res.statusText) as Error & {
         status: number;
         error: string;
       };
       error.status = res.status;
       error.error = err.error;
       throw error;
+    }
+
+    const newNonce = res.headers.get("DPoP-Nonce");
+    if (newNonce) {
+      this.dpopNonce = newNonce;
     }
 
     const responseContentType = res.headers.get("content-type") ?? "";
@@ -231,7 +272,7 @@ export class AtprotoClient {
         error: "Unknown",
         message: res.statusText,
       }));
-      const error = new Error(err.message) as Error & {
+      const error = new Error(err.message || err.error || res.statusText) as Error & {
         status: number;
         error: string;
       };
@@ -436,6 +477,270 @@ export class AtprotoClient {
       httpMethod: "POST",
     });
   }
+
+  async createPasskeyAccount(
+    params: CreatePasskeyAccountParams,
+    serviceToken?: string,
+  ): Promise<PasskeyAccountSetup> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (serviceToken) {
+      headers["Authorization"] = `Bearer ${serviceToken}`;
+    }
+
+    const res = await fetch(
+      `${this.baseUrl}/xrpc/com.tranquil.account.createPasskeyAccount`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(params),
+      },
+    );
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      const error = new Error(err.message || err.error || res.statusText) as Error & {
+        status: number;
+        error: string;
+      };
+      error.status = res.status;
+      error.error = err.error;
+      throw error;
+    }
+
+    return res.json();
+  }
+
+  async startPasskeyRegistrationForSetup(
+    did: string,
+    setupToken: string,
+    friendlyName?: string,
+  ): Promise<StartPasskeyRegistrationResponse> {
+    return this.xrpc("com.tranquil.account.startPasskeyRegistrationForSetup", {
+      httpMethod: "POST",
+      body: { did, setupToken, friendlyName },
+    });
+  }
+
+  async completePasskeySetup(
+    did: string,
+    setupToken: string,
+    passkeyCredential: unknown,
+    passkeyFriendlyName?: string,
+  ): Promise<CompletePasskeySetupResponse> {
+    return this.xrpc("com.tranquil.account.completePasskeySetup", {
+      httpMethod: "POST",
+      body: { did, setupToken, passkeyCredential, passkeyFriendlyName },
+    });
+  }
+}
+
+export async function getOAuthServerMetadata(
+  pdsUrl: string,
+): Promise<OAuthServerMetadata | null> {
+  try {
+    const directUrl = `${pdsUrl}/.well-known/oauth-authorization-server`;
+    const directRes = await fetch(directUrl);
+    if (directRes.ok) {
+      return directRes.json();
+    }
+
+    const protectedResourceUrl = `${pdsUrl}/.well-known/oauth-protected-resource`;
+    const protectedRes = await fetch(protectedResourceUrl);
+    if (!protectedRes.ok) {
+      return null;
+    }
+
+    const protectedMetadata = await protectedRes.json();
+    const authServers = protectedMetadata.authorization_servers;
+    if (!authServers || authServers.length === 0) {
+      return null;
+    }
+
+    const authServerUrl = `${authServers[0]}/.well-known/oauth-authorization-server`;
+    const authServerRes = await fetch(authServerUrl);
+    if (!authServerRes.ok) {
+      return null;
+    }
+
+    return authServerRes.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function generatePKCE(): Promise<{
+  codeVerifier: string;
+  codeChallenge: string;
+}> {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  const codeVerifier = base64UrlEncode(array);
+
+  const encoder = new TextEncoder();
+  const data = encoder.encode(codeVerifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  const codeChallenge = base64UrlEncode(new Uint8Array(digest));
+
+  return { codeVerifier, codeChallenge };
+}
+
+export function base64UrlEncode(buffer: Uint8Array | ArrayBuffer): string {
+  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function base64UrlDecode(base64url: string): Uint8Array {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+export function prepareWebAuthnCreationOptions(
+  options: { publicKey: Record<string, unknown> },
+): PublicKeyCredentialCreationOptions {
+  const pk = options.publicKey;
+  return {
+    ...pk,
+    challenge: base64UrlDecode(pk.challenge as string),
+    user: {
+      ...(pk.user as Record<string, unknown>),
+      id: base64UrlDecode((pk.user as Record<string, unknown>).id as string),
+    },
+    excludeCredentials:
+      ((pk.excludeCredentials as Array<Record<string, unknown>>) ?? []).map(
+        (cred) => ({
+          ...cred,
+          id: base64UrlDecode(cred.id as string),
+        }),
+      ),
+  } as PublicKeyCredentialCreationOptions;
+}
+
+async function computeAccessTokenHash(accessToken: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(accessToken);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return base64UrlEncode(new Uint8Array(hash));
+}
+
+export function generateOAuthState(): string {
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return base64UrlEncode(array);
+}
+
+export function buildOAuthAuthorizationUrl(
+  metadata: OAuthServerMetadata,
+  params: {
+    clientId: string;
+    redirectUri: string;
+    codeChallenge: string;
+    state: string;
+    scope?: string;
+    dpopJkt?: string;
+    loginHint?: string;
+  },
+): string {
+  const url = new URL(metadata.authorization_endpoint);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", params.clientId);
+  url.searchParams.set("redirect_uri", params.redirectUri);
+  url.searchParams.set("code_challenge", params.codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("state", params.state);
+  url.searchParams.set("scope", params.scope ?? "atproto");
+  if (params.dpopJkt) {
+    url.searchParams.set("dpop_jkt", params.dpopJkt);
+  }
+  if (params.loginHint) {
+    url.searchParams.set("login_hint", params.loginHint);
+  }
+  return url.toString();
+}
+
+export async function exchangeOAuthCode(
+  metadata: OAuthServerMetadata,
+  params: {
+    code: string;
+    codeVerifier: string;
+    clientId: string;
+    redirectUri: string;
+    dpopKeyPair?: DPoPKeyPair;
+  },
+): Promise<OAuthTokenResponse> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: params.code,
+    code_verifier: params.codeVerifier,
+    client_id: params.clientId,
+    redirect_uri: params.redirectUri,
+  });
+
+  const makeRequest = async (nonce?: string): Promise<Response> => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-www-form-urlencoded",
+    };
+
+    if (params.dpopKeyPair) {
+      const dpopProof = await createDPoPProof(
+        params.dpopKeyPair,
+        "POST",
+        metadata.token_endpoint,
+        nonce,
+      );
+      headers["DPoP"] = dpopProof;
+    }
+
+    return fetch(metadata.token_endpoint, {
+      method: "POST",
+      headers,
+      body: body.toString(),
+    });
+  };
+
+  let res = await makeRequest();
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({
+      error: "token_error",
+      error_description: res.statusText,
+    }));
+
+    if (err.error === "use_dpop_nonce" && params.dpopKeyPair) {
+      const dpopNonce = res.headers.get("DPoP-Nonce");
+      if (dpopNonce) {
+        res = await makeRequest(dpopNonce);
+        if (!res.ok) {
+          const retryErr = await res.json().catch(() => ({
+            error: "token_error",
+            error_description: res.statusText,
+          }));
+          throw new Error(
+            retryErr.error_description || retryErr.error || "Token exchange failed",
+          );
+        }
+        return res.json();
+      }
+    }
+
+    throw new Error(err.error_description || err.error || "Token exchange failed");
+  }
+
+  return res.json();
 }
 
 export async function resolveDidDocument(did: string): Promise<DidDocument> {
@@ -466,7 +771,7 @@ export async function resolveDidDocument(did: string): Promise<DidDocument> {
 export async function resolvePdsUrl(
   handleOrDid: string,
 ): Promise<{ did: string; pdsUrl: string }> {
-  let did: string;
+  let did: string | undefined;
 
   if (handleOrDid.startsWith("did:")) {
     did = handleOrDid;
@@ -515,6 +820,10 @@ export async function resolvePdsUrl(
     }
   }
 
+  if (!did) {
+    throw new Error("Could not resolve DID");
+  }
+
   const didDoc = await resolveDidDocument(did);
 
   const pdsService = didDoc.service?.find(
@@ -529,5 +838,159 @@ export async function resolvePdsUrl(
 }
 
 export function createLocalClient(): AtprotoClient {
-  return new AtprotoClient(window.location.origin);
+  return new AtprotoClient(globalThis.location.origin);
+}
+
+export function getMigrationOAuthClientId(): string {
+  return `${globalThis.location.origin}/oauth/client-metadata.json`;
+}
+
+export function getMigrationOAuthRedirectUri(): string {
+  return `${globalThis.location.origin}/migrate`;
+}
+
+export interface DPoPKeyPair {
+  privateKey: CryptoKey;
+  publicKey: CryptoKey;
+  jwk: JsonWebKey;
+  thumbprint: string;
+}
+
+const DPOP_KEY_STORAGE = "migration_dpop_key";
+const DPOP_KEY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export async function generateDPoPKeyPair(): Promise<DPoPKeyPair> {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: "ECDSA",
+      namedCurve: "P-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+
+  const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+  const thumbprint = await computeJwkThumbprint(publicJwk);
+
+  return {
+    privateKey: keyPair.privateKey,
+    publicKey: keyPair.publicKey,
+    jwk: publicJwk,
+    thumbprint,
+  };
+}
+
+async function computeJwkThumbprint(jwk: JsonWebKey): Promise<string> {
+  const thumbprintInput = JSON.stringify({
+    crv: jwk.crv,
+    kty: jwk.kty,
+    x: jwk.x,
+    y: jwk.y,
+  });
+
+  const encoder = new TextEncoder();
+  const data = encoder.encode(thumbprintInput);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return base64UrlEncode(new Uint8Array(hash));
+}
+
+export async function saveDPoPKey(keyPair: DPoPKeyPair): Promise<void> {
+  const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+  const stored = {
+    privateJwk,
+    publicJwk: keyPair.jwk,
+    thumbprint: keyPair.thumbprint,
+    createdAt: Date.now(),
+  };
+  localStorage.setItem(DPOP_KEY_STORAGE, JSON.stringify(stored));
+}
+
+export async function loadDPoPKey(): Promise<DPoPKeyPair | null> {
+  const stored = localStorage.getItem(DPOP_KEY_STORAGE);
+  if (!stored) return null;
+
+  try {
+    const { privateJwk, publicJwk, thumbprint, createdAt } = JSON.parse(stored);
+
+    if (createdAt && Date.now() - createdAt > DPOP_KEY_MAX_AGE_MS) {
+      localStorage.removeItem(DPOP_KEY_STORAGE);
+      return null;
+    }
+
+    const privateKey = await crypto.subtle.importKey(
+      "jwk",
+      privateJwk,
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign"],
+    );
+
+    const publicKey = await crypto.subtle.importKey(
+      "jwk",
+      publicJwk,
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["verify"],
+    );
+
+    return { privateKey, publicKey, jwk: publicJwk, thumbprint };
+  } catch {
+    localStorage.removeItem(DPOP_KEY_STORAGE);
+    return null;
+  }
+}
+
+export function clearDPoPKey(): void {
+  localStorage.removeItem(DPOP_KEY_STORAGE);
+}
+
+export async function createDPoPProof(
+  keyPair: DPoPKeyPair,
+  httpMethod: string,
+  httpUri: string,
+  nonce?: string,
+  accessTokenHash?: string,
+): Promise<string> {
+  const header = {
+    typ: "dpop+jwt",
+    alg: "ES256",
+    jwk: {
+      kty: keyPair.jwk.kty,
+      crv: keyPair.jwk.crv,
+      x: keyPair.jwk.x,
+      y: keyPair.jwk.y,
+    },
+  };
+
+  const payload: Record<string, unknown> = {
+    jti: crypto.randomUUID(),
+    htm: httpMethod,
+    htu: httpUri,
+    iat: Math.floor(Date.now() / 1000),
+  };
+
+  if (nonce) {
+    payload.nonce = nonce;
+  }
+
+  if (accessTokenHash) {
+    payload.ath = accessTokenHash;
+  }
+
+  const headerB64 = base64UrlEncode(
+    new TextEncoder().encode(JSON.stringify(header)),
+  );
+  const payloadB64 = base64UrlEncode(
+    new TextEncoder().encode(JSON.stringify(payload)),
+  );
+
+  const signingInput = `${headerB64}.${payloadB64}`;
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    keyPair.privateKey,
+    new TextEncoder().encode(signingInput),
+  );
+
+  const signatureB64 = base64UrlEncode(new Uint8Array(signature));
+  return `${headerB64}.${payloadB64}.${signatureB64}`;
 }

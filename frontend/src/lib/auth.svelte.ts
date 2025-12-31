@@ -444,11 +444,15 @@ export function _testSetState(
   state.savedAccounts = newState.savedAccounts ?? [];
 }
 
-export function _testReset() {
+export function _testResetState() {
   state.session = null;
   state.loading = true;
   state.error = null;
   state.savedAccounts = [];
+}
+
+export function _testReset() {
+  _testResetState();
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(ACCOUNTS_KEY);
 }

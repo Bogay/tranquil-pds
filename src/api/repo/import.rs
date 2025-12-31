@@ -346,7 +346,10 @@ pub async fn import_repo(
                 }
             }
             if blob_ref_count > 0 {
-                info!("Recorded {} blob references for imported repo", blob_ref_count);
+                info!(
+                    "Recorded {} blob references for imported repo",
+                    blob_ref_count
+                );
             }
             let key_row = match sqlx::query!(
                 r#"SELECT uk.key_bytes, uk.encryption_version

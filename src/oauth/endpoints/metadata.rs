@@ -167,13 +167,16 @@ pub async fn frontend_client_metadata(
         client_id,
         client_name: "PDS Account Manager".to_string(),
         client_uri: base_url.clone(),
-        redirect_uris: vec![format!("{}/", base_url)],
+        redirect_uris: vec![
+            format!("{}/", base_url),
+            format!("{}/migrate", base_url),
+        ],
         grant_types: vec![
             "authorization_code".to_string(),
             "refresh_token".to_string(),
         ],
         response_types: vec!["code".to_string()],
-        scope: "atproto repo:*?action=create repo:*?action=update repo:*?action=delete blob:*/*"
+        scope: "atproto transition:generic repo:* blob:*/* rpc:* rpc:com.atproto.server.createAccount?aud=* account:* identity:*"
             .to_string(),
         token_endpoint_auth_method: "none".to_string(),
         application_type: "web".to_string(),

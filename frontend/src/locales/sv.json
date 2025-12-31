@@ -189,19 +189,31 @@
     "title": "DID-dokumentredigerare",
     "preview": "Nuvarande DID-dokument",
     "verificationMethods": "Verifieringsmetoder (signeringsnycklar)",
+    "verificationMethodsDesc": "Signeringsnycklar som kan agera å din DIDs vägnar. När du migrerar till en ny PDS, lägg till deras signeringsnyckel här.",
     "addKey": "Lägg till nyckel",
     "removeKey": "Ta bort",
     "keyId": "Nyckel-ID",
     "keyIdPlaceholder": "#atproto",
     "publicKey": "Publik nyckel (Multibase)",
     "publicKeyPlaceholder": "zQ3sh...",
+    "noKeys": "Inga verifieringsmetoder konfigurerade. Använder lokal PDS-nyckel.",
     "alsoKnownAs": "Även känd som (användarnamn)",
+    "alsoKnownAsDesc": "Användarnamn som pekar på din DID. Uppdatera detta när ditt användarnamn ändras på en ny PDS.",
     "addHandle": "Lägg till användarnamn",
+    "removeHandle": "Ta bort",
+    "handle": "Användarnamn",
     "handlePlaceholder": "at://handle.pds.com",
-    "serviceEndpoint": "Tjänstslutpunkt (nuvarande PDS)",
+    "noHandles": "Inga användarnamn konfigurerade. Använder lokalt användarnamn.",
+    "serviceEndpoint": "Tjänstslutpunkt",
+    "serviceEndpointDesc": "PDS som för närvarande lagrar din kontodata. Uppdatera detta vid migrering.",
+    "currentPds": "Nuvarande PDS-URL",
     "save": "Spara ändringar",
     "saving": "Sparar...",
     "success": "DID-dokumentet har uppdaterats",
+    "saveFailed": "Kunde inte spara DID-dokument",
+    "loadFailed": "Kunde inte ladda DID-dokument",
+    "invalidMultibase": "Publik nyckel måste vara en giltig multibase-sträng som börjar med 'z'",
+    "invalidHandle": "Användarnamn måste vara en at:// URI (t.ex. at://handle.example.com)",
     "helpTitle": "Vad är detta?",
     "helpText": "När du flyttar till en annan PDS genererar den PDS nya signeringsnycklar. Uppdatera ditt DID-dokument här så att det pekar på dina nya nycklar och plats."
   },
@@ -890,6 +902,10 @@
   "reauth": {
     "title": "Återautentisering krävs",
     "subtitle": "Verifiera din identitet för att fortsätta.",
+    "password": "Lösenord",
+    "totp": "TOTP",
+    "passkey": "Passkey",
+    "authenticatorCode": "Autentiseringskod",
     "usePassword": "Använd lösenord",
     "usePasskey": "Använd nyckel",
     "useTotp": "Använd autentiserare",
@@ -897,6 +913,8 @@
     "totpPlaceholder": "Ange 6-siffrig kod",
     "verify": "Verifiera",
     "verifying": "Verifierar...",
+    "authenticating": "Autentiserar...",
+    "passkeyPrompt": "Klicka på knappen nedan för att autentisera med din passkey.",
     "cancel": "Avbryt"
   },
   "verifyChannel": {
@@ -1059,6 +1077,10 @@
     "beforeMigrate4": "Din gamla PDS kommer att meddelas om kontoinaktivering",
     "importantWarning": "Kontoflyttning är en betydande åtgärd. Se till att du litar på mål-PDS och förstår att din data kommer att flyttas. Om något går fel kan manuell återställning krävas.",
     "learnMore": "Läs mer om flyttningsrisker",
+    "comingSoon": "Kommer snart",
+    "oauthCompleting": "Slutför autentisering...",
+    "oauthFailed": "Autentisering misslyckades",
+    "tryAgain": "Försök igen",
     "resume": {
       "title": "Återuppta flytt?",
       "incomplete": "Du har en ofullständig flytt pågående:",
@@ -1078,44 +1100,85 @@
         "desc": "Flytta ditt befintliga AT Protocol-konto till denna server.",
         "understand": "Jag förstår riskerna och vill fortsätta"
       },
-      "sourceLogin": {
-        "title": "Logga in på din nuvarande PDS",
-        "desc": "Ange uppgifterna för kontot du vill flytta.",
+      "sourceAuth": {
+        "title": "Ange ditt nuvarande användarnamn",
+        "titleResume": "Återuppta flytt",
+        "desc": "Ange användarnamnet för kontot du vill flytta.",
+        "descResume": "Autentisera dig igen till din käll-PDS för att fortsätta flytten.",
         "handle": "Användarnamn",
-        "handlePlaceholder": "du.bsky.social",
-        "password": "Lösenord",
-        "twoFactorCode": "Tvåfaktorkod",
-        "twoFactorRequired": "Tvåfaktorautentisering krävs",
-        "signIn": "Logga in och fortsätt"
+        "handlePlaceholder": "alice.bsky.social",
+        "handleHint": "Ditt nuvarande användarnamn på din befintliga PDS",
+        "continue": "Fortsätt",
+        "connecting": "Ansluter...",
+        "reauthenticate": "Autentisera igen",
+        "resumeTitle": "Flytt pågår",
+        "resumeFrom": "Från",
+        "resumeTo": "Till",
+        "resumeProgress": "Framsteg",
+        "resumeOAuthNote": "Du måste autentisera dig igen via OAuth för att fortsätta."
       },
       "chooseHandle": {
         "title": "Välj ditt nya användarnamn",
         "desc": "Välj ett användarnamn för ditt konto på denna PDS.",
-        "handleHint": "Ditt fullständiga användarnamn blir: @{handle}"
+        "migratingFrom": "Flyttar från",
+        "newHandle": "Nytt användarnamn",
+        "checkingAvailability": "Kontrollerar tillgänglighet...",
+        "handleAvailable": "Användarnamnet är tillgängligt!",
+        "handleTaken": "Användarnamnet är redan taget",
+        "handleHint": "Du kan också använda din egen domän genom att ange det fullständiga användarnamnet (t.ex. alice.mindomän.se)",
+        "email": "E-postadress",
+        "authMethod": "Autentiseringsmetod",
+        "authPassword": "Lösenord",
+        "authPasswordDesc": "Traditionell lösenordsbaserad inloggning",
+        "authPasskey": "Passkey",
+        "authPasskeyDesc": "Lösenordslös inloggning med biometri eller säkerhetsnyckel",
+        "password": "Lösenord",
+        "passwordHint": "Minst 8 tecken",
+        "passkeyInfo": "Du kommer att konfigurera en passkey efter att ditt konto skapats. Din enhet kommer att uppmana dig att använda biometri (fingeravtryck, Face ID) eller en säkerhetsnyckel.",
+        "inviteCode": "Inbjudningskod"
       },
       "review": {
         "title": "Granska flytt",
-        "desc": "Granska och bekräfta dina flyttdetaljer.",
+        "desc": "Bekräfta detaljerna för din flytt.",
         "currentHandle": "Nuvarande användarnamn",
         "newHandle": "Nytt användarnamn",
-        "sourcePds": "Käll-PDS",
-        "targetPds": "Denna PDS",
+        "did": "DID",
+        "sourcePds": "Från PDS",
+        "targetPds": "Till PDS",
         "email": "E-post",
+        "authentication": "Autentisering",
+        "authPasskey": "Passkey (lösenordslös)",
+        "authPassword": "Lösenord",
         "inviteCode": "Inbjudningskod",
-        "confirm": "Jag bekräftar att jag vill flytta mitt konto",
-        "startMigration": "Starta flytt"
+        "warning": "När du klickar på \"Starta flytt\" börjar ditt arkiv och data överföras. Denna process kan inte enkelt ångras.",
+        "startMigration": "Starta flytt",
+        "starting": "Startar..."
       },
       "migrating": {
-        "title": "Flyttar ditt konto",
-        "desc": "Vänta medan vi överför din data...",
-        "gettingServiceAuth": "Hämtar tjänstauktorisering...",
-        "creatingAccount": "Skapar konto på ny PDS...",
-        "exportingRepo": "Exporterar arkiv...",
-        "importingRepo": "Importerar arkiv...",
-        "countingBlobs": "Räknar blobbar...",
-        "migratingBlobs": "Flyttar blobbar ({current}/{total})...",
-        "migratingPrefs": "Flyttar inställningar...",
-        "requestingPlc": "Begär PLC-operation..."
+        "title": "Flytt pågår",
+        "desc": "Vänta medan ditt konto överförs...",
+        "exportRepo": "Exportera arkiv",
+        "importRepo": "Importera arkiv",
+        "migrateBlobs": "Flytta blobbar",
+        "migratePrefs": "Flytta inställningar"
+      },
+      "passkeySetup": {
+        "title": "Konfigurera din passkey",
+        "desc": "Din e-post har verifierats. Konfigurera nu din passkey för säker, lösenordslös inloggning.",
+        "nameLabel": "Passkey-namn (valfritt)",
+        "namePlaceholder": "t.ex. MacBook Pro, iPhone",
+        "nameHint": "Ett vänligt namn för att identifiera denna passkey",
+        "instructions": "Klicka på knappen nedan för att registrera din passkey. Din enhet kommer att uppmana dig att använda biometri (fingeravtryck, Face ID) eller en säkerhetsnyckel.",
+        "register": "Registrera passkey",
+        "registering": "Registrerar..."
+      },
+      "appPassword": {
+        "title": "Spara ditt applösenord",
+        "desc": "Din passkey har skapats. Ett applösenord har genererats för dig att använda med appar som inte stödjer passkeys ännu.",
+        "warning": "Detta applösenord krävs för att logga in i appar som inte stödjer passkeys ännu (som bsky.app). Du kommer bara att se detta lösenord en gång.",
+        "label": "Applösenord för",
+        "saved": "Jag har sparat mitt applösenord på en säker plats",
+        "continue": "Fortsätt"
       },
       "emailVerify": {
         "title": "Verifiera din e-post",
@@ -1128,12 +1191,14 @@
         "verifying": "Verifierar..."
       },
       "plcToken": {
-        "title": "Verifiera din identitet",
-        "desc": "En verifieringskod har skickats till din e-post på din nuvarande PDS.",
-        "tokenLabel": "Verifieringstoken",
-        "tokenPlaceholder": "Ange token från din e-post",
-        "resend": "Skicka igen",
-        "resending": "Skickar..."
+        "title": "Verifiera flytt",
+        "desc": "En verifieringskod har skickats till e-posten registrerad på ditt gamla konto.",
+        "info": "Denna kod bekräftar att du har tillgång till kontot och auktoriserar uppdatering av din identitet för att peka på denna PDS.",
+        "tokenLabel": "Verifieringskod",
+        "tokenPlaceholder": "Ange kod från e-post",
+        "resend": "Skicka kod igen",
+        "complete": "Slutför flytt",
+        "completing": "Verifierar..."
       },
       "didWebUpdate": {
         "title": "Uppdatera ditt DID-dokument",
@@ -1156,9 +1221,30 @@
       "success": {
         "title": "Flytt klar!",
         "desc": "Ditt konto har framgångsrikt flyttats till denna PDS.",
-        "newHandle": "Nytt användarnamn",
+        "yourNewHandle": "Ditt nya användarnamn",
         "did": "DID",
-        "goToDashboard": "Gå till instrumentpanel"
+        "blobsWarning": "{count} blobbar kunde inte flyttas. Dessa kan vara bilder eller annan media som inte längre är tillgängliga.",
+        "redirecting": "Omdirigerar till instrumentpanel..."
+      },
+      "error": {
+        "title": "Flyttfel",
+        "desc": "Ett fel uppstod under flytten.",
+        "startOver": "Börja om"
+      },
+      "common": {
+        "back": "Tillbaka",
+        "cancel": "Avbryt",
+        "continue": "Fortsätt",
+        "whatWillHappen": "Vad som kommer att hända:",
+        "step1": "Logga in på din nuvarande PDS",
+        "step2": "Välj ditt nya användarnamn på denna server",
+        "step3": "Ditt arkiv och blobbar kommer att överföras",
+        "step4": "Verifiera flytten via e-post",
+        "step5": "Din identitet kommer att uppdateras för att peka hit",
+        "beforeProceed": "Innan du fortsätter:",
+        "warning1": "Du behöver tillgång till e-posten registrerad på ditt nuvarande konto",
+        "warning2": "Stora konton kan ta flera minuter att överföra",
+        "warning3": "Ditt gamla konto kommer att inaktiveras efter flytten"
       }
     },
     "outbound": {

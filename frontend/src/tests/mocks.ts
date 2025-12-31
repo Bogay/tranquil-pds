@@ -29,7 +29,7 @@ function extractEndpoint(url: string): string {
   return match ? match[1] : url;
 }
 export function setupFetchMock(): void {
-  global.fetch = vi.fn(
+  globalThis.fetch = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = typeof input === "string" ? input : input.toString();
       const endpoint = extractEndpoint(url);
@@ -137,7 +137,7 @@ export const mockData = {
     signalVerified: false,
     ...overrides,
   }),
-  describeServer: () => ({
+  describeServer: (overrides?: Record<string, unknown>) => ({
     availableUserDomains: ["test.tranquil.dev"],
     inviteCodeRequired: false,
     links: {
@@ -145,6 +145,8 @@ export const mockData = {
       termsOfService: "https://example.com/tos",
     },
     selfHostedDidWebEnabled: true,
+    availableCommsChannels: ["email", "discord", "telegram", "signal"],
+    ...overrides,
   }),
   describeRepo: (did: string) => ({
     handle: "testuser.test.tranquil.dev",
@@ -210,6 +212,10 @@ export function setupDefaultMocks(): void {
   mockEndpoint(
     "com.tranquil.account.updateNotificationPrefs",
     () => jsonResponse({ success: true }),
+  );
+  mockEndpoint(
+    "com.tranquil.account.getNotificationHistory",
+    () => jsonResponse({ notifications: [] }),
   );
   mockEndpoint(
     "com.atproto.server.requestEmailUpdate",

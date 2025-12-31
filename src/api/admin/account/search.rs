@@ -91,7 +91,15 @@ pub async fn search_accounts(
                 .into_iter()
                 .take(limit as usize)
                 .map(
-                    |(did, handle, email, created_at, email_verified, deactivated_at, invites_disabled)| {
+                    |(
+                        did,
+                        handle,
+                        email,
+                        created_at,
+                        email_verified,
+                        deactivated_at,
+                        invites_disabled,
+                    )| {
                         AccountView {
                             did: did.clone(),
                             handle,

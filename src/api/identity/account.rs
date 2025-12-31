@@ -1005,8 +1005,14 @@ pub async fn create_account(
         {
             warn!("Failed to sequence account event for {}: {}", did, e);
         }
-        if let Err(e) =
-            crate::api::repo::record::sequence_genesis_commit(&state, &did, &commit_cid, &mst_root, &rev_str).await
+        if let Err(e) = crate::api::repo::record::sequence_genesis_commit(
+            &state,
+            &did,
+            &commit_cid,
+            &mst_root,
+            &rev_str,
+        )
+        .await
         {
             warn!("Failed to sequence commit event for {}: {}", did, e);
         }
@@ -1144,4 +1150,3 @@ pub async fn create_account(
     )
         .into_response()
 }
-

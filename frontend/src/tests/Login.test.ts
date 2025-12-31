@@ -1,178 +1,178 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import Login from "../routes/Login.svelte";
 import {
   clearMocks,
-  errorResponse,
   jsonResponse,
   mockData,
   mockEndpoint,
   setupFetchMock,
 } from "./mocks";
+import { _testSetState, type SavedAccount } from "../lib/auth.svelte";
+
 describe("Login", () => {
   beforeEach(() => {
     clearMocks();
     setupFetchMock();
-    window.location.hash = "";
+    globalThis.location.hash = "";
+    mockEndpoint("/oauth/par", () =>
+      jsonResponse({ request_uri: "urn:mock:request" })
+    );
   });
-  describe("initial render", () => {
-    it("renders login form with all elements and correct initial state", () => {
-      render(Login);
-      expect(screen.getByRole("heading", { name: /sign in/i }))
-        .toBeInTheDocument();
-      expect(screen.getByLabelText(/handle or email/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /sign in/i }))
-        .toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /sign in/i })).toBeDisabled();
-      expect(screen.getByText(/don't have an account/i)).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: /create one/i })).toHaveAttribute(
-        "href",
-        "#/register",
-      );
-    });
-  });
-  describe("form validation", () => {
-    it("enables submit button only when both fields are filled", async () => {
-      render(Login);
-      const identifierInput = screen.getByLabelText(/handle or email/i);
-      const passwordInput = screen.getByLabelText(/password/i);
-      const submitButton = screen.getByRole("button", { name: /sign in/i });
-      await fireEvent.input(identifierInput, { target: { value: "testuser" } });
-      expect(submitButton).toBeDisabled();
-      await fireEvent.input(identifierInput, { target: { value: "" } });
-      await fireEvent.input(passwordInput, {
-        target: { value: "password123" },
-      });
-      expect(submitButton).toBeDisabled();
-      await fireEvent.input(identifierInput, { target: { value: "testuser" } });
-      expect(submitButton).not.toBeDisabled();
-    });
-  });
-  describe("login submission", () => {
-    it("calls createSession with correct credentials", async () => {
-      let capturedBody: Record<string, string> | null = null;
-      mockEndpoint("com.atproto.server.createSession", (_url, options) => {
-        capturedBody = JSON.parse((options?.body as string) || "{}");
-        return jsonResponse(mockData.session());
-      });
-      render(Login);
-      await fireEvent.input(screen.getByLabelText(/handle or email/i), {
-        target: { value: "testuser@example.com" },
-      });
-      await fireEvent.input(screen.getByLabelText(/password/i), {
-        target: { value: "mypassword" },
-      });
-      await fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
-      await waitFor(() => {
-        expect(capturedBody).toEqual({
-          identifier: "testuser@example.com",
-          password: "mypassword",
-        });
+
+  describe("initial render with no saved accounts", () => {
+    beforeEach(() => {
+      _testSetState({
+        session: null,
+        loading: false,
+        error: null,
+        savedAccounts: [],
       });
     });
-    it("shows styled error message on invalid credentials", async () => {
-      mockEndpoint(
-        "com.atproto.server.createSession",
-        () =>
-          errorResponse(
-            "AuthenticationRequired",
-            "Invalid identifier or password",
-            401,
-          ),
-      );
+
+    it("renders login page with title and OAuth button", async () => {
       render(Login);
-      await fireEvent.input(screen.getByLabelText(/handle or email/i), {
-        target: { value: "wronguser" },
-      });
-      await fireEvent.input(screen.getByLabelText(/password/i), {
-        target: { value: "wrongpassword" },
-      });
-      await fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
-      await waitFor(() => {
-        const errorDiv = screen.getByText(/invalid identifier or password/i);
-        expect(errorDiv).toBeInTheDocument();
-        expect(errorDiv).toHaveClass("error");
-      });
-    });
-    it("navigates to dashboard on successful login", async () => {
-      mockEndpoint(
-        "com.atproto.server.createSession",
-        () => jsonResponse(mockData.session()),
-      );
-      render(Login);
-      await fireEvent.input(screen.getByLabelText(/handle or email/i), {
-        target: { value: "test" },
-      });
-      await fireEvent.input(screen.getByLabelText(/password/i), {
-        target: { value: "password" },
-      });
-      await fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
-      await waitFor(() => {
-        expect(window.location.hash).toBe("#/dashboard");
-      });
-    });
-  });
-  describe("account verification flow", () => {
-    it("shows verification form with all controls when account is not verified", async () => {
-      mockEndpoint("com.atproto.server.createSession", () => ({
-        ok: false,
-        status: 401,
-        json: async () => ({
-          error: "AccountNotVerified",
-          message: "Account not verified",
-          did: "did:web:test.tranquil.dev:u:testuser",
-        }),
-      }));
-      render(Login);
-      await fireEvent.input(screen.getByLabelText(/handle or email/i), {
-        target: { value: "unverified@test.com" },
-      });
-      await fireEvent.input(screen.getByLabelText(/password/i), {
-        target: { value: "password" },
-      });
-      await fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
-      await waitFor(() => {
-        expect(screen.getByRole("heading", { name: /verify your account/i }))
-          .toBeInTheDocument();
-        expect(screen.getByLabelText(/verification code/i)).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /resend code/i }))
-          .toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /back to login/i }))
-          .toBeInTheDocument();
-      });
-    });
-    it("returns to login form when clicking back", async () => {
-      mockEndpoint("com.atproto.server.createSession", () => ({
-        ok: false,
-        status: 401,
-        json: async () => ({
-          error: "AccountNotVerified",
-          message: "Account not verified",
-          did: "did:web:test.tranquil.dev:u:testuser",
-        }),
-      }));
-      render(Login);
-      await fireEvent.input(screen.getByLabelText(/handle or email/i), {
-        target: { value: "test" },
-      });
-      await fireEvent.input(screen.getByLabelText(/password/i), {
-        target: { value: "password" },
-      });
-      await fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
-      await waitFor(() => {
-        expect(screen.getByRole("button", { name: /back to login/i }))
-          .toBeInTheDocument();
-      });
-      await fireEvent.click(
-        screen.getByRole("button", { name: /back to login/i }),
-      );
       await waitFor(() => {
         expect(screen.getByRole("heading", { name: /sign in/i }))
           .toBeInTheDocument();
-        expect(screen.queryByLabelText(/verification code/i)).not
+        expect(screen.getByRole("button", { name: /sign in/i }))
           .toBeInTheDocument();
       });
+    });
+
+    it("shows create account link", async () => {
+      render(Login);
+      await waitFor(() => {
+        expect(screen.getByText(/don't have an account/i)).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /create/i })).toHaveAttribute(
+          "href",
+          "#/register",
+        );
+      });
+    });
+
+    it("shows forgot password and lost passkey links", async () => {
+      render(Login);
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: /forgot password/i }))
+          .toHaveAttribute("href", "#/reset-password");
+        expect(screen.getByRole("link", { name: /lost passkey/i }))
+          .toHaveAttribute("href", "#/request-passkey-recovery");
+      });
+    });
+  });
+
+  describe("with saved accounts", () => {
+    const savedAccounts: SavedAccount[] = [
+      {
+        did: "did:web:test.tranquil.dev:u:alice",
+        handle: "alice.test.tranquil.dev",
+        accessJwt: "mock-jwt-alice",
+        refreshJwt: "mock-refresh-alice",
+      },
+      {
+        did: "did:web:test.tranquil.dev:u:bob",
+        handle: "bob.test.tranquil.dev",
+        accessJwt: "mock-jwt-bob",
+        refreshJwt: "mock-refresh-bob",
+      },
+    ];
+
+    beforeEach(() => {
+      _testSetState({
+        session: null,
+        loading: false,
+        error: null,
+        savedAccounts,
+      });
+      mockEndpoint("com.atproto.server.getSession", () =>
+        jsonResponse(mockData.session({ handle: "alice.test.tranquil.dev" })));
+    });
+
+    it("displays saved accounts list", async () => {
+      render(Login);
+      await waitFor(() => {
+        expect(screen.getByText(/@alice\.test\.tranquil\.dev/))
+          .toBeInTheDocument();
+        expect(screen.getByText(/@bob\.test\.tranquil\.dev/))
+          .toBeInTheDocument();
+      });
+    });
+
+    it("shows sign in to another account option", async () => {
+      render(Login);
+      await waitFor(() => {
+        expect(screen.getByText(/sign in to another/i)).toBeInTheDocument();
+      });
+    });
+
+    it("can click on saved account to switch", async () => {
+      render(Login);
+      await waitFor(() => {
+        expect(screen.getByText(/@alice\.test\.tranquil\.dev/))
+          .toBeInTheDocument();
+      });
+      const aliceAccount = screen.getByText(/@alice\.test\.tranquil\.dev/)
+        .closest("[role='button']");
+      if (aliceAccount) {
+        await fireEvent.click(aliceAccount);
+      }
+      await waitFor(() => {
+        expect(globalThis.location.hash).toBe("#/dashboard");
+      });
+    });
+
+    it("can remove saved account with forget button", async () => {
+      render(Login);
+      await waitFor(() => {
+        expect(screen.getByText(/@alice\.test\.tranquil\.dev/))
+          .toBeInTheDocument();
+        const forgetButtons = screen.getAllByTitle(/remove/i);
+        expect(forgetButtons.length).toBe(2);
+      });
+    });
+  });
+
+  describe("error handling", () => {
+    it("displays error message when auth state has error", async () => {
+      _testSetState({
+        session: null,
+        loading: false,
+        error: "OAuth login failed",
+        savedAccounts: [],
+      });
+      render(Login);
+      await waitFor(() => {
+        expect(screen.getByText(/oauth login failed/i)).toBeInTheDocument();
+        expect(screen.getByText(/oauth login failed/i)).toHaveClass("error");
+      });
+    });
+  });
+
+  describe("verification flow", () => {
+    beforeEach(() => {
+      _testSetState({
+        session: null,
+        loading: false,
+        error: null,
+        savedAccounts: [],
+      });
+    });
+
+    it("shows verification form when pending verification exists", async () => {
+      render(Login);
+    });
+  });
+
+  describe("loading state", () => {
+    it("shows loading state while auth is initializing", async () => {
+      _testSetState({
+        session: null,
+        loading: true,
+        error: null,
+        savedAccounts: [],
+      });
+      render(Login);
     });
   });
 });

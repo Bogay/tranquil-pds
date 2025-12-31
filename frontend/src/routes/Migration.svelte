@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getAuthState, logout, setSession } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
+  import { _ } from '../lib/i18n'
   import {
     createInboundMigrationFlow,
     createOutboundMigrationFlow,
@@ -18,14 +19,67 @@
   let direction = $state<Direction>('select')
   let showResumeModal = $state(false)
   let resumeInfo = $state<ReturnType<typeof getResumeInfo>>(null)
+  let oauthError = $state<string | null>(null)
+  let oauthLoading = $state(false)
 
   let inboundFlow = $state<ReturnType<typeof createInboundMigrationFlow> | null>(null)
   let outboundFlow = $state<ReturnType<typeof createOutboundMigrationFlow> | null>(null)
+  let oauthCallbackProcessed = $state(false)
 
-  if (hasPendingMigration()) {
+  $effect(() => {
+    if (oauthCallbackProcessed) return
+
+    const url = new URL(window.location.href)
+    const code = url.searchParams.get('code')
+    const state = url.searchParams.get('state')
+    const errorParam = url.searchParams.get('error')
+    const errorDescription = url.searchParams.get('error_description')
+
+    if (errorParam) {
+      oauthCallbackProcessed = true
+      oauthError = errorDescription || errorParam
+      window.history.replaceState({}, '', '/#/migrate')
+      return
+    }
+
+    if (code && state) {
+      oauthCallbackProcessed = true
+      window.history.replaceState({}, '', '/#/migrate')
+      direction = 'inbound'
+      oauthLoading = true
+      inboundFlow = createInboundMigrationFlow()
+
+      inboundFlow.handleOAuthCallback(code, state)
+        .then(() => {
+          oauthLoading = false
+        })
+        .catch((e) => {
+          oauthLoading = false
+          oauthError = e.message || 'OAuth authentication failed'
+          inboundFlow = null
+          direction = 'select'
+        })
+      return
+    }
+  })
+
+  const urlParams = new URLSearchParams(window.location.search)
+  const hasOAuthCallback = urlParams.has('code') || urlParams.has('error')
+
+  if (!hasOAuthCallback && hasPendingMigration()) {
     resumeInfo = getResumeInfo()
     if (resumeInfo) {
-      showResumeModal = true
+      const stored = loadMigrationState()
+      if (stored) {
+        if (stored.direction === 'inbound') {
+          direction = 'inbound'
+          inboundFlow = createInboundMigrationFlow()
+          inboundFlow.resumeFromState(stored)
+        } else {
+          direction = 'outbound'
+          outboundFlow = createOutboundMigrationFlow()
+        }
+      }
     }
   }
 
@@ -106,92 +160,97 @@
   {#if showResumeModal && resumeInfo}
     <div class="modal-overlay">
       <div class="modal">
-        <h2>Resume Migration?</h2>
-        <p>You have an incomplete migration in progress:</p>
+        <h2>{$_('migration.resume.title')}</h2>
+        <p>{$_('migration.resume.incomplete')}</p>
         <div class="resume-details">
           <div class="detail-row">
-            <span class="label">Direction:</span>
-            <span class="value">{resumeInfo.direction === 'inbound' ? 'Migrating here' : 'Migrating away'}</span>
+            <span class="label">{$_('migration.resume.direction')}:</span>
+            <span class="value">{resumeInfo.direction === 'inbound' ? $_('migration.resume.migratingHere') : $_('migration.resume.migratingAway')}</span>
           </div>
           {#if resumeInfo.sourceHandle}
             <div class="detail-row">
-              <span class="label">From:</span>
+              <span class="label">{$_('migration.resume.from')}:</span>
               <span class="value">{resumeInfo.sourceHandle}</span>
             </div>
           {/if}
           {#if resumeInfo.targetHandle}
             <div class="detail-row">
-              <span class="label">To:</span>
+              <span class="label">{$_('migration.resume.to')}:</span>
               <span class="value">{resumeInfo.targetHandle}</span>
             </div>
           {/if}
           <div class="detail-row">
-            <span class="label">Progress:</span>
+            <span class="label">{$_('migration.resume.progress')}:</span>
             <span class="value">{resumeInfo.progressSummary}</span>
           </div>
         </div>
-        <p class="note">You will need to re-enter your credentials to continue.</p>
+        <p class="note">{$_('migration.resume.reenterCredentials')}</p>
         <div class="modal-actions">
-          <button class="ghost" onclick={handleStartOver}>Start Over</button>
-          <button onclick={handleResume}>Resume</button>
+          <button class="ghost" onclick={handleStartOver}>{$_('migration.resume.startOver')}</button>
+          <button onclick={handleResume}>{$_('migration.resume.resumeButton')}</button>
         </div>
       </div>
     </div>
   {/if}
 
-  {#if direction === 'select'}
+  {#if oauthLoading}
+    <div class="oauth-loading">
+      <div class="loading-spinner"></div>
+      <p>{$_('migration.oauthCompleting')}</p>
+    </div>
+  {:else if oauthError}
+    <div class="oauth-error">
+      <h2>{$_('migration.oauthFailed')}</h2>
+      <p>{oauthError}</p>
+      <button onclick={() => { oauthError = null; direction = 'select' }}>{$_('migration.tryAgain')}</button>
+    </div>
+  {:else if direction === 'select'}
     <header class="page-header">
-      <h1>Account Migration</h1>
-      <p class="subtitle">Move your AT Protocol identity between servers</p>
+      <h1>{$_('migration.title')}</h1>
+      <p class="subtitle">{$_('migration.subtitle')}</p>
     </header>
 
     <div class="direction-cards">
       <button class="direction-card ghost" onclick={selectInbound}>
         <div class="card-icon">↓</div>
-        <h2>Migrate Here</h2>
-        <p>Move your existing AT Protocol account to this PDS from another server.</p>
+        <h2>{$_('migration.migrateHere')}</h2>
+        <p>{$_('migration.migrateHereDesc')}</p>
         <ul class="features">
-          <li>Bring your DID and identity</li>
-          <li>Transfer all your data</li>
-          <li>Keep your followers</li>
+          <li>{$_('migration.bringDid')}</li>
+          <li>{$_('migration.transferData')}</li>
+          <li>{$_('migration.keepFollowers')}</li>
         </ul>
       </button>
 
-      <button class="direction-card ghost" onclick={selectOutbound} disabled={!auth.session}>
+      <button class="direction-card ghost" onclick={selectOutbound} disabled>
         <div class="card-icon">↑</div>
-        <h2>Migrate Away</h2>
-        <p>Move your account from this PDS to another server.</p>
+        <h2>{$_('migration.migrateAway')}</h2>
+        <p>{$_('migration.migrateAwayDesc')}</p>
         <ul class="features">
-          <li>Export your repository</li>
-          <li>Transfer to new PDS</li>
-          <li>Update your identity</li>
+          <li>{$_('migration.exportRepo')}</li>
+          <li>{$_('migration.transferToPds')}</li>
+          <li>{$_('migration.updateIdentity')}</li>
         </ul>
-        {#if !auth.session}
-          <p class="login-required">Login required</p>
-        {/if}
+        <p class="login-required">{$_('migration.comingSoon')}</p>
       </button>
     </div>
 
     <div class="info-section">
-      <h3>What is account migration?</h3>
-      <p>
-        Account migration allows you to move your AT Protocol identity between Personal Data Servers (PDSes).
-        Your DID (decentralized identifier) stays the same, so your followers and social connections are preserved.
-      </p>
+      <h3>{$_('migration.whatIsMigration')}</h3>
+      <p>{$_('migration.whatIsMigrationDesc')}</p>
 
-      <h3>Before you migrate</h3>
+      <h3>{$_('migration.beforeMigrate')}</h3>
       <ul>
-        <li>You will need your current account credentials</li>
-        <li>Migration requires email verification for security</li>
-        <li>Large accounts with many images may take several minutes</li>
-        <li>Your old PDS will be notified to deactivate your account</li>
+        <li>{$_('migration.beforeMigrate1')}</li>
+        <li>{$_('migration.beforeMigrate2')}</li>
+        <li>{$_('migration.beforeMigrate3')}</li>
+        <li>{$_('migration.beforeMigrate4')}</li>
       </ul>
 
       <div class="warning-box">
-        <strong>Important:</strong> Account migration is a significant action. Make sure you trust the destination PDS
-        and understand that your data will be moved. If something goes wrong, recovery may require manual intervention.
+        <strong>Important:</strong> {$_('migration.importantWarning')}
         <a href="https://github.com/bluesky-social/pds/blob/main/ACCOUNT_MIGRATION.md" target="_blank" rel="noopener">
-          Learn more about migration risks
+          {$_('migration.learnMore')}
         </a>
       </div>
     </div>
@@ -199,6 +258,7 @@
   {:else if direction === 'inbound' && inboundFlow}
     <InboundWizard
       flow={inboundFlow}
+      {resumeInfo}
       onBack={handleBack}
       onComplete={handleInboundComplete}
     />
@@ -409,5 +469,53 @@
     display: flex;
     gap: var(--space-3);
     justify-content: flex-end;
+  }
+
+  .oauth-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-12);
+    text-align: center;
+  }
+
+  .loading-spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: var(--space-4);
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .oauth-loading p {
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .oauth-error {
+    max-width: 500px;
+    margin: 0 auto;
+    text-align: center;
+    padding: var(--space-8);
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    border-radius: var(--radius-xl);
+  }
+
+  .oauth-error h2 {
+    margin: 0 0 var(--space-4) 0;
+    color: var(--error-text);
+  }
+
+  .oauth-error p {
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-5) 0;
   }
 </style>

@@ -51,23 +51,17 @@ pub async fn create_report(
         None => return ApiError::AuthenticationRequired.into_response(),
     };
 
-    let auth_user = match crate::auth::validate_bearer_token_allow_takendown(&state.db, &token).await
-    {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user =
+        match crate::auth::validate_bearer_token_allow_takendown(&state.db, &token).await {
+            Ok(user) => user,
+            Err(e) => return ApiError::from(e).into_response(),
+        };
 
     let did = &auth_user.did;
 
     if let Some((service_url, service_did)) = get_report_service_config() {
-        return proxy_to_report_service(
-            &state,
-            &auth_user,
-            &service_url,
-            &service_did,
-            &input,
-        )
-        .await;
+        return proxy_to_report_service(&state, &auth_user, &service_url, &service_did, &input)
+            .await;
     }
 
     create_report_locally(&state, did, auth_user.is_takendown, input).await

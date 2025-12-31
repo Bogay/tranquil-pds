@@ -23,9 +23,7 @@ async fn test_get_notification_history() {
             format!("Subject {}", i),
             format!("Body {}", i),
         );
-        enqueue_comms(pool, comms)
-            .await
-            .expect("Failed to enqueue");
+        enqueue_comms(pool, comms).await.expect("Failed to enqueue");
     }
 
     let resp = client

@@ -112,10 +112,11 @@ async fn test_update_email_flow_success() {
         .expect("Failed to update email");
     assert_eq!(res.status(), StatusCode::OK);
 
-    let user_email: Option<String> = sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did)
-        .fetch_one(pool)
-        .await
-        .expect("User not found");
+    let user_email: Option<String> =
+        sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did)
+            .fetch_one(pool)
+            .await
+            .expect("User not found");
     assert_eq!(user_email, Some(new_email));
 }
 
@@ -255,7 +256,10 @@ async fn test_confirm_email_confirms_existing_email() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     let did = body["did"].as_str().expect("No did").to_string();
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt").to_string();
+    let access_jwt = body["accessJwt"]
+        .as_str()
+        .expect("No accessJwt")
+        .to_string();
 
     let body_text: String = sqlx::query_scalar!(
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
@@ -283,13 +287,11 @@ async fn test_confirm_email_confirms_existing_email() {
         .expect("Failed to confirm email");
     assert_eq!(res.status(), StatusCode::OK);
 
-    let verified: bool = sqlx::query_scalar!(
-        "SELECT email_verified FROM users WHERE did = $1",
-        did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("User not found");
+    let verified: bool =
+        sqlx::query_scalar!("SELECT email_verified FROM users WHERE did = $1", did)
+            .fetch_one(pool)
+            .await
+            .expect("User not found");
     assert!(verified);
 }
 
@@ -317,7 +319,10 @@ async fn test_confirm_email_rejects_wrong_email() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     let did = body["did"].as_str().expect("No did").to_string();
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt").to_string();
+    let access_jwt = body["accessJwt"]
+        .as_str()
+        .expect("No accessJwt")
+        .to_string();
 
     let body_text: String = sqlx::query_scalar!(
         "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
@@ -370,7 +375,10 @@ async fn test_confirm_email_invalid_token() {
         .expect("Failed to create account");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt").to_string();
+    let access_jwt = body["accessJwt"]
+        .as_str()
+        .expect("No accessJwt")
+        .to_string();
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.confirmEmail", base_url))
@@ -411,7 +419,10 @@ async fn test_unverified_account_can_update_email_without_token() {
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Invalid JSON");
     let did = body["did"].as_str().expect("No did").to_string();
-    let access_jwt = body["accessJwt"].as_str().expect("No accessJwt").to_string();
+    let access_jwt = body["accessJwt"]
+        .as_str()
+        .expect("No accessJwt")
+        .to_string();
 
     let res = client
         .post(format!(
@@ -491,8 +502,10 @@ async fn test_update_email_taken_by_another_user() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidRequest");
-    assert!(body["message"]
-        .as_str()
-        .unwrap_or("")
-        .contains("already in use"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("already in use")
+    );
 }

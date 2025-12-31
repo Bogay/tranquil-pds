@@ -5,7 +5,10 @@ use tokio::sync::watch;
 use tracing::{error, info, warn};
 use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
 use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
-use tranquil_pds::scheduled::{backfill_genesis_commit_blocks, backfill_record_blobs, backfill_repo_rev, backfill_user_blocks, start_scheduled_tasks};
+use tranquil_pds::scheduled::{
+    backfill_genesis_commit_blocks, backfill_record_blobs, backfill_repo_rev, backfill_user_blocks,
+    start_scheduled_tasks,
+};
 use tranquil_pds::state::AppState;
 
 #[tokio::main]

@@ -108,18 +108,19 @@ pub async fn get_preferences(
             serde_json::from_value(row.value_json).ok()
         })
         .collect();
-    if let Some(ref pref) = personal_details_pref {
-        if let Some(birth_date) = pref.get("birthDate").and_then(|v| v.as_str()) {
-            if let Some(age) = get_age_from_datestring(birth_date) {
-                let declared_age_pref = json!({
-                    "$type": DECLARED_AGE_PREF,
-                    "isOverAge13": age >= 13,
-                    "isOverAge16": age >= 16,
-                    "isOverAge18": age >= 18,
-                });
-                preferences.push(declared_age_pref);
-            }
-        }
+    if let Some(age) = personal_details_pref
+        .as_ref()
+        .and_then(|pref| pref.get("birthDate"))
+        .and_then(|v| v.as_str())
+        .and_then(get_age_from_datestring)
+    {
+        let declared_age_pref = json!({
+            "$type": DECLARED_AGE_PREF,
+            "isOverAge13": age >= 13,
+            "isOverAge16": age >= 16,
+            "isOverAge18": age >= 18,
+        });
+        preferences.push(declared_age_pref);
     }
     (StatusCode::OK, Json(GetPreferencesOutput { preferences })).into_response()
 }
@@ -157,22 +158,20 @@ pub async fn put_preferences(
             }
         };
     let has_full_access = auth_user.permissions().has_full_access();
-    let user_id: uuid::Uuid = match sqlx::query_scalar!(
-        "SELECT id FROM users WHERE did = $1",
-        auth_user.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(id)) => id,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "User not found"})),
-            )
-                .into_response();
-        }
-    };
+    let user_id: uuid::Uuid =
+        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(id)) => id,
+            _ => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError", "message": "User not found"})),
+                )
+                    .into_response();
+            }
+        };
     if input.preferences.len() > MAX_PREFERENCES_COUNT {
         return (
             StatusCode::BAD_REQUEST,

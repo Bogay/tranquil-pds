@@ -902,6 +902,10 @@
   "reauth": {
     "title": "Uudelleentodennus vaaditaan",
     "subtitle": "Vahvista henkilöllisyytesi jatkaaksesi.",
+    "password": "Salasana",
+    "totp": "TOTP",
+    "passkey": "Pääsyavain",
+    "authenticatorCode": "Todentajan koodi",
     "usePassword": "Käytä salasanaa",
     "usePasskey": "Käytä pääsyavainta",
     "useTotp": "Käytä todentajaa",
@@ -909,6 +913,8 @@
     "totpPlaceholder": "Syötä 6-numeroinen koodi",
     "verify": "Vahvista",
     "verifying": "Vahvistetaan...",
+    "authenticating": "Todennetaan...",
+    "passkeyPrompt": "Klikkaa alla olevaa painiketta todentaaksesi pääsyavaimellasi.",
     "cancel": "Peruuta"
   },
   "verifyChannel": {
@@ -1071,6 +1077,10 @@
     "beforeMigrate4": "Vanhalle PDS:llesi ilmoitetaan tilisi deaktivoinnista",
     "importantWarning": "Tilin siirto on merkittävä toimenpide. Varmista, että luotat kohde-PDS:ään ja ymmärrät, että tietosi siirretään. Jos jokin menee pieleen, palautus voi vaatia manuaalista toimenpidettä.",
     "learnMore": "Lue lisää siirron riskeistä",
+    "comingSoon": "Tulossa pian",
+    "oauthCompleting": "Viimeistellään todennusta...",
+    "oauthFailed": "Todennus epäonnistui",
+    "tryAgain": "Yritä uudelleen",
     "resume": {
       "title": "Jatka siirtoa?",
       "incomplete": "Sinulla on keskeneräinen siirto:",
@@ -1090,44 +1100,85 @@
         "desc": "Siirrä olemassa oleva AT Protocol -tilisi tälle palvelimelle.",
         "understand": "Ymmärrän riskit ja haluan jatkaa"
       },
-      "sourceLogin": {
-        "title": "Kirjaudu nykyiseen PDS:ääsi",
-        "desc": "Syötä siirrettävän tilin tunnukset.",
+      "sourceAuth": {
+        "title": "Syötä nykyinen käyttäjätunnuksesi",
+        "titleResume": "Jatka siirtoa",
+        "desc": "Syötä siirrettävän tilin käyttäjätunnus.",
+        "descResume": "Tunnistaudu uudelleen lähde-PDS:ään jatkaaksesi siirtoa.",
         "handle": "Käyttäjätunnus",
-        "handlePlaceholder": "sinä.bsky.social",
-        "password": "Salasana",
-        "twoFactorCode": "Kaksivaiheinen koodi",
-        "twoFactorRequired": "Kaksivaiheinen tunnistautuminen vaaditaan",
-        "signIn": "Kirjaudu ja jatka"
+        "handlePlaceholder": "maija.bsky.social",
+        "handleHint": "Nykyinen käyttäjätunnuksesi nykyisessä PDS:ssäsi",
+        "continue": "Jatka",
+        "connecting": "Yhdistetään...",
+        "reauthenticate": "Tunnistaudu uudelleen",
+        "resumeTitle": "Siirto käynnissä",
+        "resumeFrom": "Mistä",
+        "resumeTo": "Minne",
+        "resumeProgress": "Edistyminen",
+        "resumeOAuthNote": "Sinun täytyy tunnistautua uudelleen OAuth:n kautta jatkaaksesi."
       },
       "chooseHandle": {
         "title": "Valitse uusi käyttäjätunnuksesi",
         "desc": "Valitse käyttäjätunnus tilillesi tässä PDS:ssä.",
-        "handleHint": "Täydellinen käyttäjätunnuksesi on: @{handle}"
+        "migratingFrom": "Siirretään tililtä",
+        "newHandle": "Uusi käyttäjätunnus",
+        "checkingAvailability": "Tarkistetaan saatavuutta...",
+        "handleAvailable": "Käyttäjätunnus on saatavilla!",
+        "handleTaken": "Käyttäjätunnus on jo varattu",
+        "handleHint": "Voit myös käyttää omaa verkkotunnustasi syöttämällä täydellisen käyttäjätunnuksen (esim. maija.omadomain.fi)",
+        "email": "Sähköpostiosoite",
+        "authMethod": "Tunnistautumistapa",
+        "authPassword": "Salasana",
+        "authPasswordDesc": "Perinteinen salasanapohjainen kirjautuminen",
+        "authPasskey": "Pääsyavain",
+        "authPasskeyDesc": "Salasanaton kirjautuminen biometriikalla tai suojausavaimella",
+        "password": "Salasana",
+        "passwordHint": "Vähintään 8 merkkiä",
+        "passkeyInfo": "Määrität pääsyavaimen tilisi luomisen jälkeen. Laitteesi pyytää käyttämään biometriikkaa (sormenjälki, Face ID) tai suojausavainta.",
+        "inviteCode": "Kutsukoodi"
       },
       "review": {
         "title": "Tarkista siirto",
-        "desc": "Tarkista ja vahvista siirtotietosi.",
+        "desc": "Vahvista siirtosi tiedot.",
         "currentHandle": "Nykyinen käyttäjätunnus",
         "newHandle": "Uusi käyttäjätunnus",
+        "did": "DID",
         "sourcePds": "Lähde-PDS",
-        "targetPds": "Tämä PDS",
+        "targetPds": "Kohde-PDS",
         "email": "Sähköposti",
+        "authentication": "Tunnistautuminen",
+        "authPasskey": "Pääsyavain (salasanaton)",
+        "authPassword": "Salasana",
         "inviteCode": "Kutsukoodi",
-        "confirm": "Vahvistan haluavani siirtää tilini",
-        "startMigration": "Aloita siirto"
+        "warning": "Kun klikkaat \"Aloita siirto\", tietovarastosi ja datasi alkavat siirtyä. Tätä prosessia ei voi helposti peruuttaa.",
+        "startMigration": "Aloita siirto",
+        "starting": "Aloitetaan..."
       },
       "migrating": {
-        "title": "Siirretään tiliäsi",
-        "desc": "Odota, kun siirrämme tietojasi...",
-        "gettingServiceAuth": "Haetaan palveluvaltuutusta...",
-        "creatingAccount": "Luodaan tiliä uuteen PDS:ään...",
-        "exportingRepo": "Viedään tietovarastoa...",
-        "importingRepo": "Tuodaan tietovarastoa...",
-        "countingBlobs": "Lasketaan blob-tiedostoja...",
-        "migratingBlobs": "Siirretään blob-tiedostoja ({current}/{total})...",
-        "migratingPrefs": "Siirretään asetuksia...",
-        "requestingPlc": "Pyydetään PLC-toimintoa..."
+        "title": "Siirto käynnissä",
+        "desc": "Odota, kun tiliäsi siirretään...",
+        "exportRepo": "Vie tietovarasto",
+        "importRepo": "Tuo tietovarasto",
+        "migrateBlobs": "Siirrä blob-tiedostot",
+        "migratePrefs": "Siirrä asetukset"
+      },
+      "passkeySetup": {
+        "title": "Määritä pääsyavaimesi",
+        "desc": "Sähköpostisi on vahvistettu. Määritä nyt pääsyavaimesi turvallista, salasanatonta kirjautumista varten.",
+        "nameLabel": "Pääsyavaimen nimi (valinnainen)",
+        "namePlaceholder": "esim. MacBook Pro, iPhone",
+        "nameHint": "Kutsumanimi tämän pääsyavaimen tunnistamiseen",
+        "instructions": "Klikkaa alla olevaa painiketta rekisteröidäksesi pääsyavaimesi. Laitteesi pyytää käyttämään biometriikkaa (sormenjälki, Face ID) tai suojausavainta.",
+        "register": "Rekisteröi pääsyavain",
+        "registering": "Rekisteröidään..."
+      },
+      "appPassword": {
+        "title": "Tallenna sovellussalasanasi",
+        "desc": "Pääsyavaimesi on luotu. Sovellussalasana on luotu sinulle käytettäväksi sovellusten kanssa, jotka eivät vielä tue pääsyavaimia.",
+        "warning": "Tämä sovellussalasana vaaditaan kirjautumiseen sovelluksissa, jotka eivät vielä tue pääsyavaimia (kuten bsky.app). Näet tämän salasanan vain kerran.",
+        "label": "Sovellussalasana kohteelle",
+        "saved": "Olen tallentanut sovellussalasanani turvalliseen paikkaan",
+        "continue": "Jatka"
       },
       "emailVerify": {
         "title": "Vahvista sähköpostisi",
@@ -1140,12 +1191,14 @@
         "verifying": "Vahvistetaan..."
       },
       "plcToken": {
-        "title": "Vahvista henkilöllisyytesi",
-        "desc": "Vahvistuskoodi on lähetetty sähköpostiisi nykyisessä PDS:ssäsi.",
+        "title": "Vahvista siirto",
+        "desc": "Vahvistuskoodi on lähetetty vanhaan tiliisi rekisteröityyn sähköpostiin.",
+        "info": "Tämä koodi vahvistaa, että sinulla on pääsy tiliin ja valtuuttaa identiteettisi päivityksen osoittamaan tähän PDS:ään.",
         "tokenLabel": "Vahvistuskoodi",
         "tokenPlaceholder": "Syötä sähköpostista saatu koodi",
-        "resend": "Lähetä uudelleen",
-        "resending": "Lähetetään..."
+        "resend": "Lähetä koodi uudelleen",
+        "complete": "Viimeistele siirto",
+        "completing": "Vahvistetaan..."
       },
       "didWebUpdate": {
         "title": "Päivitä DID-dokumenttisi",
@@ -1168,9 +1221,30 @@
       "success": {
         "title": "Siirto valmis!",
         "desc": "Tilisi on siirretty onnistuneesti tähän PDS:ään.",
-        "newHandle": "Uusi käyttäjätunnus",
+        "yourNewHandle": "Uusi käyttäjätunnuksesi",
         "did": "DID",
-        "goToDashboard": "Siirry hallintapaneeliin"
+        "blobsWarning": "{count} blob-tiedostoa ei voitu siirtää. Nämä voivat olla kuvia tai muuta mediaa, jotka eivät ole enää saatavilla.",
+        "redirecting": "Uudelleenohjataan hallintapaneeliin..."
+      },
+      "error": {
+        "title": "Siirtovirhe",
+        "desc": "Siirron aikana tapahtui virhe.",
+        "startOver": "Aloita alusta"
+      },
+      "common": {
+        "back": "Takaisin",
+        "cancel": "Peruuta",
+        "continue": "Jatka",
+        "whatWillHappen": "Mitä tapahtuu:",
+        "step1": "Kirjaudu nykyiseen PDS:ääsi",
+        "step2": "Valitse uusi käyttäjätunnus tällä palvelimella",
+        "step3": "Tietovarastosi ja blob-tiedostosi siirretään",
+        "step4": "Vahvista siirto sähköpostilla",
+        "step5": "Identiteettisi päivitetään osoittamaan tänne",
+        "beforeProceed": "Ennen kuin jatkat:",
+        "warning1": "Tarvitset pääsyn nykyiseen tiliisi rekisteröityyn sähköpostiin",
+        "warning2": "Suurten tilien siirto voi kestää useita minuutteja",
+        "warning3": "Vanha tilisi deaktivoidaan siirron jälkeen"
       }
     },
     "outbound": {

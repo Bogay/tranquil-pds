@@ -21,7 +21,7 @@ describe("Dashboard", () => {
       setupUnauthenticatedUser();
       render(Dashboard);
       await waitFor(() => {
-        expect(window.location.hash).toBe("#/login");
+        expect(globalThis.location.hash).toBe("#/login");
       });
     });
     it("shows loading state while checking auth", () => {
@@ -40,8 +40,8 @@ describe("Dashboard", () => {
           .toBeInTheDocument();
         expect(screen.getByRole("heading", { name: /account overview/i }))
           .toBeInTheDocument();
-        expect(screen.getByText(/@testuser\.test\.tranquil\.dev/))
-          .toBeInTheDocument();
+        expect(screen.getAllByText(/@testuser\.test\.tranquil\.dev/).length)
+          .toBeGreaterThan(0);
         expect(screen.getByText(/did:web:test\.tranquil\.dev:u:testuser/))
           .toBeInTheDocument();
         expect(screen.getByText("test@example.com")).toBeInTheDocument();
@@ -62,7 +62,6 @@ describe("Dashboard", () => {
       await waitFor(() => {
         const navCards = [
           { name: /app passwords/i, href: "#/app-passwords" },
-          { name: /invite codes/i, href: "#/invite-codes" },
           { name: /account settings/i, href: "#/settings" },
           { name: /communication preferences/i, href: "#/comms" },
           { name: /repository explorer/i, href: "#/repo" },
@@ -72,6 +71,19 @@ describe("Dashboard", () => {
           expect(card).toBeInTheDocument();
           expect(card).toHaveAttribute("href", href);
         }
+      });
+    });
+    it("displays invite codes card when invites are required and user is admin", async () => {
+      setupAuthenticatedUser({ isAdmin: true });
+      mockEndpoint(
+        "com.atproto.server.describeServer",
+        () => jsonResponse(mockData.describeServer({ inviteCodeRequired: true })),
+      );
+      render(Dashboard);
+      await waitFor(() => {
+        const inviteCard = screen.getByRole("link", { name: /invite codes/i });
+        expect(inviteCard).toBeInTheDocument();
+        expect(inviteCard).toHaveAttribute("href", "#/invite-codes");
       });
     });
   });
@@ -89,19 +101,29 @@ describe("Dashboard", () => {
       });
       render(Dashboard);
       await waitFor(() => {
+        expect(screen.getByRole("button", { name: /@testuser/i }))
+          .toBeInTheDocument();
+      });
+      await fireEvent.click(screen.getByRole("button", { name: /@testuser/i }));
+      await waitFor(() => {
         expect(screen.getByRole("button", { name: /sign out/i }))
           .toBeInTheDocument();
       });
       await fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
       await waitFor(() => {
         expect(deleteSessionCalled).toBe(true);
-        expect(window.location.hash).toBe("#/login");
+        expect(globalThis.location.hash).toBe("#/login");
       });
     });
     it("clears session from localStorage after logout", async () => {
       const storedSession = localStorage.getItem(STORAGE_KEY);
       expect(storedSession).not.toBeNull();
       render(Dashboard);
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /@testuser/i }))
+          .toBeInTheDocument();
+      });
+      await fireEvent.click(screen.getByRole("button", { name: /@testuser/i }));
       await waitFor(() => {
         expect(screen.getByRole("button", { name: /sign out/i }))
           .toBeInTheDocument();

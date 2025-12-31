@@ -2,19 +2,31 @@ import type {
   InboundMigrationState,
   InboundStep,
   MigrationProgress,
+  OAuthServerMetadata,
   OutboundMigrationState,
   OutboundStep,
+  PasskeyAccountSetup,
   ServerDescription,
   StoredMigrationState,
 } from "./types";
 import {
   AtprotoClient,
+  buildOAuthAuthorizationUrl,
+  clearDPoPKey,
   createLocalClient,
+  exchangeOAuthCode,
+  generateDPoPKeyPair,
+  generateOAuthState,
+  generatePKCE,
+  getMigrationOAuthClientId,
+  getMigrationOAuthRedirectUri,
+  getOAuthServerMetadata,
+  loadDPoPKey,
   resolvePdsUrl,
+  saveDPoPKey,
 } from "./atproto-client";
 import {
   clearMigrationState,
-  loadMigrationState,
   saveMigrationState,
   updateProgress,
   updateStep,
@@ -63,14 +75,18 @@ export function createInboundMigrationFlow() {
     plcToken: "",
     progress: createInitialProgress(),
     error: null,
-    requires2FA: false,
-    twoFactorCode: "",
     targetVerificationMethod: null,
+    authMethod: "password",
+    passkeySetupToken: null,
+    oauthCodeVerifier: null,
+    generatedAppPassword: null,
+    generatedAppPasswordName: null,
   });
 
   let sourceClient: AtprotoClient | null = null;
   let localClient: AtprotoClient | null = null;
   let localServerInfo: ServerDescription | null = null;
+  let sourceOAuthMetadata: OAuthServerMetadata | null = null;
 
   function setStep(step: InboundStep) {
     state.step = step;
@@ -111,51 +127,162 @@ export function createInboundMigrationFlow() {
     }
   }
 
-  async function loginToSource(
-    handle: string,
-    password: string,
-    twoFactorCode?: string,
-  ): Promise<void> {
-    migrationLog("loginToSource START", { handle, has2FA: !!twoFactorCode });
+  async function initiateOAuthLogin(handle: string): Promise<void> {
+    migrationLog("initiateOAuthLogin START", { handle });
 
     if (!state.sourcePdsUrl) {
       await resolveSourcePds(handle);
     }
 
-    if (!sourceClient) {
-      sourceClient = new AtprotoClient(state.sourcePdsUrl);
+    const metadata = await getOAuthServerMetadata(state.sourcePdsUrl);
+    if (!metadata) {
+      throw new Error(
+        "Source PDS does not support OAuth. This PDS only supports OAuth-based migrations.",
+      );
+    }
+    sourceOAuthMetadata = metadata;
+
+    const { codeVerifier, codeChallenge } = await generatePKCE();
+    const oauthState = generateOAuthState();
+
+    const dpopKeyPair = await generateDPoPKeyPair();
+    await saveDPoPKey(dpopKeyPair);
+
+    localStorage.setItem("migration_oauth_state", oauthState);
+    localStorage.setItem("migration_oauth_code_verifier", codeVerifier);
+    localStorage.setItem("migration_source_pds_url", state.sourcePdsUrl);
+    localStorage.setItem("migration_source_did", state.sourceDid);
+    localStorage.setItem("migration_source_handle", state.sourceHandle);
+    localStorage.setItem("migration_oauth_issuer", metadata.issuer);
+
+    const authUrl = buildOAuthAuthorizationUrl(metadata, {
+      clientId: getMigrationOAuthClientId(),
+      redirectUri: getMigrationOAuthRedirectUri(),
+      codeChallenge,
+      state: oauthState,
+      scope: "atproto identity:* rpc:com.atproto.server.createAccount?aud=*",
+      dpopJkt: dpopKeyPair.thumbprint,
+      loginHint: state.sourceHandle,
+    });
+
+    migrationLog("initiateOAuthLogin: Redirecting to authorization", {
+      sourcePdsUrl: state.sourcePdsUrl,
+      authEndpoint: metadata.authorization_endpoint,
+      dpopJkt: dpopKeyPair.thumbprint,
+    });
+
+    state.oauthCodeVerifier = codeVerifier;
+    saveMigrationState(state);
+
+    globalThis.location.href = authUrl;
+  }
+
+  function cleanupOAuthSessionData(): void {
+    localStorage.removeItem("migration_oauth_state");
+    localStorage.removeItem("migration_oauth_code_verifier");
+    localStorage.removeItem("migration_source_pds_url");
+    localStorage.removeItem("migration_source_did");
+    localStorage.removeItem("migration_source_handle");
+    localStorage.removeItem("migration_oauth_issuer");
+  }
+
+  async function handleOAuthCallback(
+    code: string,
+    returnedState: string,
+  ): Promise<void> {
+    migrationLog("handleOAuthCallback START");
+
+    const savedState = localStorage.getItem("migration_oauth_state");
+    const codeVerifier = localStorage.getItem("migration_oauth_code_verifier");
+    const sourcePdsUrl = localStorage.getItem("migration_source_pds_url");
+    const sourceDid = localStorage.getItem("migration_source_did");
+    const sourceHandle = localStorage.getItem("migration_source_handle");
+    const oauthIssuer = localStorage.getItem("migration_oauth_issuer");
+
+    if (returnedState !== savedState) {
+      cleanupOAuthSessionData();
+      throw new Error("OAuth state mismatch - possible CSRF attack");
     }
 
-    try {
-      migrationLog("loginToSource: Calling createSession on OLD PDS", {
-        pdsUrl: state.sourcePdsUrl,
-      });
-      const session = await sourceClient.login(handle, password, twoFactorCode);
-      migrationLog("loginToSource SUCCESS", {
-        did: session.did,
-        handle: session.handle,
-        pdsUrl: state.sourcePdsUrl,
-      });
-      state.sourceAccessToken = session.accessJwt;
-      state.sourceRefreshToken = session.refreshJwt;
-      state.sourceDid = session.did;
-      state.sourceHandle = session.handle;
-      state.requires2FA = false;
-      saveMigrationState(state);
-    } catch (e) {
-      const err = e as Error & { error?: string };
-      migrationLog("loginToSource FAILED", {
-        error: err.message,
-        errorCode: err.error,
-      });
-      if (err.error === "AuthFactorTokenRequired") {
-        state.requires2FA = true;
-        throw new Error(
-          "Two-factor authentication required. Please enter the code sent to your email.",
-        );
-      }
-      throw e;
+    if (!codeVerifier || !sourcePdsUrl || !sourceDid || !sourceHandle) {
+      cleanupOAuthSessionData();
+      throw new Error("Missing OAuth session data");
     }
+
+    const dpopKeyPair = await loadDPoPKey();
+    if (!dpopKeyPair) {
+      cleanupOAuthSessionData();
+      throw new Error("Missing DPoP key - please restart the migration");
+    }
+
+    state.sourcePdsUrl = sourcePdsUrl;
+    state.sourceDid = sourceDid;
+    state.sourceHandle = sourceHandle;
+    sourceClient = new AtprotoClient(sourcePdsUrl);
+
+    let metadata = await getOAuthServerMetadata(sourcePdsUrl);
+    if (!metadata && oauthIssuer) {
+      metadata = await getOAuthServerMetadata(oauthIssuer);
+    }
+    if (!metadata) {
+      cleanupOAuthSessionData();
+      throw new Error("Could not fetch OAuth server metadata");
+    }
+    sourceOAuthMetadata = metadata;
+
+    migrationLog("handleOAuthCallback: Exchanging code for tokens");
+
+    let tokenResponse;
+    try {
+      tokenResponse = await exchangeOAuthCode(metadata, {
+        code,
+        codeVerifier,
+        clientId: getMigrationOAuthClientId(),
+        redirectUri: getMigrationOAuthRedirectUri(),
+        dpopKeyPair,
+      });
+    } catch (err) {
+      cleanupOAuthSessionData();
+      throw err;
+    }
+
+    migrationLog("handleOAuthCallback: Got access token");
+
+    state.sourceAccessToken = tokenResponse.access_token;
+    state.sourceRefreshToken = tokenResponse.refresh_token ?? null;
+    sourceClient.setAccessToken(tokenResponse.access_token);
+    sourceClient.setDPoPKeyPair(dpopKeyPair);
+
+    cleanupOAuthSessionData();
+
+    if (state.needsReauth && state.resumeToStep) {
+      const targetStep = state.resumeToStep;
+      state.needsReauth = false;
+      state.resumeToStep = undefined;
+
+      const postEmailSteps = [
+        "plc-token",
+        "did-web-update",
+        "finalizing",
+        "app-password",
+      ];
+
+      if (postEmailSteps.includes(targetStep)) {
+        if (state.authMethod === "passkey" && state.passkeySetupToken) {
+          localClient = createLocalClient();
+          setStep("passkey-setup");
+          migrationLog("handleOAuthCallback: Resuming passkey flow at passkey-setup");
+        } else {
+          setStep("email-verify");
+          migrationLog("handleOAuthCallback: Resuming at email-verify for re-auth");
+        }
+      } else {
+        setStep(targetStep);
+      }
+    } else {
+      setStep("choose-handle");
+    }
+    saveMigrationState(state);
   }
 
   async function checkHandleAvailability(handle: string): Promise<boolean> {
@@ -180,17 +307,20 @@ export function createInboundMigrationFlow() {
     await localClient.loginDeactivated(email, password);
   }
 
+  let passkeySetup: PasskeyAccountSetup | null = null;
+
   async function startMigration(): Promise<void> {
     migrationLog("startMigration START", {
       sourceDid: state.sourceDid,
       sourceHandle: state.sourceHandle,
       targetHandle: state.targetHandle,
       sourcePdsUrl: state.sourcePdsUrl,
+      authMethod: state.authMethod,
     });
 
     if (!sourceClient || !state.sourceAccessToken) {
-      migrationLog("startMigration ERROR: Not logged in to source PDS");
-      throw new Error("Not logged in to source PDS");
+      migrationLog("startMigration ERROR: Not authenticated to source PDS");
+      throw new Error("Not authenticated to source PDS");
     }
 
     if (!localClient) {
@@ -198,16 +328,16 @@ export function createInboundMigrationFlow() {
     }
 
     setStep("migrating");
-    setProgress({ currentOperation: "Getting service auth token..." });
 
     try {
+      setProgress({ currentOperation: "Getting service auth token..." });
       migrationLog("startMigration: Loading local server info");
       const serverInfo = await loadLocalServerInfo();
       migrationLog("startMigration: Got server info", {
         serverDid: serverInfo.did,
       });
 
-      migrationLog("startMigration: Getting service auth token from OLD PDS");
+      migrationLog("startMigration: Getting service auth token from source PDS");
       const { token } = await sourceClient.getServiceAuth(
         serverInfo.did,
         "com.atproto.server.createAccount",
@@ -217,26 +347,51 @@ export function createInboundMigrationFlow() {
 
       setProgress({ currentOperation: "Creating account on new PDS..." });
 
-      const accountParams = {
-        did: state.sourceDid,
-        handle: state.targetHandle,
-        email: state.targetEmail,
-        password: state.targetPassword,
-        inviteCode: state.inviteCode || undefined,
-      };
+      if (state.authMethod === "passkey") {
+        const passkeyParams = {
+          did: state.sourceDid,
+          handle: state.targetHandle,
+          email: state.targetEmail,
+          inviteCode: state.inviteCode || undefined,
+        };
 
-      migrationLog("startMigration: Creating account on NEW PDS", {
-        did: accountParams.did,
-        handle: accountParams.handle,
-      });
-      const session = await localClient.createAccount(accountParams, token);
-      migrationLog("startMigration: Account created on NEW PDS", {
-        did: session.did,
-      });
-      localClient.setAccessToken(session.accessJwt);
+        migrationLog("startMigration: Creating passkey account on NEW PDS", {
+          did: passkeyParams.did,
+          handle: passkeyParams.handle,
+          inviteCode: passkeyParams.inviteCode,
+          stateInviteCode: state.inviteCode,
+        });
+        passkeySetup = await localClient.createPasskeyAccount(passkeyParams, token);
+        migrationLog("startMigration: Passkey account created on NEW PDS", {
+          did: passkeySetup.did,
+          hasAccessJwt: !!passkeySetup.accessJwt,
+        });
+        state.passkeySetupToken = passkeySetup.setupToken;
+        if (passkeySetup.accessJwt) {
+          localClient.setAccessToken(passkeySetup.accessJwt);
+        }
+      } else {
+        const accountParams = {
+          did: state.sourceDid,
+          handle: state.targetHandle,
+          email: state.targetEmail,
+          password: state.targetPassword,
+          inviteCode: state.inviteCode || undefined,
+        };
+
+        migrationLog("startMigration: Creating account on NEW PDS", {
+          did: accountParams.did,
+          handle: accountParams.handle,
+        });
+        const session = await localClient.createAccount(accountParams, token);
+        migrationLog("startMigration: Account created on NEW PDS", {
+          did: session.did,
+        });
+        localClient.setAccessToken(session.accessJwt);
+      }
 
       setProgress({ currentOperation: "Exporting repository..." });
-      migrationLog("startMigration: Exporting repo from OLD PDS");
+      migrationLog("startMigration: Exporting repo from source PDS");
       const exportStart = Date.now();
       const car = await sourceClient.getRepo(state.sourceDid);
       migrationLog("startMigration: Repo exported", {
@@ -320,7 +475,7 @@ export function createInboundMigrationFlow() {
           await localClient.uploadBlob(blobData, "application/octet-stream");
           migrated++;
           setProgress({ blobsMigrated: migrated });
-        } catch (e) {
+        } catch {
           state.progress.blobsFailed.push(blob.cid);
         }
       }
@@ -336,8 +491,7 @@ export function createInboundMigrationFlow() {
       const prefs = await sourceClient.getPreferences();
       await localClient.putPreferences(prefs);
       setProgress({ prefsMigrated: true });
-    } catch {
-    }
+    } catch { /* optional, best-effort */ }
   }
 
   async function submitEmailVerifyToken(
@@ -355,10 +509,18 @@ export function createInboundMigrationFlow() {
       await localClient.verifyToken(token, state.targetEmail);
 
       if (!sourceClient) {
-        setStep("source-login");
+        setStep("source-handle");
         setError(
           "Email verified! Please log in to your old account again to complete the migration.",
         );
+        return;
+      }
+
+      if (state.authMethod === "passkey") {
+        migrationLog(
+          "submitEmailVerifyToken: Email verified, proceeding to passkey setup",
+        );
+        setStep("passkey-setup");
         return;
       }
 
@@ -402,6 +564,10 @@ export function createInboundMigrationFlow() {
   async function checkEmailVerifiedAndProceed(): Promise<boolean> {
     if (checkingEmailVerification) return false;
     if (!sourceClient || !localClient) return false;
+
+    if (state.authMethod === "passkey") {
+      return false;
+    }
 
     checkingEmailVerification = true;
     try {
@@ -460,7 +626,7 @@ export function createInboundMigrationFlow() {
         services: credentials.services,
       });
 
-      migrationLog("Step 2: Signing PLC operation on OLD PDS", {
+      migrationLog("Step 2: Signing PLC operation on source PDS", {
         sourcePdsUrl: state.sourcePdsUrl,
       });
       const signStart = Date.now();
@@ -497,13 +663,13 @@ export function createInboundMigrationFlow() {
       setProgress({ activated: true });
 
       setProgress({ currentOperation: "Deactivating old account..." });
-      migrationLog("Step 5: Deactivating account on OLD PDS", {
+      migrationLog("Step 5: Deactivating account on source PDS", {
         sourcePdsUrl: state.sourcePdsUrl,
       });
       const deactivateStart = Date.now();
       try {
         await sourceClient.deactivateAccount();
-        migrationLog("Step 5 COMPLETE: Account deactivated on OLD PDS", {
+        migrationLog("Step 5 COMPLETE: Account deactivated on source PDS", {
           durationMs: Date.now() - deactivateStart,
           success: true,
         });
@@ -513,7 +679,7 @@ export function createInboundMigrationFlow() {
           error?: string;
           status?: number;
         };
-        migrationLog("Step 5 FAILED: Could not deactivate on OLD PDS", {
+        migrationLog("Step 5 FAILED: Could not deactivate on source PDS", {
           durationMs: Date.now() - deactivateStart,
           error: err.message,
           errorCode: err.error,
@@ -581,17 +747,17 @@ export function createInboundMigrationFlow() {
       setProgress({ activated: true });
 
       setProgress({ currentOperation: "Deactivating old account..." });
-      migrationLog("Deactivating account on OLD PDS");
+      migrationLog("Deactivating account on source PDS");
       const deactivateStart = Date.now();
       try {
         await sourceClient.deactivateAccount();
-        migrationLog("Account deactivated on OLD PDS", {
+        migrationLog("Account deactivated on source PDS", {
           durationMs: Date.now() - deactivateStart,
         });
         setProgress({ deactivated: true });
       } catch (deactivateErr) {
         const err = deactivateErr as Error & { error?: string };
-        migrationLog("Could not deactivate on OLD PDS", { error: err.message });
+        migrationLog("Could not deactivate on source PDS", { error: err.message });
       }
 
       migrationLog("completeDidWebMigration SUCCESS");
@@ -604,6 +770,68 @@ export function createInboundMigrationFlow() {
       migrationLog("completeDidWebMigration FAILED", { error: message });
       setError(message);
       setStep("did-web-update");
+    }
+  }
+
+  async function startPasskeyRegistration(): Promise<{ options: unknown }> {
+    if (!localClient || !state.passkeySetupToken) {
+      throw new Error("Not ready for passkey registration");
+    }
+
+    migrationLog("startPasskeyRegistration START", { did: state.sourceDid });
+    const result = await localClient.startPasskeyRegistrationForSetup(
+      state.sourceDid,
+      state.passkeySetupToken,
+    );
+    migrationLog("startPasskeyRegistration: Got WebAuthn options");
+    return result;
+  }
+
+  async function completePasskeyRegistration(
+    credential: unknown,
+    friendlyName?: string,
+  ): Promise<void> {
+    if (!localClient || !state.passkeySetupToken || !sourceClient) {
+      throw new Error("Not ready for passkey registration");
+    }
+
+    migrationLog("completePasskeyRegistration START", { did: state.sourceDid });
+
+    const result = await localClient.completePasskeySetup(
+      state.sourceDid,
+      state.passkeySetupToken,
+      credential,
+      friendlyName,
+    );
+    migrationLog("completePasskeyRegistration: Passkey registered", {
+      appPassword: "***",
+    });
+
+    setProgress({ currentOperation: "Authenticating with app password..." });
+    await localClient.loginDeactivated(state.targetEmail, result.appPassword);
+    migrationLog("completePasskeyRegistration: Authenticated to new PDS");
+
+    state.generatedAppPassword = result.appPassword;
+    state.generatedAppPasswordName = result.appPasswordName;
+    setStep("app-password");
+  }
+
+  async function proceedFromAppPassword(): Promise<void> {
+    if (!sourceClient || !localClient) {
+      throw new Error("Clients not initialized");
+    }
+
+    migrationLog("proceedFromAppPassword: Starting");
+
+    if (state.sourceDid.startsWith("did:web:")) {
+      const credentials = await localClient.getRecommendedDidCredentials();
+      state.targetVerificationMethod =
+        credentials.verificationMethods?.atproto || null;
+      setStep("did-web-update");
+    } else {
+      setProgress({ currentOperation: "Requesting PLC operation token..." });
+      await sourceClient.requestPlcOperationSignature();
+      setStep("plc-token");
     }
   }
 
@@ -625,12 +853,18 @@ export function createInboundMigrationFlow() {
       plcToken: "",
       progress: createInitialProgress(),
       error: null,
-      requires2FA: false,
-      twoFactorCode: "",
       targetVerificationMethod: null,
+      authMethod: "password",
+      passkeySetupToken: null,
+      oauthCodeVerifier: null,
+      generatedAppPassword: null,
+      generatedAppPasswordName: null,
     };
     sourceClient = null;
+    passkeySetup = null;
+    sourceOAuthMetadata = null;
     clearMigrationState();
+    clearDPoPKey();
   }
 
   async function resumeFromState(stored: StoredMigrationState): Promise<void> {
@@ -641,12 +875,44 @@ export function createInboundMigrationFlow() {
     state.sourceHandle = stored.sourceHandle;
     state.targetHandle = stored.targetHandle;
     state.targetEmail = stored.targetEmail;
+    state.authMethod = stored.authMethod ?? "password";
     state.progress = {
       ...createInitialProgress(),
       ...stored.progress,
     };
 
-    state.step = "source-login";
+    const stepsRequiringSourceAuth = [
+      "choose-handle",
+      "review",
+      "migrating",
+      "email-verify",
+      "plc-token",
+      "did-web-update",
+      "finalizing",
+      "app-password",
+    ];
+
+    if (stepsRequiringSourceAuth.includes(stored.step)) {
+      state.step = "source-handle";
+      state.needsReauth = true;
+      state.resumeToStep = stored.step as InboundMigrationState["step"];
+      migrationLog("resumeFromState: Requiring re-auth for step", {
+        originalStep: stored.step,
+      });
+    } else if (stored.step === "passkey-setup" && stored.passkeySetupToken) {
+      state.passkeySetupToken = stored.passkeySetupToken;
+      localClient = createLocalClient();
+      state.step = "passkey-setup";
+      migrationLog("resumeFromState: Restored passkey-setup with token");
+    } else if (stored.step === "success") {
+      state.step = "success";
+    } else if (stored.step === "error") {
+      state.step = "source-handle";
+      state.needsReauth = true;
+      migrationLog("resumeFromState: Error state, requiring re-auth");
+    } else {
+      state.step = stored.step as InboundMigrationState["step"];
+    }
   }
 
   function getLocalSession():
@@ -666,10 +932,15 @@ export function createInboundMigrationFlow() {
     get state() {
       return state;
     },
+    get passkeySetup() {
+      return passkeySetup;
+    },
     setStep,
     setError,
     loadLocalServerInfo,
-    loginToSource,
+    resolveSourcePds,
+    initiateOAuthLogin,
+    handleOAuthCallback,
     authenticateToLocal,
     checkHandleAvailability,
     startMigration,
@@ -680,6 +951,9 @@ export function createInboundMigrationFlow() {
     submitPlcToken,
     resendPlcToken,
     completeDidWebMigration,
+    startPasskeyRegistration,
+    completePasskeyRegistration,
+    proceedFromAppPassword,
     reset,
     resumeFromState,
     getLocalSession,
@@ -856,7 +1130,7 @@ export function createOutboundMigrationFlow() {
           await targetClient.uploadBlob(blobData, "application/octet-stream");
           migrated++;
           setProgress({ blobsMigrated: migrated });
-        } catch (e) {
+        } catch {
           state.progress.blobsFailed.push(blob.cid);
         }
       }
@@ -872,8 +1146,7 @@ export function createOutboundMigrationFlow() {
       const prefs = await localClient.getPreferences();
       await targetClient.putPreferences(prefs);
       setProgress({ prefsMigrated: true });
-    } catch {
-    }
+    } catch { /* optional, best-effort */ }
   }
 
   async function submitPlcToken(token: string): Promise<void> {
@@ -908,8 +1181,7 @@ export function createOutboundMigrationFlow() {
       try {
         await localClient.deactivateAccount(state.targetPdsUrl);
         setProgress({ deactivated: true });
-      } catch {
-      }
+      } catch { /* optional, best-effort */ }
 
       setStep("success");
       clearMigrationState();

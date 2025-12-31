@@ -217,7 +217,10 @@ async fn test_disable_invite_codes_by_account() {
         .expect("Failed to get invite codes");
     let list_body: Value = list_res.json().await.unwrap();
     let codes = list_body["codes"].as_array().unwrap();
-    let admin_codes: Vec<_> = codes.iter().filter(|c| c["forAccount"].as_str() == Some(&did)).collect();
+    let admin_codes: Vec<_> = codes
+        .iter()
+        .filter(|c| c["forAccount"].as_str() == Some(&did))
+        .collect();
     for code in admin_codes {
         assert_eq!(code["disabled"], true);
     }
