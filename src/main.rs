@@ -90,7 +90,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let app = tranquil_pds::app(state);
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+
+    let host = std::env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port: u16 = std::env::var("SERVER_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3000);
+
+    let addr: SocketAddr = format!("{}:{}", host, port)
+        .parse()
+        .map_err(|e| format!("Invalid SERVER_HOST or SERVER_PORT: {}", e))?;
+
     info!("listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
