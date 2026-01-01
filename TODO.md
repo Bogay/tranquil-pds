@@ -2,21 +2,6 @@
 
 ## Active development
 
-### Migration tool
-Seamless account migration built into the UI, inspired by pdsmoover. Users shouldn't need external tools or brain surgery on half-done account states.
-
-- [x] Inbound UI wizard: login to old PDS -> choose handle -> import -> PLC token flow
-- [x] Support `createAccount` with existing DID + service auth token
-- [x] Progress tracking with resume capability
-- [ ] Scheduled automatic backups (CAR export)
-- [ ] One-click restore from backup
-
-Outbound migration wizard exists but is disabled. Rethinking the approach: instead of a managed flow with `migratingTo` state, pds-hosted did:web users should just have direct control over their DID document. They can independently update serviceEndpoint, add/remove keys, export their repo, deactivate their account.
-
-- [ ] Remove `migratingTo` field and related state machine
-- [ ] Let did:web users edit their DID doc fields (serviceEndpoint, keys) whenever
-- [ ] Repo export as standalone feature, not tied to migration wizard
-
 ### Plugin system
 Extensible architecture allowing third-party plugins to add functionality. Going with wasm-based rather than scripting language.
 
@@ -69,3 +54,5 @@ Passkeys and 2FA: WebAuthn/FIDO2 passkey registration and authentication, TOTP w
 App password scopes: Granular permissions for app passwords using the same scope system as OAuth. Preset buttons for common use cases (full access, read-only, post-only), scope stored in session and preserved across token refresh, explicit RPC/repo/blob scope enforcement for restricted passwords.
 
 Account Delegation: Delegated accounts controlled by other accounts instead of passwords. OAuth delegation flow (authenticate as controller), scope-based permissions (owner/admin/editor/viewer presets), scope intersection (tokens limited to granted permissions), `act` claim for delegation tracking, creating delegated account flow, controller management UI, "act as" account switcher, comprehensive audit logging with actor/controller tracking, delegation-aware OAuth consent with permission limitation notices.
+
+Migration: OAuth-based inbound migration wizard with PLC token flow, offline restore from CAR file + rotation key for disaster recovery, scheduled automatic backups, standalone repo/blob export, did:web DID document editor for self-service identity management.

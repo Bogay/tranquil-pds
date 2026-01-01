@@ -382,8 +382,9 @@ pub async fn create_record_internal(
     let commit = jacquard_repo::commit::Commit::from_cbor(&commit_bytes)
         .map_err(|e| format!("Failed to parse commit: {:?}", e))?;
     let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+    let record_ipld = crate::util::json_to_ipld(record);
     let mut record_bytes = Vec::new();
-    serde_ipld_dagcbor::to_writer(&mut record_bytes, record)
+    serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld)
         .map_err(|e| format!("Failed to serialize record: {:?}", e))?;
     let record_cid = tracking_store
         .put(&record_bytes)

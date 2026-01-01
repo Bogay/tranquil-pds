@@ -41,7 +41,7 @@
 
     try {
       const response = await fetch(
-        `/xrpc/com.tranquil.delegation.getAuditLog?limit=${limit}&offset=${offset}`,
+        `/xrpc/_delegation.getAuditLog?limit=${limit}&offset=${offset}`,
         {
           headers: { 'Authorization': `Bearer ${auth.session.accessJwt}` }
         }

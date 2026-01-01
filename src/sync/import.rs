@@ -77,19 +77,30 @@ pub fn find_blob_refs_ipld(value: &Ipld, depth: usize) -> Vec<BlobRef> {
         Ipld::Map(obj) => {
             if let Some(Ipld::String(type_str)) = obj.get("$type")
                 && type_str == "blob"
-                && let Some(Ipld::Link(link_cid)) = obj.get("ref")
             {
-                let mime = obj.get("mimeType").and_then(|v| {
-                    if let Ipld::String(s) = v {
-                        Some(s.clone())
-                    } else {
-                        None
-                    }
-                });
-                return vec![BlobRef {
-                    cid: link_cid.to_string(),
-                    mime_type: mime,
-                }];
+                let cid_str = if let Some(Ipld::Link(link_cid)) = obj.get("ref") {
+                    Some(link_cid.to_string())
+                } else if let Some(Ipld::Map(ref_obj)) = obj.get("ref")
+                    && let Some(Ipld::String(link)) = ref_obj.get("$link")
+                {
+                    Some(link.clone())
+                } else {
+                    None
+                };
+
+                if let Some(cid) = cid_str {
+                    let mime = obj.get("mimeType").and_then(|v| {
+                        if let Ipld::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    });
+                    return vec![BlobRef {
+                        cid,
+                        mime_type: mime,
+                    }];
+                }
             }
             obj.values()
                 .flat_map(|v| find_blob_refs_ipld(v, depth + 1))

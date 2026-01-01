@@ -57,15 +57,15 @@ pub fn app(state: AppState) -> Router {
             get(api::server::get_session),
         )
         .route(
-            "/xrpc/com.tranquil.account.listSessions",
+            "/xrpc/_account.listSessions",
             get(api::server::list_sessions),
         )
         .route(
-            "/xrpc/com.tranquil.account.revokeSession",
+            "/xrpc/_account.revokeSession",
             post(api::server::revoke_session),
         )
         .route(
-            "/xrpc/com.tranquil.account.revokeAllSessions",
+            "/xrpc/_account.revokeAllSessions",
             post(api::server::revoke_all_sessions),
         )
         .route(
@@ -208,104 +208,93 @@ pub fn app(state: AppState) -> Router {
             post(api::server::reset_password),
         )
         .route(
-            "/xrpc/com.tranquil.account.changePassword",
+            "/xrpc/_account.changePassword",
             post(api::server::change_password),
         )
         .route(
-            "/xrpc/com.tranquil.account.removePassword",
+            "/xrpc/_account.removePassword",
             post(api::server::remove_password),
         )
         .route(
-            "/xrpc/com.tranquil.account.getPasswordStatus",
+            "/xrpc/_account.getPasswordStatus",
             get(api::server::get_password_status),
         )
         .route(
-            "/xrpc/com.tranquil.account.getReauthStatus",
+            "/xrpc/_account.getReauthStatus",
             get(api::server::get_reauth_status),
         )
         .route(
-            "/xrpc/com.tranquil.account.reauthPassword",
+            "/xrpc/_account.reauthPassword",
             post(api::server::reauth_password),
         )
+        .route("/xrpc/_account.reauthTotp", post(api::server::reauth_totp))
         .route(
-            "/xrpc/com.tranquil.account.reauthTotp",
-            post(api::server::reauth_totp),
-        )
-        .route(
-            "/xrpc/com.tranquil.account.reauthPasskeyStart",
+            "/xrpc/_account.reauthPasskeyStart",
             post(api::server::reauth_passkey_start),
         )
         .route(
-            "/xrpc/com.tranquil.account.reauthPasskeyFinish",
+            "/xrpc/_account.reauthPasskeyFinish",
             post(api::server::reauth_passkey_finish),
         )
         .route(
-            "/xrpc/com.tranquil.account.getLegacyLoginPreference",
+            "/xrpc/_account.getLegacyLoginPreference",
             get(api::server::get_legacy_login_preference),
         )
         .route(
-            "/xrpc/com.tranquil.account.updateLegacyLoginPreference",
+            "/xrpc/_account.updateLegacyLoginPreference",
             post(api::server::update_legacy_login_preference),
         )
         .route(
-            "/xrpc/com.tranquil.account.updateLocale",
+            "/xrpc/_account.updateLocale",
             post(api::server::update_locale),
         )
         .route(
-            "/xrpc/com.tranquil.account.listTrustedDevices",
+            "/xrpc/_account.listTrustedDevices",
             get(api::server::list_trusted_devices),
         )
         .route(
-            "/xrpc/com.tranquil.account.revokeTrustedDevice",
+            "/xrpc/_account.revokeTrustedDevice",
             post(api::server::revoke_trusted_device),
         )
         .route(
-            "/xrpc/com.tranquil.account.updateTrustedDevice",
+            "/xrpc/_account.updateTrustedDevice",
             post(api::server::update_trusted_device),
         )
         .route(
-            "/xrpc/com.tranquil.account.createPasskeyAccount",
+            "/xrpc/_account.createPasskeyAccount",
             post(api::server::create_passkey_account),
         )
         .route(
-            "/xrpc/com.tranquil.account.startPasskeyRegistrationForSetup",
+            "/xrpc/_account.startPasskeyRegistrationForSetup",
             post(api::server::start_passkey_registration_for_setup),
         )
         .route(
-            "/xrpc/com.tranquil.account.completePasskeySetup",
+            "/xrpc/_account.completePasskeySetup",
             post(api::server::complete_passkey_setup),
         )
         .route(
-            "/xrpc/com.tranquil.account.requestPasskeyRecovery",
+            "/xrpc/_account.requestPasskeyRecovery",
             post(api::server::request_passkey_recovery),
         )
         .route(
-            "/xrpc/com.tranquil.account.recoverPasskeyAccount",
+            "/xrpc/_account.recoverPasskeyAccount",
             post(api::server::recover_passkey_account),
         )
         .route(
-            "/xrpc/com.tranquil.account.getMigrationStatus",
-            get(api::server::get_migration_status),
-        )
-        .route(
-            "/xrpc/com.tranquil.account.updateMigrationForwarding",
-            post(api::server::update_migration_forwarding),
-        )
-        .route(
-            "/xrpc/com.tranquil.account.clearMigrationForwarding",
-            post(api::server::clear_migration_forwarding),
-        )
-        .route(
-            "/xrpc/com.tranquil.account.updateDidDocument",
+            "/xrpc/_account.updateDidDocument",
             post(api::server::update_did_document),
         )
         .route(
-            "/xrpc/com.tranquil.account.getDidDocument",
+            "/xrpc/_account.getDidDocument",
             get(api::server::get_did_document),
         )
         .route(
             "/xrpc/com.atproto.server.requestEmailUpdate",
             post(api::server::request_email_update),
+        )
+        .route(
+            "/xrpc/_checkEmailVerified",
+            post(api::server::check_email_verified),
         )
         .route(
             "/xrpc/com.atproto.server.confirmEmail",
@@ -432,15 +421,15 @@ pub fn app(state: AppState) -> Router {
             get(api::admin::get_invite_codes),
         )
         .route(
-            "/xrpc/com.tranquil.admin.getServerStats",
+            "/xrpc/_admin.getServerStats",
             get(api::admin::get_server_stats),
         )
         .route(
-            "/xrpc/com.tranquil.server.getConfig",
+            "/xrpc/_server.getConfig",
             get(api::admin::get_server_config),
         )
         .route(
-            "/xrpc/com.tranquil.admin.updateServerConfig",
+            "/xrpc/_admin.updateServerConfig",
             post(api::admin::update_server_config),
         )
         .route(
@@ -575,57 +564,72 @@ pub fn app(state: AppState) -> Router {
             post(api::temp::dereference_scope),
         )
         .route(
-            "/xrpc/com.tranquil.account.getNotificationPrefs",
+            "/xrpc/_account.getNotificationPrefs",
             get(api::notification_prefs::get_notification_prefs),
         )
         .route(
-            "/xrpc/com.tranquil.account.updateNotificationPrefs",
+            "/xrpc/_account.updateNotificationPrefs",
             post(api::notification_prefs::update_notification_prefs),
         )
         .route(
-            "/xrpc/com.tranquil.account.getNotificationHistory",
+            "/xrpc/_account.getNotificationHistory",
             get(api::notification_prefs::get_notification_history),
         )
         .route(
-            "/xrpc/com.tranquil.account.confirmChannelVerification",
+            "/xrpc/_account.confirmChannelVerification",
             post(api::verification::confirm_channel_verification),
         )
         .route(
-            "/xrpc/com.tranquil.account.verifyToken",
+            "/xrpc/_account.verifyToken",
             post(api::server::verify_token),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.listControllers",
+            "/xrpc/_delegation.listControllers",
             get(api::delegation::list_controllers),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.addController",
+            "/xrpc/_delegation.addController",
             post(api::delegation::add_controller),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.removeController",
+            "/xrpc/_delegation.removeController",
             post(api::delegation::remove_controller),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.updateControllerScopes",
+            "/xrpc/_delegation.updateControllerScopes",
             post(api::delegation::update_controller_scopes),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.listControlledAccounts",
+            "/xrpc/_delegation.listControlledAccounts",
             get(api::delegation::list_controlled_accounts),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.getAuditLog",
+            "/xrpc/_delegation.getAuditLog",
             get(api::delegation::get_audit_log),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.getScopePresets",
+            "/xrpc/_delegation.getScopePresets",
             get(api::delegation::get_scope_presets),
         )
         .route(
-            "/xrpc/com.tranquil.delegation.createDelegatedAccount",
+            "/xrpc/_delegation.createDelegatedAccount",
             post(api::delegation::create_delegated_account),
         )
+        .route("/xrpc/_backup.listBackups", get(api::backup::list_backups))
+        .route("/xrpc/_backup.getBackup", get(api::backup::get_backup))
+        .route(
+            "/xrpc/_backup.createBackup",
+            post(api::backup::create_backup),
+        )
+        .route(
+            "/xrpc/_backup.deleteBackup",
+            post(api::backup::delete_backup),
+        )
+        .route(
+            "/xrpc/_backup.setEnabled",
+            post(api::backup::set_backup_enabled),
+        )
+        .route("/xrpc/_backup.exportBlobs", get(api::backup::export_blobs))
         .route(
             "/xrpc/app.bsky.ageassurance.getState",
             get(api::age_assurance::get_state),

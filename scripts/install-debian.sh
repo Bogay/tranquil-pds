@@ -44,9 +44,10 @@ nuke_installation() {
     sudo -u postgres psql -c "DROP DATABASE IF EXISTS pds;" 2>/dev/null || true
     sudo -u postgres psql -c "DROP USER IF EXISTS tranquil_pds;" 2>/dev/null || true
 
-    log_info "Removing minio bucket..."
+    log_info "Removing minio buckets..."
     if command -v mc &>/dev/null; then
         mc rb local/pds-blobs --force 2>/dev/null || true
+        mc rb local/pds-backups --force 2>/dev/null || true
         mc alias remove local 2>/dev/null || true
     fi
     systemctl stop minio 2>/dev/null || true
@@ -78,7 +79,7 @@ if [[ -f /etc/tranquil-pds/tranquil-pds.env ]] || [[ -d /opt/tranquil-pds ]] || 
             echo "  - PostgreSQL database 'pds' and all data"
             echo "  - All Tranquil PDS configuration and credentials"
             echo "  - All source code in /opt/tranquil-pds"
-            echo "  - MinIO bucket 'pds-blobs' and all blobs"
+            echo "  - MinIO buckets 'pds-blobs' and 'pds-backups' and all data"
             echo ""
             read -p "Type 'NUKE' to confirm: " CONFIRM_NUKE
             if [[ "$CONFIRM_NUKE" == "NUKE" ]]; then
@@ -274,7 +275,8 @@ fi
 mc alias remove local 2>/dev/null || true
 mc alias set local http://localhost:9000 minioadmin "${MINIO_PASSWORD}" --api S3v4
 mc mb local/pds-blobs --ignore-existing
-log_success "minio bucket created"
+mc mb local/pds-backups --ignore-existing
+log_success "minio buckets created"
 
 log_info "Installing rust..."
 if [[ -f "$HOME/.cargo/env" ]]; then
@@ -382,6 +384,7 @@ DATABASE_MIN_CONNECTIONS=10
 S3_ENDPOINT=http://localhost:9000
 AWS_REGION=us-east-1
 S3_BUCKET=pds-blobs
+BACKUP_S3_BUCKET=pds-backups
 AWS_ACCESS_KEY_ID=minioadmin
 AWS_SECRET_ACCESS_KEY=${MINIO_PASSWORD}
 VALKEY_URL=redis://localhost:6379

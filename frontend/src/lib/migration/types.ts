@@ -13,20 +13,27 @@ export type InboundStep =
   | "success"
   | "error";
 
-export type AuthMethod = "password" | "passkey";
-
-export type OutboundStep =
+export type OfflineInboundStep =
   | "welcome"
-  | "target-pds"
-  | "new-account"
+  | "provide-did"
+  | "upload-car"
+  | "provide-rotation-key"
+  | "choose-handle"
   | "review"
-  | "migrating"
-  | "plc-token"
+  | "creating"
+  | "importing"
+  | "migrating-blobs"
+  | "plc-signing"
+  | "email-verify"
+  | "passkey-setup"
+  | "app-password"
   | "finalizing"
   | "success"
   | "error";
 
-export type MigrationDirection = "inbound" | "outbound";
+export type AuthMethod = "password" | "passkey";
+
+export type MigrationDirection = "inbound";
 
 export interface MigrationProgress {
   repoExported: boolean;
@@ -68,27 +75,34 @@ export interface InboundMigrationState {
   resumeToStep?: InboundStep;
 }
 
-export interface OutboundMigrationState {
-  direction: "outbound";
-  step: OutboundStep;
-  localDid: string;
-  localHandle: string;
-  targetPdsUrl: string;
-  targetPdsDid: string;
+export interface OfflineInboundMigrationState {
+  direction: "offline-inbound";
+  step: OfflineInboundStep;
+  userDid: string;
+  carFile: Uint8Array | null;
+  carFileName: string;
+  carSizeBytes: number;
+  carNeedsReupload: boolean;
+  rotationKey: string;
+  rotationKeyDidKey: string;
+  oldPdsUrl: string | null;
   targetHandle: string;
   targetEmail: string;
   targetPassword: string;
   inviteCode: string;
-  targetAccessToken: string | null;
-  targetRefreshToken: string | null;
-  serviceAuthToken: string | null;
-  plcToken: string;
+  authMethod: AuthMethod;
+  localAccessToken: string | null;
+  localRefreshToken: string | null;
+  passkeySetupToken: string | null;
+  generatedAppPassword: string | null;
+  generatedAppPasswordName: string | null;
+  emailVerifyToken: string;
   progress: MigrationProgress;
   error: string | null;
-  targetServerInfo: ServerDescription | null;
+  plcUpdatedTemporarily: boolean;
 }
 
-export type MigrationState = InboundMigrationState | OutboundMigrationState;
+export type MigrationState = InboundMigrationState;
 
 export interface StoredMigrationState {
   version: 1;

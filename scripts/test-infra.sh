@@ -83,15 +83,19 @@ start_infra() {
         echo "Waiting for Valkey... ($i/30)"
         sleep 1
     done
-    echo "Creating MinIO bucket..."
+    echo "Creating MinIO buckets..."
     $CONTAINER_CMD run --rm --network host \
         -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
         minio/mc:latest mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
+    $CONTAINER_CMD run --rm --network host \
+        -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
+        minio/mc:latest mb minio/test-backups --ignore-existing >/dev/null 2>&1 || true
     cat > "$INFRA_FILE" << EOF
 export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
 export TEST_DB_PORT="${PG_PORT}"
 export S3_ENDPOINT="http://127.0.0.1:${MINIO_PORT}"
 export S3_BUCKET="test-bucket"
+export BACKUP_S3_BUCKET="test-backups"
 export AWS_ACCESS_KEY_ID="minioadmin"
 export AWS_SECRET_ACCESS_KEY="minioadmin"
 export AWS_REGION="us-east-1"

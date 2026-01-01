@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT u.id as user_id, u.did, r.repo_root_cid, r.repo_rev\n        FROM users u\n        JOIN repos r ON r.user_id = u.id\n        WHERE u.backup_enabled = true\n          AND u.deactivated_at IS NULL\n          AND (\n            NOT EXISTS (\n              SELECT 1 FROM account_backups ab WHERE ab.user_id = u.id\n            )\n            OR (\n              SELECT MAX(ab.created_at) FROM account_backups ab WHERE ab.user_id = u.id\n            ) < NOW() - make_interval(secs => $1)\n          )\n        LIMIT 50\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "repo_root_cid",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "repo_rev",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "d6d533b728887666b2a9ad2d2f9e6b173131842bb9b5f9068175397fd30a50ab"
+}

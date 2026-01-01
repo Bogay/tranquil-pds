@@ -111,7 +111,7 @@
   {#if auth.session?.isAdmin}
     <section class="create-section">
       <button onclick={handleCreate} disabled={creating}>
-        {creating ? $_('inviteCodes.creating') : $_('inviteCodes.createNew')}
+        {creating ? $_('common.creating') : $_('inviteCodes.createNew')}
       </button>
     </section>
   {/if}

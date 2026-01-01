@@ -205,6 +205,38 @@ export const api = {
     return data;
   },
 
+  async createAccountWithServiceAuth(
+    serviceAuthToken: string,
+    params: {
+      did: string;
+      handle: string;
+      email: string;
+      password: string;
+      inviteCode?: string;
+    },
+  ): Promise<Session> {
+    const url = `${API_BASE}/com.atproto.server.createAccount`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${serviceAuthToken}`,
+      },
+      body: JSON.stringify({
+        did: params.did,
+        handle: params.handle,
+        email: params.email,
+        password: params.password,
+        inviteCode: params.inviteCode,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new ApiError(response.status, data.error, data.message);
+    }
+    return data;
+  },
+
   async confirmSignup(
     did: string,
     verificationCode: string,
@@ -226,6 +258,13 @@ export const api = {
     return xrpc("com.atproto.server.createSession", {
       method: "POST",
       body: { identifier, password },
+    });
+  },
+
+  async checkEmailVerified(identifier: string): Promise<{ verified: boolean }> {
+    return xrpc("_checkEmailVerified", {
+      method: "POST",
+      body: { identifier },
     });
   },
 
@@ -379,7 +418,7 @@ export const api = {
     signalNumber: string | null;
     signalVerified: boolean;
   }> {
-    return xrpc("com.tranquil.account.getNotificationPrefs", { token });
+    return xrpc("_account.getNotificationPrefs", { token });
   },
 
   async updateNotificationPrefs(token: string, prefs: {
@@ -388,7 +427,7 @@ export const api = {
     telegramUsername?: string;
     signalNumber?: string;
   }): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.updateNotificationPrefs", {
+    return xrpc("_account.updateNotificationPrefs", {
       method: "POST",
       token,
       body: prefs,
@@ -401,7 +440,7 @@ export const api = {
     identifier: string,
     code: string,
   ): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.confirmChannelVerification", {
+    return xrpc("_account.confirmChannelVerification", {
       method: "POST",
       token,
       body: { channel, identifier, code },
@@ -418,7 +457,7 @@ export const api = {
       body: string;
     }>;
   }> {
-    return xrpc("com.tranquil.account.getNotificationHistory", { token });
+    return xrpc("_account.getNotificationHistory", { token });
   },
 
   async getServerStats(token: string): Promise<{
@@ -427,7 +466,7 @@ export const api = {
     recordCount: number;
     blobStorageBytes: number;
   }> {
-    return xrpc("com.tranquil.admin.getServerStats", { token });
+    return xrpc("_admin.getServerStats", { token });
   },
 
   async getServerConfig(): Promise<{
@@ -438,7 +477,7 @@ export const api = {
     secondaryColorDark: string | null;
     logoCid: string | null;
   }> {
-    return xrpc("com.tranquil.server.getConfig");
+    return xrpc("_server.getConfig");
   },
 
   async updateServerConfig(
@@ -452,7 +491,7 @@ export const api = {
       logoCid?: string;
     },
   ): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.admin.updateServerConfig", {
+    return xrpc("_admin.updateServerConfig", {
       method: "POST",
       token,
       body: config,
@@ -495,7 +534,7 @@ export const api = {
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
-    await xrpc("com.tranquil.account.changePassword", {
+    await xrpc("_account.changePassword", {
       method: "POST",
       token,
       body: { currentPassword, newPassword },
@@ -503,27 +542,27 @@ export const api = {
   },
 
   async removePassword(token: string): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.removePassword", {
+    return xrpc("_account.removePassword", {
       method: "POST",
       token,
     });
   },
 
   async getPasswordStatus(token: string): Promise<{ hasPassword: boolean }> {
-    return xrpc("com.tranquil.account.getPasswordStatus", { token });
+    return xrpc("_account.getPasswordStatus", { token });
   },
 
   async getLegacyLoginPreference(
     token: string,
   ): Promise<{ allowLegacyLogin: boolean; hasMfa: boolean }> {
-    return xrpc("com.tranquil.account.getLegacyLoginPreference", { token });
+    return xrpc("_account.getLegacyLoginPreference", { token });
   },
 
   async updateLegacyLoginPreference(
     token: string,
     allowLegacyLogin: boolean,
   ): Promise<{ allowLegacyLogin: boolean }> {
-    return xrpc("com.tranquil.account.updateLegacyLoginPreference", {
+    return xrpc("_account.updateLegacyLoginPreference", {
       method: "POST",
       token,
       body: { allowLegacyLogin },
@@ -534,7 +573,7 @@ export const api = {
     token: string,
     preferredLocale: string,
   ): Promise<{ preferredLocale: string }> {
-    return xrpc("com.tranquil.account.updateLocale", {
+    return xrpc("_account.updateLocale", {
       method: "POST",
       token,
       body: { preferredLocale },
@@ -551,11 +590,11 @@ export const api = {
       isCurrent: boolean;
     }>;
   }> {
-    return xrpc("com.tranquil.account.listSessions", { token });
+    return xrpc("_account.listSessions", { token });
   },
 
   async revokeSession(token: string, sessionId: string): Promise<void> {
-    await xrpc("com.tranquil.account.revokeSession", {
+    await xrpc("_account.revokeSession", {
       method: "POST",
       token,
       body: { sessionId },
@@ -563,7 +602,7 @@ export const api = {
   },
 
   async revokeAllSessions(token: string): Promise<{ revokedCount: number }> {
-    return xrpc("com.tranquil.account.revokeAllSessions", {
+    return xrpc("_account.revokeAllSessions", {
       method: "POST",
       token,
     });
@@ -868,14 +907,14 @@ export const api = {
       lastSeenAt: string;
     }>;
   }> {
-    return xrpc("com.tranquil.account.listTrustedDevices", { token });
+    return xrpc("_account.listTrustedDevices", { token });
   },
 
   async revokeTrustedDevice(
     token: string,
     deviceId: string,
   ): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.revokeTrustedDevice", {
+    return xrpc("_account.revokeTrustedDevice", {
       method: "POST",
       token,
       body: { deviceId },
@@ -887,7 +926,7 @@ export const api = {
     deviceId: string,
     friendlyName: string,
   ): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.updateTrustedDevice", {
+    return xrpc("_account.updateTrustedDevice", {
       method: "POST",
       token,
       body: { deviceId, friendlyName },
@@ -899,14 +938,14 @@ export const api = {
     lastReauthAt: string | null;
     availableMethods: string[];
   }> {
-    return xrpc("com.tranquil.account.getReauthStatus", { token });
+    return xrpc("_account.getReauthStatus", { token });
   },
 
   async reauthPassword(
     token: string,
     password: string,
   ): Promise<{ success: boolean; reauthAt: string }> {
-    return xrpc("com.tranquil.account.reauthPassword", {
+    return xrpc("_account.reauthPassword", {
       method: "POST",
       token,
       body: { password },
@@ -917,7 +956,7 @@ export const api = {
     token: string,
     code: string,
   ): Promise<{ success: boolean; reauthAt: string }> {
-    return xrpc("com.tranquil.account.reauthTotp", {
+    return xrpc("_account.reauthTotp", {
       method: "POST",
       token,
       body: { code },
@@ -925,7 +964,7 @@ export const api = {
   },
 
   async reauthPasskeyStart(token: string): Promise<{ options: unknown }> {
-    return xrpc("com.tranquil.account.reauthPasskeyStart", {
+    return xrpc("_account.reauthPasskeyStart", {
       method: "POST",
       token,
     });
@@ -935,7 +974,7 @@ export const api = {
     token: string,
     credential: unknown,
   ): Promise<{ success: boolean; reauthAt: string }> {
-    return xrpc("com.tranquil.account.reauthPasskeyFinish", {
+    return xrpc("_account.reauthPasskeyFinish", {
       method: "POST",
       token,
       body: { credential },
@@ -982,7 +1021,7 @@ export const api = {
     setupToken: string;
     setupExpiresAt: string;
   }> {
-    const url = `${API_BASE}/com.tranquil.account.createPasskeyAccount`;
+    const url = `${API_BASE}/_account.createPasskeyAccount`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -1009,7 +1048,7 @@ export const api = {
     setupToken: string,
     friendlyName?: string,
   ): Promise<{ options: unknown }> {
-    return xrpc("com.tranquil.account.startPasskeyRegistrationForSetup", {
+    return xrpc("_account.startPasskeyRegistrationForSetup", {
       method: "POST",
       body: { did, setupToken, friendlyName },
     });
@@ -1026,14 +1065,14 @@ export const api = {
     appPassword: string;
     appPasswordName: string;
   }> {
-    return xrpc("com.tranquil.account.completePasskeySetup", {
+    return xrpc("_account.completePasskeySetup", {
       method: "POST",
       body: { did, setupToken, passkeyCredential, passkeyFriendlyName },
     });
   },
 
   async requestPasskeyRecovery(email: string): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.requestPasskeyRecovery", {
+    return xrpc("_account.requestPasskeyRecovery", {
       method: "POST",
       body: { email },
     });
@@ -1044,7 +1083,7 @@ export const api = {
     recoveryToken: string,
     newPassword: string,
   ): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.recoverPasskeyAccount", {
+    return xrpc("_account.recoverPasskeyAccount", {
       method: "POST",
       body: { did, recoveryToken, newPassword },
     });
@@ -1077,7 +1116,7 @@ export const api = {
     purpose: string;
     channel: string;
   }> {
-    return xrpc("com.tranquil.account.verifyToken", {
+    return xrpc("_account.verifyToken", {
       method: "POST",
       body: { token, identifier },
       token: accessToken,
@@ -1085,7 +1124,7 @@ export const api = {
   },
 
   async getDidDocument(token: string): Promise<DidDocument> {
-    return xrpc("com.tranquil.account.getDidDocument", { token });
+    return xrpc("_account.getDidDocument", { token });
   },
 
   async updateDidDocument(
@@ -1096,7 +1135,7 @@ export const api = {
       serviceEndpoint?: string;
     },
   ): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.updateDidDocument", {
+    return xrpc("_account.updateDidDocument", {
       method: "POST",
       token,
       body: params,
@@ -1106,38 +1145,107 @@ export const api = {
   async deactivateAccount(
     token: string,
     deleteAfter?: string,
-    migratingTo?: string,
   ): Promise<void> {
     await xrpc("com.atproto.server.deactivateAccount", {
       method: "POST",
       token,
-      body: { deleteAfter, migratingTo },
+      body: { deleteAfter },
     });
   },
 
-  async getMigrationStatus(token: string): Promise<{
-    migratedToPds?: string;
-    migratedAt?: string;
-    forwardingEnabled: boolean;
+  async getRepo(token: string, did: string): Promise<ArrayBuffer> {
+    const url = `${API_BASE}/com.atproto.sync.getRepo?did=${
+      encodeURIComponent(did)
+    }`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(res.status, err.error, err.message);
+    }
+    return res.arrayBuffer();
+  },
+
+  async listBackups(token: string): Promise<{
+    backups: Array<{
+      id: string;
+      repoRev: string;
+      repoRootCid: string;
+      blockCount: number;
+      sizeBytes: number;
+      createdAt: string;
+    }>;
+    backupEnabled: boolean;
   }> {
-    return xrpc("com.tranquil.account.getMigrationStatus", { token });
+    return xrpc("_backup.listBackups", { token });
   },
 
-  async updateMigrationForwarding(
+  async getBackup(token: string, id: string): Promise<Blob> {
+    const url = `${API_BASE}/_backup.getBackup?id=${encodeURIComponent(id)}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(res.status, err.error, err.message);
+    }
+    return res.blob();
+  },
+
+  async createBackup(token: string): Promise<{
+    id: string;
+    repoRev: string;
+    sizeBytes: number;
+    blockCount: number;
+  }> {
+    return xrpc("_backup.createBackup", {
+      method: "POST",
+      token,
+    });
+  },
+
+  async deleteBackup(token: string, id: string): Promise<void> {
+    await xrpc("_backup.deleteBackup", {
+      method: "POST",
+      token,
+      params: { id },
+    });
+  },
+
+  async setBackupEnabled(
     token: string,
-    forwardingPds?: string,
-  ): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.updateMigrationForwarding", {
+    enabled: boolean,
+  ): Promise<{ enabled: boolean }> {
+    return xrpc("_backup.setEnabled", {
       method: "POST",
       token,
-      body: { forwardingPds },
+      body: { enabled },
     });
   },
 
-  async clearMigrationForwarding(token: string): Promise<{ success: boolean }> {
-    return xrpc("com.tranquil.account.clearMigrationForwarding", {
+  async importRepo(token: string, car: Uint8Array): Promise<void> {
+    const url = `${API_BASE}/com.atproto.repo.importRepo`;
+    const res = await fetch(url, {
       method: "POST",
-      token,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/vnd.ipld.car",
+      },
+      body: car,
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(res.status, err.error, err.message);
+    }
   },
 };

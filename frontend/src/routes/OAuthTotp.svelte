@@ -121,7 +121,7 @@
         {$_('common.cancel')}
       </button>
       <button type="submit" class="submit-btn" disabled={submitting || !canSubmit}>
-        {submitting ? $_('oauth.totp.verifying') : $_('oauth.totp.verify')}
+        {submitting ? $_('common.verifying') : $_('common.verify')}
       </button>
     </div>
   </form>

@@ -5,9 +5,15 @@
   import { base64UrlEncode, prepareWebAuthnCreationOptions } from '../../lib/migration/atproto-client'
   import { _ } from '../../lib/i18n'
   import '../../styles/migration.css'
+  import ErrorStep from './ErrorStep.svelte'
+  import SuccessStep from './SuccessStep.svelte'
+  import ChooseHandleStep from './ChooseHandleStep.svelte'
+  import EmailVerifyStep from './EmailVerifyStep.svelte'
+  import PasskeySetupStep from './PasskeySetupStep.svelte'
+  import AppPasswordStep from './AppPasswordStep.svelte'
 
   interface ResumeInfo {
-    direction: 'inbound' | 'outbound'
+    direction: 'inbound'
     sourceHandle: string
     targetHandle: string
     sourcePdsUrl: string
@@ -37,8 +43,6 @@
   let checkingHandle = $state(false)
   let selectedAuthMethod = $state<AuthMethod>('password')
   let passkeyName = $state('')
-  let appPasswordCopied = $state(false)
-  let appPasswordAcknowledged = $state(false)
 
   const isResuming = $derived(flow.state.needsReauth === true)
   const isDidWeb = $derived(flow.state.sourceDid.startsWith("did:web:"))
@@ -234,13 +238,6 @@
     }
   }
 
-  function copyAppPassword() {
-    if (flow.state.generatedAppPassword) {
-      navigator.clipboard.writeText(flow.state.generatedAppPassword)
-      appPasswordCopied = true
-    }
-  }
-
   async function handleProceedFromAppPassword() {
     loading = true
     try {
@@ -352,8 +349,8 @@
       </label>
 
       <div class="button-row">
-        <button class="ghost" onclick={onBack}>{$_('migration.inbound.common.cancel')}</button>
-        <button disabled={!understood} onclick={() => flow.setStep('source-handle')}>
+        <button type="button" class="ghost" onclick={onBack}>{$_('migration.inbound.common.cancel')}</button>
+        <button type="button" disabled={!understood} onclick={() => flow.setStep('source-handle')}>
           {$_('migration.inbound.common.continue')}
         </button>
       </div>
@@ -409,131 +406,29 @@
     </div>
 
   {:else if flow.state.step === 'choose-handle'}
-    <div class="step-content">
-      <h2>{$_('migration.inbound.chooseHandle.title')}</h2>
-      <p>{$_('migration.inbound.chooseHandle.desc')}</p>
-
-      <div class="current-info">
-        <span class="label">{$_('migration.inbound.chooseHandle.migratingFrom')}:</span>
-        <span class="value">{flow.state.sourceHandle}</span>
-      </div>
-
-      <div class="field">
-        <label for="new-handle">{$_('migration.inbound.chooseHandle.newHandle')}</label>
-        <div class="handle-input-group">
-          <input
-            id="new-handle"
-            type="text"
-            placeholder="username"
-            bind:value={handleInput}
-            onblur={checkHandle}
-          />
-          {#if serverInfo && serverInfo.availableUserDomains.length > 0 && !handleInput.includes('.')}
-            <select bind:value={selectedDomain}>
-              {#each serverInfo.availableUserDomains as domain}
-                <option value={domain}>.{domain}</option>
-              {/each}
-            </select>
-          {/if}
-        </div>
-
-        {#if checkingHandle}
-          <p class="hint">{$_('migration.inbound.chooseHandle.checkingAvailability')}</p>
-        {:else if handleAvailable === true}
-          <p class="hint" style="color: var(--success-text)">{$_('migration.inbound.chooseHandle.handleAvailable')}</p>
-        {:else if handleAvailable === false}
-          <p class="hint error">{$_('migration.inbound.chooseHandle.handleTaken')}</p>
-        {:else}
-          <p class="hint">{$_('migration.inbound.chooseHandle.handleHint')}</p>
-        {/if}
-      </div>
-
-      <div class="field">
-        <label for="email">{$_('migration.inbound.chooseHandle.email')}</label>
-        <input
-          id="email"
-          type="email"
-          placeholder="you@example.com"
-          bind:value={flow.state.targetEmail}
-          oninput={(e) => flow.updateField('targetEmail', (e.target as HTMLInputElement).value)}
-          required
-        />
-      </div>
-
-      <div class="field">
-        <label>{$_('migration.inbound.chooseHandle.authMethod')}</label>
-        <div class="auth-method-options">
-          <label class="auth-option" class:selected={selectedAuthMethod === 'password'}>
-            <input
-              type="radio"
-              name="auth-method"
-              value="password"
-              bind:group={selectedAuthMethod}
-            />
-            <div class="auth-option-content">
-              <strong>{$_('migration.inbound.chooseHandle.authPassword')}</strong>
-              <span>{$_('migration.inbound.chooseHandle.authPasswordDesc')}</span>
-            </div>
-          </label>
-          <label class="auth-option" class:selected={selectedAuthMethod === 'passkey'}>
-            <input
-              type="radio"
-              name="auth-method"
-              value="passkey"
-              bind:group={selectedAuthMethod}
-            />
-            <div class="auth-option-content">
-              <strong>{$_('migration.inbound.chooseHandle.authPasskey')}</strong>
-              <span>{$_('migration.inbound.chooseHandle.authPasskeyDesc')}</span>
-            </div>
-          </label>
-        </div>
-      </div>
-
-      {#if selectedAuthMethod === 'password'}
-        <div class="field">
-          <label for="new-password">{$_('migration.inbound.chooseHandle.password')}</label>
-          <input
-            id="new-password"
-            type="password"
-            placeholder="Password for your new account"
-            bind:value={flow.state.targetPassword}
-            oninput={(e) => flow.updateField('targetPassword', (e.target as HTMLInputElement).value)}
-            required
-            minlength="8"
-          />
-          <p class="hint">{$_('migration.inbound.chooseHandle.passwordHint')}</p>
-        </div>
-      {:else}
-        <div class="info-box">
-          <p>{$_('migration.inbound.chooseHandle.passkeyInfo')}</p>
-        </div>
-      {/if}
-
-      {#if serverInfo?.inviteCodeRequired}
-        <div class="field">
-          <label for="invite">{$_('migration.inbound.chooseHandle.inviteCode')}</label>
-          <input
-            id="invite"
-            type="text"
-            placeholder="Enter invite code"
-            bind:value={flow.state.inviteCode}
-            oninput={(e) => flow.updateField('inviteCode', (e.target as HTMLInputElement).value)}
-            required
-          />
-        </div>
-      {/if}
-
-      <div class="button-row">
-        <button class="ghost" onclick={() => flow.setStep('source-handle')}>{$_('migration.inbound.common.back')}</button>
-        <button
-          disabled={!handleInput.trim() || !flow.state.targetEmail || (selectedAuthMethod === 'password' && !flow.state.targetPassword) || handleAvailable === false}
-          onclick={proceedToReviewWithAuth}
-        >
-          {$_('migration.inbound.common.continue')}
-        </button>
-      </div>
-    </div>
+    <ChooseHandleStep
+      {handleInput}
+      {selectedDomain}
+      {handleAvailable}
+      {checkingHandle}
+      email={flow.state.targetEmail}
+      password={flow.state.targetPassword}
+      authMethod={selectedAuthMethod}
+      inviteCode={flow.state.inviteCode}
+      {serverInfo}
+      migratingFromLabel={$_('migration.inbound.chooseHandle.migratingFrom')}
+      migratingFromValue={flow.state.sourceHandle}
+      {loading}
+      onHandleChange={(h) => handleInput = h}
+      onDomainChange={(d) => selectedDomain = d}
+      onCheckHandle={checkHandle}
+      onEmailChange={(e) => flow.updateField('targetEmail', e)}
+      onPasswordChange={(p) => flow.updateField('targetPassword', p)}
+      onAuthMethodChange={(m) => selectedAuthMethod = m}
+      onInviteCodeChange={(c) => flow.updateField('inviteCode', c)}
+      onBack={() => flow.setStep('source-handle')}
+      onContinue={proceedToReviewWithAuth}
+    />
 
   {:else if flow.state.step === 'review'}
     <div class="step-content">
@@ -620,108 +515,32 @@
     </div>
 
   {:else if flow.state.step === 'passkey-setup'}
-    <div class="step-content">
-      <h2>{$_('migration.inbound.passkeySetup.title')}</h2>
-      <p>{$_('migration.inbound.passkeySetup.desc')}</p>
-
-      {#if flow.state.error}
-        <div class="message error">
-          {flow.state.error}
-        </div>
-      {/if}
-
-      <div class="field">
-        <label for="passkey-name">{$_('migration.inbound.passkeySetup.nameLabel')}</label>
-        <input
-          id="passkey-name"
-          type="text"
-          placeholder={$_('migration.inbound.passkeySetup.namePlaceholder')}
-          bind:value={passkeyName}
-          disabled={loading}
-        />
-        <p class="hint">{$_('migration.inbound.passkeySetup.nameHint')}</p>
-      </div>
-
-      <div class="passkey-section">
-        <p>{$_('migration.inbound.passkeySetup.instructions')}</p>
-        <button class="primary" onclick={registerPasskey} disabled={loading}>
-          {loading ? $_('migration.inbound.passkeySetup.registering') : $_('migration.inbound.passkeySetup.register')}
-        </button>
-      </div>
-    </div>
+    <PasskeySetupStep
+      {passkeyName}
+      {loading}
+      error={flow.state.error}
+      onPasskeyNameChange={(n) => passkeyName = n}
+      onRegister={registerPasskey}
+    />
 
   {:else if flow.state.step === 'app-password'}
-    <div class="step-content">
-      <h2>{$_('migration.inbound.appPassword.title')}</h2>
-      <p>{$_('migration.inbound.appPassword.desc')}</p>
-
-      <div class="warning-box">
-        <strong>{$_('migration.inbound.appPassword.warning')}</strong>
-      </div>
-
-      <div class="app-password-display">
-        <div class="app-password-label">
-          {$_('migration.inbound.appPassword.label')}: <strong>{flow.state.generatedAppPasswordName}</strong>
-        </div>
-        <code class="app-password-code">{flow.state.generatedAppPassword}</code>
-        <button type="button" class="copy-btn" onclick={copyAppPassword}>
-          {appPasswordCopied ? $_('common.copied') : $_('common.copyToClipboard')}
-        </button>
-      </div>
-
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={appPasswordAcknowledged} />
-        <span>{$_('migration.inbound.appPassword.saved')}</span>
-      </label>
-
-      <div class="button-row">
-        <button onclick={handleProceedFromAppPassword} disabled={!appPasswordAcknowledged || loading}>
-          {loading ? $_('migration.inbound.common.continue') : $_('migration.inbound.appPassword.continue')}
-        </button>
-      </div>
-    </div>
+    <AppPasswordStep
+      appPassword={flow.state.generatedAppPassword || ''}
+      appPasswordName={flow.state.generatedAppPasswordName || ''}
+      {loading}
+      onContinue={handleProceedFromAppPassword}
+    />
 
   {:else if flow.state.step === 'email-verify'}
-    <div class="step-content">
-      <h2>{$_('migration.inbound.emailVerify.title')}</h2>
-      <p>{@html $_('migration.inbound.emailVerify.desc', { values: { email: `<strong>${flow.state.targetEmail}</strong>` } })}</p>
-
-      <div class="info-box">
-        <p>
-          {$_('migration.inbound.emailVerify.hint')}
-        </p>
-      </div>
-
-      {#if flow.state.error}
-        <div class="message error">
-          {flow.state.error}
-        </div>
-      {/if}
-
-      <form onsubmit={submitEmailVerify}>
-        <div class="field">
-          <label for="email-verify-token">{$_('migration.inbound.emailVerify.tokenLabel')}</label>
-          <input
-            id="email-verify-token"
-            type="text"
-            placeholder={$_('migration.inbound.emailVerify.tokenPlaceholder')}
-            bind:value={flow.state.emailVerifyToken}
-            oninput={(e) => flow.updateField('emailVerifyToken', (e.target as HTMLInputElement).value)}
-            disabled={loading}
-            required
-          />
-        </div>
-
-        <div class="button-row">
-          <button type="button" class="ghost" onclick={resendEmailVerify} disabled={loading}>
-            {$_('migration.inbound.emailVerify.resend')}
-          </button>
-          <button type="submit" disabled={loading || !flow.state.emailVerifyToken}>
-            {loading ? $_('migration.inbound.emailVerify.verifying') : $_('migration.inbound.emailVerify.verify')}
-          </button>
-        </div>
-      </form>
-    </div>
+    <EmailVerifyStep
+      email={flow.state.targetEmail}
+      token={flow.state.emailVerifyToken}
+      {loading}
+      error={flow.state.error}
+      onTokenChange={(t) => flow.updateField('emailVerifyToken', t)}
+      onSubmit={submitEmailVerify}
+      onResend={resendEmailVerify}
+    />
 
   {:else if flow.state.step === 'plc-token'}
     <div class="step-content">
@@ -837,83 +656,22 @@
     </div>
 
   {:else if flow.state.step === 'success'}
-    <div class="step-content success-content">
-      <div class="success-icon">✓</div>
-      <h2>{$_('migration.inbound.success.title')}</h2>
-      <p>{$_('migration.inbound.success.desc')}</p>
-
-      <div class="success-details">
-        <div class="detail-row">
-          <span class="label">{$_('migration.inbound.success.yourNewHandle')}:</span>
-          <span class="value">{flow.state.targetHandle}</span>
-        </div>
-        <div class="detail-row">
-          <span class="label">{$_('migration.inbound.success.did')}:</span>
-          <span class="value mono">{flow.state.sourceDid}</span>
-        </div>
-      </div>
-
-      {#if flow.state.progress.blobsFailed.length > 0}
-        <div class="message warning">
-          {$_('migration.inbound.success.blobsWarning', { values: { count: flow.state.progress.blobsFailed.length } })}
-        </div>
-      {/if}
-
-      <p class="redirect-text">{$_('migration.inbound.success.redirecting')}</p>
-    </div>
+    <SuccessStep handle={flow.state.targetHandle} did={flow.state.sourceDid}>
+      {#snippet extraContent()}
+        {#if flow.state.progress.blobsFailed.length > 0}
+          <div class="message warning">
+            {$_('migration.inbound.success.blobsWarning', { values: { count: flow.state.progress.blobsFailed.length } })}
+          </div>
+        {/if}
+      {/snippet}
+    </SuccessStep>
 
   {:else if flow.state.step === 'error'}
-    <div class="step-content">
-      <h2>{$_('migration.inbound.error.title')}</h2>
-      <p>{$_('migration.inbound.error.desc')}</p>
-
-      <div class="message error">
-        {flow.state.error || 'An unknown error occurred. Please check the browser console for details.'}
-      </div>
-
-      <div class="button-row">
-        <button class="ghost" onclick={onBack}>{$_('migration.inbound.error.startOver')}</button>
-      </div>
-    </div>
+    <ErrorStep error={flow.state.error} onStartOver={onBack} />
   {/if}
 </div>
 
 <style>
-  .passkey-section {
-    margin-top: 16px;
-  }
-  .passkey-section button {
-    width: 100%;
-    margin-top: 12px;
-  }
-  .app-password-display {
-    background: var(--bg-card);
-    border: 2px solid var(--accent);
-    border-radius: var(--radius-xl);
-    padding: var(--space-6);
-    text-align: center;
-    margin: var(--space-4) 0;
-  }
-  .app-password-label {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-4);
-  }
-  .app-password-code {
-    display: block;
-    font-size: var(--text-xl);
-    font-family: ui-monospace, monospace;
-    letter-spacing: 0.1em;
-    padding: var(--space-5);
-    background: var(--bg-input);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-4);
-    user-select: all;
-  }
-  .copy-btn {
-    padding: var(--space-3) var(--space-5);
-    font-size: var(--text-sm);
-  }
   .resume-info {
     margin-bottom: var(--space-5);
   }

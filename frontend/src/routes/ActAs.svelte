@@ -37,7 +37,7 @@
 
     try {
       const response = await fetch(
-        `/xrpc/com.tranquil.delegation.listControlledAccounts`,
+        `/xrpc/_delegation.listControlledAccounts`,
         {
           headers: { 'Authorization': `Bearer ${auth.session!.accessJwt}` }
         }

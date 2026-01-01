@@ -297,8 +297,9 @@ pub async fn create_record(
     let rkey = input
         .rkey
         .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
+    let record_ipld = crate::util::json_to_ipld(&input.record);
     let mut record_bytes = Vec::new();
-    if serde_ipld_dagcbor::to_writer(&mut record_bytes, &input.record).is_err() {
+    if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"})),
@@ -550,8 +551,9 @@ pub async fn put_record(
         }
     }
     let existing_cid = mst.get(&key).await.ok().flatten();
+    let record_ipld = crate::util::json_to_ipld(&input.record);
     let mut record_bytes = Vec::new();
-    if serde_ipld_dagcbor::to_writer(&mut record_bytes, &input.record).is_err() {
+    if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"})),

@@ -29,7 +29,7 @@ describe("Comms", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       mockEndpoint(
@@ -37,7 +37,7 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
@@ -67,12 +67,12 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
     it("shows loading text while fetching preferences", async () => {
-      mockEndpoint("com.tranquil.account.getNotificationPrefs", async () => {
+      mockEndpoint("_account.getNotificationPrefs", async () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         return jsonResponse(mockData.notificationPrefs());
       });
@@ -88,13 +88,13 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
     it("displays all four channel options", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       render(Comms);
@@ -111,7 +111,7 @@ describe("Comms", () => {
     });
     it("email channel is always selectable", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       render(Comms);
@@ -122,7 +122,7 @@ describe("Comms", () => {
     });
     it("discord channel is disabled when not configured", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs({ discordId: null })),
       );
       render(Comms);
@@ -133,7 +133,7 @@ describe("Comms", () => {
     });
     it("discord channel is enabled when configured", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () =>
           jsonResponse(mockData.notificationPrefs({ discordId: "123456789" })),
       );
@@ -145,7 +145,7 @@ describe("Comms", () => {
     });
     it("shows hint for disabled channels", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       render(Comms);
@@ -156,7 +156,7 @@ describe("Comms", () => {
     });
     it("selects current preferred channel", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () =>
           jsonResponse(
             mockData.notificationPrefs({ preferredChannel: "email" }),
@@ -179,13 +179,13 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
     it("displays email as readonly with current value", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       render(Comms);
@@ -199,7 +199,7 @@ describe("Comms", () => {
     });
     it("displays all channel inputs with current values", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () =>
           jsonResponse(mockData.notificationPrefs({
             discordId: "123456789",
@@ -231,13 +231,13 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
     it("shows Primary badge for email", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       render(Comms);
@@ -247,7 +247,7 @@ describe("Comms", () => {
     });
     it("shows Verified badge for verified discord", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () =>
           jsonResponse(mockData.notificationPrefs({
             discordId: "123456789",
@@ -262,7 +262,7 @@ describe("Comms", () => {
     });
     it("shows Not verified badge for unverified discord", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () =>
           jsonResponse(mockData.notificationPrefs({
             discordId: "123456789",
@@ -276,7 +276,7 @@ describe("Comms", () => {
     });
     it("does not show badge when channel not configured", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       render(Comms);
@@ -294,18 +294,18 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
     it("calls updateNotificationPrefs with correct data", async () => {
       let capturedBody: Record<string, unknown> | null = null;
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       mockEndpoint(
-        "com.tranquil.account.updateNotificationPrefs",
+        "_account.updateNotificationPrefs",
         (_url, options) => {
           capturedBody = JSON.parse((options?.body as string) || "{}");
           return jsonResponse({ success: true });
@@ -329,10 +329,10 @@ describe("Comms", () => {
     });
     it("shows loading state while saving", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
-      mockEndpoint("com.tranquil.account.updateNotificationPrefs", async () => {
+      mockEndpoint("_account.updateNotificationPrefs", async () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         return jsonResponse({ success: true });
       });
@@ -350,11 +350,11 @@ describe("Comms", () => {
     });
     it("shows success message after saving", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       mockEndpoint(
-        "com.tranquil.account.updateNotificationPrefs",
+        "_account.updateNotificationPrefs",
         () => jsonResponse({ success: true }),
       );
       render(Comms);
@@ -372,11 +372,11 @@ describe("Comms", () => {
     });
     it("shows error when save fails", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       mockEndpoint(
-        "com.tranquil.account.updateNotificationPrefs",
+        "_account.updateNotificationPrefs",
         () =>
           errorResponse("InvalidRequest", "Invalid channel configuration", 400),
       );
@@ -400,12 +400,12 @@ describe("Comms", () => {
     });
     it("reloads preferences after successful save", async () => {
       let loadCount = 0;
-      mockEndpoint("com.tranquil.account.getNotificationPrefs", () => {
+      mockEndpoint("_account.getNotificationPrefs", () => {
         loadCount++;
         return jsonResponse(mockData.notificationPrefs());
       });
       mockEndpoint(
-        "com.tranquil.account.updateNotificationPrefs",
+        "_account.updateNotificationPrefs",
         () => jsonResponse({ success: true }),
       );
       render(Comms);
@@ -430,13 +430,13 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
     it("enables discord channel after entering discord ID", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
       );
       render(Comms);
@@ -453,7 +453,7 @@ describe("Comms", () => {
     });
     it("allows selecting a configured channel", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () =>
           jsonResponse(mockData.notificationPrefs({
             discordId: "123456789",
@@ -480,13 +480,13 @@ describe("Comms", () => {
         () => jsonResponse(mockData.describeServer()),
       );
       mockEndpoint(
-        "com.tranquil.account.getNotificationHistory",
+        "_account.getNotificationHistory",
         () => jsonResponse({ notifications: [] }),
       );
     });
     it("shows error when loading preferences fails", async () => {
       mockEndpoint(
-        "com.tranquil.account.getNotificationPrefs",
+        "_account.getNotificationPrefs",
         () => errorResponse("InternalError", "Database connection failed", 500),
       );
       render(Comms);

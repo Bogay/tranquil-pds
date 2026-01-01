@@ -19,6 +19,7 @@ cid = "0.11.1"
 dotenvy = "0.15.7"
 futures = "0.3.30"
 governor = "0.10"
+hex = "0.4"
 hkdf = "0.12"
 hmac = "0.12"
 aes-gcm = "0.10"
@@ -62,6 +63,7 @@ bs58 = "0.5.1"
 totp-rs = { version = "5", features = ["qr"] }
 webauthn-rs = { version = "0.5.4", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
 webauthn-rs-proto = "0.5.4"
+zip = { version = "7.0.0", default-features = false, features = ["deflate"] }
 [features]
 external-infra = []
 [dev-dependencies]

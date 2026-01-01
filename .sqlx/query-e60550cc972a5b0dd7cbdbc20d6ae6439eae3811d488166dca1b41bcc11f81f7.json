@@ -1,21 +1,21 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT did, migrated_to_pds, migrated_at FROM users WHERE did = $1",
+  "query": "SELECT id, handle, deactivated_at FROM users WHERE did = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "did",
-        "type_info": "Text"
+        "name": "id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 1,
-        "name": "migrated_to_pds",
+        "name": "handle",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
-        "name": "migrated_at",
+        "name": "deactivated_at",
         "type_info": "Timestamptz"
       }
     ],
@@ -26,9 +26,9 @@
     },
     "nullable": [
       false,
-      true,
+      false,
       true
     ]
   },
-  "hash": "791d0d6ea6fbedc3e51fb8b1fda7bfe756f2631daf688e6646705725342ad67e"
+  "hash": "e60550cc972a5b0dd7cbdbc20d6ae6439eae3811d488166dca1b41bcc11f81f7"
 }

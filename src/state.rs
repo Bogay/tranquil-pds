@@ -4,7 +4,7 @@ use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
 use crate::rate_limit::RateLimiters;
 use crate::repo::PostgresBlockStore;
-use crate::storage::{BlobStorage, S3BlobStorage};
+use crate::storage::{BackupStorage, BlobStorage, S3BlobStorage};
 use crate::sync::firehose::SequencedEvent;
 use sqlx::PgPool;
 use std::error::Error;
@@ -16,6 +16,7 @@ pub struct AppState {
     pub db: PgPool,
     pub block_store: PostgresBlockStore,
     pub blob_store: Arc<dyn BlobStorage>,
+    pub backup_storage: Option<Arc<BackupStorage>>,
     pub firehose_tx: broadcast::Sender<SequencedEvent>,
     pub rate_limiters: Arc<RateLimiters>,
     pub circuit_breakers: Arc<CircuitBreakers>,
@@ -39,6 +40,7 @@ pub enum RateLimitKind {
     TotpVerify,
     HandleUpdate,
     HandleUpdateDaily,
+    VerificationCheck,
 }
 
 impl RateLimitKind {
@@ -58,6 +60,7 @@ impl RateLimitKind {
             Self::TotpVerify => "totp_verify",
             Self::HandleUpdate => "handle_update",
             Self::HandleUpdateDaily => "handle_update_daily",
+            Self::VerificationCheck => "verification_check",
         }
     }
 
@@ -77,6 +80,7 @@ impl RateLimitKind {
             Self::TotpVerify => (5, 300_000),
             Self::HandleUpdate => (10, 300_000),
             Self::HandleUpdateDaily => (50, 86_400_000),
+            Self::VerificationCheck => (60, 60_000),
         }
     }
 }
@@ -131,6 +135,7 @@ impl AppState {
 
         let block_store = PostgresBlockStore::new(db.clone());
         let blob_store = S3BlobStorage::new().await;
+        let backup_storage = BackupStorage::new().await.map(Arc::new);
 
         let firehose_buffer_size: usize = std::env::var("FIREHOSE_BUFFER_SIZE")
             .ok()
@@ -147,6 +152,7 @@ impl AppState {
             db,
             block_store,
             blob_store: Arc::new(blob_store),
+            backup_storage,
             firehose_tx,
             rate_limiters,
             circuit_breakers,
@@ -199,6 +205,7 @@ impl AppState {
             RateLimitKind::TotpVerify => &self.rate_limiters.totp_verify,
             RateLimitKind::HandleUpdate => &self.rate_limiters.handle_update,
             RateLimitKind::HandleUpdateDaily => &self.rate_limiters.handle_update_daily,
+            RateLimitKind::VerificationCheck => &self.rate_limiters.verification_check,
         };
 
         let ok = limiter.check_key(&client_ip.to_string()).is_ok();

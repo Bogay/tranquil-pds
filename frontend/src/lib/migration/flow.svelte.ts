@@ -2,8 +2,6 @@ import type {
   InboundMigrationState,
   InboundStep,
   MigrationProgress,
-  OutboundMigrationState,
-  OutboundStep,
   PasskeyAccountSetup,
   ServerDescription,
   StoredMigrationState,
@@ -30,6 +28,7 @@ import {
   updateProgress,
   updateStep,
 } from "./storage";
+import { migrateBlobs as migrateBlobsUtil } from "./blob-migration";
 
 function migrationLog(stage: string, data?: Record<string, unknown>) {
   const timestamp = new Date().toISOString();
@@ -85,12 +84,16 @@ export function createInboundMigrationFlow() {
   let sourceClient: AtprotoClient | null = null;
   let localClient: AtprotoClient | null = null;
   let localServerInfo: ServerDescription | null = null;
+  let sourceOAuthMetadata: Awaited<ReturnType<typeof getOAuthServerMetadata>> =
+    null;
 
   function setStep(step: InboundStep) {
     state.step = step;
     state.error = null;
-    saveMigrationState(state);
-    updateStep(step);
+    if (step !== "success") {
+      saveMigrationState(state);
+      updateStep(step);
+    }
   }
 
   function setError(error: string) {
@@ -458,37 +461,14 @@ export function createInboundMigrationFlow() {
   async function migrateBlobs(): Promise<void> {
     if (!sourceClient || !localClient) return;
 
-    let cursor: string | undefined;
-    let migrated = 0;
+    const result = await migrateBlobsUtil(
+      localClient,
+      sourceClient,
+      state.sourceDid,
+      setProgress,
+    );
 
-    do {
-      const { blobs, cursor: nextCursor } = await localClient.listMissingBlobs(
-        cursor,
-        100,
-      );
-
-      for (const blob of blobs) {
-        try {
-          setProgress({
-            currentOperation: `Migrating blob ${
-              migrated + 1
-            }/${state.progress.blobsTotal}...`,
-          });
-
-          const blobData = await sourceClient.getBlob(
-            state.sourceDid,
-            blob.cid,
-          );
-          await localClient.uploadBlob(blobData, "application/octet-stream");
-          migrated++;
-          setProgress({ blobsMigrated: migrated });
-        } catch {
-          state.progress.blobsFailed.push(blob.cid);
-        }
-      }
-
-      cursor = nextCursor;
-    } while (cursor);
+    state.progress.blobsFailed = result.failed;
   }
 
   async function migratePreferences(): Promise<void> {
@@ -578,6 +558,9 @@ export function createInboundMigrationFlow() {
 
     checkingEmailVerification = true;
     try {
+      const verified = await localClient.checkEmailVerified(state.targetEmail);
+      if (!verified) return false;
+
       await localClient.loginDeactivated(
         state.targetEmail,
         state.targetPassword,
@@ -978,290 +961,6 @@ export function createInboundMigrationFlow() {
   };
 }
 
-export function createOutboundMigrationFlow() {
-  let state = $state<OutboundMigrationState>({
-    direction: "outbound",
-    step: "welcome",
-    localDid: "",
-    localHandle: "",
-    targetPdsUrl: "",
-    targetPdsDid: "",
-    targetHandle: "",
-    targetEmail: "",
-    targetPassword: "",
-    inviteCode: "",
-    targetAccessToken: null,
-    targetRefreshToken: null,
-    serviceAuthToken: null,
-    plcToken: "",
-    progress: createInitialProgress(),
-    error: null,
-    targetServerInfo: null,
-  });
-
-  let localClient: AtprotoClient | null = null;
-  let targetClient: AtprotoClient | null = null;
-
-  function setStep(step: OutboundStep) {
-    state.step = step;
-    state.error = null;
-    saveMigrationState(state);
-    updateStep(step);
-  }
-
-  function setError(error: string) {
-    state.error = error;
-    saveMigrationState(state);
-  }
-
-  function setProgress(updates: Partial<MigrationProgress>) {
-    state.progress = { ...state.progress, ...updates };
-    updateProgress(updates);
-  }
-
-  async function validateTargetPds(url: string): Promise<ServerDescription> {
-    const normalizedUrl = url.replace(/\/$/, "");
-    targetClient = new AtprotoClient(normalizedUrl);
-
-    try {
-      const serverInfo = await targetClient.describeServer();
-      state.targetPdsUrl = normalizedUrl;
-      state.targetPdsDid = serverInfo.did;
-      state.targetServerInfo = serverInfo;
-      return serverInfo;
-    } catch (e) {
-      throw new Error(`Could not connect to PDS: ${(e as Error).message}`);
-    }
-  }
-
-  function initLocalClient(
-    accessToken: string,
-    did?: string,
-    handle?: string,
-  ): void {
-    localClient = createLocalClient();
-    localClient.setAccessToken(accessToken);
-    if (did) {
-      state.localDid = did;
-    }
-    if (handle) {
-      state.localHandle = handle;
-    }
-  }
-
-  async function startMigration(currentDid: string): Promise<void> {
-    if (!localClient || !targetClient) {
-      throw new Error("Not connected to PDSes");
-    }
-
-    setStep("migrating");
-    setProgress({ currentOperation: "Getting service auth token..." });
-
-    try {
-      const { token } = await localClient.getServiceAuth(
-        state.targetPdsDid,
-        "com.atproto.server.createAccount",
-      );
-      state.serviceAuthToken = token;
-
-      setProgress({ currentOperation: "Creating account on new PDS..." });
-
-      const accountParams = {
-        did: currentDid,
-        handle: state.targetHandle,
-        email: state.targetEmail,
-        password: state.targetPassword,
-        inviteCode: state.inviteCode || undefined,
-      };
-
-      const session = await targetClient.createAccount(accountParams, token);
-      state.targetAccessToken = session.accessJwt;
-      state.targetRefreshToken = session.refreshJwt;
-      targetClient.setAccessToken(session.accessJwt);
-
-      setProgress({ currentOperation: "Exporting repository..." });
-
-      const car = await localClient.getRepo(currentDid);
-      setProgress({
-        repoExported: true,
-        currentOperation: "Importing repository...",
-      });
-
-      await targetClient.importRepo(car);
-      setProgress({
-        repoImported: true,
-        currentOperation: "Counting blobs...",
-      });
-
-      const accountStatus = await targetClient.checkAccountStatus();
-      setProgress({
-        blobsTotal: accountStatus.expectedBlobs,
-        currentOperation: "Migrating blobs...",
-      });
-
-      await migrateBlobs(currentDid);
-
-      setProgress({ currentOperation: "Migrating preferences..." });
-      await migratePreferences();
-
-      setProgress({ currentOperation: "Requesting PLC operation token..." });
-      await localClient.requestPlcOperationSignature();
-
-      setStep("plc-token");
-    } catch (e) {
-      const err = e as Error & { error?: string; status?: number };
-      const message = err.message || err.error ||
-        `Unknown error (status ${err.status || "unknown"})`;
-      setError(message);
-      setStep("error");
-    }
-  }
-
-  async function migrateBlobs(did: string): Promise<void> {
-    if (!localClient || !targetClient) return;
-
-    let cursor: string | undefined;
-    let migrated = 0;
-
-    do {
-      const { blobs, cursor: nextCursor } = await targetClient.listMissingBlobs(
-        cursor,
-        100,
-      );
-
-      for (const blob of blobs) {
-        try {
-          setProgress({
-            currentOperation: `Migrating blob ${
-              migrated + 1
-            }/${state.progress.blobsTotal}...`,
-          });
-
-          const blobData = await localClient.getBlob(did, blob.cid);
-          await targetClient.uploadBlob(blobData, "application/octet-stream");
-          migrated++;
-          setProgress({ blobsMigrated: migrated });
-        } catch {
-          state.progress.blobsFailed.push(blob.cid);
-        }
-      }
-
-      cursor = nextCursor;
-    } while (cursor);
-  }
-
-  async function migratePreferences(): Promise<void> {
-    if (!localClient || !targetClient) return;
-
-    try {
-      const prefs = await localClient.getPreferences();
-      await targetClient.putPreferences(prefs);
-      setProgress({ prefsMigrated: true });
-    } catch { /* optional, best-effort */ }
-  }
-
-  async function submitPlcToken(token: string): Promise<void> {
-    if (!localClient || !targetClient) {
-      throw new Error("Not connected to PDSes");
-    }
-
-    state.plcToken = token;
-    setStep("finalizing");
-    setProgress({ currentOperation: "Signing PLC operation..." });
-
-    try {
-      const credentials = await targetClient.getRecommendedDidCredentials();
-
-      const { operation } = await localClient.signPlcOperation({
-        token,
-        ...credentials,
-      });
-
-      setProgress({
-        plcSigned: true,
-        currentOperation: "Submitting PLC operation...",
-      });
-
-      await targetClient.submitPlcOperation(operation);
-
-      setProgress({ currentOperation: "Activating account on new PDS..." });
-      await targetClient.activateAccount();
-      setProgress({ activated: true });
-
-      setProgress({ currentOperation: "Deactivating old account..." });
-      try {
-        await localClient.deactivateAccount(state.targetPdsUrl);
-        setProgress({ deactivated: true });
-      } catch { /* optional, best-effort */ }
-
-      setStep("success");
-      clearMigrationState();
-    } catch (e) {
-      const err = e as Error & { error?: string; status?: number };
-      const message = err.message || err.error ||
-        `Unknown error (status ${err.status || "unknown"})`;
-      setError(message);
-      setStep("plc-token");
-    }
-  }
-
-  async function resendPlcToken(): Promise<void> {
-    if (!localClient) {
-      throw new Error("Not connected to local PDS");
-    }
-    await localClient.requestPlcOperationSignature();
-  }
-
-  function reset(): void {
-    state = {
-      direction: "outbound",
-      step: "welcome",
-      localDid: "",
-      localHandle: "",
-      targetPdsUrl: "",
-      targetPdsDid: "",
-      targetHandle: "",
-      targetEmail: "",
-      targetPassword: "",
-      inviteCode: "",
-      targetAccessToken: null,
-      targetRefreshToken: null,
-      serviceAuthToken: null,
-      plcToken: "",
-      progress: createInitialProgress(),
-      error: null,
-      targetServerInfo: null,
-    };
-    localClient = null;
-    targetClient = null;
-    clearMigrationState();
-  }
-
-  return {
-    get state() {
-      return state;
-    },
-    setStep,
-    setError,
-    validateTargetPds,
-    initLocalClient,
-    startMigration,
-    submitPlcToken,
-    resendPlcToken,
-    reset,
-
-    updateField<K extends keyof OutboundMigrationState>(
-      field: K,
-      value: OutboundMigrationState[K],
-    ) {
-      state[field] = value;
-    },
-  };
-}
-
 export type InboundMigrationFlow = ReturnType<
   typeof createInboundMigrationFlow
->;
-export type OutboundMigrationFlow = ReturnType<
-  typeof createOutboundMigrationFlow
 >;

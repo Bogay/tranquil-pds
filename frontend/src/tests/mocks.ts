@@ -206,15 +206,15 @@ export function setupDefaultMocks(): void {
     () => jsonResponse({ code: "new-invite-" + Date.now() }),
   );
   mockEndpoint(
-    "com.tranquil.account.getNotificationPrefs",
+    "_account.getNotificationPrefs",
     () => jsonResponse(mockData.notificationPrefs()),
   );
   mockEndpoint(
-    "com.tranquil.account.updateNotificationPrefs",
+    "_account.updateNotificationPrefs",
     () => jsonResponse({ success: true }),
   );
   mockEndpoint(
-    "com.tranquil.account.getNotificationHistory",
+    "_account.getNotificationHistory",
     () => jsonResponse({ notifications: [] }),
   );
   mockEndpoint(
@@ -240,6 +240,10 @@ export function setupDefaultMocks(): void {
   mockEndpoint(
     "com.atproto.repo.listRecords",
     () => jsonResponse({ records: [] }),
+  );
+  mockEndpoint(
+    "_backup.listBackups",
+    () => jsonResponse({ backups: [] }),
   );
 }
 export function setupAuthenticatedUser(

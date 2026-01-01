@@ -40,6 +40,7 @@
   let deleteToken = $state('')
   let deleteTokenSent = $state(false)
   let exportLoading = $state(false)
+  let exportBlobsLoading = $state(false)
   let passwordLoading = $state(false)
   let currentPassword = $state('')
   let newPassword = $state('')
@@ -173,6 +174,172 @@
       exportLoading = false
     }
   }
+  async function handleExportBlobs() {
+    if (!auth.session) return
+    exportBlobsLoading = true
+    message = null
+    try {
+      const response = await fetch('/xrpc/_backup.exportBlobs', {
+        headers: {
+          'Authorization': `Bearer ${auth.session.accessJwt}`
+        }
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ message: 'Export failed' }))
+        throw new Error(err.message || 'Export failed')
+      }
+      const blob = await response.blob()
+      if (blob.size === 0) {
+        showMessage('success', $_('settings.messages.noBlobsToExport'))
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${auth.session.handle}-blobs.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      showMessage('success', $_('settings.messages.blobsExported'))
+    } catch (e) {
+      showMessage('error', e instanceof Error ? e.message : $_('settings.messages.exportFailed'))
+    } finally {
+      exportBlobsLoading = false
+    }
+  }
+
+  interface BackupInfo {
+    id: string
+    repoRev: string
+    repoRootCid: string
+    blockCount: number
+    sizeBytes: number
+    createdAt: string
+  }
+  let backups = $state<BackupInfo[]>([])
+  let backupEnabled = $state(true)
+  let backupsLoading = $state(false)
+  let createBackupLoading = $state(false)
+  let restoreFile = $state<File | null>(null)
+  let restoreLoading = $state(false)
+
+  async function loadBackups() {
+    if (!auth.session) return
+    backupsLoading = true
+    try {
+      const result = await api.listBackups(auth.session.accessJwt)
+      backups = result.backups
+      backupEnabled = result.backupEnabled
+    } catch (e) {
+      console.error('Failed to load backups:', e)
+    } finally {
+      backupsLoading = false
+    }
+  }
+
+  onMount(() => {
+    loadBackups()
+  })
+
+  async function handleToggleBackup() {
+    if (!auth.session) return
+    const newEnabled = !backupEnabled
+    backupsLoading = true
+    try {
+      await api.setBackupEnabled(auth.session.accessJwt, newEnabled)
+      backupEnabled = newEnabled
+      showMessage('success', newEnabled ? $_('settings.backups.enabled') : $_('settings.backups.disabled'))
+    } catch (e) {
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.toggleFailed'))
+    } finally {
+      backupsLoading = false
+    }
+  }
+
+  async function handleCreateBackup() {
+    if (!auth.session) return
+    createBackupLoading = true
+    message = null
+    try {
+      await api.createBackup(auth.session.accessJwt)
+      await loadBackups()
+      showMessage('success', $_('settings.backups.created'))
+    } catch (e) {
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.createFailed'))
+    } finally {
+      createBackupLoading = false
+    }
+  }
+
+  async function handleDownloadBackup(id: string, rev: string) {
+    if (!auth.session) return
+    try {
+      const blob = await api.getBackup(auth.session.accessJwt, id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${auth.session.handle}-${rev}.car`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.downloadFailed'))
+    }
+  }
+
+  async function handleDeleteBackup(id: string) {
+    if (!auth.session) return
+    try {
+      await api.deleteBackup(auth.session.accessJwt, id)
+      await loadBackups()
+      showMessage('success', $_('settings.backups.deleted'))
+    } catch (e) {
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.deleteFailed'))
+    }
+  }
+
+  function handleFileSelect(e: Event) {
+    const input = e.target as HTMLInputElement
+    if (input.files && input.files.length > 0) {
+      restoreFile = input.files[0]
+    }
+  }
+
+  async function handleRestore() {
+    if (!auth.session || !restoreFile) return
+    restoreLoading = true
+    message = null
+    try {
+      const buffer = await restoreFile.arrayBuffer()
+      const car = new Uint8Array(buffer)
+      await api.importRepo(auth.session.accessJwt, car)
+      showMessage('success', $_('settings.backups.restored'))
+      restoreFile = null
+    } catch (e) {
+      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.restoreFailed'))
+    } finally {
+      restoreLoading = false
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  function formatDate(iso: string): string {
+    return new Date(iso).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
   async function handleChangePassword(e: Event) {
     e.preventDefault()
     if (!auth.session || !currentPassword || !newPassword || !confirmNewPassword) return
@@ -323,7 +490,7 @@
             />
           </div>
           <button type="submit" disabled={handleLoading || !newHandle}>
-            {handleLoading ? $_('settings.verifying') : $_('settings.verifyAndUpdate')}
+            {handleLoading ? $_('common.verifying') : $_('settings.verifyAndUpdate')}
           </button>
         </form>
       </div>
@@ -394,9 +561,77 @@
   <section>
     <h2>{$_('settings.exportData')}</h2>
     <p class="description">{$_('settings.exportDataDescription')}</p>
-    <button onclick={handleExportRepo} disabled={exportLoading}>
-      {exportLoading ? $_('settings.exporting') : $_('settings.downloadRepo')}
+    <div class="export-buttons">
+      <button onclick={handleExportRepo} disabled={exportLoading}>
+        {exportLoading ? $_('settings.exporting') : $_('settings.downloadRepo')}
+      </button>
+      <button onclick={handleExportBlobs} disabled={exportBlobsLoading} class="secondary">
+        {exportBlobsLoading ? $_('settings.exporting') : $_('settings.downloadBlobs')}
+      </button>
+    </div>
+  </section>
+  <section class="backups-section">
+    <h2>{$_('settings.backups.title')}</h2>
+    <p class="description">{$_('settings.backups.description')}</p>
+
+    <label class="checkbox-label">
+      <input type="checkbox" checked={backupEnabled} onchange={handleToggleBackup} disabled={backupsLoading} />
+      <span>{$_('settings.backups.enableAutomatic')}</span>
+    </label>
+
+    {#if backupsLoading}
+      <p class="loading">{$_('common.loading')}</p>
+    {:else if backups.length > 0}
+      <ul class="backup-list">
+        {#each backups as backup}
+          <li class="backup-item">
+            <div class="backup-info">
+              <span class="backup-date">{formatDate(backup.createdAt)}</span>
+              <span class="backup-size">{formatBytes(backup.sizeBytes)}</span>
+              <span class="backup-blocks">{backup.blockCount} {$_('settings.backups.blocks')}</span>
+            </div>
+            <div class="backup-actions">
+              <button class="small" onclick={() => handleDownloadBackup(backup.id, backup.repoRev)}>
+                {$_('settings.backups.download')}
+              </button>
+              <button class="small danger" onclick={() => handleDeleteBackup(backup.id)}>
+                {$_('settings.backups.delete')}
+              </button>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <p class="empty">{$_('settings.backups.noBackups')}</p>
+    {/if}
+
+    <button onclick={handleCreateBackup} disabled={createBackupLoading || !backupEnabled}>
+      {createBackupLoading ? $_('common.creating') : $_('settings.backups.createNow')}
     </button>
+  </section>
+  <section class="restore-section">
+    <h2>{$_('settings.backups.restoreTitle')}</h2>
+    <p class="description">{$_('settings.backups.restoreDescription')}</p>
+
+    <div class="field">
+      <label for="restore-file">{$_('settings.backups.selectFile')}</label>
+      <input
+        id="restore-file"
+        type="file"
+        accept=".car"
+        onchange={handleFileSelect}
+        disabled={restoreLoading}
+      />
+    </div>
+
+    {#if restoreFile}
+      <div class="restore-preview">
+        <p>{$_('settings.backups.selectedFile')}: {restoreFile.name} ({formatBytes(restoreFile.size)})</p>
+        <button onclick={handleRestore} disabled={restoreLoading} class="danger">
+          {restoreLoading ? $_('settings.backups.restoring') : $_('settings.backups.restore')}
+        </button>
+      </div>
+    {/if}
   </section>
   </div>
   <section class="danger-zone">
@@ -658,5 +893,108 @@
     white-space: nowrap;
     border-left: 1px solid var(--border-color);
     background: var(--bg-card);
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    margin-bottom: var(--space-4);
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+
+  .backup-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-4) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .backup-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-3);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    gap: var(--space-4);
+  }
+
+  .backup-info {
+    display: flex;
+    gap: var(--space-4);
+    font-size: var(--text-sm);
+    flex-wrap: wrap;
+  }
+
+  .backup-date {
+    font-weight: 500;
+  }
+
+  .backup-size,
+  .backup-blocks {
+    color: var(--text-secondary);
+  }
+
+  .backup-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+
+  button.small {
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .empty,
+  .loading {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
+  }
+
+  .restore-preview {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    margin-top: var(--space-3);
+  }
+
+  .restore-preview p {
+    margin: 0 0 var(--space-3) 0;
+    font-size: var(--text-sm);
+  }
+
+  .export-buttons {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 640px) {
+    .backup-item {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .backup-actions {
+      width: 100%;
+      margin-top: var(--space-2);
+    }
+
+    .backup-actions button {
+      flex: 1;
+    }
   }
 </style>

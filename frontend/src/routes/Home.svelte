@@ -183,6 +183,11 @@
         <h3>Delegate without sharing passwords</h3>
         <p>Let team members or tools manage your account with specific permission levels. They authenticate with their own credentials, you see everything they do in an audit log.</p>
       </div>
+
+      <div class="feature">
+        <h3>Automatic backups</h3>
+        <p>Your repository is backed up daily to object storage. Download any backup or restore with one click. You own your data, even if the worst happens.</p>
+      </div>
     </div>
 
     <h2>Everything in one place</h2>

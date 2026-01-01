@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT rb.blob_cid, rb.record_uri\n        FROM record_blobs rb\n        LEFT JOIN blobs b ON rb.blob_cid = b.cid AND b.created_by_user = rb.repo_id\n        WHERE rb.repo_id = $1 AND b.cid IS NULL AND rb.blob_cid > $2\n        ORDER BY rb.blob_cid\n        LIMIT $3\n        ",
+  "query": "\n        SELECT rb.blob_cid, rb.record_uri\n        FROM record_blobs rb\n        LEFT JOIN blobs b ON rb.blob_cid = b.cid\n        WHERE rb.repo_id = $1 AND b.cid IS NULL AND rb.blob_cid > $2\n        ORDER BY rb.blob_cid\n        LIMIT $3\n        ",
   "describe": {
     "columns": [
       {
@@ -26,5 +26,5 @@
       false
     ]
   },
-  "hash": "6f88c5e63c1beb47733daed5295492d59c649a35ef78414c62dcdf4d0b2a3115"
+  "hash": "ec51d224b9fcd73fd04eebaf2215423d7b1d528b5aba87a0d2f5fe4636af0adf"
 }

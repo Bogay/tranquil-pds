@@ -105,7 +105,7 @@
         {$_('common.cancel')}
       </button>
       <button type="submit" class="submit-btn" disabled={submitting || code.trim().length !== 6}>
-        {submitting ? $_('oauth.twoFactorCode.verifying') : $_('oauth.twoFactorCode.verify')}
+        {submitting ? $_('common.verifying') : $_('common.verify')}
       </button>
     </div>
   </form>

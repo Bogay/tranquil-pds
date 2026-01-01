@@ -17,7 +17,53 @@
     "dashboard": "Dashboard",
     "backToDashboard": "← Dashboard",
     "copied": "Copied!",
-    "copyToClipboard": "Copy to Clipboard"
+    "copyToClipboard": "Copy to Clipboard",
+
+    "verifying": "Verifying...",
+    "saving": "Saving...",
+    "creating": "Creating...",
+    "updating": "Updating...",
+    "sending": "Sending...",
+    "authenticating": "Authenticating...",
+    "checking": "Checking...",
+    "redirecting": "Redirecting...",
+
+    "signIn": "Sign In",
+    "verify": "Verify",
+    "remove": "Remove",
+    "revoke": "Revoke",
+    "resendCode": "Resend Code",
+    "startOver": "Start Over",
+    "tryAgain": "Try Again",
+
+    "password": "Password",
+    "email": "Email",
+    "emailAddress": "Email Address",
+    "handle": "Handle",
+    "did": "DID",
+    "verificationCode": "Verification Code",
+    "inviteCode": "Invite Code",
+    "newPassword": "New Password",
+    "confirmPassword": "Confirm Password",
+
+    "enterSixDigitCode": "Enter 6-digit code",
+    "passwordHint": "At least 8 characters",
+    "enterPassword": "Enter your password",
+    "emailPlaceholder": "you@example.com",
+
+    "verified": "Verified",
+    "disabled": "Disabled",
+    "available": "Available",
+    "deactivated": "Deactivated",
+    "unverified": "Unverified",
+
+    "backToLogin": "Back to Login",
+    "backToSettings": "Back to Settings",
+    "alreadyHaveAccount": "Already have an account?",
+    "createAccount": "Create account",
+
+    "passwordsMismatch": "Passwords do not match",
+    "passwordTooShort": "Password must be at least 8 characters"
   },
   "login": {
     "title": "Sign In",
@@ -49,11 +95,7 @@
     "codeLabel": "Verification Code",
     "codePlaceholder": "Enter 6-digit code",
     "verifyButton": "Verify Account",
-    "verifying": "Verifying...",
-    "resendButton": "Resend Code",
-    "resending": "Resending...",
-    "resent": "Verification code resent!",
-    "backToLogin": "Back to Login"
+    "resent": "Verification code resent!"
   },
   "register": {
     "title": "Create Account",
@@ -124,7 +166,6 @@
     "inviteCodePlaceholder": "Enter your invite code",
     "inviteCodeRequired": "required",
     "createButton": "Create Account",
-    "creating": "Creating account...",
     "alreadyHaveAccount": "Already have an account?",
     "signIn": "Sign in",
     "wantPasswordless": "Want passwordless security?",
@@ -179,6 +220,11 @@
     "navAdminDesc": "Server stats and admin operations",
     "navDidDocument": "DID Document",
     "navDidDocumentDesc": "Manage your DID document for external migrations",
+    "navDidDocumentDescActive": "Edit your DID document settings",
+    "navBackup": "Download Backup",
+    "navBackupDesc": "Download your repository as a CAR file",
+    "downloadingBackup": "Downloading...",
+    "backupFailed": "Failed to download backup",
     "migrated": "Migrated",
     "migratedTitle": "Account Migrated",
     "migratedMessage": "Your account has migrated to {pds}. Your DID document is still hosted here, and you can update it for future migrations.",
@@ -208,7 +254,6 @@
     "serviceEndpointDesc": "The PDS that currently hosts your account data. Update this when migrating.",
     "currentPds": "Current PDS URL",
     "save": "Save Changes",
-    "saving": "Saving...",
     "success": "DID document updated successfully",
     "saveFailed": "Failed to save DID document",
     "loadFailed": "Failed to load DID document",
@@ -246,7 +291,6 @@
     "yourDomain": "Your Domain",
     "yourDomainPlaceholder": "example.com",
     "verifyAndUpdate": "Verify & Update Handle",
-    "verifying": "Verifying...",
     "newHandle": "New Handle",
     "newHandlePlaceholder": "yourhandle",
     "changeHandleButton": "Change Handle",
@@ -262,7 +306,34 @@
     "exportData": "Export Data",
     "exportDataDescription": "Download your entire repository as a CAR (Content Addressable Archive) file. This includes all your posts, likes, follows, and other data.",
     "downloadRepo": "Download Repository",
+    "downloadBlobs": "Download Media",
     "exporting": "Exporting...",
+    "backups": {
+      "title": "Backups",
+      "description": "Your repository is automatically backed up daily. You can also create manual backups or restore from a previous backup.",
+      "enableAutomatic": "Enable automatic backups",
+      "enabled": "Automatic backups enabled",
+      "disabled": "Automatic backups disabled",
+      "toggleFailed": "Failed to update backup setting",
+      "noBackups": "No backups available yet.",
+      "blocks": "blocks",
+      "download": "Download",
+      "delete": "Delete",
+      "createNow": "Create Backup Now",
+      "created": "Backup created successfully",
+      "createFailed": "Failed to create backup",
+      "downloadFailed": "Failed to download backup",
+      "deleted": "Backup deleted",
+      "deleteFailed": "Failed to delete backup",
+      "restoreTitle": "Restore from Backup",
+      "restoreDescription": "Upload a CAR file to restore your repository. This will overwrite your current data.",
+      "selectFile": "Select CAR file",
+      "selectedFile": "Selected file",
+      "restore": "Restore",
+      "restoring": "Restoring...",
+      "restored": "Repository restored successfully",
+      "restoreFailed": "Failed to restore repository"
+    },
     "deleteAccount": "Delete Account",
     "deleteWarning": "This action is irreversible. All your data will be permanently deleted.",
     "requestDeletion": "Request Account Deletion",
@@ -291,7 +362,9 @@
       "deleteConfirmation": "Are you absolutely sure you want to delete your account? This cannot be undone.",
       "deletionFailed": "Failed to delete account",
       "repoExported": "Repository exported successfully",
-      "exportFailed": "Failed to export repository",
+      "blobsExported": "Media files exported successfully",
+      "noBlobsToExport": "No media files to export",
+      "exportFailed": "Failed to export",
       "confirmDelete": "Are you absolutely sure you want to delete your account? This cannot be undone."
     }
   },
@@ -306,7 +379,6 @@
     "noPasswords": "No app passwords yet",
     "revoke": "Revoke",
     "revoking": "Revoking...",
-    "creating": "Creating...",
     "revokeConfirm": "Revoke app password \"{name}\"? Apps using this password will no longer be able to access your account.",
     "saveWarningTitle": "Important: Save this app password!",
     "saveWarningMessage": "This password is required to sign into apps that don't support passkeys or OAuth. You will only see it once.",
@@ -354,7 +426,6 @@
     "used": "Used by @{handle}",
     "disabled": "Disabled",
     "usedBy": "Used by",
-    "creating": "Creating...",
     "disableConfirm": "Disable this invite code? It can no longer be used.",
     "created": "Invite Code Created",
     "copy": "Copy",
@@ -482,7 +553,6 @@
     "verifyButton": "Verify",
     "verifyCodePlaceholder": "Enter verification code",
     "submit": "Submit",
-    "saving": "Saving...",
     "savePreferences": "Save Preferences",
     "preferencesSaved": "Communication preferences saved",
     "verifiedSuccess": "{channel} verified successfully",
@@ -521,13 +591,11 @@
     "noCollectionsYet": "No collections yet. Create your first record to get started.",
     "loadMore": "Load More",
     "recordJson": "Record JSON",
-    "saving": "Saving...",
     "updateRecord": "Update Record",
     "collectionNsid": "Collection (NSID)",
     "recordKeyOptional": "Record Key (optional)",
     "autoGenerated": "Auto-generated if empty (TID)",
     "autoGeneratedHint": "Leave empty to auto-generate a TID-based key",
-    "creating": "Creating...",
     "demoPostText": "Hello from my PDS! This is my first post.",
     "demoDisplayName": "Your Display Name",
     "demoBio": "A short bio about yourself."
@@ -551,7 +619,6 @@
     "secondaryLight": "Secondary (Light Mode)",
     "secondaryDark": "Secondary (Dark Mode)",
     "configSaved": "Server configuration saved",
-    "saving": "Saving...",
     "saveConfig": "Save Configuration",
     "serverStats": "Server Statistics",
     "users": "Users",
@@ -639,16 +706,13 @@
       "title": "Two-Factor Authentication",
       "subtitle": "Additional verification is required",
       "usePasskey": "Use Passkey",
-      "useTotp": "Use Authenticator App",
-      "verifying": "Verifying..."
+      "useTotp": "Use Authenticator App"
     },
     "twoFactorCode": {
       "title": "Two-Factor Authentication",
       "subtitle": "A verification code has been sent to your {channel}. Enter the code below to continue.",
       "codeLabel": "Verification Code",
       "codePlaceholder": "Enter 6-digit code",
-      "verify": "Verify",
-      "verifying": "Verifying...",
       "errors": {
         "missingRequestUri": "Missing request_uri parameter",
         "verificationFailed": "Verification failed",
@@ -660,8 +724,6 @@
       "title": "Enter Authenticator Code",
       "subtitle": "Enter the 6-digit code from your authenticator app",
       "codePlaceholder": "Enter 6-digit code",
-      "verify": "Verify",
-      "verifying": "Verifying...",
       "useBackupCode": "Use backup code instead",
       "backupCodePlaceholder": "Enter backup code",
       "trustDevice": "Trust this device for 30 days",
@@ -691,16 +753,9 @@
     "codeLabel": "Verification Code",
     "codeHelp": "Copy the entire code from your message, including dashes",
     "verifyButton": "Verify Account",
-    "verify": "Verify",
-    "verifying": "Verifying...",
     "pleaseWait": "Please wait...",
-    "resendCode": "Resend Code",
-    "resending": "Resending...",
-    "sending": "Sending...",
     "codeResent": "Verification code resent!",
     "codeResentDetail": "Verification code sent! Check your inbox.",
-    "backToLogin": "Back to Login",
-    "backToSettings": "Back to Settings",
     "verifyingAccount": "Verifying account: @{handle}",
     "startOver": "Start over with a different account",
     "noPending": "No pending verification found.",
@@ -746,7 +801,6 @@
     "resetButton": "Reset Password",
     "resetting": "Resetting...",
     "success": "Password reset successfully!",
-    "backToLogin": "Back to Sign In",
     "requestNewCode": "Request New Code",
     "passwordsMismatch": "Passwords do not match",
     "passwordLength": "Password must be at least 8 characters"
@@ -790,8 +844,7 @@
     "howItWorks": "How it works",
     "howItWorksDetail": "We'll send a secure link to your registered notification channel. Click the link to set a temporary password. Then you can sign in and add a new passkey.",
     "sendRecoveryLink": "Send Recovery Link",
-    "sending": "Sending...",
-    "backToLogin": "Back to Sign In"
+    "sending": "Sending..."
   },
   "registerPasskey": {
     "title": "Create Passkey Account",
@@ -814,7 +867,6 @@
     "inviteCode": "Invite Code",
     "inviteCodePlaceholder": "Enter your invite code",
     "createButton": "Create Account",
-    "creating": "Creating...",
     "continue": "Continue",
     "back": "Back",
     "alreadyHaveAccount": "Already have an account?",
@@ -911,8 +963,6 @@
     "useTotp": "Use Authenticator",
     "passwordPlaceholder": "Enter your password",
     "totpPlaceholder": "Enter 6-digit code",
-    "verify": "Verify",
-    "verifying": "Verifying...",
     "authenticating": "Authenticating...",
     "passkeyPrompt": "Click the button below to authenticate with your passkey.",
     "cancel": "Cancel"
@@ -947,7 +997,6 @@
     "handle": "Handle",
     "emailOptional": "Email (optional)",
     "yourAccessLevel": "Your Access Level",
-    "creating": "Creating...",
     "createAccount": "Create Account",
     "createDelegatedAccountButton": "+ Create Delegated Account",
     "accountCreated": "Created delegated account: {handle}",
@@ -1059,15 +1108,9 @@
     "navDesc": "Move your account to or from another PDS",
     "migrateHere": "Migrate Here",
     "migrateHereDesc": "Move your existing AT Protocol account to this PDS from another server.",
-    "migrateAway": "Migrate Away",
-    "migrateAwayDesc": "Move your account from this PDS to another server.",
-    "loginRequired": "Login required",
     "bringDid": "Bring your DID and identity",
     "transferData": "Transfer all your data",
     "keepFollowers": "Keep your followers",
-    "exportRepo": "Export your repository",
-    "transferToPds": "Transfer to new PDS",
-    "updateIdentity": "Update your identity",
     "whatIsMigration": "What is account migration?",
     "whatIsMigrationDesc": "Account migration allows you to move your AT Protocol identity between Personal Data Servers (PDSes). Your DID (decentralized identifier) stays the same, so your followers and social connections are preserved.",
     "beforeMigrate": "Before you migrate",
@@ -1077,7 +1120,11 @@
     "beforeMigrate4": "Your old PDS will be notified to deactivate your account",
     "importantWarning": "Account migration is a significant action. Make sure you trust the destination PDS and understand that your data will be moved. If something goes wrong, recovery may require manual intervention.",
     "learnMore": "Learn more about migration risks",
-    "comingSoon": "Coming soon",
+    "offlineRestore": "Offline Restore",
+    "offlineRestoreDesc": "Restore from backup when your old PDS is unavailable.",
+    "offlineFeature1": "Use a CAR file backup",
+    "offlineFeature2": "Prove ownership with rotation key",
+    "offlineFeature3": "Recovery for shutdown servers",
     "oauthCompleting": "Completing authentication...",
     "oauthFailed": "Authentication Failed",
     "tryAgain": "Try Again",
@@ -1086,7 +1133,6 @@
       "incomplete": "You have an incomplete migration in progress:",
       "direction": "Direction",
       "migratingHere": "Migrating here",
-      "migratingAway": "Migrating away",
       "from": "From",
       "to": "To",
       "progress": "Progress",
@@ -1229,7 +1275,8 @@
       "error": {
         "title": "Migration Error",
         "desc": "An error occurred during migration.",
-        "startOver": "Start Over"
+        "startOver": "Start Over",
+        "unknown": "An unknown error occurred."
       },
       "common": {
         "back": "Back",
@@ -1247,70 +1294,77 @@
         "warning3": "Your old account will be deactivated after migration"
       }
     },
-    "outbound": {
+    "offline": {
       "welcome": {
-        "title": "Migrate Away from This PDS",
-        "desc": "Move your account to another Personal Data Server.",
-        "warning": "After migration, your account here will be deactivated.",
-        "didWebNotice": "did:web Migration Notice",
-        "didWebNoticeDesc": "Your account uses a did:web identifier ({did}). After migrating, this PDS will continue to serve your DID document pointing to the new PDS. Your identity will remain functional as long as this server is online.",
-        "understand": "I understand the risks and want to proceed"
+        "title": "Offline Restore",
+        "desc": "Restore your account when your old PDS is unavailable. This is for disaster recovery when you cannot contact your previous server.",
+        "warningTitle": "Advanced Recovery Method",
+        "warningDesc": "This method requires your rotation key private key. Only use this if your previous PDS has shut down or you cannot access it.",
+        "requirementsTitle": "You will need:",
+        "requirement1": "Your DID (did:plc:...)",
+        "requirement2": "A CAR file backup of your repository",
+        "requirement3": "Your rotation key (private key in hex, base58, or JWK format)",
+        "understand": "I understand this is for offline recovery only"
       },
-      "targetPds": {
-        "title": "Choose Target PDS",
-        "desc": "Enter the URL of the PDS you want to migrate to.",
-        "url": "PDS URL",
-        "urlPlaceholder": "https://pds.example.com",
-        "validate": "Validate & Continue",
+      "provideDid": {
+        "title": "Enter Your DID",
+        "desc": "Enter the DID of the account you want to restore.",
+        "label": "Your DID",
+        "hint": "Your decentralized identifier (e.g., did:plc:abc123...)"
+      },
+      "uploadCar": {
+        "title": "Upload Repository Backup",
+        "desc": "Upload the CAR file containing your repository data.",
+        "label": "CAR File",
+        "hint": "This should be a .car file from a previous backup of your repository",
+        "reuploadWarningTitle": "CAR File Required",
+        "reuploadWarning": "Your session was restored, but you need to re-upload your CAR file. For security reasons, file contents are not stored between sessions."
+      },
+      "rotationKey": {
+        "title": "Provide Rotation Key",
+        "desc": "Enter your rotation key to prove ownership of this DID.",
+        "securityWarningTitle": "Security Warning",
+        "securityWarning1": "Your rotation key is extremely sensitive - anyone with it can take over your identity",
+        "securityWarning2": "Only enter it on trusted devices and connections",
+        "securityWarning3": "The key will not be stored after migration",
+        "label": "Rotation Key",
+        "placeholder": "Paste your rotation key (hex, base58, or JWK)...",
+        "hint": "Supports 64-character hex, base58, or JWK format",
+        "valid": "Rotation key verified! You have control of this DID.",
+        "invalid": "This key is not a valid rotation key for this DID.",
         "validating": "Validating...",
-        "connected": "Connected to {name}",
-        "inviteRequired": "Invite code required",
-        "privacyPolicy": "Privacy Policy",
-        "termsOfService": "Terms of Service"
+        "validate": "Validate Key"
       },
-      "newAccount": {
-        "title": "New Account Details",
-        "desc": "Set up your account on the new PDS.",
-        "handle": "Handle",
-        "availableDomains": "Available domains",
-        "email": "Email",
-        "password": "Password",
-        "confirmPassword": "Confirm Password",
-        "inviteCode": "Invite Code"
+      "chooseHandle": {
+        "migratingDid": "Restoring DID"
       },
       "review": {
-        "title": "Review Migration",
-        "desc": "Please review and confirm your migration details.",
-        "currentHandle": "Current Handle",
-        "newHandle": "New Handle",
-        "sourcePds": "This PDS",
-        "targetPds": "Target PDS",
-        "confirm": "I confirm I want to migrate my account",
-        "startMigration": "Start Migration"
+        "desc": "Please confirm the details of your offline restoration.",
+        "carFile": "CAR File",
+        "rotationKey": "Rotation Key",
+        "warning": "After you click \"Start Migration\", your repository will be imported and your DID will be updated to point to this PDS.",
+        "plcWarningTitle": "Point of No Return",
+        "plcWarning": "Once you start, your DID document will be updated to point to this PDS. If something goes wrong, you can use your rotation key to recover, but you should complete the migration to avoid a broken identity state."
       },
       "migrating": {
-        "title": "Migrating Your Account",
-        "desc": "Please wait while we transfer your data..."
+        "title": "Restoring Account",
+        "desc": "Please wait while your account is being restored...",
+        "creating": "Creating account",
+        "importing": "Importing repository",
+        "plcSigning": "Signing identity update",
+        "activating": "Activating account"
       },
-      "plcToken": {
-        "title": "Verify Your Identity",
-        "desc": "A verification code has been sent to your email."
-      },
-      "finalizing": {
-        "title": "Finalizing Migration",
-        "desc": "Please wait while we complete the migration...",
-        "updatingForwarding": "Updating DID document forwarding..."
+      "blobs": {
+        "title": "Migrating Blobs",
+        "desc": "Attempting to recover images and media from your old PDS...",
+        "migrating": "Migrating blobs",
+        "failedTitle": "Some blobs could not be migrated",
+        "failedDesc": "{count} blobs could not be fetched from your old PDS. This may happen if the server is unreachable or the files were deleted.",
+        "sourceUnreachableTitle": "Source PDS Unreachable",
+        "sourceUnreachable": "Could not connect to your old PDS to fetch media files. This is common when migrating from a shut-down server. Your posts will work, but some images may be missing."
       },
       "success": {
-        "title": "Migration Complete!",
-        "desc": "Your account has been successfully migrated to your new PDS.",
-        "newHandle": "New Handle",
-        "newPds": "New PDS",
-        "nextSteps": "Next Steps",
-        "nextSteps1": "Sign in to your new PDS",
-        "nextSteps2": "Update any apps with your new credentials",
-        "nextSteps3": "Your followers will automatically see your new location",
-        "loggingOut": "Logging you out in {seconds} seconds..."
+        "desc": "Your account has been successfully restored to this PDS."
       }
     },
     "progress": {

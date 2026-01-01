@@ -145,7 +145,7 @@
       case 'info': return $_('register.subtitle')
       case 'key-choice': return $_('register.subtitleKeyChoice')
       case 'initial-did-doc': return $_('register.subtitleInitialDidDoc')
-      case 'creating': return $_('register.creating')
+      case 'creating': return $_('common.creating')
       case 'verify': return $_('register.subtitleVerify', { values: { channel: channelLabel(flow.info.verificationChannel) } })
       case 'updated-did-doc': return $_('register.subtitleUpdatedDidDoc')
       case 'activating': return $_('register.subtitleActivating')
@@ -375,7 +375,7 @@
           {/if}
 
           <button type="submit" disabled={flow.state.submitting}>
-            {flow.state.submitting ? $_('register.creating') : $_('register.createButton')}
+            {flow.state.submitting ? $_('common.creating') : $_('register.createButton')}
           </button>
         </form>
 
@@ -413,7 +413,7 @@
     />
 
   {:else if flow.state.step === 'creating'}
-    <p class="loading">{$_('register.creating')}</p>
+    <p class="loading">{$_('common.creating')}</p>
 
   {:else if flow.state.step === 'verify'}
     <VerificationStep {flow} />

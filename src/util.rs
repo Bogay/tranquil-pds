@@ -1,6 +1,11 @@
 use axum::http::HeaderMap;
+use cid::Cid;
+use ipld_core::ipld::Ipld;
 use rand::Rng;
+use serde_json::Value as JsonValue;
 use sqlx::PgPool;
+use std::collections::BTreeMap;
+use std::str::FromStr;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
@@ -150,6 +155,37 @@ pub fn build_full_url(path: &str) -> String {
     format!("{}{}", pds_public_url(), path)
 }
 
+pub fn json_to_ipld(value: &JsonValue) -> Ipld {
+    match value {
+        JsonValue::Null => Ipld::Null,
+        JsonValue::Bool(b) => Ipld::Bool(*b),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ipld::Integer(i as i128)
+            } else if let Some(f) = n.as_f64() {
+                Ipld::Float(f)
+            } else {
+                Ipld::Null
+            }
+        }
+        JsonValue::String(s) => Ipld::String(s.clone()),
+        JsonValue::Array(arr) => Ipld::List(arr.iter().map(json_to_ipld).collect()),
+        JsonValue::Object(obj) => {
+            if let Some(JsonValue::String(link)) = obj.get("$link")
+                && obj.len() == 1
+                && let Ok(cid) = Cid::from_str(link)
+            {
+                return Ipld::Link(cid);
+            }
+            let map: BTreeMap<String, Ipld> = obj
+                .iter()
+                .map(|(k, v)| (k.clone(), json_to_ipld(v)))
+                .collect();
+            Ipld::Map(map)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +259,98 @@ mod tests {
         for part in parts {
             assert_eq!(part.len(), 4);
         }
+    }
+
+    #[test]
+    fn test_json_to_ipld_cid_link() {
+        let json = serde_json::json!({
+            "$link": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+        });
+        let ipld = json_to_ipld(&json);
+        match ipld {
+            Ipld::Link(cid) => {
+                assert_eq!(
+                    cid.to_string(),
+                    "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+                );
+            }
+            _ => panic!("Expected Ipld::Link, got {:?}", ipld),
+        }
+    }
+
+    #[test]
+    fn test_json_to_ipld_blob_ref() {
+        let json = serde_json::json!({
+            "$type": "blob",
+            "ref": {
+                "$link": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+            },
+            "mimeType": "image/jpeg",
+            "size": 12345
+        });
+        let ipld = json_to_ipld(&json);
+        match ipld {
+            Ipld::Map(map) => {
+                assert_eq!(map.get("$type"), Some(&Ipld::String("blob".to_string())));
+                assert_eq!(
+                    map.get("mimeType"),
+                    Some(&Ipld::String("image/jpeg".to_string()))
+                );
+                assert_eq!(map.get("size"), Some(&Ipld::Integer(12345)));
+                match map.get("ref") {
+                    Some(Ipld::Link(cid)) => {
+                        assert_eq!(
+                            cid.to_string(),
+                            "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+                        );
+                    }
+                    _ => panic!("Expected Ipld::Link in ref field, got {:?}", map.get("ref")),
+                }
+            }
+            _ => panic!("Expected Ipld::Map, got {:?}", ipld),
+        }
+    }
+
+    #[test]
+    fn test_json_to_ipld_nested_blob_refs_serializes_correctly() {
+        let record = serde_json::json!({
+            "$type": "app.bsky.feed.post",
+            "text": "Hello world",
+            "embed": {
+                "$type": "app.bsky.embed.images",
+                "images": [
+                    {
+                        "alt": "Test image",
+                        "image": {
+                            "$type": "blob",
+                            "ref": {
+                                "$link": "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+                            },
+                            "mimeType": "image/jpeg",
+                            "size": 12345
+                        }
+                    }
+                ]
+            }
+        });
+        let ipld = json_to_ipld(&record);
+        let cbor_bytes = serde_ipld_dagcbor::to_vec(&ipld).expect("CBOR serialization failed");
+        assert!(!cbor_bytes.is_empty());
+        let parsed: Ipld =
+            serde_ipld_dagcbor::from_slice(&cbor_bytes).expect("CBOR deserialization failed");
+        if let Ipld::Map(map) = &parsed
+            && let Some(Ipld::Map(embed)) = map.get("embed")
+            && let Some(Ipld::List(images)) = embed.get("images")
+            && let Some(Ipld::Map(img)) = images.first()
+            && let Some(Ipld::Map(blob)) = img.get("image")
+            && let Some(Ipld::Link(cid)) = blob.get("ref")
+        {
+            assert_eq!(
+                cid.to_string(),
+                "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+            );
+            return;
+        }
+        panic!("Failed to find CID link in parsed CBOR");
     }
 }

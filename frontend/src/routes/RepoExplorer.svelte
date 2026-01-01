@@ -417,7 +417,7 @@
         </div>
         <div class="actions">
           <button type="submit" class="primary" disabled={saving || !!jsonError}>
-            {saving ? $_('repoExplorer.saving') : $_('repoExplorer.updateRecord')}
+            {saving ? $_('common.saving') : $_('repoExplorer.updateRecord')}
           </button>
           <button type="button" class="danger" onclick={handleDelete} disabled={saving}>
             {$_('common.delete')}
@@ -464,7 +464,7 @@
       </div>
       <div class="actions">
         <button type="submit" class="primary" disabled={saving || !!jsonError || !newCollection.trim()}>
-          {saving ? $_('repoExplorer.creating') : $_('repoExplorer.createRecord')}
+          {saving ? $_('common.creating') : $_('repoExplorer.createRecord')}
         </button>
         <button type="button" class="secondary" onclick={goBack}>
           {$_('common.cancel')}

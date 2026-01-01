@@ -155,7 +155,7 @@
         </div>
       </div>
       <button type="submit" disabled={creating || !newPasswordName.trim()}>
-        {creating ? $_('appPasswords.creating') : $_('common.create')}
+        {creating ? $_('common.creating') : $_('common.create')}
       </button>
     </form>
   </section>

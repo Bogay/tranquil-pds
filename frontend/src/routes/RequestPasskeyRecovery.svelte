@@ -36,7 +36,7 @@
       <h1>{$_('requestPasskeyRecovery.successTitle')}</h1>
       <p class="subtitle">{$_('requestPasskeyRecovery.successMessage')}</p>
       <p class="info-text">{$_('requestPasskeyRecovery.successInfo')}</p>
-      <button onclick={() => navigate('/login')}>{$_('requestPasskeyRecovery.backToLogin')}</button>
+      <button onclick={() => navigate('/login')}>{$_('common.backToLogin')}</button>
     </div>
   {:else}
     <h1>{$_('requestPasskeyRecovery.title')}</h1>
@@ -71,7 +71,7 @@
   {/if}
 
   <p class="link-text">
-    <a href="#/login">{$_('requestPasskeyRecovery.backToLogin')}</a>
+    <a href="#/login">{$_('common.backToLogin')}</a>
   </p>
 </div>
 

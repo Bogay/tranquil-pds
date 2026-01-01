@@ -567,7 +567,6 @@ pub async fn activate_account(
 #[serde(rename_all = "camelCase")]
 pub struct DeactivateAccountInput {
     pub delete_after: Option<String>,
-    pub migrating_to: Option<String>,
 }
 
 pub async fn deactivate_account(
@@ -618,62 +617,34 @@ pub async fn deactivate_account(
 
     let did = auth_user.did;
 
-    let migrating_to = if let Some(ref url) = input.migrating_to {
-        let url = url.trim().trim_end_matches('/');
-        if url.is_empty() || !did.starts_with("did:web:") {
-            None
-        } else {
-            if !url.starts_with("https://") {
-                return ApiError::InvalidRequest("migratingTo must start with https://".into())
-                    .into_response();
-            }
-            Some(url.to_string())
-        }
-    } else {
-        None
-    };
-
     let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await
         .ok()
         .flatten();
 
-    let result = if let Some(ref pds_url) = migrating_to {
-        sqlx::query!(
-            "UPDATE users SET deactivated_at = NOW(), delete_after = $2, migrated_to_pds = $3, migrated_at = NOW() WHERE did = $1",
-            did,
-            delete_after,
-            pds_url
-        )
-        .execute(&state.db)
-        .await
-    } else {
-        sqlx::query!(
-            "UPDATE users SET deactivated_at = NOW(), delete_after = $2 WHERE did = $1",
-            did,
-            delete_after
-        )
-        .execute(&state.db)
-        .await
-    };
-
-    let status = if migrating_to.is_some() {
-        "migrated"
-    } else {
-        "deactivated"
-    };
+    let result = sqlx::query!(
+        "UPDATE users SET deactivated_at = NOW(), delete_after = $2 WHERE did = $1",
+        did,
+        delete_after
+    )
+    .execute(&state.db)
+    .await;
 
     match result {
         Ok(_) => {
             if let Some(ref h) = handle {
                 let _ = state.cache.delete(&format!("handle:{}", h)).await;
             }
-            if let Err(e) =
-                crate::api::repo::record::sequence_account_event(&state, &did, false, Some(status))
-                    .await
+            if let Err(e) = crate::api::repo::record::sequence_account_event(
+                &state,
+                &did,
+                false,
+                Some("deactivated"),
+            )
+            .await
             {
-                warn!("Failed to sequence account {} event: {}", status, e);
+                warn!("Failed to sequence account deactivated event: {}", e);
             }
             (StatusCode::OK, Json(json!({}))).into_response()
         }

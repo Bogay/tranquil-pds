@@ -225,7 +225,7 @@
 <div class="verify-page">
   {#if autoSubmitting}
     <div class="loading-container">
-      <h1>{$_('verify.verifying')}</h1>
+      <h1>{$_('common.verifying')}</h1>
       <p class="subtitle">{$_('verify.pleaseWait')}</p>
     </div>
   {:else if success}
@@ -235,7 +235,7 @@
         <p class="subtitle">{$_('verify.emailUpdated')}</p>
         <p class="info-text">{$_('verify.emailUpdatedInfo')}</p>
         <div class="actions">
-          <a href="#/settings" class="btn">{$_('verify.backToSettings')}</a>
+          <a href="#/settings" class="btn">{$_('common.backToSettings')}</a>
         </div>
       {:else if successPurpose === 'migration' || successPurpose === 'signup'}
         <p class="subtitle">{$_('verify.channelVerified', { values: { channel: channelLabel(successChannel || '') } })}</p>
@@ -301,7 +301,7 @@
       </form>
 
       <p class="link-text">
-        <a href="#/settings">{$_('verify.backToSettings')}</a>
+        <a href="#/settings">{$_('common.backToSettings')}</a>
       </p>
     {/if}
   {:else if mode === 'token'}
@@ -347,16 +347,16 @@
       </div>
 
       <button type="submit" disabled={submitting || !verificationCode.trim() || !identifier.trim()}>
-        {submitting ? $_('verify.verifying') : $_('verify.verify')}
+        {submitting ? $_('common.verifying') : $_('common.verify')}
       </button>
 
       <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode || !identifier.trim()}>
-        {resendingCode ? $_('verify.sending') : $_('verify.resendCode')}
+        {resendingCode ? $_('common.sending') : $_('common.resendCode')}
       </button>
     </form>
 
     <p class="link-text">
-      <a href="#/login">{$_('verify.backToLogin')}</a>
+      <a href="#/login">{$_('common.backToLogin')}</a>
     </p>
   {:else if pendingVerification}
     <h1>{$_('verify.title')}</h1>
@@ -390,11 +390,11 @@
       </div>
 
       <button type="submit" disabled={submitting || !verificationCode.trim()}>
-        {submitting ? $_('verify.verifying') : $_('verify.verifyButton')}
+        {submitting ? $_('common.verifying') : $_('common.verify')}
       </button>
 
       <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
-        {resendingCode ? $_('verify.resending') : $_('verify.resendCode')}
+        {resendingCode ? $_('common.sending') : $_('common.resendCode')}
       </button>
     </form>
 

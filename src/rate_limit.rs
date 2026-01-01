@@ -32,6 +32,7 @@ pub struct RateLimiters {
     pub totp_verify: Arc<KeyedRateLimiter>,
     pub handle_update: Arc<KeyedRateLimiter>,
     pub handle_update_daily: Arc<KeyedRateLimiter>,
+    pub verification_check: Arc<KeyedRateLimiter>,
 }
 
 impl Default for RateLimiters {
@@ -91,6 +92,9 @@ impl RateLimiters {
                     .unwrap()
                     .allow_burst(NonZeroU32::new(50).unwrap()),
             )),
+            verification_check: Arc::new(RateLimiter::keyed(Quota::per_minute(
+                NonZeroU32::new(60).unwrap(),
+            ))),
         }
     }
 

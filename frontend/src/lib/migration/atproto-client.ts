@@ -372,23 +372,15 @@ export class AtprotoClient {
     );
   }
 
-  async deactivateAccount(migratingTo?: string): Promise<void> {
+  async deactivateAccount(): Promise<void> {
     apiLog(
       "POST",
       `${this.baseUrl}/xrpc/com.atproto.server.deactivateAccount`,
-      {
-        migratingTo,
-      },
     );
     const start = Date.now();
     try {
-      const body: { migratingTo?: string } = {};
-      if (migratingTo) {
-        body.migratingTo = migratingTo;
-      }
       await this.xrpc("com.atproto.server.deactivateAccount", {
         httpMethod: "POST",
-        body,
       });
       apiLog(
         "POST",
@@ -396,7 +388,6 @@ export class AtprotoClient {
         {
           durationMs: Date.now() - start,
           success: true,
-          migratingTo,
         },
       );
     } catch (e) {
@@ -409,7 +400,6 @@ export class AtprotoClient {
           error: err.message,
           errorCode: err.error,
           status: err.status,
-          migratingTo,
         },
       );
       throw e;
@@ -418,33 +408,6 @@ export class AtprotoClient {
 
   async checkAccountStatus(): Promise<AccountStatus> {
     return this.xrpc("com.atproto.server.checkAccountStatus");
-  }
-
-  async getMigrationStatus(): Promise<{
-    did: string;
-    didType: string;
-    migrated: boolean;
-    migratedToPds?: string;
-    migratedAt?: string;
-  }> {
-    return this.xrpc("com.tranquil.account.getMigrationStatus");
-  }
-
-  async updateMigrationForwarding(pdsUrl: string): Promise<{
-    success: boolean;
-    migratedToPds: string;
-    migratedAt: string;
-  }> {
-    return this.xrpc("com.tranquil.account.updateMigrationForwarding", {
-      httpMethod: "POST",
-      body: { pdsUrl },
-    });
-  }
-
-  async clearMigrationForwarding(): Promise<{ success: boolean }> {
-    return this.xrpc("com.tranquil.account.clearMigrationForwarding", {
-      httpMethod: "POST",
-    });
   }
 
   async resolveHandle(handle: string): Promise<{ did: string }> {
@@ -468,13 +431,24 @@ export class AtprotoClient {
     return session;
   }
 
+  async checkEmailVerified(identifier: string): Promise<boolean> {
+    const result = await this.xrpc<{ verified: boolean }>(
+      "_checkEmailVerified",
+      {
+        httpMethod: "POST",
+        body: { identifier },
+      },
+    );
+    return result.verified;
+  }
+
   async verifyToken(
     token: string,
     identifier: string,
   ): Promise<
     { success: boolean; did: string; purpose: string; channel: string }
   > {
-    return this.xrpc("com.tranquil.account.verifyToken", {
+    return this.xrpc("_account.verifyToken", {
       httpMethod: "POST",
       body: { token, identifier },
     });
@@ -498,7 +472,7 @@ export class AtprotoClient {
     }
 
     const res = await fetch(
-      `${this.baseUrl}/xrpc/com.tranquil.account.createPasskeyAccount`,
+      `${this.baseUrl}/xrpc/_account.createPasskeyAccount`,
       {
         method: "POST",
         headers,
@@ -530,7 +504,7 @@ export class AtprotoClient {
     setupToken: string,
     friendlyName?: string,
   ): Promise<StartPasskeyRegistrationResponse> {
-    return this.xrpc("com.tranquil.account.startPasskeyRegistrationForSetup", {
+    return this.xrpc("_account.startPasskeyRegistrationForSetup", {
       httpMethod: "POST",
       body: { did, setupToken, friendlyName },
     });
@@ -542,7 +516,7 @@ export class AtprotoClient {
     passkeyCredential: unknown,
     passkeyFriendlyName?: string,
   ): Promise<CompletePasskeySetupResponse> {
-    return this.xrpc("com.tranquil.account.completePasskeySetup", {
+    return this.xrpc("_account.completePasskeySetup", {
       httpMethod: "POST",
       body: { did, setupToken, passkeyCredential, passkeyFriendlyName },
     });

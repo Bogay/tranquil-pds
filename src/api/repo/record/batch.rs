@@ -345,8 +345,9 @@ pub async fn apply_writes(
                 let rkey = rkey
                     .clone()
                     .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
+                let record_ipld = crate::util::json_to_ipld(value);
                 let mut record_bytes = Vec::new();
-                if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
+                if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();
                 }
                 let record_cid = match tracking_store.put(&record_bytes).await {
@@ -409,8 +410,9 @@ pub async fn apply_writes(
                     }
                 };
                 all_blob_cids.extend(extract_blob_cids(value));
+                let record_ipld = crate::util::json_to_ipld(value);
                 let mut record_bytes = Vec::new();
-                if serde_ipld_dagcbor::to_writer(&mut record_bytes, value).is_err() {
+                if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
                     return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"}))).into_response();
                 }
                 let record_cid = match tracking_store.put(&record_bytes).await {

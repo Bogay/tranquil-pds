@@ -8,13 +8,13 @@ import {
   mockData,
   mockEndpoint,
   setupAuthenticatedUser,
-  setupFetchMock,
+  setupDefaultMocks,
   setupUnauthenticatedUser,
 } from "./mocks";
 describe("Settings", () => {
   beforeEach(() => {
     clearMocks();
-    setupFetchMock();
+    setupDefaultMocks();
     globalThis.confirm = vi.fn(() => true);
   });
   describe("authentication guard", () => {

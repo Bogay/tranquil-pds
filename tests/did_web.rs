@@ -547,62 +547,10 @@ async fn test_did_web_byod_flow() {
 }
 
 #[tokio::test]
-async fn test_deactivate_with_migrating_to() {
+async fn test_did_web_can_edit_did_document() {
     let client = client();
     let base = base_url().await;
-    let handle = format!("mig{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    let payload = json!({
-        "handle": handle,
-        "email": format!("{}@example.com", handle),
-        "password": "Testpass123!",
-        "didType": "web"
-    });
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
-        .json(&payload)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Response was not JSON");
-    let did = body["did"].as_str().expect("No DID").to_string();
-    let jwt = verify_new_account(&client, &did).await;
-    let target_pds = "https://pds2.example.com";
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.deactivateAccount",
-            base
-        ))
-        .bearer_auth(&jwt)
-        .json(&json!({ "migratingTo": target_pds }))
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        r#"SELECT migrated_to_pds, deactivated_at FROM users WHERE did = $1"#,
-        &did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to query user");
-    assert_eq!(
-        row.migrated_to_pds.as_deref(),
-        Some(target_pds),
-        "migrated_to_pds should be set to target PDS"
-    );
-    assert!(
-        row.deactivated_at.is_some(),
-        "deactivated_at should be set for migrated account"
-    );
-}
-
-#[tokio::test]
-async fn test_migrated_account_blocked_from_repo_ops() {
-    let client = client();
-    let base = base_url().await;
-    let handle = format!("blk{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let handle = format!("doc{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -620,131 +568,53 @@ async fn test_migrated_account_blocked_from_repo_ops() {
     let did = body["did"].as_str().expect("No DID").to_string();
     let jwt = verify_new_account(&client, &did).await;
     let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base))
+        .get(format!("{}/xrpc/_account.getDidDocument", base))
         .bearer_auth(&jwt)
-        .json(&json!({
-            "repo": did,
-            "collection": "app.bsky.feed.post",
-            "record": {
-                "$type": "app.bsky.feed.post",
-                "text": "Pre-migration post",
-                "createdAt": chrono::Utc::now().to_rfc3339()
-            }
-        }))
         .send()
         .await
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not JSON");
+    assert!(
+        body["didDocument"].is_object(),
+        "Should return DID document"
+    );
+    assert_eq!(
+        body["didDocument"]["id"], did,
+        "DID document should have correct id"
+    );
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.deactivateAccount",
-            base
-        ))
-        .bearer_auth(&jwt)
-        .json(&json!({ "migratingTo": "https://pds2.example.com" }))
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base))
+        .post(format!("{}/xrpc/_account.updateDidDocument", base))
         .bearer_auth(&jwt)
         .json(&json!({
-            "repo": did,
-            "collection": "app.bsky.feed.post",
-            "record": {
-                "$type": "app.bsky.feed.post",
-                "text": "Post-migration post - should fail",
-                "createdAt": chrono::Utc::now().to_rfc3339()
-            }
+            "alsoKnownAs": ["at://custom.handle.test"]
         }))
         .send()
         .await
         .expect("Failed to send request");
-    assert!(
-        res.status().is_client_error(),
-        "createRecord should fail for migrated account: {}",
-        res.status()
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "Non-migrated did:web user should be able to update DID document"
     );
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.putRecord", base))
-        .bearer_auth(&jwt)
-        .json(&json!({
-            "repo": did,
-            "collection": "app.bsky.actor.profile",
-            "rkey": "self",
-            "record": {
-                "$type": "app.bsky.actor.profile",
-                "displayName": "Test"
-            }
-        }))
-        .send()
-        .await
-        .expect("Failed to send request");
+    let body: Value = res.json().await.expect("Response was not JSON");
+    assert!(body["success"].as_bool().unwrap_or(false));
+    let also_known_as = body["didDocument"]["alsoKnownAs"]
+        .as_array()
+        .expect("alsoKnownAs should be array");
     assert!(
-        res.status().is_client_error(),
-        "putRecord should fail for migrated account: {}",
-        res.status()
-    );
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.deleteRecord", base))
-        .bearer_auth(&jwt)
-        .json(&json!({
-            "repo": did,
-            "collection": "app.bsky.feed.post",
-            "rkey": "test123"
-        }))
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert!(
-        res.status().is_client_error(),
-        "deleteRecord should fail for migrated account: {}",
-        res.status()
-    );
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.applyWrites", base))
-        .bearer_auth(&jwt)
-        .json(&json!({
-            "repo": did,
-            "writes": [{
-                "$type": "com.atproto.repo.applyWrites#create",
-                "collection": "app.bsky.feed.post",
-                "value": {
-                    "$type": "app.bsky.feed.post",
-                    "text": "Batch post",
-                    "createdAt": chrono::Utc::now().to_rfc3339()
-                }
-            }]
-        }))
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert!(
-        res.status().is_client_error(),
-        "applyWrites should fail for migrated account: {}",
-        res.status()
-    );
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base))
-        .bearer_auth(&jwt)
-        .header("Content-Type", "text/plain")
-        .body("test blob content")
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert!(
-        res.status().is_client_error(),
-        "uploadBlob should fail for migrated account: {}",
-        res.status()
+        also_known_as
+            .iter()
+            .any(|v| v.as_str() == Some("at://custom.handle.test")),
+        "alsoKnownAs should contain custom entry"
     );
 }
 
 #[tokio::test]
-async fn test_migrated_session_status() {
+async fn test_deactivate_account_basic() {
     let client = client();
     let base = base_url().await;
-    let handle = format!("ses{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let handle = format!("dea{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let payload = json!({
         "handle": handle,
         "email": format!("{}@example.com", handle),
@@ -762,26 +632,12 @@ async fn test_migrated_session_status() {
     let did = body["did"].as_str().expect("No DID").to_string();
     let jwt = verify_new_account(&client, &did).await;
     let res = client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", base))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Response was not JSON");
-    assert_eq!(body["active"], true);
-    assert!(
-        body["status"].is_null() || body["status"] == "active",
-        "Status should be null or 'active' for normal accounts"
-    );
-    let target_pds = "https://pds3.example.com";
-    let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.deactivateAccount",
             base
         ))
         .bearer_auth(&jwt)
-        .json(&json!({ "migratingTo": target_pds }))
+        .json(&json!({}))
         .send()
         .await
         .expect("Failed to send request");
@@ -794,84 +650,9 @@ async fn test_migrated_session_status() {
         .expect("Failed to send request");
     assert_eq!(res.status(), StatusCode::OK);
     let body: Value = res.json().await.expect("Response was not JSON");
-    assert_eq!(
-        body["active"], false,
-        "Migrated account should not be active"
-    );
-    assert_eq!(
-        body["status"], "migrated",
-        "Status should be 'migrated' after migration"
-    );
-    assert_eq!(
-        body["migratedToPds"], target_pds,
-        "migratedToPds should be set to target PDS"
-    );
-}
-
-#[tokio::test]
-async fn test_migrating_to_ignored_for_did_plc() {
-    let client = client();
-    let base = base_url().await;
-    let handle = format!("plc{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    let payload = json!({
-        "handle": handle,
-        "email": format!("{}@example.com", handle),
-        "password": "Testpass123!",
-        "didType": "plc"
-    });
-    let res = client
-        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
-        .json(&payload)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Response was not JSON");
-    let did = body["did"].as_str().expect("No DID").to_string();
-    assert!(did.starts_with("did:plc:"), "Should be did:plc account");
-    let jwt = verify_new_account(&client, &did).await;
-    let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.deactivateAccount",
-            base
-        ))
-        .bearer_auth(&jwt)
-        .json(&json!({ "migratingTo": "https://pds2.example.com" }))
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let pool = get_test_db_pool().await;
-    let row = sqlx::query!(
-        r#"SELECT migrated_to_pds, deactivated_at FROM users WHERE did = $1"#,
-        &did
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to query user");
-    assert!(
-        row.migrated_to_pds.is_none(),
-        "migrated_to_pds should NOT be set for did:plc accounts"
-    );
-    assert!(
-        row.deactivated_at.is_some(),
-        "deactivated_at should still be set"
-    );
-    let res = client
-        .get(format!("{}/xrpc/com.atproto.server.getSession", base))
-        .bearer_auth(&jwt)
-        .send()
-        .await
-        .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Response was not JSON");
-    assert_eq!(body["active"], false);
+    assert_eq!(body["active"], false, "Account should be deactivated");
     assert_eq!(
         body["status"], "deactivated",
-        "Status should be 'deactivated' not 'migrated' for did:plc"
-    );
-    assert!(
-        body["migratedToPds"].is_null(),
-        "migratedToPds should not be set for did:plc accounts"
+        "Status should be 'deactivated'"
     );
 }

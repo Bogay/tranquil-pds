@@ -171,7 +171,7 @@
       <h1>{$_('oauth.error.title')}</h1>
       <div class="error">{error}</div>
       <button type="button" onclick={() => navigate('/login')}>
-        {$_('verify.backToLogin')}
+        {$_('common.backToLogin')}
       </button>
     </div>
   {:else if consentData}

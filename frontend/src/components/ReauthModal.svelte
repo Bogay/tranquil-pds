@@ -228,7 +228,7 @@
               />
             </div>
             <button type="submit" class="btn-primary" disabled={loading || !password}>
-              {loading ? $_('reauth.verifying') : $_('reauth.verify')}
+              {loading ? $_('common.verifying') : $_('common.verify')}
             </button>
           </form>
         {:else if activeMethod === 'totp'}
@@ -247,7 +247,7 @@
               />
             </div>
             <button type="submit" class="btn-primary" disabled={loading || !totpCode}>
-              {loading ? $_('reauth.verifying') : $_('reauth.verify')}
+              {loading ? $_('common.verifying') : $_('common.verify')}
             </button>
           </form>
         {:else if activeMethod === 'passkey'}

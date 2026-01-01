@@ -75,7 +75,7 @@
   async function loadControllers() {
     if (!auth.session) return
     try {
-      const response = await fetch('/xrpc/com.tranquil.delegation.listControllers', {
+      const response = await fetch('/xrpc/_delegation.listControllers', {
         headers: { 'Authorization': `Bearer ${auth.session.accessJwt}` }
       })
       if (response.ok) {
@@ -90,7 +90,7 @@
   async function loadControlledAccounts() {
     if (!auth.session) return
     try {
-      const response = await fetch('/xrpc/com.tranquil.delegation.listControlledAccounts', {
+      const response = await fetch('/xrpc/_delegation.listControlledAccounts', {
         headers: { 'Authorization': `Bearer ${auth.session.accessJwt}` }
       })
       if (response.ok) {
@@ -104,7 +104,7 @@
 
   async function loadScopePresets() {
     try {
-      const response = await fetch('/xrpc/com.tranquil.delegation.getScopePresets')
+      const response = await fetch('/xrpc/_delegation.getScopePresets')
       if (response.ok) {
         const data = await response.json()
         scopePresets = data.presets || []
@@ -121,7 +121,7 @@
     success = null
 
     try {
-      const response = await fetch('/xrpc/com.tranquil.delegation.addController', {
+      const response = await fetch('/xrpc/_delegation.addController', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${auth.session.accessJwt}`,
@@ -159,7 +159,7 @@
     success = null
 
     try {
-      const response = await fetch('/xrpc/com.tranquil.delegation.removeController', {
+      const response = await fetch('/xrpc/_delegation.removeController', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${auth.session.accessJwt}`,
@@ -188,7 +188,7 @@
     success = null
 
     try {
-      const response = await fetch('/xrpc/com.tranquil.delegation.createDelegatedAccount', {
+      const response = await fetch('/xrpc/_delegation.createDelegatedAccount', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${auth.session.accessJwt}`,
@@ -407,7 +407,7 @@
               {$_('common.cancel')}
             </button>
             <button onclick={createDelegatedAccount} disabled={creatingDelegated || !newDelegatedHandle.trim()}>
-              {creatingDelegated ? $_('delegation.creating') : $_('delegation.createAccount')}
+              {creatingDelegated ? $_('common.creating') : $_('delegation.createAccount')}
             </button>
           </div>
         </div>

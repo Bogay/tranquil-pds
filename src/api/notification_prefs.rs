@@ -182,15 +182,34 @@ pub async fn get_notification_history(
                 .into_response(),
         };
 
+    let sensitive_types = [
+        "email_verification",
+        "password_reset",
+        "email_update",
+        "two_factor_code",
+        "passkey_recovery",
+        "migration_verification",
+        "plc_operation",
+        "channel_verification",
+        "signup_verification",
+    ];
+
     let notifications = rows
         .iter()
-        .map(|row| NotificationHistoryEntry {
-            created_at: row.created_at.to_rfc3339(),
-            channel: row.channel.clone(),
-            comms_type: row.comms_type.clone(),
-            status: row.status.clone(),
-            subject: row.subject.clone(),
-            body: row.body.clone(),
+        .map(|row| {
+            let body = if sensitive_types.contains(&row.comms_type.as_str()) {
+                "[Code redacted for security]".to_string()
+            } else {
+                row.body.clone()
+            };
+            NotificationHistoryEntry {
+                created_at: row.created_at.to_rfc3339(),
+                channel: row.channel.clone(),
+                comms_type: row.comms_type.clone(),
+                status: row.status.clone(),
+                subject: row.subject.clone(),
+                body,
+            }
         })
         .collect();
 

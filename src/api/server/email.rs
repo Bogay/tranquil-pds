@@ -476,3 +476,57 @@ pub async fn update_email(
     info!("Email updated for user {}", user_id);
     (StatusCode::OK, Json(json!({}))).into_response()
 }
+
+#[derive(Deserialize)]
+pub struct CheckEmailVerifiedInput {
+    pub identifier: String,
+}
+
+pub async fn check_email_verified(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<CheckEmailVerifiedInput>,
+) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state
+        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
+        .await
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({
+                "error": "RateLimitExceeded",
+                "message": "Too many requests. Please try again later."
+            })),
+        )
+            .into_response();
+    }
+
+    let user = sqlx::query!(
+        "SELECT email_verified FROM users WHERE email = $1 OR handle = $1",
+        input.identifier
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    match user {
+        Ok(Some(row)) => (
+            StatusCode::OK,
+            Json(json!({ "verified": row.email_verified })),
+        )
+            .into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "AccountNotFound", "message": "Account not found" })),
+        )
+            .into_response(),
+        Err(e) => {
+            error!("DB error checking email verified: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "InternalError" })),
+            )
+                .into_response()
+        }
+    }
+}

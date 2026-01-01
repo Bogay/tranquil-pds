@@ -107,13 +107,13 @@
       </div>
       <div class="actions">
         <button type="submit" disabled={submitting || !verificationCode.trim()}>
-          {submitting ? $_('verification.verifying') : $_('verification.verifyButton')}
+          {submitting ? $_('common.verifying') : $_('common.verify')}
         </button>
         <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
-          {resendingCode ? $_('verification.resending') : $_('verification.resendButton')}
+          {resendingCode ? $_('common.sending') : $_('common.resendCode')}
         </button>
         <button type="button" class="tertiary" onclick={backToLogin}>
-          {$_('verification.backToLogin')}
+          {$_('common.backToLogin')}
         </button>
       </div>
     </form>

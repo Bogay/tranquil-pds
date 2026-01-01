@@ -435,7 +435,7 @@
             <div class="message success">{$_('admin.configSaved')}</div>
           {/if}
           <button type="submit" disabled={serverConfigLoading || !hasConfigChanges()}>
-            {serverConfigLoading ? $_('admin.saving') : $_('admin.saveConfig')}
+            {serverConfigLoading ? $_('common.saving') : $_('admin.saveConfig')}
           </button>
         </form>
       </section>

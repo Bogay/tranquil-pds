@@ -1,21 +1,22 @@
 <script lang="ts">
-  import { getAuthState, logout, setSession } from '../lib/auth.svelte'
+  import { setSession } from '../lib/auth.svelte'
   import { navigate } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
   import {
     createInboundMigrationFlow,
-    createOutboundMigrationFlow,
+    createOfflineInboundMigrationFlow,
     hasPendingMigration,
+    hasPendingOfflineMigration,
     getResumeInfo,
+    getOfflineResumeInfo,
     clearMigrationState,
+    clearOfflineState,
     loadMigrationState,
   } from '../lib/migration'
   import InboundWizard from '../components/migration/InboundWizard.svelte'
-  import OutboundWizard from '../components/migration/OutboundWizard.svelte'
+  import OfflineInboundWizard from '../components/migration/OfflineInboundWizard.svelte'
 
-  const auth = getAuthState()
-
-  type Direction = 'select' | 'inbound' | 'outbound'
+  type Direction = 'select' | 'inbound' | 'offline-inbound'
   let direction = $state<Direction>('select')
   let showResumeModal = $state(false)
   let resumeInfo = $state<ReturnType<typeof getResumeInfo>>(null)
@@ -23,7 +24,7 @@
   let oauthLoading = $state(false)
 
   let inboundFlow = $state<ReturnType<typeof createInboundMigrationFlow> | null>(null)
-  let outboundFlow = $state<ReturnType<typeof createOutboundMigrationFlow> | null>(null)
+  let offlineFlow = $state<ReturnType<typeof createOfflineInboundMigrationFlow> | null>(null)
   let oauthCallbackProcessed = $state(false)
 
   $effect(() => {
@@ -66,19 +67,30 @@
   const urlParams = new URLSearchParams(window.location.search)
   const hasOAuthCallback = urlParams.has('code') || urlParams.has('error')
 
-  if (!hasOAuthCallback && hasPendingMigration()) {
-    resumeInfo = getResumeInfo()
-    if (resumeInfo) {
-      const stored = loadMigrationState()
-      if (stored) {
-        if (stored.direction === 'inbound') {
-          direction = 'inbound'
-          inboundFlow = createInboundMigrationFlow()
-          inboundFlow.resumeFromState(stored)
+  if (!hasOAuthCallback) {
+    if (hasPendingMigration()) {
+      resumeInfo = getResumeInfo()
+      if (resumeInfo) {
+        if (resumeInfo.step === 'success') {
+          clearMigrationState()
+          resumeInfo = null
         } else {
-          direction = 'outbound'
-          outboundFlow = createOutboundMigrationFlow()
+          const stored = loadMigrationState()
+          if (stored && stored.direction === 'inbound') {
+            direction = 'inbound'
+            inboundFlow = createInboundMigrationFlow()
+            inboundFlow.resumeFromState(stored)
+          }
         }
+      }
+    } else if (hasPendingOfflineMigration()) {
+      const offlineInfo = getOfflineResumeInfo()
+      if (offlineInfo && offlineInfo.step === 'success') {
+        clearOfflineState()
+      } else {
+        direction = 'offline-inbound'
+        offlineFlow = createOfflineInboundMigrationFlow()
+        offlineFlow.tryResume()
       }
     }
   }
@@ -88,14 +100,9 @@
     inboundFlow = createInboundMigrationFlow()
   }
 
-  function selectOutbound() {
-    if (!auth.session) {
-      navigate('/login')
-      return
-    }
-    direction = 'outbound'
-    outboundFlow = createOutboundMigrationFlow()
-    outboundFlow.initLocalClient(auth.session.accessJwt, auth.session.did, auth.session.handle)
+  function selectOfflineInbound() {
+    direction = 'offline-inbound'
+    offlineFlow = createOfflineInboundMigrationFlow()
   }
 
   function handleResume() {
@@ -108,14 +115,6 @@
       direction = 'inbound'
       inboundFlow = createInboundMigrationFlow()
       inboundFlow.resumeFromState(stored)
-    } else {
-      if (!auth.session) {
-        navigate('/login')
-        return
-      }
-      direction = 'outbound'
-      outboundFlow = createOutboundMigrationFlow()
-      outboundFlow.initLocalClient(auth.session.accessJwt, auth.session.did, auth.session.handle)
     }
   }
 
@@ -130,9 +129,9 @@
       inboundFlow.reset()
       inboundFlow = null
     }
-    if (outboundFlow) {
-      outboundFlow.reset()
-      outboundFlow = null
+    if (offlineFlow) {
+      offlineFlow.reset()
+      offlineFlow = null
     }
     direction = 'select'
   }
@@ -150,9 +149,17 @@
     navigate('/dashboard')
   }
 
-  async function handleOutboundComplete() {
-    await logout()
-    navigate('/login')
+  function handleOfflineComplete() {
+    const session = offlineFlow?.getLocalSession()
+    if (session) {
+      setSession({
+        did: session.did,
+        handle: session.handle,
+        accessJwt: session.accessJwt,
+        refreshJwt: '',
+      })
+    }
+    navigate('/dashboard')
   }
 </script>
 
@@ -165,7 +172,7 @@
         <div class="resume-details">
           <div class="detail-row">
             <span class="label">{$_('migration.resume.direction')}:</span>
-            <span class="value">{resumeInfo.direction === 'inbound' ? $_('migration.resume.migratingHere') : $_('migration.resume.migratingAway')}</span>
+            <span class="value">{$_('migration.resume.migratingHere')}</span>
           </div>
           {#if resumeInfo.sourceHandle}
             <div class="detail-row">
@@ -212,7 +219,6 @@
 
     <div class="direction-cards">
       <button class="direction-card ghost" onclick={selectInbound}>
-        <div class="card-icon">↓</div>
         <h2>{$_('migration.migrateHere')}</h2>
         <p>{$_('migration.migrateHereDesc')}</p>
         <ul class="features">
@@ -222,16 +228,14 @@
         </ul>
       </button>
 
-      <button class="direction-card ghost" onclick={selectOutbound} disabled>
-        <div class="card-icon">↑</div>
-        <h2>{$_('migration.migrateAway')}</h2>
-        <p>{$_('migration.migrateAwayDesc')}</p>
+      <button class="direction-card ghost offline-card" onclick={selectOfflineInbound}>
+        <h2>{$_('migration.offlineRestore')}</h2>
+        <p>{$_('migration.offlineRestoreDesc')}</p>
         <ul class="features">
-          <li>{$_('migration.exportRepo')}</li>
-          <li>{$_('migration.transferToPds')}</li>
-          <li>{$_('migration.updateIdentity')}</li>
+          <li>{$_('migration.offlineFeature1')}</li>
+          <li>{$_('migration.offlineFeature2')}</li>
+          <li>{$_('migration.offlineFeature3')}</li>
         </ul>
-        <p class="login-required">{$_('migration.comingSoon')}</p>
       </button>
     </div>
 
@@ -263,11 +267,11 @@
       onComplete={handleInboundComplete}
     />
 
-  {:else if direction === 'outbound' && outboundFlow}
-    <OutboundWizard
-      flow={outboundFlow}
+  {:else if direction === 'offline-inbound' && offlineFlow}
+    <OfflineInboundWizard
+      flow={offlineFlow}
       onBack={handleBack}
-      onComplete={handleOutboundComplete}
+      onComplete={handleOfflineComplete}
     />
   {/if}
 </div>
@@ -302,6 +306,9 @@
   }
 
   .direction-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
@@ -320,12 +327,6 @@
   .direction-card:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-  }
-
-  .card-icon {
-    font-size: var(--text-3xl);
-    margin-bottom: var(--space-4);
-    color: var(--accent);
   }
 
   .direction-card h2 {
@@ -349,12 +350,6 @@
 
   .features li {
     margin-bottom: var(--space-2);
-  }
-
-  .login-required {
-    color: var(--warning-text);
-    font-weight: var(--font-medium);
-    margin-top: var(--space-4);
   }
 
   .info-section {
@@ -402,9 +397,8 @@
   }
 
   .warning-box a {
-    display: block;
-    margin-top: var(--space-3);
-    color: var(--accent);
+    display: inline;
+    margin-top: var(--space-2);
   }
 
   .modal-overlay {

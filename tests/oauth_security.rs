@@ -1116,10 +1116,7 @@ async fn test_delegation_viewer_scope_cannot_write() {
 
     let delegated_handle = format!("dg{}", suffix);
     let delegated_res = http_client
-        .post(format!(
-            "{}/xrpc/com.tranquil.delegation.createDelegatedAccount",
-            url
-        ))
+        .post(format!("{}/xrpc/_delegation.createDelegatedAccount", url))
         .bearer_auth(controller_jwt)
         .json(&json!({
             "handle": delegated_handle,

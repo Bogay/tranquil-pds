@@ -1,7 +1,6 @@
 mod common;
 mod helpers;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use chrono::Utc;
 use common::{base_url, client, get_test_db_pool};
 use helpers::verify_new_account;
 use reqwest::{StatusCode, redirect};

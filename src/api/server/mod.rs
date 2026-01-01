@@ -22,14 +22,11 @@ pub use account_status::{
     request_account_delete,
 };
 pub use app_password::{create_app_password, list_app_passwords, revoke_app_password};
-pub use email::{confirm_email, request_email_update, update_email};
+pub use email::{check_email_verified, confirm_email, request_email_update, update_email};
 pub use invite::{create_invite_code, create_invite_codes, get_account_invite_codes};
 pub use logo::get_logo;
 pub use meta::{describe_server, health, robots_txt};
-pub use migration::{
-    clear_migration_forwarding, get_did_document, get_migration_status, update_did_document,
-    update_migration_forwarding,
-};
+pub use migration::{get_did_document, update_did_document};
 pub use passkey_account::{
     complete_passkey_setup, create_passkey_account, recover_passkey_account,
     request_passkey_recovery, start_passkey_registration_for_setup,

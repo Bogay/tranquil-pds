@@ -408,7 +408,7 @@
       </div>
 
       <button type="submit" disabled={flow.state.submitting}>
-        {flow.state.submitting ? $_('registerPasskey.creating') : $_('registerPasskey.continue')}
+        {flow.state.submitting ? $_('common.creating') : $_('registerPasskey.continue')}
       </button>
     </form>
 

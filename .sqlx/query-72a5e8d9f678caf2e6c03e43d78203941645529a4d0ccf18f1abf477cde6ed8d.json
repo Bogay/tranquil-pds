@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT ab.id, ab.storage_key, u.deactivated_at\n        FROM account_backups ab\n        JOIN users u ON u.id = ab.user_id\n        WHERE ab.id = $1 AND u.did = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "storage_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "72a5e8d9f678caf2e6c03e43d78203941645529a4d0ccf18f1abf477cde6ed8d"
+}

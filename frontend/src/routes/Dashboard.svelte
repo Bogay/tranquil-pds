@@ -10,6 +10,8 @@
   let switching = $state(false)
   let inviteCodesEnabled = $state(false)
 
+  const isDidWeb = $derived(auth.session?.did?.startsWith('did:web:') ?? false)
+
   onMount(async () => {
     try {
       const serverInfo = await api.describeServer()
@@ -176,6 +178,10 @@
           <h3>{$_('dashboard.navSecurity')}</h3>
           <p>{$_('dashboard.navSecurityDesc')}</p>
         </a>
+        <a href="#/settings" class="nav-card">
+          <h3>{$_('dashboard.navSettings')}</h3>
+          <p>{$_('dashboard.navSettingsDesc')}</p>
+        </a>
         <a href="#/migrate" class="nav-card">
           <h3>{$_('dashboard.navMigrateAgain')}</h3>
           <p>{$_('dashboard.navMigrateAgainDesc')}</p>
@@ -215,6 +221,12 @@
           <h3>{$_('dashboard.navDelegation')}</h3>
           <p>{$_('dashboard.navDelegationDesc')}</p>
         </a>
+        {#if isDidWeb}
+          <a href="#/did-document" class="nav-card did-web-card">
+            <h3>{$_('dashboard.navDidDocument')}</h3>
+            <p>{$_('dashboard.navDidDocumentDescActive')}</p>
+          </a>
+        {/if}
         <a href="#/migrate" class="nav-card">
           <h3>{$_('migration.navTitle')}</h3>
           <p>{$_('migration.navDesc')}</p>
@@ -503,5 +515,14 @@
 
   .nav-card.migrated-card h3 {
     color: var(--info-text, #0369a1);
+  }
+
+  .nav-card.did-web-card {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-muted) 100%);
+  }
+
+  .nav-card.did-web-card:hover {
+    box-shadow: 0 2px 12px var(--accent-muted);
   }
 </style>

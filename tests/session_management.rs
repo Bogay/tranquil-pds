@@ -10,10 +10,7 @@ async fn test_list_sessions_returns_current_session() {
     let client = client();
     let (did, jwt) = setup_new_user("list-sessions").await;
     let res = client
-        .get(format!(
-            "{}/xrpc/com.tranquil.account.listSessions",
-            base_url().await
-        ))
+        .get(format!("{}/xrpc/_account.listSessions", base_url().await))
         .bearer_auth(&jwt)
         .send()
         .await
@@ -83,10 +80,7 @@ async fn test_list_sessions_multiple_sessions() {
     let login_body: Value = login_res.json().await.unwrap();
     let jwt2 = login_body["accessJwt"].as_str().unwrap();
     let list_res = client
-        .get(format!(
-            "{}/xrpc/com.tranquil.account.listSessions",
-            base_url().await
-        ))
+        .get(format!("{}/xrpc/_account.listSessions", base_url().await))
         .bearer_auth(jwt2)
         .send()
         .await
@@ -106,10 +100,7 @@ async fn test_list_sessions_multiple_sessions() {
 async fn test_list_sessions_requires_auth() {
     let client = client();
     let res = client
-        .get(format!(
-            "{}/xrpc/com.tranquil.account.listSessions",
-            base_url().await
-        ))
+        .get(format!("{}/xrpc/_account.listSessions", base_url().await))
         .send()
         .await
         .expect("Failed to send request");
@@ -158,10 +149,7 @@ async fn test_revoke_session_success() {
     let login_body: Value = login_res.json().await.unwrap();
     let jwt2 = login_body["accessJwt"].as_str().unwrap();
     let list_res = client
-        .get(format!(
-            "{}/xrpc/com.tranquil.account.listSessions",
-            base_url().await
-        ))
+        .get(format!("{}/xrpc/_account.listSessions", base_url().await))
         .bearer_auth(jwt2)
         .send()
         .await
@@ -177,10 +165,7 @@ async fn test_revoke_session_success() {
     );
     let session_id = other_session.unwrap()["id"].as_str().unwrap();
     let revoke_res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.revokeSession",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.revokeSession", base_url().await))
         .bearer_auth(jwt2)
         .json(&json!({"sessionId": session_id}))
         .send()
@@ -188,10 +173,7 @@ async fn test_revoke_session_success() {
         .expect("Failed to revoke session");
     assert_eq!(revoke_res.status(), StatusCode::OK);
     let list_after_res = client
-        .get(format!(
-            "{}/xrpc/com.tranquil.account.listSessions",
-            base_url().await
-        ))
+        .get(format!("{}/xrpc/_account.listSessions", base_url().await))
         .bearer_auth(jwt2)
         .send()
         .await
@@ -213,10 +195,7 @@ async fn test_revoke_session_invalid_id() {
     let client = client();
     let (_, jwt) = setup_new_user("revoke-invalid").await;
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.revokeSession",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.revokeSession", base_url().await))
         .bearer_auth(&jwt)
         .json(&json!({"sessionId": "not-a-number"}))
         .send()
@@ -230,10 +209,7 @@ async fn test_revoke_session_not_found() {
     let client = client();
     let (_, jwt) = setup_new_user("revoke-notfound").await;
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.revokeSession",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.revokeSession", base_url().await))
         .bearer_auth(&jwt)
         .json(&json!({"sessionId": "jwt:999999999"}))
         .send()
@@ -246,10 +222,7 @@ async fn test_revoke_session_not_found() {
 async fn test_revoke_session_requires_auth() {
     let client = client();
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.revokeSession",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.revokeSession", base_url().await))
         .json(&json!({"sessionId": "1"}))
         .send()
         .await

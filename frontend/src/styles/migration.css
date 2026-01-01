@@ -190,6 +190,12 @@
 
 .current-info .value {
   font-weight: var(--font-medium);
+  word-break: break-all;
+}
+
+.current-info .value.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
 .review-card {
@@ -268,6 +274,31 @@
   text-align: center;
   color: var(--text-secondary);
   font-size: var(--text-sm);
+}
+
+.blob-progress {
+  margin: var(--space-4) 0;
+}
+
+.blob-progress-bar {
+  height: 8px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-bottom: var(--space-2);
+}
+
+.blob-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--transition-slow);
+}
+
+.blob-progress-text {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  margin: 0;
 }
 
 .success-content {
@@ -566,4 +597,63 @@ label.auth-option {
   margin-top: var(--space-4);
   font-size: var(--text-sm);
   font-style: italic;
+}
+
+.file-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.file-info {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3);
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
+}
+
+.file-name {
+  font-weight: var(--font-medium);
+}
+
+.file-size {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.step-content textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  resize: vertical;
+}
+
+.step-content textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.message {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
+}
+
+.message.success {
+  background: var(--success-bg);
+  color: var(--success-text);
+  border: 1px solid var(--success-border);
+}
+
+.message.error {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 1px solid var(--error-border);
 }

@@ -230,7 +230,7 @@
 
     <div class="actions">
       <button onclick={handleSave} disabled={saving}>
-        {saving ? $_('didEditor.saving') : $_('didEditor.save')}
+        {saving ? $_('common.saving') : $_('common.save')}
       </button>
     </div>
   {/if}

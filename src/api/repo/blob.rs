@@ -312,7 +312,7 @@ pub async fn list_missing_blobs(
         r#"
         SELECT rb.blob_cid, rb.record_uri
         FROM record_blobs rb
-        LEFT JOIN blobs b ON rb.blob_cid = b.cid AND b.created_by_user = rb.repo_id
+        LEFT JOIN blobs b ON rb.blob_cid = b.cid
         WHERE rb.repo_id = $1 AND b.cid IS NULL AND rb.blob_cid > $2
         ORDER BY rb.blob_cid
         LIMIT $3

@@ -341,7 +341,7 @@
 
           <div class="actions">
             <button type="submit" disabled={saving}>
-              {saving ? $_('comms.saving') : $_('comms.savePreferences')}
+              {saving ? $_('common.saving') : $_('comms.savePreferences')}
             </button>
           </div>
         </form>

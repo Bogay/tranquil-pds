@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, migrated_to_pds, handle FROM users WHERE did = $1",
+  "query": "\n        SELECT id, storage_key\n        FROM account_backups\n        WHERE user_id = $1\n        ORDER BY created_at DESC\n        OFFSET $2\n        ",
   "describe": {
     "columns": [
       {
@@ -10,25 +10,20 @@
       },
       {
         "ordinal": 1,
-        "name": "migrated_to_pds",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 2,
-        "name": "handle",
+        "name": "storage_key",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
       false,
-      true,
       false
     ]
   },
-  "hash": "63cfbd8c2fda2c01cb9a97fc2768b60cafecaa4fa3006c2db9848e852d867073"
+  "hash": "a36a237358f5dc502bb09258074139a5aef77adb0f6d58ffc5e998acbc00f144"
 }

@@ -17,7 +17,53 @@
     "dashboard": "Hallintapaneeli",
     "backToDashboard": "← Hallintapaneeli",
     "copied": "Kopioitu!",
-    "copyToClipboard": "Kopioi"
+    "copyToClipboard": "Kopioi",
+
+    "verifying": "Vahvistetaan...",
+    "saving": "Tallennetaan...",
+    "creating": "Luodaan...",
+    "updating": "Päivitetään...",
+    "sending": "Lähetetään...",
+    "authenticating": "Todennetaan...",
+    "checking": "Tarkistetaan...",
+    "redirecting": "Ohjataan...",
+
+    "signIn": "Kirjaudu sisään",
+    "verify": "Vahvista",
+    "remove": "Poista",
+    "revoke": "Peruuta",
+    "resendCode": "Lähetä koodi uudelleen",
+    "startOver": "Aloita alusta",
+    "tryAgain": "Yritä uudelleen",
+
+    "password": "Salasana",
+    "email": "Sähköposti",
+    "emailAddress": "Sähköpostiosoite",
+    "handle": "Käsittely",
+    "did": "DID",
+    "verificationCode": "Vahvistuskoodi",
+    "inviteCode": "Kutsukoodi",
+    "newPassword": "Uusi salasana",
+    "confirmPassword": "Vahvista salasana",
+
+    "enterSixDigitCode": "Syötä 6-numeroinen koodi",
+    "passwordHint": "Vähintään 8 merkkiä",
+    "enterPassword": "Syötä salasanasi",
+    "emailPlaceholder": "sinä@esimerkki.com",
+
+    "verified": "Vahvistettu",
+    "disabled": "Poistettu käytöstä",
+    "available": "Saatavilla",
+    "deactivated": "Deaktivoitu",
+    "unverified": "Vahvistamaton",
+
+    "backToLogin": "Takaisin kirjautumiseen",
+    "backToSettings": "Takaisin asetuksiin",
+    "alreadyHaveAccount": "Onko sinulla jo tili?",
+    "createAccount": "Luo tili",
+
+    "passwordsMismatch": "Salasanat eivät täsmää",
+    "passwordTooShort": "Salasanan on oltava vähintään 8 merkkiä"
   },
   "login": {
     "title": "Kirjaudu sisään",
@@ -49,11 +95,7 @@
     "codeLabel": "Vahvistuskoodi",
     "codePlaceholder": "Syötä 6-numeroinen koodi",
     "verifyButton": "Vahvista tili",
-    "verifying": "Vahvistetaan...",
-    "resendButton": "Lähetä koodi uudelleen",
-    "resending": "Lähetetään uudelleen...",
-    "resent": "Vahvistuskoodi lähetetty uudelleen!",
-    "backToLogin": "Takaisin kirjautumiseen"
+    "resent": "Vahvistuskoodi lähetetty uudelleen!"
   },
   "register": {
     "title": "Luo tili",
@@ -124,7 +166,6 @@
     "inviteCodePlaceholder": "Syötä kutsukoodisi",
     "inviteCodeRequired": "vaaditaan",
     "createButton": "Luo tili",
-    "creating": "Luodaan tiliä...",
     "alreadyHaveAccount": "Onko sinulla jo tili?",
     "signIn": "Kirjaudu sisään",
     "wantPasswordless": "Haluatko salasanattoman turvallisuuden?",
@@ -179,6 +220,11 @@
     "navAdminDesc": "Palvelintilastot ja ylläpitotoiminnot",
     "navDidDocument": "DID-dokumentti",
     "navDidDocumentDesc": "Hallitse DID-dokumenttiasi ulkoisia siirtoja varten",
+    "navDidDocumentDescActive": "Muokkaa DID-dokumentin asetuksia",
+    "navBackup": "Lataa varmuuskopio",
+    "navBackupDesc": "Lataa tietovarastosi CAR-tiedostona",
+    "downloadingBackup": "Ladataan...",
+    "backupFailed": "Varmuuskopion lataus epäonnistui",
     "migrated": "Siirretty",
     "migratedTitle": "Tili siirretty",
     "migratedMessage": "Tilisi on siirretty palvelimelle {pds}. DID-dokumenttisi isännöidään edelleen täällä, ja voit päivittää sen tulevia siirtoja varten.",
@@ -208,7 +254,6 @@
     "serviceEndpointDesc": "PDS, joka tällä hetkellä isännöi tilitietojasi. Päivitä tämä siirron yhteydessä.",
     "currentPds": "Nykyinen PDS-URL",
     "save": "Tallenna muutokset",
-    "saving": "Tallennetaan...",
     "success": "DID-dokumentti päivitetty onnistuneesti",
     "saveFailed": "DID-dokumentin tallennus epäonnistui",
     "loadFailed": "DID-dokumentin lataus epäonnistui",
@@ -246,7 +291,6 @@
     "yourDomain": "Verkkotunnuksesi",
     "yourDomainPlaceholder": "esimerkki.fi",
     "verifyAndUpdate": "Vahvista ja päivitä käyttäjänimi",
-    "verifying": "Vahvistetaan...",
     "newHandle": "Uusi käyttäjänimi",
     "newHandlePlaceholder": "käyttäjänimesi",
     "changeHandleButton": "Vaihda käyttäjänimi",
@@ -262,7 +306,34 @@
     "exportData": "Vie tiedot",
     "exportDataDescription": "Lataa koko tietovarastosi CAR-tiedostona (Content Addressable Archive). Tämä sisältää kaikki julkaisusi, tykkäyksesi, seuraamisesi ja muut tiedot.",
     "downloadRepo": "Lataa tietovarasto",
+    "downloadBlobs": "Lataa media",
     "exporting": "Viedään...",
+    "backups": {
+      "title": "Varmuuskopiot",
+      "description": "Tietovarastosi varmuuskopioidaan automaattisesti päivittäin. Voit myös luoda manuaalisia varmuuskopioita tai palauttaa aiemmasta varmuuskopiosta.",
+      "enableAutomatic": "Ota automaattiset varmuuskopiot käyttöön",
+      "enabled": "Automaattiset varmuuskopiot käytössä",
+      "disabled": "Automaattiset varmuuskopiot pois käytöstä",
+      "toggleFailed": "Varmuuskopioasetuksen päivitys epäonnistui",
+      "noBackups": "Varmuuskopioita ei ole vielä saatavilla.",
+      "blocks": "lohkoa",
+      "download": "Lataa",
+      "delete": "Poista",
+      "createNow": "Luo varmuuskopio nyt",
+      "created": "Varmuuskopio luotu onnistuneesti",
+      "createFailed": "Varmuuskopion luonti epäonnistui",
+      "downloadFailed": "Varmuuskopion lataus epäonnistui",
+      "deleted": "Varmuuskopio poistettu",
+      "deleteFailed": "Varmuuskopion poisto epäonnistui",
+      "restoreTitle": "Palauta varmuuskopiosta",
+      "restoreDescription": "Lataa CAR-tiedosto palauttaaksesi tietovarastosi. Tämä korvaa nykyiset tietosi.",
+      "selectFile": "Valitse CAR-tiedosto",
+      "selectedFile": "Valittu tiedosto",
+      "restore": "Palauta",
+      "restoring": "Palautetaan...",
+      "restored": "Tietovarasto palautettu onnistuneesti",
+      "restoreFailed": "Tietovaraston palautus epäonnistui"
+    },
     "deleteAccount": "Poista tili",
     "deleteWarning": "Tämä toiminto on peruuttamaton. Kaikki tietosi poistetaan pysyvästi.",
     "requestDeletion": "Pyydä tilin poistoa",
@@ -291,7 +362,9 @@
       "deleteConfirmation": "Oletko täysin varma, että haluat poistaa tilisi? Tätä ei voi perua.",
       "deletionFailed": "Tilin poisto epäonnistui",
       "repoExported": "Tietovarasto viety",
-      "exportFailed": "Tietovaraston vienti epäonnistui",
+      "blobsExported": "Mediatiedostot viety",
+      "noBlobsToExport": "Ei vietäviä mediatiedostoja",
+      "exportFailed": "Vienti epäonnistui",
       "confirmDelete": "Oletko täysin varma, että haluat poistaa tilisi? Tätä ei voi perua."
     }
   },
@@ -306,7 +379,6 @@
     "noPasswords": "Ei vielä sovellusten salasanoja",
     "revoke": "Peruuta",
     "revoking": "Peruutetaan...",
-    "creating": "Luodaan...",
     "revokeConfirm": "Peruuta sovelluksen salasana \"{name}\"? Sovellukset, jotka käyttävät tätä salasanaa, eivät enää pääse tilillesi.",
     "saveWarningTitle": "Tärkeää: Tallenna tämä sovelluksen salasana!",
     "saveWarningMessage": "Tämä salasana tarvitaan kirjautumiseen sovelluksiin, jotka eivät tue pääsyavaimia tai OAuthia. Näet sen vain kerran.",
@@ -354,7 +426,6 @@
     "used": "Käyttänyt @{handle}",
     "disabled": "Poistettu käytöstä",
     "usedBy": "Käyttänyt",
-    "creating": "Luodaan...",
     "disableConfirm": "Poista tämä kutsukoodi käytöstä? Sitä ei voi enää käyttää.",
     "created": "Kutsukoodi luotu",
     "copy": "Kopioi",
@@ -482,7 +553,6 @@
     "verifyButton": "Vahvista",
     "verifyCodePlaceholder": "Syötä vahvistuskoodi",
     "submit": "Lähetä",
-    "saving": "Tallennetaan...",
     "savePreferences": "Tallenna asetukset",
     "preferencesSaved": "Viestintäasetukset tallennettu",
     "verifiedSuccess": "{channel} vahvistettu",
@@ -521,13 +591,11 @@
     "noCollectionsYet": "Ei vielä kokoelmia. Luo ensimmäinen tietueesi aloittaaksesi.",
     "loadMore": "Lataa lisää",
     "recordJson": "Tietueen JSON",
-    "saving": "Tallennetaan...",
     "updateRecord": "Päivitä tietue",
     "collectionNsid": "Kokoelma (NSID)",
     "recordKeyOptional": "Tietueavain (valinnainen)",
     "autoGenerated": "Luodaan automaattisesti jos tyhjä (TID)",
     "autoGeneratedHint": "Jätä tyhjäksi luodaksesi TID-pohjaisen avaimen automaattisesti",
-    "creating": "Luodaan...",
     "demoPostText": "Hei PDS:ltäni! Tämä on ensimmäinen julkaisuni.",
     "demoDisplayName": "Näyttönimesi",
     "demoBio": "Lyhyt kuvaus itsestäsi."
@@ -548,7 +616,6 @@
     "primaryLight": "Ensisijainen (vaalea tila)",
     "primaryDark": "Ensisijainen (tumma tila)",
     "configSaved": "Palvelinasetukset tallennettu",
-    "saving": "Tallennetaan...",
     "saveConfig": "Tallenna asetukset",
     "serverStats": "Palvelintilastot",
     "users": "Käyttäjät",
@@ -639,16 +706,13 @@
       "title": "Kaksivaiheinen tunnistautuminen",
       "subtitle": "Lisävahvistus vaaditaan",
       "usePasskey": "Käytä pääsyavainta",
-      "useTotp": "Käytä todentajasovellusta",
-      "verifying": "Vahvistetaan..."
+      "useTotp": "Käytä todentajasovellusta"
     },
     "twoFactorCode": {
       "title": "Kaksivaiheinen tunnistautuminen",
       "subtitle": "Vahvistuskoodi on lähetetty {channel}. Syötä koodi alla jatkaaksesi.",
       "codeLabel": "Vahvistuskoodi",
       "codePlaceholder": "Syötä 6-numeroinen koodi",
-      "verify": "Vahvista",
-      "verifying": "Vahvistetaan...",
       "errors": {
         "missingRequestUri": "Puuttuva request_uri-parametri",
         "verificationFailed": "Vahvistus epäonnistui",
@@ -660,8 +724,6 @@
       "title": "Syötä todentajakoodi",
       "subtitle": "Syötä 6-numeroinen koodi todentajasovelluksestasi",
       "codePlaceholder": "Syötä 6-numeroinen koodi",
-      "verify": "Vahvista",
-      "verifying": "Vahvistetaan...",
       "useBackupCode": "Käytä varakoodia sen sijaan",
       "backupCodePlaceholder": "Syötä varakoodi",
       "trustDevice": "Luota tähän laitteeseen 30 päivää",
@@ -691,12 +753,7 @@
     "codeLabel": "Vahvistuskoodi",
     "codeHelp": "Kopioi koko koodi viestistäsi, mukaan lukien väliviivat",
     "verifyButton": "Vahvista tili",
-    "verify": "Vahvista",
-    "verifying": "Vahvistetaan...",
     "pleaseWait": "Odota...",
-    "sending": "Lähetetään...",
-    "resendCode": "Lähetä koodi uudelleen",
-    "resending": "Lähetetään uudelleen...",
     "codeResent": "Vahvistuskoodi lähetetty uudelleen!",
     "codeResentDetail": "Vahvistuskoodi lähetetty! Tarkista saapuneet-kansiosi.",
     "verified": "Vahvistettu!",
@@ -706,14 +763,12 @@
     "identifierLabel": "Sähköposti tai tunniste",
     "identifierPlaceholder": "sinä@esimerkki.fi",
     "identifierHelp": "Sähköpostiosoite tai tunniste, johon koodi lähetettiin",
-    "backToLogin": "Takaisin kirjautumiseen",
     "verifyingAccount": "Vahvistetaan tiliä: @{handle}",
     "startOver": "Aloita alusta toisella tilillä",
     "noPending": "Odottavaa vahvistusta ei löytynyt.",
     "noPendingInfo": "Jos loit tilin äskettäin ja sinun on vahvistettava se, sinun on ehkä luotava uusi tili. Jos olet jo vahvistanut tilisi, voit kirjautua sisään.",
     "createAccount": "Luo tili",
     "signIn": "Kirjaudu sisään",
-    "backToSettings": "Takaisin asetuksiin",
     "emailUpdateCodeHelp": "Koodi lähetettiin nykyiseen sähköpostiosoitteeseesi",
     "emailUpdateFailed": "Sähköpostiosoitteen päivitys epäonnistui",
     "emailUpdateRequiresAuth": "Sinun on kirjauduttava sisään päivittääksesi sähköpostiosoitteesi.",
@@ -746,7 +801,6 @@
     "resetButton": "Palauta salasana",
     "resetting": "Palautetaan...",
     "success": "Salasana palautettu!",
-    "backToLogin": "Takaisin kirjautumiseen",
     "requestNewCode": "Pyydä uusi koodi",
     "passwordsMismatch": "Salasanat eivät täsmää",
     "passwordLength": "Salasanan on oltava vähintään 8 merkkiä"
@@ -790,8 +844,7 @@
     "howItWorks": "Miten se toimii",
     "howItWorksDetail": "Lähetämme suojatun linkin rekisteröityyn ilmoituskanavaasi. Klikkaa linkkiä asettaaksesi väliaikaisen salasanan. Sitten voit kirjautua sisään ja lisätä uuden pääsyavaimen.",
     "sendRecoveryLink": "Lähetä palautuslinkki",
-    "sending": "Lähetetään...",
-    "backToLogin": "Takaisin kirjautumiseen"
+    "sending": "Lähetetään..."
   },
   "registerPasskey": {
     "title": "Luo pääsyavaintili",
@@ -812,7 +865,6 @@
     "externalDid": "Sinun did:web",
     "externalDidPlaceholder": "did:web:verkkotunnuksesi.fi",
     "createButton": "Luo tili",
-    "creating": "Luodaan...",
     "alreadyHaveAccount": "Onko sinulla jo tili?",
     "signIn": "Kirjaudu sisään",
     "wantPassword": "Haluatko käyttää salasanaa?",
@@ -911,8 +963,6 @@
     "useTotp": "Käytä todentajaa",
     "passwordPlaceholder": "Syötä salasanasi",
     "totpPlaceholder": "Syötä 6-numeroinen koodi",
-    "verify": "Vahvista",
-    "verifying": "Vahvistetaan...",
     "authenticating": "Todennetaan...",
     "passkeyPrompt": "Klikkaa alla olevaa painiketta todentaaksesi pääsyavaimellasi.",
     "cancel": "Peruuta"
@@ -967,7 +1017,6 @@
     "handle": "Käyttäjänimi",
     "emailOptional": "Sähköposti (valinnainen)",
     "yourAccessLevel": "Käyttöoikeustasosi",
-    "creating": "Luodaan...",
     "createAccount": "Luo tili",
     "createDelegatedAccountButton": "+ Luo delegoitu tili",
     "accountCreated": "Delegoitu tili luotu: {handle}",
@@ -1059,15 +1108,9 @@
     "navDesc": "Siirrä tilisi toiseen tai toisesta PDS:stä",
     "migrateHere": "Siirrä tänne",
     "migrateHereDesc": "Siirrä olemassa oleva AT Protocol -tilisi tähän PDS:ään toiselta palvelimelta.",
-    "migrateAway": "Siirrä pois",
-    "migrateAwayDesc": "Siirrä tilisi tästä PDS:stä toiselle palvelimelle.",
-    "loginRequired": "Kirjautuminen vaaditaan",
     "bringDid": "Tuo DID ja identiteettisi",
     "transferData": "Siirrä kaikki tietosi",
     "keepFollowers": "Säilytä seuraajasi",
-    "exportRepo": "Vie tietovarastosi",
-    "transferToPds": "Siirrä uuteen PDS:ään",
-    "updateIdentity": "Päivitä identiteettisi",
     "whatIsMigration": "Mikä on tilin siirto?",
     "whatIsMigrationDesc": "Tilin siirto mahdollistaa AT Protocol -identiteettisi siirtämisen henkilökohtaisten datapalvelimien (PDS) välillä. DID (hajautettu tunniste) pysyy samana, joten seuraajasi ja sosiaaliset yhteytesi säilyvät.",
     "beforeMigrate": "Ennen siirtoa",
@@ -1077,7 +1120,11 @@
     "beforeMigrate4": "Vanhalle PDS:llesi ilmoitetaan tilisi deaktivoinnista",
     "importantWarning": "Tilin siirto on merkittävä toimenpide. Varmista, että luotat kohde-PDS:ään ja ymmärrät, että tietosi siirretään. Jos jokin menee pieleen, palautus voi vaatia manuaalista toimenpidettä.",
     "learnMore": "Lue lisää siirron riskeistä",
-    "comingSoon": "Tulossa pian",
+    "offlineRestore": "Offline-palautus",
+    "offlineRestoreDesc": "Palauta varmuuskopiosta, kun vanha PDS ei ole käytettävissä.",
+    "offlineFeature1": "Käytä CAR-tiedoston varmuuskopiota",
+    "offlineFeature2": "Todista omistajuus rotaatioavaimella",
+    "offlineFeature3": "Palautus suljetuille palvelimille",
     "oauthCompleting": "Viimeistellään todennusta...",
     "oauthFailed": "Todennus epäonnistui",
     "tryAgain": "Yritä uudelleen",
@@ -1086,7 +1133,6 @@
       "incomplete": "Sinulla on keskeneräinen siirto:",
       "direction": "Suunta",
       "migratingHere": "Siirretään tänne",
-      "migratingAway": "Siirretään pois",
       "from": "Mistä",
       "to": "Minne",
       "progress": "Edistyminen",
@@ -1229,7 +1275,8 @@
       "error": {
         "title": "Siirtovirhe",
         "desc": "Siirron aikana tapahtui virhe.",
-        "startOver": "Aloita alusta"
+        "startOver": "Aloita alusta",
+        "unknown": "Tuntematon virhe tapahtui."
       },
       "common": {
         "back": "Takaisin",
@@ -1247,70 +1294,77 @@
         "warning3": "Vanha tilisi deaktivoidaan siirron jälkeen"
       }
     },
-    "outbound": {
+    "offline": {
       "welcome": {
-        "title": "Siirrä pois tästä PDS:stä",
-        "desc": "Siirrä tilisi toiseen henkilökohtaiseen datapalvelimeen.",
-        "warning": "Siirron jälkeen tilisi täällä deaktivoidaan.",
-        "didWebNotice": "did:web-siirtoilmoitus",
-        "didWebNoticeDesc": "Tilisi käyttää did:web-tunnistetta ({did}). Siirron jälkeen tämä PDS jatkaa DID-dokumenttisi tarjoamista osoittaen uuteen PDS:ään. Identiteettisi toimii niin kauan kuin tämä palvelin on päällä.",
-        "understand": "Ymmärrän riskit ja haluan jatkaa"
+        "title": "Palauta varmuuskopiosta",
+        "desc": "Palauta tilisi CAR-tiedoston varmuuskopiolla ja rotaatioavaimella. Käytä tätä, kun edellinen PDS ei ole käytettävissä.",
+        "warningTitle": "Milloin käyttää tätä menetelmää",
+        "warningDesc": "Tämä offline-palautus on katastrofipalautukseen, kun vanha PDS on suljettu, tavoittamattomissa tai sinut on lukittu ulos. Jos vanha PDS on edelleen käytettävissä, käytä normaalia siirtoa.",
+        "requirementsTitle": "Tarvitset",
+        "requirement1": "CAR-tiedoston varmuuskopion tietovarastostasi",
+        "requirement2": "Rotaatioavaimesi (DID:n yksityinen avain)",
+        "requirement3": "DID:si (did:plc:xxx)",
+        "understand": "Ymmärrän ja haluan jatkaa"
       },
-      "targetPds": {
-        "title": "Valitse kohde-PDS",
-        "desc": "Syötä sen PDS:n URL, johon haluat siirtyä.",
-        "url": "PDS URL",
-        "urlPlaceholder": "https://pds.example.com",
-        "validate": "Vahvista ja jatka",
-        "validating": "Vahvistetaan...",
-        "connected": "Yhdistetty: {name}",
-        "inviteRequired": "Kutsukoodi vaaditaan",
-        "privacyPolicy": "Tietosuojakäytäntö",
-        "termsOfService": "Käyttöehdot"
+      "provideDid": {
+        "title": "Syötä DID:si",
+        "desc": "Syötä palautettavan tilin DID.",
+        "label": "DID:si",
+        "hint": "Hajautettu tunnistesi (esim. did:plc:abc123)"
       },
-      "newAccount": {
-        "title": "Uuden tilin tiedot",
-        "desc": "Määritä tilisi uudessa PDS:ssä.",
-        "handle": "Käyttäjätunnus",
-        "availableDomains": "Käytettävissä olevat verkkotunnukset",
-        "email": "Sähköposti",
-        "password": "Salasana",
-        "confirmPassword": "Vahvista salasana",
-        "inviteCode": "Kutsukoodi"
+      "uploadCar": {
+        "title": "Lataa CAR-tiedosto",
+        "desc": "Lataa tietovaraston varmuuskopiotiedostosi.",
+        "label": "CAR-tiedosto",
+        "hint": "Valitse .car-tiedosto varmuuskopiostasi",
+        "reuploadWarningTitle": "CAR-tiedosto vaaditaan",
+        "reuploadWarning": "Istuntosi palautettiin, mutta sinun täytyy ladata CAR-tiedostosi uudelleen. Turvallisuussyistä tiedostosisältöä ei tallenneta istuntojen välillä."
+      },
+      "rotationKey": {
+        "title": "Anna rotaatioavain",
+        "desc": "Anna rotaatioavaimesi todistaaksesi tämän DID:n omistajuuden.",
+        "securityWarningTitle": "Turvallisuusvaroitus",
+        "securityWarning1": "Rotaatioavaimesi on erittäin arkaluonteinen - kohtele sitä kuten pääsalasanaa",
+        "securityWarning2": "Syötä se vain luotetuilla laitteilla ja verkoilla",
+        "securityWarning3": "Tätä avainta ei tallenneta siirron jälkeen",
+        "label": "Rotaatioavain",
+        "placeholder": "Syötä yksityinen avain (hex, base58 tai JWK)",
+        "hint": "Yksityinen avain, joka vastaa yhtä DID-dokumentin rotaatioavaimista",
+        "valid": "Avain on kelvollinen ja vastaa DID:si rotaatioavainta",
+        "invalid": "Avain ei vastaa mitään DID-dokumentin rotaatioavainta",
+        "validating": "Vahvistetaan avainta...",
+        "validate": "Vahvista avain"
+      },
+      "chooseHandle": {
+        "migratingDid": "Palautetaan DID"
       },
       "review": {
-        "title": "Tarkista siirto",
-        "desc": "Tarkista ja vahvista siirtotietosi.",
-        "currentHandle": "Nykyinen käyttäjätunnus",
-        "newHandle": "Uusi käyttäjätunnus",
-        "sourcePds": "Tämä PDS",
-        "targetPds": "Kohde-PDS",
-        "confirm": "Vahvistan haluavani siirtää tilini",
-        "startMigration": "Aloita siirto"
+        "desc": "Tarkista offline-palautuksen tiedot.",
+        "carFile": "CAR-tiedosto",
+        "rotationKey": "Rotaatioavain",
+        "warning": "Kun aloitat palautuksen, identiteettisi päivitetään osoittamaan tähän PDS:ään. Tätä ei voi helposti perua.",
+        "plcWarningTitle": "Ei paluuta",
+        "plcWarning": "Kun aloitat, DID-dokumenttisi päivitetään osoittamaan tähän PDS:ään. Jos jokin menee pieleen, voit käyttää rotaatioavaintasi palautumiseen, mutta sinun tulisi suorittaa siirto loppuun välttääksesi rikkinäisen identiteettitilan."
       },
       "migrating": {
-        "title": "Siirretään tiliäsi",
-        "desc": "Odota, kun siirrämme tietojasi..."
-      },
-      "plcToken": {
-        "title": "Vahvista henkilöllisyytesi",
-        "desc": "Vahvistuskoodi on lähetetty sähköpostiisi."
-      },
-      "finalizing": {
-        "title": "Viimeistellään siirtoa",
-        "desc": "Odota, kun viimeistelemme siirtoa...",
-        "updatingForwarding": "Päivitetään DID-dokumentin uudelleenohjausta..."
+        "title": "Palautetaan tiliä",
+        "desc": "Odota, tiliäsi palautetaan...",
+        "creating": "Luodaan tili",
+        "importing": "Tuodaan tietovarastoa",
+        "plcSigning": "Päivitetään identiteettiä",
+        "activating": "Aktivoidaan tili"
       },
       "success": {
-        "title": "Siirto valmis!",
-        "desc": "Tilisi on siirretty onnistuneesti uuteen PDS:ääsi.",
-        "newHandle": "Uusi käyttäjätunnus",
-        "newPds": "Uusi PDS",
-        "nextSteps": "Seuraavat vaiheet",
-        "nextSteps1": "Kirjaudu uuteen PDS:ääsi",
-        "nextSteps2": "Päivitä sovellukset uusilla tunnuksillasi",
-        "nextSteps3": "Seuraajasi näkevät automaattisesti uuden sijaintisi",
-        "loggingOut": "Kirjaudutaan ulos {seconds} sekunnin kuluttua..."
+        "desc": "Tilisi on palautettu onnistuneesti tähän PDS:ään."
+      },
+      "blobs": {
+        "title": "Siirretään blob-tiedostoja",
+        "desc": "Yritetään palauttaa kuvia ja mediaa vanhasta PDS:stäsi...",
+        "migrating": "Siirretään blob-tiedostoja",
+        "failedTitle": "Joitain blob-tiedostoja ei voitu siirtää",
+        "failedDesc": "{count} blob-tiedostoa ei voitu hakea vanhasta PDS:stäsi. Tämä voi tapahtua, jos palvelin ei ole tavoitettavissa tai tiedostot on poistettu.",
+        "sourceUnreachableTitle": "Lähde-PDS ei tavoitettavissa",
+        "sourceUnreachable": "Ei voitu yhdistää vanhaan PDS:ääsi mediatiedostojen hakemiseksi. Tämä on yleistä siirrettäessä suljetulta palvelimelta. Julkaisusi toimivat, mutta joitain kuvia saattaa puuttua."
       }
     },
     "progress": {

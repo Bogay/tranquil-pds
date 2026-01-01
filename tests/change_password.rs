@@ -32,10 +32,7 @@ async fn test_change_password_success() {
     let did = create_body["did"].as_str().unwrap();
     let jwt = verify_new_account(&client, did).await;
     let change_res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.changePassword",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.changePassword", base_url().await))
         .bearer_auth(&jwt)
         .json(&json!({
             "currentPassword": old_password,
@@ -86,10 +83,7 @@ async fn test_change_password_wrong_current() {
     let client = client();
     let (_, jwt) = setup_new_user("change-pw-wrong").await;
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.changePassword",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.changePassword", base_url().await))
         .bearer_auth(&jwt)
         .json(&json!({
             "currentPassword": "Wrongpass999!",
@@ -129,10 +123,7 @@ async fn test_change_password_too_short() {
     let did = create_body["did"].as_str().unwrap();
     let jwt = verify_new_account(&client, did).await;
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.changePassword",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.changePassword", base_url().await))
         .bearer_auth(&jwt)
         .json(&json!({
             "currentPassword": password,
@@ -151,10 +142,7 @@ async fn test_change_password_empty_current() {
     let client = client();
     let (_, jwt) = setup_new_user("change-pw-empty").await;
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.changePassword",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.changePassword", base_url().await))
         .bearer_auth(&jwt)
         .json(&json!({
             "currentPassword": "",
@@ -171,10 +159,7 @@ async fn test_change_password_empty_new() {
     let client = client();
     let (_, jwt) = setup_new_user("change-pw-emptynew").await;
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.changePassword",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.changePassword", base_url().await))
         .bearer_auth(&jwt)
         .json(&json!({
             "currentPassword": "E2epass123!",
@@ -190,10 +175,7 @@ async fn test_change_password_empty_new() {
 async fn test_change_password_requires_auth() {
     let client = client();
     let res = client
-        .post(format!(
-            "{}/xrpc/com.tranquil.account.changePassword",
-            base_url().await
-        ))
+        .post(format!("{}/xrpc/_account.changePassword", base_url().await))
         .json(&json!({
             "currentPassword": "Oldpass123!",
             "newPassword": "Newpass123!"

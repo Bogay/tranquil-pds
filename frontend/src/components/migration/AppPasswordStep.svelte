@@ -1,0 +1,86 @@
+<script lang="ts">
+  import { _ } from '../../lib/i18n'
+
+  interface Props {
+    appPassword: string
+    appPasswordName: string
+    loading: boolean
+    onContinue: () => void
+  }
+
+  let {
+    appPassword,
+    appPasswordName,
+    loading,
+    onContinue,
+  }: Props = $props()
+
+  let copied = $state(false)
+  let acknowledged = $state(false)
+
+  function copyPassword() {
+    navigator.clipboard.writeText(appPassword)
+    copied = true
+  }
+</script>
+
+<div class="step-content">
+  <h2>{$_('migration.inbound.appPassword.title')}</h2>
+  <p>{$_('migration.inbound.appPassword.desc')}</p>
+
+  <div class="warning-box">
+    <strong>{$_('migration.inbound.appPassword.warning')}</strong>
+  </div>
+
+  <div class="app-password-display">
+    <div class="app-password-label">
+      {$_('migration.inbound.appPassword.label')}: <strong>{appPasswordName}</strong>
+    </div>
+    <code class="app-password-code">{appPassword}</code>
+    <button type="button" class="copy-btn" onclick={copyPassword}>
+      {copied ? $_('common.copied') : $_('common.copyToClipboard')}
+    </button>
+  </div>
+
+  <label class="checkbox-label">
+    <input type="checkbox" bind:checked={acknowledged} />
+    <span>{$_('migration.inbound.appPassword.saved')}</span>
+  </label>
+
+  <div class="button-row">
+    <button onclick={onContinue} disabled={!acknowledged || loading}>
+      {loading ? $_('migration.inbound.common.continue') : $_('migration.inbound.appPassword.continue')}
+    </button>
+  </div>
+</div>
+
+<style>
+  .app-password-display {
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
+    text-align: center;
+    margin: var(--space-4) 0;
+  }
+  .app-password-label {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin-bottom: var(--space-4);
+  }
+  .app-password-code {
+    display: block;
+    font-size: var(--text-xl);
+    font-family: ui-monospace, monospace;
+    letter-spacing: 0.1em;
+    padding: var(--space-5);
+    background: var(--bg-input);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
+    user-select: all;
+  }
+  .copy-btn {
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm);
+  }
+</style>

@@ -11,7 +11,8 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 use crate::repo::PostgresBlockStore;
-use crate::storage::BlobStorage;
+use crate::storage::{BackupStorage, BlobStorage};
+use crate::sync::car::encode_car_header;
 
 pub async fn backfill_genesis_commit_blocks(db: &PgPool, block_store: PostgresBlockStore) {
     let broken_genesis_commits = match sqlx::query!(
@@ -560,6 +561,315 @@ async fn delete_account_data(
         blob_count = blob_storage_keys.len(),
         "Deleted account data including blobs from storage"
     );
+
+    Ok(())
+}
+
+pub async fn start_backup_tasks(
+    db: PgPool,
+    block_store: PostgresBlockStore,
+    backup_storage: Arc<BackupStorage>,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
+    let backup_interval = Duration::from_secs(BackupStorage::interval_secs());
+
+    info!(
+        interval_secs = backup_interval.as_secs(),
+        retention_count = BackupStorage::retention_count(),
+        "Starting backup service"
+    );
+
+    let mut ticker = interval(backup_interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() {
+                    info!("Backup service shutting down");
+                    break;
+                }
+            }
+            _ = ticker.tick() => {
+                if let Err(e) = process_scheduled_backups(&db, &block_store, &backup_storage).await {
+                    error!("Error processing scheduled backups: {}", e);
+                }
+            }
+        }
+    }
+}
+
+async fn process_scheduled_backups(
+    db: &PgPool,
+    block_store: &PostgresBlockStore,
+    backup_storage: &BackupStorage,
+) -> Result<(), String> {
+    let backup_interval_secs = BackupStorage::interval_secs() as i64;
+    let retention_count = BackupStorage::retention_count();
+
+    let users_needing_backup = sqlx::query!(
+        r#"
+        SELECT u.id as user_id, u.did, r.repo_root_cid, r.repo_rev
+        FROM users u
+        JOIN repos r ON r.user_id = u.id
+        WHERE u.backup_enabled = true
+          AND u.deactivated_at IS NULL
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM account_backups ab WHERE ab.user_id = u.id
+            )
+            OR (
+              SELECT MAX(ab.created_at) FROM account_backups ab WHERE ab.user_id = u.id
+            ) < NOW() - make_interval(secs => $1)
+          )
+        LIMIT 50
+        "#,
+        backup_interval_secs as f64
+    )
+    .fetch_all(db)
+    .await
+    .map_err(|e| format!("DB error fetching users for backup: {}", e))?;
+
+    if users_needing_backup.is_empty() {
+        debug!("No accounts need backup");
+        return Ok(());
+    }
+
+    info!(
+        count = users_needing_backup.len(),
+        "Processing scheduled backups"
+    );
+
+    for user in users_needing_backup {
+        let repo_root_cid = user.repo_root_cid.clone();
+
+        let repo_rev = match &user.repo_rev {
+            Some(rev) => rev.clone(),
+            None => {
+                warn!(did = %user.did, "User has no repo_rev, skipping backup");
+                continue;
+            }
+        };
+
+        let head_cid = match Cid::from_str(&repo_root_cid) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(did = %user.did, error = %e, "Invalid repo_root_cid, skipping backup");
+                continue;
+            }
+        };
+
+        let car_result = generate_full_backup(block_store, &head_cid).await;
+        let car_bytes = match car_result {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                warn!(did = %user.did, error = %e, "Failed to generate CAR for backup");
+                continue;
+            }
+        };
+
+        let block_count = count_car_blocks(&car_bytes);
+        let size_bytes = car_bytes.len() as i64;
+
+        let storage_key = match backup_storage
+            .put_backup(&user.did, &repo_rev, &car_bytes)
+            .await
+        {
+            Ok(key) => key,
+            Err(e) => {
+                warn!(did = %user.did, error = %e, "Failed to upload backup to storage");
+                continue;
+            }
+        };
+
+        if let Err(e) = sqlx::query!(
+            r#"
+            INSERT INTO account_backups (user_id, storage_key, repo_root_cid, repo_rev, block_count, size_bytes)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+            user.user_id,
+            storage_key,
+            repo_root_cid,
+            repo_rev,
+            block_count,
+            size_bytes
+        )
+        .execute(db)
+        .await
+        {
+            warn!(did = %user.did, error = %e, "Failed to insert backup record, rolling back S3 upload");
+            if let Err(rollback_err) = backup_storage.delete_backup(&storage_key).await {
+                error!(
+                    did = %user.did,
+                    storage_key = %storage_key,
+                    error = %rollback_err,
+                    "Failed to rollback orphaned backup from S3"
+                );
+            }
+            continue;
+        }
+
+        info!(
+            did = %user.did,
+            rev = %repo_rev,
+            size_bytes,
+            block_count,
+            "Created backup"
+        );
+
+        if let Err(e) = cleanup_old_backups(db, backup_storage, user.user_id, retention_count).await
+        {
+            warn!(did = %user.did, error = %e, "Failed to cleanup old backups");
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn generate_repo_car(
+    block_store: &PostgresBlockStore,
+    head_cid: &Cid,
+) -> Result<Vec<u8>, String> {
+    use jacquard_repo::storage::BlockStore;
+    use std::io::Write;
+
+    let mut car_bytes =
+        encode_car_header(head_cid).map_err(|e| format!("Failed to encode CAR header: {}", e))?;
+
+    let mut stack = vec![*head_cid];
+    let mut visited = std::collections::HashSet::new();
+
+    while let Some(cid) = stack.pop() {
+        if visited.contains(&cid) {
+            continue;
+        }
+        visited.insert(cid);
+
+        if let Ok(Some(block)) = block_store.get(&cid).await {
+            let cid_bytes = cid.to_bytes();
+            let total_len = cid_bytes.len() + block.len();
+            let mut writer = Vec::new();
+            crate::sync::car::write_varint(&mut writer, total_len as u64)
+                .expect("Writing to Vec<u8> should never fail");
+            writer
+                .write_all(&cid_bytes)
+                .expect("Writing to Vec<u8> should never fail");
+            writer
+                .write_all(&block)
+                .expect("Writing to Vec<u8> should never fail");
+            car_bytes.extend_from_slice(&writer);
+
+            if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
+                extract_links(&value, &mut stack);
+            }
+        }
+    }
+
+    Ok(car_bytes)
+}
+
+pub async fn generate_full_backup(
+    block_store: &PostgresBlockStore,
+    head_cid: &Cid,
+) -> Result<Vec<u8>, String> {
+    generate_repo_car(block_store, head_cid).await
+}
+
+fn extract_links(value: &Ipld, stack: &mut Vec<Cid>) {
+    match value {
+        Ipld::Link(cid) => {
+            stack.push(*cid);
+        }
+        Ipld::Map(map) => {
+            for v in map.values() {
+                extract_links(v, stack);
+            }
+        }
+        Ipld::List(arr) => {
+            for v in arr {
+                extract_links(v, stack);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn count_car_blocks(car_bytes: &[u8]) -> i32 {
+    let mut count = 0;
+    let mut pos = 0;
+
+    if let Some((header_len, header_varint_len)) = read_varint(&car_bytes[pos..]) {
+        pos += header_varint_len + header_len as usize;
+    } else {
+        return 0;
+    }
+
+    while pos < car_bytes.len() {
+        if let Some((block_len, varint_len)) = read_varint(&car_bytes[pos..]) {
+            pos += varint_len + block_len as usize;
+            count += 1;
+        } else {
+            break;
+        }
+    }
+
+    count
+}
+
+fn read_varint(data: &[u8]) -> Option<(u64, usize)> {
+    let mut value: u64 = 0;
+    let mut shift = 0;
+    let mut pos = 0;
+
+    while pos < data.len() && pos < 10 {
+        let byte = data[pos];
+        value |= ((byte & 0x7f) as u64) << shift;
+        pos += 1;
+        if byte & 0x80 == 0 {
+            return Some((value, pos));
+        }
+        shift += 7;
+    }
+
+    None
+}
+
+async fn cleanup_old_backups(
+    db: &PgPool,
+    backup_storage: &BackupStorage,
+    user_id: uuid::Uuid,
+    retention_count: u32,
+) -> Result<(), String> {
+    let old_backups = sqlx::query!(
+        r#"
+        SELECT id, storage_key
+        FROM account_backups
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        OFFSET $2
+        "#,
+        user_id,
+        retention_count as i64
+    )
+    .fetch_all(db)
+    .await
+    .map_err(|e| format!("DB error fetching old backups: {}", e))?;
+
+    for backup in old_backups {
+        if let Err(e) = backup_storage.delete_backup(&backup.storage_key).await {
+            warn!(
+                storage_key = %backup.storage_key,
+                error = %e,
+                "Failed to delete old backup from storage, skipping DB cleanup to avoid orphan"
+            );
+            continue;
+        }
+
+        sqlx::query!("DELETE FROM account_backups WHERE id = $1", backup.id)
+            .execute(db)
+            .await
+            .map_err(|e| format!("Failed to delete old backup record: {}", e))?;
+    }
 
     Ok(())
 }
