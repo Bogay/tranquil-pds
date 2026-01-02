@@ -343,7 +343,9 @@ pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore)
             }
         };
 
-        let mut blob_refs_found = 0;
+        let mut batch_record_uris: Vec<String> = Vec::new();
+        let mut batch_blob_cids: Vec<String> = Vec::new();
+
         for record in records {
             let record_cid = match Cid::from_str(&record.record_cid) {
                 Ok(c) => c,
@@ -363,33 +365,36 @@ pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore)
             let blob_refs = crate::sync::import::find_blob_refs_ipld(&record_ipld, 0);
             for blob_ref in blob_refs {
                 let record_uri = format!("at://{}/{}/{}", user.did, record.collection, record.rkey);
-                if let Err(e) = sqlx::query!(
-                    r#"
-                    INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
-                    "#,
-                    user.user_id,
-                    record_uri,
-                    blob_ref.cid
-                )
-                .execute(db)
-                .await
-                {
-                    warn!(error = %e, "Failed to insert record_blob during backfill");
-                } else {
-                    blob_refs_found += 1;
-                }
+                batch_record_uris.push(record_uri);
+                batch_blob_cids.push(blob_ref.cid);
             }
         }
 
-        if blob_refs_found > 0 {
-            info!(
-                user_id = %user.user_id,
-                did = %user.did,
-                blob_refs = blob_refs_found,
-                "Backfilled record_blobs"
-            );
+        let blob_refs_found = batch_record_uris.len();
+        if !batch_record_uris.is_empty() {
+            if let Err(e) = sqlx::query!(
+                r#"
+                INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
+                SELECT $1, record_uri, blob_cid
+                FROM UNNEST($2::text[], $3::text[]) AS t(record_uri, blob_cid)
+                ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
+                "#,
+                user.user_id,
+                &batch_record_uris,
+                &batch_blob_cids
+            )
+            .execute(db)
+            .await
+            {
+                warn!(error = %e, "Failed to batch insert record_blobs during backfill");
+            } else {
+                info!(
+                    user_id = %user.user_id,
+                    did = %user.did,
+                    blob_refs = blob_refs_found,
+                    "Backfilled record_blobs"
+                );
+            }
         }
         success += 1;
     }

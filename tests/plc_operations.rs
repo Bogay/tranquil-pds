@@ -114,7 +114,7 @@ async fn test_submit_plc_operation_validation() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let handle = did.split(':').last().unwrap_or("user");
+    let handle = did.split(':').next_back().unwrap_or("user");
     let res = client.post(format!("{}/xrpc/com.atproto.identity.submitPlcOperation", base_url().await))
         .bearer_auth(&token).json(&json!({
             "operation": { "type": "plc_operation", "rotationKeys": ["did:key:z123"],

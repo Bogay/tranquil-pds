@@ -17,7 +17,7 @@ fn generate_pkce() -> (String, String) {
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
     let mut hasher = Sha256::new();
     hasher.update(code_verifier.as_bytes());
-    let code_challenge = URL_SAFE_NO_PAD.encode(&hasher.finalize());
+    let code_challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
     (code_verifier, code_challenge)
 }
 
@@ -120,7 +120,7 @@ async fn test_token_tampering_attacks() {
     let (access_token, _, _) = get_oauth_tokens(&http_client, url).await;
     let parts: Vec<&str> = access_token.split('.').collect();
     assert_eq!(parts.len(), 3);
-    let forged_sig = URL_SAFE_NO_PAD.encode(&[0u8; 32]);
+    let forged_sig = URL_SAFE_NO_PAD.encode([0u8; 32]);
     let forged_token = format!("{}.{}.{}", parts[0], parts[1], forged_sig);
     assert_eq!(
         http_client
@@ -173,7 +173,7 @@ async fn test_token_tampering_attacks() {
         "{}.{}.{}",
         URL_SAFE_NO_PAD.encode(serde_json::to_string(&rs256_header).unwrap()),
         URL_SAFE_NO_PAD.encode(serde_json::to_string(&none_payload).unwrap()),
-        URL_SAFE_NO_PAD.encode(&[1u8; 64])
+        URL_SAFE_NO_PAD.encode([1u8; 64])
     );
     assert_eq!(
         http_client
@@ -193,7 +193,7 @@ async fn test_token_tampering_attacks() {
         URL_SAFE_NO_PAD
             .encode(serde_json::to_string(&json!({"alg":"HS256","typ":"at+jwt"})).unwrap()),
         URL_SAFE_NO_PAD.encode(serde_json::to_string(&expired_payload).unwrap()),
-        URL_SAFE_NO_PAD.encode(&[1u8; 32])
+        URL_SAFE_NO_PAD.encode([1u8; 32])
     );
     assert_eq!(
         http_client
@@ -678,7 +678,7 @@ async fn test_malformed_tokens_and_headers() {
             "{}.{}.{}",
             URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap()),
             URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap()),
-            URL_SAFE_NO_PAD.encode(&[1u8; 32])
+            URL_SAFE_NO_PAD.encode([1u8; 32])
         );
         assert_eq!(
             http_client

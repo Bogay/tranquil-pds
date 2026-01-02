@@ -174,7 +174,7 @@ pub async fn sign_plc_operation(
                 .into_response();
         }
     };
-    let plc_client = PlcClient::new(None);
+    let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
     let did_clone = did.clone();
     let result: Result<PlcOpOrTombstone, CircuitBreakerError<PlcError>> =
         with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {

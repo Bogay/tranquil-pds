@@ -2,24 +2,26 @@ use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::delegation::{self, DelegationActionType};
 use crate::state::AppState;
 use crate::util::get_max_blob_size;
-use axum::body::Bytes;
+use axum::body::Body;
 use axum::{
     Json,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use bytes::Bytes;
 use cid::Cid;
+use futures::StreamExt;
 use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sha2::{Digest, Sha256};
-use tracing::{debug, error};
+use std::pin::Pin;
+use tracing::{debug, error, info};
 
 pub async fn upload_blob(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
@@ -106,39 +108,12 @@ pub async fn upload_blob(
             .into_response();
     }
 
-    let max_size = get_max_blob_size();
-
-    if body.len() > max_size {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(json!({"error": "BlobTooLarge", "message": format!("Blob size {} exceeds maximum of {} bytes", body.len(), max_size)})),
-        )
-            .into_response();
-    }
     let mime_type = headers
         .get("content-type")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("application/octet-stream")
         .to_string();
-    let size = body.len() as i64;
-    let data = body.to_vec();
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let hash = hasher.finalize();
-    let multihash = match Multihash::wrap(0x12, &hash) {
-        Ok(mh) => mh,
-        Err(e) => {
-            error!("Failed to create multihash for blob: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to hash blob"})),
-            )
-                .into_response();
-        }
-    };
-    let cid = Cid::new_v1(0x55, multihash);
-    let cid_str = cid.to_string();
-    let storage_key = format!("blobs/{}", cid_str);
+
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
         .await;
@@ -152,9 +127,65 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
+
+    let temp_key = format!("temp/{}", uuid::Uuid::new_v4());
+    let max_size = get_max_blob_size() as u64;
+
+    let body_stream = body.into_data_stream();
+    let mapped_stream =
+        body_stream.map(|result| result.map_err(|e| std::io::Error::other(e.to_string())));
+    let pinned_stream: Pin<Box<dyn futures::Stream<Item = Result<Bytes, std::io::Error>> + Send>> =
+        Box::pin(mapped_stream);
+
+    info!("Starting streaming blob upload to temp key: {}", temp_key);
+
+    let upload_result = match state.blob_store.put_stream(&temp_key, pinned_stream).await {
+        Ok(result) => result,
+        Err(e) => {
+            error!("Failed to stream blob to storage: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
+            )
+                .into_response();
+        }
+    };
+
+    let size = upload_result.size;
+    if size > max_size {
+        let _ = state.blob_store.delete(&temp_key).await;
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({"error": "BlobTooLarge", "message": format!("Blob size {} exceeds maximum of {} bytes", size, max_size)})),
+        )
+            .into_response();
+    }
+
+    let multihash = match Multihash::wrap(0x12, &upload_result.sha256_hash) {
+        Ok(mh) => mh,
+        Err(e) => {
+            let _ = state.blob_store.delete(&temp_key).await;
+            error!("Failed to create multihash for blob: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError", "message": "Failed to hash blob"})),
+            )
+                .into_response();
+        }
+    };
+    let cid = Cid::new_v1(0x55, multihash);
+    let cid_str = cid.to_string();
+    let storage_key = format!("blobs/{}", cid_str);
+
+    info!(
+        "Blob upload complete: size={}, cid={}, copying to final location",
+        size, cid_str
+    );
+
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
+            let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to begin transaction: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -163,20 +194,23 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
+
     let insert = sqlx::query!(
         "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cid) DO NOTHING RETURNING cid",
         cid_str,
         mime_type,
-        size,
+        size as i64,
         user_id,
         storage_key
     )
     .fetch_optional(&mut *tx)
     .await;
+
     let was_inserted = match insert {
         Ok(Some(_)) => true,
         Ok(None) => false,
         Err(e) => {
+            let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to insert blob record: {:?}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -185,19 +219,19 @@ pub async fn upload_blob(
                 .into_response();
         }
     };
-    if was_inserted
-        && let Err(e) = state
-            .blob_store
-            .put_bytes(&storage_key, bytes::Bytes::from(data))
-            .await
-    {
-        error!("Failed to upload blob to storage: {:?}", e);
+
+    if was_inserted && let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
+        let _ = state.blob_store.delete(&temp_key).await;
+        error!("Failed to copy blob to final location: {:?}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
         )
             .into_response();
     }
+
+    let _ = state.blob_store.delete(&temp_key).await;
+
     if let Err(e) = tx.commit().await {
         error!("Failed to commit blob transaction: {:?}", e);
         if was_inserted && let Err(cleanup_err) = state.blob_store.delete(&storage_key).await {

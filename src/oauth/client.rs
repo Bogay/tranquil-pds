@@ -80,6 +80,8 @@ impl ClientMetadataCache {
             http_client: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .connect_timeout(std::time::Duration::from_secs(10))
+                .pool_max_idle_per_host(10)
+                .pool_idle_timeout(std::time::Duration::from_secs(90))
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             cache_ttl_secs,

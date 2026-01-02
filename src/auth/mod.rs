@@ -35,6 +35,14 @@ pub use verify::{
 
 const KEY_CACHE_TTL_SECS: u64 = 300;
 const SESSION_CACHE_TTL_SECS: u64 = 60;
+const USER_STATUS_CACHE_TTL_SECS: u64 = 60;
+
+#[derive(Serialize, Deserialize)]
+struct CachedUserStatus {
+    deactivated: bool,
+    takendown: bool,
+    is_admin: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenValidationError {
@@ -149,23 +157,67 @@ async fn validate_bearer_token_with_options_internal(
 
         let (decrypted_key, deactivated_at, takedown_ref, is_admin) = if let Some(key) = cached_key
         {
-            let user_status = sqlx::query!(
-                "SELECT deactivated_at, takedown_ref, is_admin FROM users WHERE did = $1",
-                did
-            )
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten();
+            let status_cache_key = format!("auth:status:{}", did);
+            let cached_status: Option<CachedUserStatus> = if let Some(c) = cache {
+                c.get(&status_cache_key)
+                    .await
+                    .and_then(|s| serde_json::from_str(&s).ok())
+            } else {
+                None
+            };
 
-            match user_status {
-                Some(status) => (
+            if let Some(status) = cached_status {
+                (
                     Some(key),
-                    status.deactivated_at,
-                    status.takedown_ref,
+                    if status.deactivated {
+                        Some(chrono::Utc::now())
+                    } else {
+                        None
+                    },
+                    if status.takendown {
+                        Some("takendown".to_string())
+                    } else {
+                        None
+                    },
                     status.is_admin,
-                ),
-                None => (None, None, None, false),
+                )
+            } else {
+                let user_status = sqlx::query!(
+                    "SELECT deactivated_at, takedown_ref, is_admin FROM users WHERE did = $1",
+                    did
+                )
+                .fetch_optional(db)
+                .await
+                .ok()
+                .flatten();
+
+                match user_status {
+                    Some(status) => {
+                        if let Some(c) = cache {
+                            let cached = CachedUserStatus {
+                                deactivated: status.deactivated_at.is_some(),
+                                takendown: status.takedown_ref.is_some(),
+                                is_admin: status.is_admin,
+                            };
+                            if let Ok(json) = serde_json::to_string(&cached) {
+                                let _ = c
+                                    .set(
+                                        &status_cache_key,
+                                        &json,
+                                        Duration::from_secs(USER_STATUS_CACHE_TTL_SECS),
+                                    )
+                                    .await;
+                            }
+                        }
+                        (
+                            Some(key),
+                            status.deactivated_at,
+                            status.takedown_ref,
+                            status.is_admin,
+                        )
+                    }
+                    None => (None, None, None, false),
+                }
             }
         } else if let Some(user) = sqlx::query!(
             "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref, u.is_admin
@@ -190,6 +242,22 @@ async fn validate_bearer_token_with_options_internal(
                         Duration::from_secs(KEY_CACHE_TTL_SECS),
                     )
                     .await;
+
+                let status_cache_key = format!("auth:status:{}", did);
+                let cached = CachedUserStatus {
+                    deactivated: user.deactivated_at.is_some(),
+                    takendown: user.takedown_ref.is_some(),
+                    is_admin: user.is_admin,
+                };
+                if let Ok(json) = serde_json::to_string(&cached) {
+                    let _ = c
+                        .set(
+                            &status_cache_key,
+                            &json,
+                            Duration::from_secs(USER_STATUS_CACHE_TTL_SECS),
+                        )
+                        .await;
+                }
             }
 
             (
@@ -328,7 +396,9 @@ async fn validate_bearer_token_with_options_internal(
 
 pub async fn invalidate_auth_cache(cache: &Arc<dyn Cache>, did: &str) {
     let key_cache_key = format!("auth:key:{}", did);
+    let status_cache_key = format!("auth:status:{}", did);
     let _ = cache.delete(&key_cache_key).await;
+    let _ = cache.delete(&status_cache_key).await;
 }
 
 pub async fn validate_token_with_dpop(

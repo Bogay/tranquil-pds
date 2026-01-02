@@ -21,7 +21,7 @@ fn generate_pkce() -> (String, String) {
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
     let mut hasher = Sha256::new();
     hasher.update(code_verifier.as_bytes());
-    let code_challenge = URL_SAFE_NO_PAD.encode(&hasher.finalize());
+    let code_challenge = URL_SAFE_NO_PAD.encode(hasher.finalize());
     (code_verifier, code_challenge)
 }
 
@@ -1036,7 +1036,7 @@ async fn test_granular_scope_repo_create_only() {
     );
     let body: Value = create_res.json().await.unwrap();
     let uri = body["uri"].as_str().expect("Should have uri");
-    let rkey = uri.split('/').last().unwrap();
+    let rkey = uri.split('/').next_back().unwrap();
     let delete_res = http_client
         .post(format!("{}/xrpc/com.atproto.repo.deleteRecord", url))
         .bearer_auth(&token)
@@ -1092,7 +1092,7 @@ async fn test_granular_scope_wildcard_collection() {
     );
     let body: Value = post_res.json().await.unwrap();
     let uri = body["uri"].as_str().unwrap();
-    let rkey = uri.split('/').last().unwrap();
+    let rkey = uri.split('/').next_back().unwrap();
     let delete_res = http_client
         .post(format!("{}/xrpc/com.atproto.repo.deleteRecord", url))
         .bearer_auth(&token)

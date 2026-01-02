@@ -53,7 +53,7 @@ async fn test_create_and_list_backup() {
     assert_eq!(list_res.status(), StatusCode::OK);
     let list_body: Value = list_res.json().await.expect("Invalid JSON");
     let backups = list_body["backups"].as_array().unwrap();
-    assert!(backups.len() >= 1);
+    assert!(!backups.is_empty());
 }
 
 #[tokio::test]

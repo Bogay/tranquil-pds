@@ -48,7 +48,7 @@ async fn test_check_account_status_returns_correct_block_count() {
         .as_str()
         .unwrap()
         .split('/')
-        .last()
+        .next_back()
         .unwrap()
         .to_string();
 

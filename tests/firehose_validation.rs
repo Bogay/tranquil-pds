@@ -232,11 +232,11 @@ async fn test_firehose_frame_structure() {
                 tungstenite::Message::Binary(bin) => bin,
                 _ => continue,
             };
-            if let Ok((h, f)) = parse_frame(&raw_bytes) {
-                if f.repo == did {
-                    frame_opt = Some((h, f));
-                    break;
-                }
+            if let Ok((h, f)) = parse_frame(&raw_bytes)
+                && f.repo == did
+            {
+                frame_opt = Some((h, f));
+                break;
             }
         }
     })
@@ -427,11 +427,11 @@ async fn test_firehose_update_has_prev_field() {
                 tungstenite::Message::Binary(bin) => bin,
                 _ => continue,
             };
-            if let Ok((_, f)) = parse_frame(&raw_bytes) {
-                if f.repo == did {
-                    frame_opt = Some(f);
-                    break;
-                }
+            if let Ok((_, f)) = parse_frame(&raw_bytes)
+                && f.repo == did
+            {
+                frame_opt = Some(f);
+                break;
             }
         }
     })
@@ -504,11 +504,11 @@ async fn test_firehose_commit_has_prev_data() {
                 tungstenite::Message::Binary(bin) => bin,
                 _ => continue,
             };
-            if let Ok((_, f)) = parse_frame(&raw_bytes) {
-                if f.repo == did {
-                    first_frame_opt = Some(f);
-                    break;
-                }
+            if let Ok((_, f)) = parse_frame(&raw_bytes)
+                && f.repo == did
+            {
+                first_frame_opt = Some(f);
+                break;
             }
         }
     })
@@ -554,11 +554,11 @@ async fn test_firehose_commit_has_prev_data() {
                 tungstenite::Message::Binary(bin) => bin,
                 _ => continue,
             };
-            if let Ok((_, f)) = parse_frame(&raw_bytes) {
-                if f.repo == did {
-                    second_frame_opt = Some(f);
-                    break;
-                }
+            if let Ok((_, f)) = parse_frame(&raw_bytes)
+                && f.repo == did
+            {
+                second_frame_opt = Some(f);
+                break;
             }
         }
     })
@@ -626,11 +626,11 @@ async fn test_compare_raw_cbor_encoding() {
                 tungstenite::Message::Binary(bin) => bin,
                 _ => continue,
             };
-            if let Ok((_, f)) = parse_frame(&raw) {
-                if f.repo == did {
-                    raw_bytes_opt = Some(raw.to_vec());
-                    break;
-                }
+            if let Ok((_, f)) = parse_frame(&raw)
+                && f.repo == did
+            {
+                raw_bytes_opt = Some(raw.to_vec());
+                break;
             }
         }
     })
@@ -826,11 +826,11 @@ async fn test_firehose_outdated_cursor_info() {
                             found_info = true;
                             println!("Found OutdatedCursor info frame!");
                         }
-                    } else if let Ok((_, frame)) = parse_frame(&bin) {
-                        if frame.repo == did {
-                            found_commit = true;
-                            println!("Found commit for our DID");
-                        }
+                    } else if let Ok((_, frame)) = parse_frame(&bin)
+                        && frame.repo == did
+                    {
+                        found_commit = true;
+                        println!("Found commit for our DID");
                     }
                     if found_commit {
                         break;

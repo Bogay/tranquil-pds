@@ -184,7 +184,7 @@ pub async fn submit_plc_operation(
                 .into_response();
         }
     }
-    let plc_client = PlcClient::new(None);
+    let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
     let operation_clone = input.operation.clone();
     let did_clone = did.clone();
     let result: Result<(), CircuitBreakerError<PlcError>> =

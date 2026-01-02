@@ -727,7 +727,7 @@ async fn test_cross_pds_migration_with_records() {
             "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=app.bsky.feed.post&rkey={}",
             base_url().await,
             did,
-            original_uri.split('/').last().unwrap()
+            original_uri.split('/').next_back().unwrap()
         ))
         .send()
         .await
@@ -970,7 +970,7 @@ async fn test_full_migration_flow_end_to_end() {
         .as_array()
         .expect("Should have records array");
     assert!(
-        records.len() >= 1,
+        !records.is_empty(),
         "Should have at least 1 record after migration, found {}",
         records.len()
     );

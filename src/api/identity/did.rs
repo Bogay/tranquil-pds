@@ -10,7 +10,6 @@ use axum::{
 use base64::Engine;
 use k256::SecretKey;
 use k256::elliptic_curve::sec1::ToEncodedPoint;
-use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, warn};
@@ -504,10 +503,7 @@ pub async fn verify_did_web(
         let path = parts[3..].join("/");
         format!("{}://{}/{}/did.json", scheme, domain, path)
     };
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| format!("Failed to create client: {}", e))?;
+    let client = crate::api::proxy_client::did_resolution_client();
     let resp = client
         .get(&url)
         .send()
@@ -926,7 +922,7 @@ pub async fn update_plc_handle(
     };
     let key_bytes = crate::config::decrypt_key(&user_row.key_bytes, user_row.encryption_version)?;
     let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)?;
-    let plc_client = crate::plc::PlcClient::new(None);
+    let plc_client = crate::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
     let last_op = plc_client.get_last_op(did).await?;
     let new_also_known_as = vec![format!("at://{}", new_handle)];
     let update_op =

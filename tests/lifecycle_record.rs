@@ -385,7 +385,7 @@ async fn test_authorization_protects_repos() {
     let (alice_did, alice_jwt) = setup_new_user("alice-auth").await;
     let (_bob_did, bob_jwt) = setup_new_user("bob-auth").await;
     let (post_uri, _) = create_post(&client, &alice_did, &alice_jwt, "Alice's post").await;
-    let post_rkey = post_uri.split('/').last().unwrap();
+    let post_rkey = post_uri.split('/').next_back().unwrap();
     let post_payload = json!({
         "repo": alice_did,
         "collection": "app.bsky.feed.post",
@@ -630,7 +630,7 @@ async fn test_list_records_comprehensive() {
     assert_eq!(records.len(), 5);
     let rkeys: Vec<&str> = records
         .iter()
-        .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
+        .map(|r| r["uri"].as_str().unwrap().split('/').next_back().unwrap())
         .collect();
     assert_eq!(
         rkeys,
@@ -661,7 +661,7 @@ async fn test_list_records_comprehensive() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
+        .map(|r| r["uri"].as_str().unwrap().split('/').next_back().unwrap())
         .collect();
     assert_eq!(
         rev_rkeys,
@@ -733,7 +733,7 @@ async fn test_list_records_comprehensive() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|r| r["uri"].as_str().unwrap().split('/').last().unwrap())
+        .map(|r| r["uri"].as_str().unwrap().split('/').next_back().unwrap())
         .collect();
     for rkey in &range_rkeys {
         assert!(

@@ -216,7 +216,7 @@ fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Erro
         op: 1,
         t: "#identity".to_string(),
     };
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(256);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
@@ -234,7 +234,7 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error
         op: 1,
         t: "#account".to_string(),
     };
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(256);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     let hex_str: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
@@ -281,7 +281,7 @@ async fn format_sync_event(
         op: 1,
         t: "#sync".to_string(),
     };
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(512);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
@@ -349,7 +349,7 @@ pub async fn format_event_for_sending(
         op: 1,
         t: "#commit".to_string(),
     };
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(frame.blocks.len() + 512);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
@@ -385,7 +385,7 @@ pub async fn prefetch_blocks_for_events(
         return Ok(HashMap::new());
     }
     let fetched = state.block_store.get_many(&all_cids).await?;
-    let mut blocks_map = HashMap::new();
+    let mut blocks_map = HashMap::with_capacity(all_cids.len());
     for (cid, data_opt) in all_cids.into_iter().zip(fetched.into_iter()) {
         if let Some(data) = data_opt {
             blocks_map.insert(cid, data);
@@ -497,7 +497,7 @@ pub async fn format_event_with_prefetched_blocks(
         op: 1,
         t: "#commit".to_string(),
     };
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(frame.blocks.len() + 512);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
@@ -512,7 +512,7 @@ pub fn format_info_frame(name: &str, message: Option<&str>) -> Result<Vec<u8>, a
         name: name.to_string(),
         message: message.map(String::from),
     };
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(128);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)
@@ -524,7 +524,7 @@ pub fn format_error_frame(error: &str, message: Option<&str>) -> Result<Vec<u8>,
         error: error.to_string(),
         message: message.map(String::from),
     };
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(128);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
     serde_ipld_dagcbor::to_writer(&mut bytes, &frame)?;
     Ok(bytes)

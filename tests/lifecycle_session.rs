@@ -461,7 +461,7 @@ async fn test_account_deactivation_lifecycle() {
     let did = account["did"].as_str().unwrap().to_string();
     let jwt = verify_new_account(&client, &did).await;
     let (post_uri, _) = create_post(&client, &did, &jwt, "Post before deactivation").await;
-    let post_rkey = post_uri.split('/').last().unwrap();
+    let post_rkey = post_uri.split('/').next_back().unwrap();
     let status_before = client
         .get(format!(
             "{}/xrpc/com.atproto.server.checkAccountStatus",

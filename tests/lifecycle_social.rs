@@ -14,7 +14,7 @@ async fn test_like_lifecycle() {
     let (post_uri, post_cid) =
         create_post(&client, &alice_did, &alice_jwt, "Like this post!").await;
     let (like_uri, _) = create_like(&client, &bob_did, &bob_jwt, &post_uri, &post_cid).await;
-    let like_rkey = like_uri.split('/').last().unwrap();
+    let like_rkey = like_uri.split('/').next_back().unwrap();
     let get_like_res = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.getRecord",
@@ -74,7 +74,7 @@ async fn test_repost_lifecycle() {
     let (bob_did, bob_jwt) = setup_new_user("bob-repost").await;
     let (post_uri, post_cid) = create_post(&client, &alice_did, &alice_jwt, "Repost this!").await;
     let (repost_uri, _) = create_repost(&client, &bob_did, &bob_jwt, &post_uri, &post_cid).await;
-    let repost_rkey = repost_uri.split('/').last().unwrap();
+    let repost_rkey = repost_uri.split('/').next_back().unwrap();
     let get_repost_res = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.getRecord",
@@ -119,7 +119,7 @@ async fn test_unfollow_lifecycle() {
     let (alice_did, _alice_jwt) = setup_new_user("alice-unfollow").await;
     let (bob_did, bob_jwt) = setup_new_user("bob-unfollow").await;
     let (follow_uri, _) = create_follow(&client, &bob_did, &bob_jwt, &alice_did).await;
-    let follow_rkey = follow_uri.split('/').last().unwrap();
+    let follow_rkey = follow_uri.split('/').next_back().unwrap();
     let get_follow_res = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.getRecord",
@@ -240,7 +240,7 @@ async fn test_account_to_post_full_lifecycle() {
         .query(&[
             ("repo", did.as_str()),
             ("collection", "app.bsky.feed.post"),
-            ("rkey", post_uri.split('/').last().unwrap()),
+            ("rkey", post_uri.split('/').next_back().unwrap()),
         ])
         .send()
         .await

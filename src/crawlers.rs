@@ -24,6 +24,9 @@ impl Crawlers {
             crawler_urls,
             http_client: Client::builder()
                 .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(5))
+                .pool_max_idle_per_host(5)
+                .pool_idle_timeout(Duration::from_secs(90))
                 .build()
                 .unwrap_or_default(),
             last_notified: AtomicU64::new(0),

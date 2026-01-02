@@ -44,7 +44,7 @@ fn test_signature_attacks() {
     let token = create_access_token(did, &key_bytes).expect("create token");
     let parts: Vec<&str> = token.split('.').collect();
 
-    let forged_signature = URL_SAFE_NO_PAD.encode(&[0u8; 64]);
+    let forged_signature = URL_SAFE_NO_PAD.encode([0u8; 64]);
     let forged_token = format!("{}.{}.{}", parts[0], parts[1], forged_signature);
     let result = verify_access_token(&forged_token, &key_bytes);
     assert!(result.is_err(), "Forged signature must be rejected");
@@ -121,7 +121,7 @@ fn test_algorithm_substitution_attacks() {
     let mut mac = HmacSha256::new_from_slice(&key_bytes).unwrap();
     mac.update(message.as_bytes());
     let hmac_sig = mac.finalize().into_bytes();
-    let hs256_token = format!("{}.{}", message, URL_SAFE_NO_PAD.encode(&hmac_sig));
+    let hs256_token = format!("{}.{}", message, URL_SAFE_NO_PAD.encode(hmac_sig));
     assert!(
         verify_access_token(&hs256_token, &key_bytes).is_err(),
         "HS256 substitution must be rejected"
@@ -130,7 +130,7 @@ fn test_algorithm_substitution_attacks() {
     for (alg, sig_len) in [("RS256", 256), ("ES256", 64)] {
         let header = json!({ "alg": alg, "typ": TOKEN_TYPE_ACCESS });
         let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-        let fake_sig = URL_SAFE_NO_PAD.encode(&vec![1u8; sig_len]);
+        let fake_sig = URL_SAFE_NO_PAD.encode(vec![1u8; sig_len]);
         let token = format!("{}.{}.{}", header_b64, claims_b64, fake_sig);
         assert!(
             verify_access_token(&token, &key_bytes).is_err(),
@@ -335,7 +335,7 @@ fn test_malformed_tokens() {
 
     let invalid_header = URL_SAFE_NO_PAD.encode("{not valid json}");
     let claims_b64 = URL_SAFE_NO_PAD.encode(r#"{"sub":"test"}"#);
-    let fake_sig = URL_SAFE_NO_PAD.encode(&[1u8; 64]);
+    let fake_sig = URL_SAFE_NO_PAD.encode([1u8; 64]);
     assert!(
         verify_access_token(
             &format!("{}.{}.{}", invalid_header, claims_b64, fake_sig),
@@ -439,7 +439,7 @@ fn test_did_and_jti_extraction() {
 
     let header_b64 = URL_SAFE_NO_PAD.encode(r#"{"alg":"ES256K"}"#);
     let claims_b64 = URL_SAFE_NO_PAD.encode(r#"{"iss":"did:plc:iss","sub":"did:plc:sub"}"#);
-    let fake_sig = URL_SAFE_NO_PAD.encode(&[0u8; 64]);
+    let fake_sig = URL_SAFE_NO_PAD.encode([0u8; 64]);
     let unverified = format!("{}.{}.{}", header_b64, claims_b64, fake_sig);
     assert_eq!(get_did_from_token(&unverified).unwrap(), "did:plc:sub");
 
@@ -479,7 +479,7 @@ fn test_header_injection_and_constant_time() {
         "{}.{}.{}",
         parts[0],
         parts[1],
-        URL_SAFE_NO_PAD.encode(&[0xFFu8; 64])
+        URL_SAFE_NO_PAD.encode([0xFFu8; 64])
     );
     let _ = verify_access_token(&almost_valid_token, &key_bytes);
     let _ = verify_access_token(&completely_invalid_token, &key_bytes);

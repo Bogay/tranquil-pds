@@ -17,7 +17,7 @@ fn generate_pkce() -> (String, String) {
     let mut hasher = Sha256::new();
     hasher.update(code_verifier.as_bytes());
     let hash = hasher.finalize();
-    let code_challenge = URL_SAFE_NO_PAD.encode(&hash);
+    let code_challenge = URL_SAFE_NO_PAD.encode(hash);
     (code_verifier, code_challenge)
 }
 
@@ -195,7 +195,7 @@ async fn test_oauth_token_can_create_and_read_records() {
     );
     let create_body: Value = create_res.json().await.unwrap();
     let uri = create_body["uri"].as_str().unwrap();
-    let rkey = uri.split('/').last().unwrap();
+    let rkey = uri.split('/').next_back().unwrap();
     let get_res = http_client
         .get(format!("{}/xrpc/com.atproto.repo.getRecord", url))
         .bearer_auth(&session.access_token)
@@ -290,7 +290,7 @@ async fn test_oauth_full_post_lifecycle_create_edit_delete() {
     assert_eq!(create_res.status(), StatusCode::OK);
     let create_body: Value = create_res.json().await.unwrap();
     let uri = create_body["uri"].as_str().unwrap();
-    let rkey = uri.split('/').last().unwrap();
+    let rkey = uri.split('/').next_back().unwrap();
     let updated_text = "Updated post content via OAuth putRecord";
     let put_res = http_client
         .post(format!("{}/xrpc/com.atproto.repo.putRecord", url))

@@ -307,7 +307,7 @@ async fn test_import_preserves_records_after_reimport() {
         assert_eq!(res.status(), StatusCode::OK);
         let body: serde_json::Value = res.json().await.unwrap();
         let uri = body["uri"].as_str().unwrap();
-        let rkey = uri.split('/').last().unwrap().to_string();
+        let rkey = uri.split('/').next_back().unwrap().to_string();
         rkeys.push(rkey);
     }
     for rkey in &rkeys {

@@ -16,8 +16,8 @@ use k256::ecdsa::SigningKey;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
-const DEFAULT_MAX_IMPORT_SIZE: usize = 100 * 1024 * 1024;
-const DEFAULT_MAX_BLOCKS: usize = 50000;
+const DEFAULT_MAX_IMPORT_SIZE: usize = 1024 * 1024 * 1024;
+const DEFAULT_MAX_BLOCKS: usize = 500000;
 
 pub async fn import_repo(
     State(state): State<AppState>,

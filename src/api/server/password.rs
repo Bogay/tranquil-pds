@@ -226,17 +226,27 @@ pub async fn reset_password(
         )
             .into_response();
     }
-    let password_hash = match hash(password, DEFAULT_COST) {
-        Ok(h) => h,
-        Err(e) => {
-            error!("Failed to hash password: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+    let password_clone = password.to_string();
+    let password_hash =
+        match tokio::task::spawn_blocking(move || hash(password_clone, DEFAULT_COST)).await {
+            Ok(Ok(h)) => h,
+            Ok(Err(e)) => {
+                error!("Failed to hash password: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                error!("Failed to spawn blocking task: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -409,17 +419,27 @@ pub async fn change_password(
         )
             .into_response();
     }
-    let new_hash = match hash(new_password, DEFAULT_COST) {
-        Ok(h) => h,
-        Err(e) => {
-            error!("Failed to hash password: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+    let new_password_clone = new_password.to_string();
+    let new_hash =
+        match tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST)).await {
+            Ok(Ok(h)) => h,
+            Ok(Err(e)) => {
+                error!("Failed to hash password: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                error!("Failed to spawn blocking task: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
     if let Err(e) = sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
         .bind(&new_hash)
         .bind(user_id)

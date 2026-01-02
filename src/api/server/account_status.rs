@@ -1,4 +1,5 @@
 use crate::api::ApiError;
+use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
 use axum::{
@@ -16,6 +17,7 @@ use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
+use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -140,7 +142,7 @@ pub async fn check_account_status(
     .await
     .unwrap_or(Some(0))
     .unwrap_or(0);
-    let valid_did = is_valid_did_for_service(&state.db, &did).await;
+    let valid_did = is_valid_did_for_service(&state.db, &state.cache, &did).await;
     (
         StatusCode::OK,
         Json(CheckAccountStatusOutput {
@@ -158,14 +160,15 @@ pub async fn check_account_status(
         .into_response()
 }
 
-async fn is_valid_did_for_service(db: &sqlx::PgPool, did: &str) -> bool {
-    assert_valid_did_document_for_service(db, did, false)
+async fn is_valid_did_for_service(db: &sqlx::PgPool, cache: &Arc<dyn Cache>, did: &str) -> bool {
+    assert_valid_did_document_for_service(db, cache, did, false)
         .await
         .is_ok()
 }
 
 async fn assert_valid_did_document_for_service(
     db: &sqlx::PgPool,
+    cache: &Arc<dyn Cache>,
     did: &str,
     with_retry: bool,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
@@ -173,7 +176,7 @@ async fn assert_valid_did_document_for_service(
     let expected_endpoint = format!("https://{}", hostname);
 
     if did.starts_with("did:plc:") {
-        let plc_client = PlcClient::new(None);
+        let plc_client = PlcClient::with_cache(None, Some(cache.clone()));
 
         let max_attempts = if with_retry { 5 } else { 1 };
         let mut last_error = None;
@@ -308,7 +311,7 @@ async fn assert_valid_did_document_for_service(
             }
         }
     } else if let Some(host_and_path) = did.strip_prefix("did:web:") {
-        let client = reqwest::Client::new();
+        let client = crate::api::proxy_client::did_resolution_client();
         let decoded = host_and_path.replace("%3A", ":");
         let parts: Vec<&str> = decoded.split(':').collect();
         let (host, path_parts) = if parts.len() > 1 && parts[1].chars().all(|c| c.is_ascii_digit())
@@ -438,7 +441,8 @@ pub async fn activate_account(
         did
     );
     let did_validation_start = std::time::Instant::now();
-    if let Err((status, json)) = assert_valid_did_document_for_service(&state.db, &did, true).await
+    if let Err((status, json)) =
+        assert_valid_did_document_for_service(&state.db, &state.cache, &did, true).await
     {
         info!(
             "[MIGRATION] activateAccount: DID document validation FAILED for {} (took {:?})",

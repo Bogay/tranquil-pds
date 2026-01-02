@@ -52,11 +52,11 @@ fn cleanup() {
     }
     if std::env::var("XDG_RUNTIME_DIR").is_ok() {
         let _ = std::process::Command::new("podman")
-            .args(&["rm", "-f", "--filter", "label=tranquil_pds_test=true"])
+            .args(["rm", "-f", "--filter", "label=tranquil_pds_test=true"])
             .output();
     }
     let _ = std::process::Command::new("docker")
-        .args(&[
+        .args([
             "container",
             "prune",
             "-f",
@@ -83,16 +83,16 @@ pub async fn base_url() -> &'static str {
             unsafe {
                 std::env::set_var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS", "1");
             }
-            if std::env::var("DOCKER_HOST").is_err() {
-                if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-                    let podman_sock = std::path::Path::new(&runtime_dir).join("podman/podman.sock");
-                    if podman_sock.exists() {
-                        unsafe {
-                            std::env::set_var(
-                                "DOCKER_HOST",
-                                format!("unix://{}", podman_sock.display()),
-                            );
-                        }
+            if std::env::var("DOCKER_HOST").is_err()
+                && let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR")
+            {
+                let podman_sock = std::path::Path::new(&runtime_dir).join("podman/podman.sock");
+                if podman_sock.exists() {
+                    unsafe {
+                        std::env::set_var(
+                            "DOCKER_HOST",
+                            format!("unix://{}", podman_sock.display()),
+                        );
                     }
                 }
             }
@@ -135,6 +135,7 @@ async fn setup_with_external_infra() -> String {
             std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
         );
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
     }
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
@@ -168,6 +169,7 @@ async fn setup_with_testcontainers() -> String {
         std::env::set_var("AWS_SECRET_ACCESS_KEY", "minioadmin");
         std::env::set_var("AWS_REGION", "us-east-1");
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
     }
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region("us-east-1")
@@ -418,7 +420,7 @@ pub async fn create_test_post(
         .to_string();
     let rkey = uri
         .split('/')
-        .last()
+        .next_back()
         .expect("URI was malformed")
         .to_string();
     (uri, cid, rkey)
@@ -472,10 +474,10 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
                     .expect("Failed to mark user as admin");
             }
             let verification_required = body["verificationRequired"].as_bool().unwrap_or(true);
-            if let Some(access_jwt) = body["accessJwt"].as_str() {
-                if !verification_required {
-                    return (access_jwt.to_string(), did);
-                }
+            if let Some(access_jwt) = body["accessJwt"].as_str()
+                && !verification_required
+            {
+                return (access_jwt.to_string(), did);
             }
             let body_text: String = sqlx::query_scalar!(
                 "SELECT body FROM comms_queue WHERE user_id = (SELECT id FROM users WHERE did = $1) AND comms_type = 'email_verification' ORDER BY created_at DESC LIMIT 1",
@@ -488,17 +490,17 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
             let verification_code = lines
                 .iter()
                 .enumerate()
-                .find(|(_, line)| {
+                .find(|(_, line): &(usize, &&str)| {
                     line.contains("verification code is:") || line.contains("code is:")
                 })
-                .and_then(|(i, _)| lines.get(i + 1).map(|s| s.trim().to_string()))
+                .and_then(|(i, _)| lines.get(i + 1).map(|s: &&str| s.trim().to_string()))
                 .or_else(|| {
                     body_text
                         .split_whitespace()
-                        .find(|word| {
+                        .find(|word: &&str| {
                             word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3
                         })
-                        .map(|s| s.to_string())
+                        .map(|s: &str| s.to_string())
                 })
                 .unwrap_or_else(|| body_text.clone());
 

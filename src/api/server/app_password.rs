@@ -158,10 +158,19 @@ pub async fn create_app_password(
         })
         .collect::<Vec<String>>()
         .join("-");
-    let password_hash = match bcrypt::hash(&password, bcrypt::DEFAULT_COST) {
-        Ok(h) => h,
-        Err(e) => {
+    let password_clone = password.clone();
+    let password_hash = match tokio::task::spawn_blocking(move || {
+        bcrypt::hash(&password_clone, bcrypt::DEFAULT_COST)
+    })
+    .await
+    {
+        Ok(Ok(h)) => h,
+        Ok(Err(e)) => {
             error!("Failed to hash password: {:?}", e);
+            return ApiError::InternalError.into_response();
+        }
+        Err(e) => {
+            error!("Failed to spawn blocking task: {:?}", e);
             return ApiError::InternalError.into_response();
         }
     };

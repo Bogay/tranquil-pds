@@ -451,7 +451,7 @@ pub async fn create_account(
                                 .into_response();
                         }
                     };
-                    let plc_client = PlcClient::new(None);
+                    let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
                     if let Err(e) = plc_client
                         .send_operation(&genesis_result.did, &genesis_result.signed_operation)
                         .await
@@ -488,7 +488,7 @@ pub async fn create_account(
                             .into_response();
                     }
                 };
-                let plc_client = PlcClient::new(None);
+                let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
                 if let Err(e) = plc_client
                     .send_operation(&genesis_result.did, &genesis_result.signed_operation)
                     .await
@@ -745,17 +745,27 @@ pub async fn create_account(
             .into_response();
     }
 
-    let password_hash = match hash(&input.password, DEFAULT_COST) {
-        Ok(h) => h,
-        Err(e) => {
-            error!("Error hashing password: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
-        }
-    };
+    let password_clone = input.password.clone();
+    let password_hash =
+        match tokio::task::spawn_blocking(move || hash(&password_clone, DEFAULT_COST)).await {
+            Ok(Ok(h)) => h,
+            Ok(Err(e)) => {
+                error!("Error hashing password: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                error!("Failed to spawn blocking task: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "InternalError"})),
+                )
+                    .into_response();
+            }
+        };
     let is_first_user = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
         .fetch_one(&mut *tx)
         .await

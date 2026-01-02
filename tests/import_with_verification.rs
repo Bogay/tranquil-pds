@@ -192,7 +192,7 @@ async fn test_import_with_valid_signature_and_mock_plc() {
     let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
-    let handle = did.split(':').last().unwrap_or("user");
+    let handle = did.split(':').next_back().unwrap_or("user");
     let did_doc = create_did_document(&did, handle, &signing_key, &pds_endpoint);
     let mock_plc = setup_mock_plc_directory(&did, did_doc).await;
     unsafe {
@@ -236,7 +236,7 @@ async fn test_import_with_wrong_signing_key_fails() {
         SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
-    let handle = did.split(':').last().unwrap_or("user");
+    let handle = did.split(':').next_back().unwrap_or("user");
     let did_doc = create_did_document(&did, handle, &correct_signing_key, &pds_endpoint);
     let mock_plc = setup_mock_plc_directory(&did, did_doc).await;
     unsafe {
@@ -285,7 +285,7 @@ async fn test_import_with_did_mismatch_fails() {
     let wrong_did = "did:plc:wrongdidthatdoesnotmatch";
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
-    let handle = did.split(':').last().unwrap_or("user");
+    let handle = did.split(':').next_back().unwrap_or("user");
     let did_doc = create_did_document(&did, handle, &signing_key, &pds_endpoint);
     let mock_plc = setup_mock_plc_directory(&did, did_doc).await;
     unsafe {
@@ -370,7 +370,7 @@ async fn test_import_with_no_signing_key_in_did_doc() {
         .await
         .expect("Failed to get user signing key");
     let signing_key = SigningKey::from_slice(&key_bytes).expect("Failed to create signing key");
-    let handle = did.split(':').last().unwrap_or("user");
+    let handle = did.split(':').next_back().unwrap_or("user");
     let did_doc_without_key = json!({
         "@context": ["https://www.w3.org/ns/did/v1"],
         "id": did,

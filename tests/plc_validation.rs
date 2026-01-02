@@ -172,7 +172,7 @@ fn test_signature_verification() {
         "verificationMethods": {}, "alsoKnownAs": [], "services": {}, "prev": null
     });
     let signed = sign_operation(&op, &key).unwrap();
-    let result = verify_operation_signature(&signed, &[did_key.clone()]);
+    let result = verify_operation_signature(&signed, std::slice::from_ref(&did_key));
     assert!(result.is_ok() && result.unwrap());
 
     let other_key = SigningKey::random(&mut rand::thread_rng());

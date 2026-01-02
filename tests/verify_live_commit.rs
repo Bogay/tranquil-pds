@@ -84,6 +84,7 @@ fn commit_unsigned_bytes(commit: &jacquard_repo::commit::Commit<'_>) -> Vec<u8> 
     serde_ipld_dagcbor::to_vec(&unsigned).unwrap()
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_car(
     cursor: &mut std::io::Cursor<&[u8]>,
 ) -> Result<(Vec<Cid>, HashMap<Cid, Bytes>), Box<dyn std::error::Error>> {
@@ -113,11 +114,8 @@ fn parse_car(
     }
     let header: CarHeader = serde_ipld_dagcbor::from_slice(&header_bytes)?;
     let mut blocks = HashMap::new();
-    loop {
-        let block_len = match read_varint(cursor) {
-            Ok(len) => len as usize,
-            Err(_) => break,
-        };
+    while let Ok(len) = read_varint(cursor) {
+        let block_len = len as usize;
         if block_len == 0 {
             break;
         }

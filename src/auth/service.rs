@@ -85,6 +85,8 @@ impl ServiceTokenVerifier {
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .connect_timeout(Duration::from_secs(5))
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Duration::from_secs(90))
             .build()
             .unwrap_or_else(|_| Client::new());
 

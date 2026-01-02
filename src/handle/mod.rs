@@ -2,8 +2,6 @@ pub mod reserved;
 
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-use reqwest::Client;
-use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -43,11 +41,7 @@ pub async fn resolve_handle_dns(handle: &str) -> Result<String, HandleResolution
 
 pub async fn resolve_handle_http(handle: &str) -> Result<String, HandleResolutionError> {
     let url = format!("https://{}/.well-known/atproto-did", handle);
-    let client = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .map_err(|e| HandleResolutionError::HttpError(e.to_string()))?;
+    let client = crate::api::proxy_client::handle_resolution_client();
     let response = client
         .get(&url)
         .header("Accept", "text/plain")

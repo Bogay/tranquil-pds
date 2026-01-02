@@ -19,8 +19,8 @@ fmt-check:
     cargo fmt -- --check
 lint: fmt-check clippy
 
-test-all *args:
-    ./scripts/run-tests.sh {{args}}
+test-unit:
+    SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
 
 test-auth:
     ./scripts/run-tests.sh --test oauth --test oauth_lifecycle --test oauth_scopes --test oauth_security --test oauth_client_metadata --test jwt_security --test session_management --test change_password --test password_reset
@@ -50,6 +50,7 @@ test-misc:
     ./scripts/run-tests.sh --test actor --test commit_signing --test image_processing --test lifecycle_social --test notifications --test server --test signing_key --test verify_live_commit
 
 test *args:
+    @just test-unit
     ./scripts/run-tests.sh {{args}}
 
 test-one name:

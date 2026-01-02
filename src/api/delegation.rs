@@ -726,7 +726,7 @@ pub async fn create_delegated_account(
         }
     };
 
-    let plc_client = crate::plc::PlcClient::new(None);
+    let plc_client = crate::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
     if let Err(e) = plc_client
         .send_operation(&genesis_result.did, &genesis_result.signed_operation)
         .await

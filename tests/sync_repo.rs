@@ -115,7 +115,7 @@ async fn test_list_repos_pagination() {
     let mut page_count = 0;
     let max_pages = 100;
     loop {
-        let mut params: Vec<(&str, String)> = vec![("limit".into(), "10".into())];
+        let mut params: Vec<(&str, String)> = vec![("limit", "10".into())];
         if let Some(ref c) = cursor {
             params.push(("cursor", c.clone()));
         }
@@ -313,7 +313,7 @@ async fn test_get_record_sync_success() {
         .expect("Failed to create record");
     let create_body: Value = create_res.json().await.expect("Invalid JSON");
     let uri = create_body["uri"].as_str().expect("No URI");
-    let rkey = uri.split('/').last().expect("Invalid URI");
+    let rkey = uri.split('/').next_back().expect("Invalid URI");
     let params = [
         ("did", did.as_str()),
         ("collection", "app.bsky.feed.post"),
@@ -418,7 +418,7 @@ async fn test_sync_record_lifecycle() {
     let client = client();
     let (did, jwt) = setup_new_user("sync-record-lifecycle").await;
     let (post_uri, _post_cid) = create_post(&client, &did, &jwt, "Post for sync record test").await;
-    let post_rkey = post_uri.split('/').last().unwrap();
+    let post_rkey = post_uri.split('/').next_back().unwrap();
     let sync_record_res = client
         .get(format!(
             "{}/xrpc/com.atproto.sync.getRecord",
@@ -503,7 +503,7 @@ async fn test_sync_record_lifecycle() {
         StatusCode::NOT_FOUND,
         "Deleted record should return 404 via sync.getRecord"
     );
-    let post2_rkey = post2_uri.split('/').last().unwrap();
+    let post2_rkey = post2_uri.split('/').next_back().unwrap();
     let sync_post2_res = client
         .get(format!(
             "{}/xrpc/com.atproto.sync.getRecord",

@@ -1,3 +1,4 @@
+use crate::cache::Cache;
 use base32::Alphabet;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use k256::ecdsa::{Signature, SigningKey, signature::Signer};
@@ -6,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -77,13 +79,20 @@ impl PlcOpOrTombstone {
     }
 }
 
+const PLC_CACHE_TTL_SECS: u64 = 300;
+
 pub struct PlcClient {
     base_url: String,
     client: Client,
+    cache: Option<Arc<dyn Cache>>,
 }
 
 impl PlcClient {
     pub fn new(base_url: Option<String>) -> Self {
+        Self::with_cache(base_url, None)
+    }
+
+    pub fn with_cache(base_url: Option<String>, cache: Option<Arc<dyn Cache>>) -> Self {
         let base_url = base_url.unwrap_or_else(|| {
             std::env::var("PLC_DIRECTORY_URL")
                 .unwrap_or_else(|_| "https://plc.directory".to_string())
@@ -100,9 +109,14 @@ impl PlcClient {
             .timeout(Duration::from_secs(timeout_secs))
             .connect_timeout(Duration::from_secs(connect_timeout_secs))
             .pool_max_idle_per_host(5)
+            .pool_idle_timeout(Duration::from_secs(90))
             .build()
             .unwrap_or_else(|_| Client::new());
-        Self { base_url, client }
+        Self {
+            base_url,
+            client,
+            cache,
+        }
     }
 
     fn encode_did(did: &str) -> String {
@@ -110,6 +124,13 @@ impl PlcClient {
     }
 
     pub async fn get_document(&self, did: &str) -> Result<Value, PlcError> {
+        let cache_key = format!("plc:doc:{}", did);
+        if let Some(ref cache) = self.cache
+            && let Some(cached) = cache.get(&cache_key).await
+            && let Ok(value) = serde_json::from_str(&cached)
+        {
+            return Ok(value);
+        }
         let url = format!("{}/{}", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -123,13 +144,32 @@ impl PlcClient {
                 status, body
             )));
         }
-        response
+        let value: Value = response
             .json()
             .await
-            .map_err(|e| PlcError::InvalidResponse(e.to_string()))
+            .map_err(|e| PlcError::InvalidResponse(e.to_string()))?;
+        if let Some(ref cache) = self.cache
+            && let Ok(json_str) = serde_json::to_string(&value)
+        {
+            let _ = cache
+                .set(
+                    &cache_key,
+                    &json_str,
+                    Duration::from_secs(PLC_CACHE_TTL_SECS),
+                )
+                .await;
+        }
+        Ok(value)
     }
 
     pub async fn get_document_data(&self, did: &str) -> Result<Value, PlcError> {
+        let cache_key = format!("plc:data:{}", did);
+        if let Some(ref cache) = self.cache
+            && let Some(cached) = cache.get(&cache_key).await
+            && let Ok(value) = serde_json::from_str(&cached)
+        {
+            return Ok(value);
+        }
         let url = format!("{}/{}/data", self.base_url, Self::encode_did(did));
         let response = self.client.get(&url).send().await?;
         if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -143,10 +183,22 @@ impl PlcClient {
                 status, body
             )));
         }
-        response
+        let value: Value = response
             .json()
             .await
-            .map_err(|e| PlcError::InvalidResponse(e.to_string()))
+            .map_err(|e| PlcError::InvalidResponse(e.to_string()))?;
+        if let Some(ref cache) = self.cache
+            && let Ok(json_str) = serde_json::to_string(&value)
+        {
+            let _ = cache
+                .set(
+                    &cache_key,
+                    &json_str,
+                    Duration::from_secs(PLC_CACHE_TTL_SECS),
+                )
+                .await;
+        }
+        Ok(value)
     }
 
     pub async fn get_last_op(&self, did: &str) -> Result<PlcOpOrTombstone, PlcError> {

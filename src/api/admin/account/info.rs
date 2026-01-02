@@ -217,7 +217,10 @@ pub async fn get_account_infos(
     _auth: BearerAuthAdmin,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
-    let dids = crate::util::parse_repeated_query_param(raw_query.as_deref(), "dids");
+    let dids: Vec<String> = crate::util::parse_repeated_query_param(raw_query.as_deref(), "dids")
+        .into_iter()
+        .filter(|d| !d.is_empty())
+        .collect();
     if dids.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -225,41 +228,132 @@ pub async fn get_account_infos(
         )
             .into_response();
     }
-    let mut infos = Vec::new();
-    for did in &dids {
-        if did.is_empty() {
-            continue;
+    let users = match sqlx::query!(
+        r#"
+        SELECT id, did, handle, email, created_at, invites_disabled, email_verified, deactivated_at
+        FROM users
+        WHERE did = ANY($1)
+        "#,
+        &dids
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to fetch account infos: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "InternalError"})),
+            )
+                .into_response();
         }
-        let result = sqlx::query!(
+    };
+
+    let user_ids: Vec<uuid::Uuid> = users.iter().map(|u| u.id).collect();
+
+    let all_invite_codes = sqlx::query!(
+        r#"
+        SELECT ic.code, ic.available_uses, ic.disabled, ic.for_account, ic.created_at,
+               ic.created_by_user, u.did as created_by
+        FROM invite_codes ic
+        JOIN users u ON ic.created_by_user = u.id
+        WHERE ic.created_by_user = ANY($1)
+        "#,
+        &user_ids
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let all_codes: Vec<String> = all_invite_codes.iter().map(|c| c.code.clone()).collect();
+    let all_invite_uses = if !all_codes.is_empty() {
+        sqlx::query!(
             r#"
-            SELECT id, did, handle, email, created_at, invites_disabled, email_verified, deactivated_at
-            FROM users
-            WHERE did = $1
+            SELECT icu.code, u.did as used_by, icu.used_at
+            FROM invite_code_uses icu
+            JOIN users u ON icu.used_by_user = u.id
+            WHERE icu.code = ANY($1)
             "#,
-            did
+            &all_codes
         )
-        .fetch_optional(&state.db)
-        .await;
-        if let Ok(Some(row)) = result {
-            let invited_by = get_invited_by(&state.db, row.id).await;
-            let invites = get_invites_for_user(&state.db, row.id).await;
-            infos.push(AccountInfo {
-                did: row.did,
-                handle: row.handle,
-                email: row.email,
-                indexed_at: row.created_at.to_rfc3339(),
-                invite_note: None,
-                invites_disabled: row.invites_disabled.unwrap_or(false),
-                email_confirmed_at: if row.email_verified {
-                    Some(row.created_at.to_rfc3339())
-                } else {
-                    None
-                },
-                deactivated_at: row.deactivated_at.map(|dt| dt.to_rfc3339()),
-                invited_by,
-                invites,
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let invited_by_map: std::collections::HashMap<uuid::Uuid, String> = sqlx::query!(
+        r#"
+        SELECT icu.used_by_user, icu.code
+        FROM invite_code_uses icu
+        WHERE icu.used_by_user = ANY($1)
+        "#,
+        &user_ids
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|r| (r.used_by_user, r.code))
+    .collect();
+
+    let mut uses_by_code: std::collections::HashMap<String, Vec<InviteCodeUseInfo>> =
+        std::collections::HashMap::new();
+    for u in all_invite_uses {
+        uses_by_code
+            .entry(u.code.clone())
+            .or_default()
+            .push(InviteCodeUseInfo {
+                used_by: u.used_by,
+                used_at: u.used_at.to_rfc3339(),
             });
-        }
+    }
+
+    let mut codes_by_user: std::collections::HashMap<uuid::Uuid, Vec<InviteCodeInfo>> =
+        std::collections::HashMap::new();
+    let mut code_info_map: std::collections::HashMap<String, InviteCodeInfo> =
+        std::collections::HashMap::new();
+    for ic in all_invite_codes {
+        let info = InviteCodeInfo {
+            code: ic.code.clone(),
+            available: ic.available_uses,
+            disabled: ic.disabled.unwrap_or(false),
+            for_account: ic.for_account,
+            created_by: ic.created_by,
+            created_at: ic.created_at.to_rfc3339(),
+            uses: uses_by_code.get(&ic.code).cloned().unwrap_or_default(),
+        };
+        code_info_map.insert(ic.code.clone(), info.clone());
+        codes_by_user
+            .entry(ic.created_by_user)
+            .or_default()
+            .push(info);
+    }
+
+    let mut infos = Vec::with_capacity(users.len());
+    for row in users {
+        let invited_by = invited_by_map
+            .get(&row.id)
+            .and_then(|code| code_info_map.get(code).cloned());
+        let invites = codes_by_user.get(&row.id).cloned();
+        infos.push(AccountInfo {
+            did: row.did,
+            handle: row.handle,
+            email: row.email,
+            indexed_at: row.created_at.to_rfc3339(),
+            invite_note: None,
+            invites_disabled: row.invites_disabled.unwrap_or(false),
+            email_confirmed_at: if row.email_verified {
+                Some(row.created_at.to_rfc3339())
+            } else {
+                None
+            },
+            deactivated_at: row.deactivated_at.map(|dt| dt.to_rfc3339()),
+            invited_by,
+            invites,
+        });
     }
     (StatusCode::OK, Json(GetAccountInfosOutput { infos })).into_response()
 }

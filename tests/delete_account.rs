@@ -40,7 +40,7 @@ async fn test_delete_account_full_flow() {
     let handle = format!("delete-test-{}.test", ts);
     let email = format!("delete-test-{}@test.com", ts);
     let password = "Delete123pass!";
-    let (did, jwt) = create_verified_account(&client, &base_url, &handle, &email, password).await;
+    let (did, jwt) = create_verified_account(&client, base_url, &handle, &email, password).await;
     let request_delete_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.requestAccountDelete",
@@ -97,7 +97,7 @@ async fn test_delete_account_wrong_password() {
     let handle = format!("delete-wrongpw-{}.test", ts);
     let email = format!("delete-wrongpw-{}@test.com", ts);
     let password = "Correct123!";
-    let (did, jwt) = create_verified_account(&client, &base_url, &handle, &email, password).await;
+    let (did, jwt) = create_verified_account(&client, base_url, &handle, &email, password).await;
     let request_delete_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.requestAccountDelete",
@@ -187,7 +187,7 @@ async fn test_delete_account_expired_token() {
     let handle = format!("delete-expired-{}.test", ts);
     let email = format!("delete-expired-{}@test.com", ts);
     let password = "Delete123!";
-    let (did, jwt) = create_verified_account(&client, &base_url, &handle, &email, password).await;
+    let (did, jwt) = create_verified_account(&client, base_url, &handle, &email, password).await;
     let request_delete_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.requestAccountDelete",
@@ -242,11 +242,11 @@ async fn test_delete_account_token_mismatch() {
     let email1 = format!("delete-user1-{}@test.com", ts);
     let password1 = "User1pass123!";
     let (did1, jwt1) =
-        create_verified_account(&client, &base_url, &handle1, &email1, password1).await;
+        create_verified_account(&client, base_url, &handle1, &email1, password1).await;
     let handle2 = format!("delete-user2-{}.test", ts);
     let email2 = format!("delete-user2-{}@test.com", ts);
     let password2 = "User2pass123!";
-    let (did2, _) = create_verified_account(&client, &base_url, &handle2, &email2, password2).await;
+    let (did2, _) = create_verified_account(&client, base_url, &handle2, &email2, password2).await;
     let request_delete_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.requestAccountDelete",
@@ -294,7 +294,7 @@ async fn test_delete_account_with_app_password() {
     let email = format!("delete-apppw-{}@test.com", ts);
     let main_password = "Mainpass123!";
     let (did, jwt) =
-        create_verified_account(&client, &base_url, &handle, &email, main_password).await;
+        create_verified_account(&client, base_url, &handle, &email, main_password).await;
     let app_password_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAppPassword",

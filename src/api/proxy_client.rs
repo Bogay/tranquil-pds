@@ -10,6 +10,8 @@ pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_RESPONSE_SIZE: u64 = 10 * 1024 * 1024;
 
 static PROXY_CLIENT: OnceLock<Client> = OnceLock::new();
+static DID_RESOLUTION_CLIENT: OnceLock<Client> = OnceLock::new();
+static HANDLE_RESOLUTION_CLIENT: OnceLock<Client> = OnceLock::new();
 
 pub fn proxy_client() -> &'static Client {
     PROXY_CLIENT.get_or_init(|| {
@@ -22,6 +24,35 @@ pub fn proxy_client() -> &'static Client {
             .build()
             .expect(
                 "Failed to build HTTP client - this indicates a TLS or system configuration issue",
+            )
+    })
+}
+
+pub fn did_resolution_client() -> &'static Client {
+    DID_RESOLUTION_CLIENT.get_or_init(|| {
+        ClientBuilder::new()
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .build()
+            .expect(
+                "Failed to build DID resolution client - this indicates a TLS or system configuration issue",
+            )
+    })
+}
+
+pub fn handle_resolution_client() -> &'static Client {
+    HANDLE_RESOLUTION_CLIENT.get_or_init(|| {
+        ClientBuilder::new()
+            .timeout(Duration::from_secs(10))
+            .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .build()
+            .expect(
+                "Failed to build handle resolution client - this indicates a TLS or system configuration issue",
             )
     })
 }

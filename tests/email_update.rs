@@ -59,7 +59,7 @@ async fn test_request_email_update_returns_token_required() {
     let base_url = common::base_url().await;
     let handle = format!("er{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
-    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, base_url, &handle, &email).await;
 
     let res = client
         .post(format!(
@@ -82,7 +82,7 @@ async fn test_update_email_flow_success() {
     let pool = common::get_test_db_pool().await;
     let handle = format!("eu{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
-    let (access_jwt, did) = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, did) = create_verified_account(&client, base_url, &handle, &email).await;
     let new_email = format!("new_{}@example.com", handle);
 
     let res = client
@@ -126,7 +126,7 @@ async fn test_update_email_requires_token_when_verified() {
     let base_url = common::base_url().await;
     let handle = format!("ed{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
-    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, base_url, &handle, &email).await;
     let new_email = format!("direct_{}@example.com", handle);
 
     let res = client
@@ -147,7 +147,7 @@ async fn test_update_email_same_email_noop() {
     let base_url = common::base_url().await;
     let handle = format!("es{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
-    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, base_url, &handle, &email).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
@@ -169,7 +169,7 @@ async fn test_update_email_invalid_token() {
     let base_url = common::base_url().await;
     let handle = format!("eb{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
-    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, base_url, &handle, &email).await;
     let new_email = format!("badtok_{}@example.com", handle);
 
     let res = client
@@ -220,7 +220,7 @@ async fn test_update_email_invalid_format() {
     let base_url = common::base_url().await;
     let handle = format!("ef{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email = format!("{}@example.com", handle);
-    let (access_jwt, _) = create_verified_account(&client, &base_url, &handle, &email).await;
+    let (access_jwt, _) = create_verified_account(&client, base_url, &handle, &email).await;
 
     let res = client
         .post(format!("{}/xrpc/com.atproto.server.updateEmail", base_url))
@@ -470,11 +470,11 @@ async fn test_update_email_taken_by_another_user() {
 
     let handle1 = format!("d1{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email1 = format!("{}@example.com", handle1);
-    let (_, _) = create_verified_account(&client, &base_url, &handle1, &email1).await;
+    let (_, _) = create_verified_account(&client, base_url, &handle1, &email1).await;
 
     let handle2 = format!("d2{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let email2 = format!("{}@example.com", handle2);
-    let (access_jwt2, did2) = create_verified_account(&client, &base_url, &handle2, &email2).await;
+    let (access_jwt2, did2) = create_verified_account(&client, base_url, &handle2, &email2).await;
 
     let res = client
         .post(format!(
