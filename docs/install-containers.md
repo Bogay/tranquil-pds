@@ -82,13 +82,13 @@ systemctl start tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey
 sleep 10
 ```
 
-Create the minio bucket:
+Create the minio buckets:
 ```bash
 podman run --rm --pod tranquil-pds \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=your-minio-password \
   docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
-  sh -c "mc alias set local http://localhost:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs"
+  sh -c "mc alias set local http://localhost:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs && mc mb --ignore-existing local/pds-backups"
 ```
 
 Run migrations:
@@ -230,14 +230,14 @@ rc-service tranquil-pds start
 sleep 15
 ```
 
-Create the minio bucket:
+Create the minio buckets:
 ```sh
 source /srv/tranquil-pds/config/tranquil-pds.env
 podman run --rm --network tranquil-pds_default \
   -e MINIO_ROOT_USER="$MINIO_ROOT_USER" \
   -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
   docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
-  sh -c 'mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs'
+  sh -c 'mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs && mc mb --ignore-existing local/pds-backups'
 ```
 
 Run migrations:
@@ -349,4 +349,25 @@ podman exec tranquil-pds-db pg_dump -U tranquil_pds pds > /var/backups/pds-$(dat
 **Alpine:**
 ```sh
 podman exec tranquil-pds-db-1 pg_dump -U tranquil_pds pds > /var/backups/pds-$(date +%Y%m%d).sql
+```
+
+## Custom Homepage
+
+Mount a `homepage.html` into the container's frontend directory and it becomes your landing page. Go nuts with it. Account dashboard is at `/app/` so you won't break anything.
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Welcome to my PDS</title>
+    <style>
+        body { font-family: system-ui; max-width: 600px; margin: 100px auto; padding: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to my dark web popsocket store</h1>
+    <p>This is a <a href="https://atproto.com">AT Protocol</a> Personal Data Server.</p>
+    <p><a href="/app/">Sign in</a> or learn more at <a href="https://bsky.social">Bluesky</a>.</p>
+</body>
+</html>
 ```

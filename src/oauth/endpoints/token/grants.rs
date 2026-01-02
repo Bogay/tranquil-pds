@@ -94,9 +94,10 @@ pub async fn handle_authorization_code_grant(
             ));
         }
         Some(result.jkt)
-    } else if auth_request.parameters.dpop_jkt.is_some() {
-        return Err(OAuthError::InvalidRequest(
-            "DPoP proof required for this authorization".to_string(),
+    } else if auth_request.parameters.dpop_jkt.is_some() || client_metadata.requires_dpop() {
+        return Err(OAuthError::UseDpopNonce(
+            crate::oauth::dpop::DPoPVerifier::new(AuthConfig::get().dpop_secret().as_bytes())
+                .generate_nonce(),
         ));
     } else {
         None
@@ -138,6 +139,8 @@ pub async fn handle_authorization_code_grant(
     } else {
         REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL
     };
+    let mut stored_parameters = auth_request.parameters.clone();
+    stored_parameters.dpop_jkt = dpop_jkt.clone();
     let token_data = TokenData {
         did: did.clone(),
         token_id: token_id.0.clone(),
@@ -147,7 +150,7 @@ pub async fn handle_authorization_code_grant(
         client_id: auth_request.client_id.clone(),
         client_auth: stored_client_auth,
         device_id: auth_request.device_id,
-        parameters: auth_request.parameters.clone(),
+        parameters: stored_parameters,
         details: None,
         code: None,
         current_refresh_token: Some(refresh_token.0.clone()),

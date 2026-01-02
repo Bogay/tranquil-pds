@@ -161,13 +161,13 @@
         </button>
 
         <p class="forgot-links">
-          <a href="#/reset-password">{$_('login.forgotPassword')}</a>
+          <a href="/app/reset-password">{$_('login.forgotPassword')}</a>
           <span class="separator">&middot;</span>
-          <a href="#/request-passkey-recovery">{$_('login.lostPasskey')}</a>
+          <a href="/app/request-passkey-recovery">{$_('login.lostPasskey')}</a>
         </p>
 
         <p class="link-text">
-          {$_('login.noAccount')} <a href="#/register">{$_('login.createAccount')}</a>
+          {$_('login.noAccount')} <a href="/app/register">{$_('login.createAccount')}</a>
         </p>
       </div>
 

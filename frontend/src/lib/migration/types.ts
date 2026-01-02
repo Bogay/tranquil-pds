@@ -254,11 +254,13 @@ export interface OAuthServerMetadata {
   issuer: string;
   authorization_endpoint: string;
   token_endpoint: string;
+  pushed_authorization_request_endpoint?: string;
   scopes_supported?: string[];
   response_types_supported?: string[];
   grant_types_supported?: string[];
   code_challenge_methods_supported?: string[];
   dpop_signing_alg_values_supported?: string[];
+  require_pushed_authorization_requests?: boolean;
 }
 
 export interface OAuthTokenResponse {

@@ -403,7 +403,7 @@
 
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('security.title')}</h1>
   </header>
 
@@ -722,7 +722,7 @@
       <p class="description">
         {$_('security.trustedDevicesDescription')}
       </p>
-      <a href="#/trusted-devices" class="section-link">
+      <a href="/app/trusted-devices" class="section-link">
         {$_('security.manageTrustedDevices')} &rarr;
       </a>
     </section>
@@ -765,8 +765,8 @@
               <strong>{$_('security.legacyLoginWarning')}</strong>
               <p>{$_('security.totpPasswordWarning')}</p>
               <ol>
-                <li><strong>{$_('security.totpPasswordOption1Label')}</strong> {$_('security.totpPasswordOption1Text')} <a href="#/settings">{$_('security.totpPasswordOption1Link')}</a> {$_('security.totpPasswordOption1Suffix')}</li>
-                <li><strong>{$_('security.totpPasswordOption2Label')}</strong> {$_('security.totpPasswordOption2Text')} <a href="#/settings">{$_('security.totpPasswordOption2Link')}</a> {$_('security.totpPasswordOption2Suffix')}</li>
+                <li><strong>{$_('security.totpPasswordOption1Label')}</strong> {$_('security.totpPasswordOption1Text')} <a href="/app/settings">{$_('security.totpPasswordOption1Link')}</a> {$_('security.totpPasswordOption1Suffix')}</li>
+                <li><strong>{$_('security.totpPasswordOption2Label')}</strong> {$_('security.totpPasswordOption2Text')} <a href="/app/settings">{$_('security.totpPasswordOption2Link')}</a> {$_('security.totpPasswordOption2Suffix')}</li>
               </ol>
             </div>
           {/if}

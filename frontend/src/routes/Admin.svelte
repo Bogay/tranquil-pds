@@ -308,7 +308,7 @@
 {#if auth.session?.isAdmin}
   <div class="page">
     <header>
-      <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+      <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
       <h1>{$_('admin.title')}</h1>
     </header>
     {#if loading}

@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tranquil PDS</title>
+    <style>
+      :root {
+        --space-0: 0;
+        --space-1: 0.125rem;
+        --space-2: 0.25rem;
+        --space-3: 0.5rem;
+        --space-4: 0.75rem;
+        --space-5: 1rem;
+        --space-6: 1.5rem;
+        --space-7: 2rem;
+        --space-8: 3rem;
+        --space-9: 4rem;
+        --text-xs: 0.75rem;
+        --text-sm: 0.875rem;
+        --text-base: 1rem;
+        --text-lg: 1.125rem;
+        --text-xl: 1.25rem;
+        --text-2xl: 1.5rem;
+        --text-3xl: 2rem;
+        --text-4xl: 2.5rem;
+        --font-normal: 400;
+        --font-medium: 500;
+        --font-semibold: 600;
+        --font-bold: 700;
+        --leading-tight: 1.25;
+        --leading-normal: 1.5;
+        --leading-relaxed: 1.75;
+        --radius-sm: 3px;
+        --radius-md: 4px;
+        --radius-lg: 6px;
+        --radius-xl: 8px;
+        --width-xs: 360px;
+        --width-sm: 480px;
+        --width-md: 760px;
+        --width-lg: 960px;
+        --width-xl: 1100px;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
+        --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.15);
+        --shadow-focus: 0 0 0 2px var(--accent-muted);
+        --transition-fast: 0.1s ease;
+        --transition-normal: 0.15s ease;
+        --transition-slow: 0.25s ease;
+        --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+        --bg-primary: #f9fafa;
+        --bg-secondary: #f1f3f3;
+        --bg-tertiary: #e8ebeb;
+        --bg-hover: #e8ebeb;
+        --bg-card: #ffffff;
+        --bg-input: #ffffff;
+        --bg-input-disabled: #f1f3f3;
+        --text-primary: #1a1d1d;
+        --text-secondary: #5a605f;
+        --text-muted: #8a8f8e;
+        --text-inverse: #ffffff;
+        --border-color: #dce0df;
+        --border-light: #e8ebeb;
+        --border-dark: #c8cecc;
+        --accent: #1a1d1d;
+        --accent-hover: #2e3332;
+        --accent-muted: rgba(26, 29, 29, 0.06);
+        --accent-light: #3a403f;
+        --secondary: #1a1d1d;
+        --secondary-hover: #2e3332;
+        --secondary-muted: rgba(26, 29, 29, 0.06);
+        --success-bg: #dfd;
+        --success-border: #8c8;
+        --success-text: #060;
+        --error-bg: #fee;
+        --error-border: #fcc;
+        --error-text: #c00;
+        --warning-bg: #ffd;
+        --warning-border: #d4a03c;
+        --warning-text: #856404;
+        --border-color-light: var(--border-dark);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-primary: #0a0c0c;
+          --bg-secondary: #131616;
+          --bg-tertiary: #1a1d1d;
+          --bg-hover: #1a1d1d;
+          --bg-card: #131616;
+          --bg-input: #1a1d1d;
+          --bg-input-disabled: #131616;
+          --text-primary: #e6e8e8;
+          --text-secondary: #9ca1a0;
+          --text-muted: #686d6c;
+          --text-inverse: #0a0c0c;
+          --border-color: #282c2b;
+          --border-light: #1f2322;
+          --border-dark: #343938;
+          --accent: #e6e8e8;
+          --accent-hover: #ffffff;
+          --accent-muted: rgba(230, 232, 232, 0.1);
+          --accent-light: #ffffff;
+          --secondary: #e6e8e8;
+          --secondary-hover: #ffffff;
+          --secondary-muted: rgba(230, 232, 232, 0.1);
+          --success-bg: #0f1f1a;
+          --success-border: #1a3d2d;
+          --success-text: #7bc6a0;
+          --error-bg: #1f0f0f;
+          --error-border: #3d1a1a;
+          --error-text: #ff8a8a;
+          --warning-bg: #1f1a0f;
+          --warning-border: #3d351a;
+          --warning-text: #c6b87b;
+        }
+      }
+
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        line-height: var(--leading-normal);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .pattern-container {
+        position: fixed;
+        top: -32px;
+        left: -32px;
+        right: -32px;
+        bottom: -32px;
+        pointer-events: none;
+        z-index: 1;
+        overflow: hidden;
+      }
+      .pattern {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: calc(100% + 500px);
+        height: 100%;
+        animation: drift 80s linear infinite;
+      }
+      .dot {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: rgba(0, 0, 0, 0.06);
+        border-radius: 50%;
+        transition: transform 0.04s linear;
+      }
+      @media (prefers-color-scheme: dark) {
+        .dot {
+          background: rgba(255, 255, 255, 0.1);
+        }
+      }
+      .pattern-fade {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(
+          135deg,
+          transparent 50%,
+          var(--bg-primary) 75%
+        );
+        pointer-events: none;
+        z-index: 2;
+      }
+      @keyframes drift {
+        0% {
+          transform: translateX(-500px);
+        }
+        100% {
+          transform: translateX(0);
+        }
+      }
+
+      nav {
+        position: fixed;
+        top: 12px;
+        left: 32px;
+        right: 32px;
+        background: var(--accent);
+        padding: 10px 18px;
+        z-index: 100;
+        border-radius: var(--radius-xl);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .nav-left {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+      }
+      .nav-logo {
+        height: 28px;
+        width: auto;
+        object-fit: contain;
+        border-radius: var(--radius-sm);
+      }
+      .hostname {
+        font-weight: var(--font-semibold);
+        font-size: var(--text-base);
+        letter-spacing: 0.08em;
+        color: var(--text-inverse);
+        text-transform: uppercase;
+      }
+      .hostname.placeholder {
+        opacity: 0.4;
+      }
+      .user-count {
+        font-size: var(--text-sm);
+        color: var(--text-inverse);
+        opacity: 0.85;
+        padding: 4px 10px;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: var(--radius-md);
+        white-space: nowrap;
+      }
+      @media (prefers-color-scheme: dark) {
+        .user-count {
+          background: rgba(0, 0, 0, 0.15);
+        }
+      }
+      .nav-meta {
+        font-size: var(--text-sm);
+        color: var(--text-inverse);
+        opacity: 0.6;
+        letter-spacing: 0.05em;
+      }
+
+      .home {
+        position: relative;
+        z-index: 10;
+        max-width: var(--width-xl);
+        margin: 0 auto;
+        padding: 72px 32px 32px;
+      }
+      .hero {
+        padding: var(--space-7) 0 var(--space-8);
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: var(--space-8);
+      }
+      h1 {
+        font-size: var(--text-4xl);
+        font-weight: var(--font-semibold);
+        line-height: var(--leading-tight);
+        margin-bottom: var(--space-6);
+        letter-spacing: -0.02em;
+      }
+      .cycling-word-container {
+        display: inline-block;
+        width: 3.9em;
+        text-align: left;
+      }
+      .cycling-word {
+        display: inline-block;
+        transition: opacity 0.1s ease, transform 0.1s ease;
+      }
+      .cycling-word.transitioning {
+        opacity: 0;
+        transform: scale(0.95);
+      }
+      .lede {
+        font-size: var(--text-xl);
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+        line-height: var(--leading-relaxed);
+        margin-bottom: 0;
+      }
+      .actions {
+        display: flex;
+        gap: var(--space-4);
+        margin-top: var(--space-7);
+      }
+      .btn {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: var(--space-4) var(--space-6);
+        border-radius: var(--radius-lg);
+        text-decoration: none;
+        transition: all var(--transition-normal);
+        border: 1px solid transparent;
+      }
+      .btn.primary {
+        background: var(--secondary);
+        color: var(--text-inverse);
+        border-color: var(--secondary);
+      }
+      .btn.primary:hover {
+        background: var(--secondary-hover);
+        border-color: var(--secondary-hover);
+      }
+      .btn.secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border-color: var(--border-color);
+      }
+      .btn.secondary:hover {
+        background: var(--secondary-muted);
+        border-color: var(--secondary);
+        color: var(--secondary);
+      }
+      blockquote {
+        margin: var(--space-8) 0 0 0;
+        padding: var(--space-6);
+        background: var(--accent-muted);
+        border-left: 3px solid var(--accent);
+        border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
+      }
+      blockquote p {
+        font-size: var(--text-lg);
+        color: var(--text-primary);
+        font-style: italic;
+        margin-bottom: var(--space-3);
+      }
+      blockquote cite {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        font-style: normal;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .content h2 {
+        font-size: var(--text-sm);
+        font-weight: var(--font-bold);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--accent-light);
+        margin: var(--space-8) 0 var(--space-5);
+      }
+      .content h2:first-child {
+        margin-top: 0;
+      }
+      .content > p {
+        font-size: var(--text-base);
+        color: var(--text-secondary);
+        margin-bottom: var(--space-5);
+        line-height: var(--leading-relaxed);
+      }
+      .features {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-6);
+        margin: var(--space-6) 0 var(--space-8);
+      }
+      .feature {
+        padding: var(--space-5);
+        background: var(--bg-secondary);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--border-color);
+      }
+      .feature h3 {
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        margin-bottom: var(--space-3);
+      }
+      .feature p {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        margin: 0;
+        line-height: var(--leading-relaxed);
+      }
+      @media (max-width: 700px) {
+        .features {
+          grid-template-columns: 1fr;
+        }
+        h1 {
+          font-size: var(--text-3xl);
+        }
+        .actions {
+          flex-direction: column;
+        }
+        .btn {
+          text-align: center;
+        }
+        .user-count, .nav-meta {
+          display: none;
+        }
+      }
+      .site-footer {
+        margin-top: var(--space-9);
+        padding-top: var(--space-7);
+        display: flex;
+        justify-content: space-between;
+        font-size: var(--text-sm);
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-top: 1px solid var(--border-color);
+      }
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pattern-container">
+      <div class="pattern" id="dotPattern"></div>
+    </div>
+    <div class="pattern-fade"></div>
+
+    <nav>
+      <div class="nav-left">
+        <img src="/logo" alt="Logo" class="nav-logo hidden" id="navLogo">
+        <span class="hostname" id="hostname">loading...</span>
+        <span class="user-count hidden" id="userCount"></span>
+      </div>
+      <span class="nav-meta" id="version"></span>
+    </nav>
+
+    <div class="home">
+      <section class="hero">
+        <h1>
+          A home for your <span class="cycling-word-container"><span
+              class="cycling-word"
+              id="cyclingWord"
+            >Bluesky</span></span> account
+        </h1>
+
+        <p class="lede">
+          Tranquil PDS is a Personal Data Server, the thing that stores your
+          posts, profile, and keys. Bluesky runs one for you, but you can run
+          your own.
+        </p>
+
+        <div class="actions" id="heroActions">
+          <a href="/app/register" class="btn primary" id="heroPrimary"
+          >Join This Server</a>
+          <a
+            href="https://tangled.org/lewis.moe/bspds-sandbox"
+            class="btn secondary"
+            id="heroSecondary"
+            target="_blank"
+            rel="noopener"
+          >Run Your Own</a>
+        </div>
+
+        <blockquote>
+          <p>"Nature does not hurry, yet everything is accomplished."</p>
+          <cite>Lao Tzu</cite>
+        </blockquote>
+      </section>
+
+      <section class="content">
+        <h2>What you get</h2>
+
+        <div class="features">
+          <div class="feature">
+            <h3>Real security</h3>
+            <p>
+              Sign in with passkeys, add two-factor authentication, set up
+              backup codes, and mark devices you trust. Your account stays
+              yours.
+            </p>
+          </div>
+
+          <div class="feature">
+            <h3>Your own identity</h3>
+            <p>
+              Use your own domain as your handle, or get a subdomain on ours.
+              Either way, your identity moves with you if you ever leave.
+            </p>
+          </div>
+
+          <div class="feature">
+            <h3>Stay in the loop</h3>
+            <p>
+              Get important alerts where you actually see them: email, Discord,
+              Telegram, or Signal.
+            </p>
+          </div>
+
+          <div class="feature">
+            <h3>You decide what apps can do</h3>
+            <p>
+              When an app asks for access, you'll see exactly what it wants in
+              plain language. Grant what makes sense, deny what doesn't.
+            </p>
+          </div>
+
+          <div class="feature">
+            <h3>App passwords with guardrails</h3>
+            <p>
+              Create app passwords that can only do specific things: read-only
+              for feed readers, post-only for bots. Full control over what each
+              password can access.
+            </p>
+          </div>
+
+          <div class="feature">
+            <h3>Delegate without sharing passwords</h3>
+            <p>
+              Let team members or tools manage your account with specific
+              permission levels. They authenticate with their own credentials,
+              you see everything they do in an audit log.
+            </p>
+          </div>
+
+          <div class="feature">
+            <h3>Automatic backups</h3>
+            <p>
+              Your repository is backed up daily to object storage. Download any
+              backup or restore with one click. You own your data, even if the
+              worst happens.
+            </p>
+          </div>
+        </div>
+
+        <h2>Everything in one place</h2>
+
+        <p>
+          Manage your profile, security settings, connected apps, and more from
+          a clean dashboard. No command line or 3rd party apps required.
+        </p>
+
+        <h2>Works with everything</h2>
+
+        <p>
+          Use any ATProto app you already like. Tranquil PDS speaks the same
+          language as Bluesky's servers, so all your favorite clients and tools
+          just work.
+        </p>
+
+        <h2>Ready to try it?</h2>
+
+        <p>
+          Join this server, or grab the source and run your own. Either way, you
+          can migrate an existing account over and your followers, posts, and
+          identity come with you.
+        </p>
+
+        <div class="actions" id="footerActions">
+          <a href="/app/register" class="btn primary" id="footerPrimary"
+          >Join This Server</a>
+          <a
+            href="https://tangled.org/lewis.moe/bspds-sandbox"
+            class="btn secondary"
+            target="_blank"
+            rel="noopener"
+          >View Source</a>
+        </div>
+      </section>
+
+      <footer class="site-footer">
+        <span>Made by people who don't take themselves too seriously</span>
+        <span>Open Source: issues & PRs welcome</span>
+      </footer>
+    </div>
+
+    <script>
+      (function checkSession() {
+        try {
+          const stored = localStorage.getItem("tranquil_pds_session");
+          if (stored) {
+            const session = JSON.parse(stored);
+            if (session && session.handle) {
+              const handle = "@" + session.handle;
+              const heroPrimary = document.getElementById(
+                "heroPrimary",
+              );
+              const footerPrimary = document.getElementById(
+                "footerPrimary",
+              );
+              const heroSecondary = document.getElementById(
+                "heroSecondary",
+              );
+              if (heroPrimary) {
+                heroPrimary.href = "/app/dashboard";
+                heroPrimary.textContent = handle;
+              }
+              if (footerPrimary) {
+                footerPrimary.href = "/app/dashboard";
+                footerPrimary.textContent = handle;
+              }
+              if (heroSecondary) {
+                heroSecondary.classList.add("hidden");
+              }
+            }
+          }
+        } catch (e) {}
+      })();
+
+      const heroWords = ["Bluesky", "Tangled", "Leaflet", "ATProto"];
+      const wordSpacing = {
+        "Bluesky": "0.01em",
+        "Tangled": "0.02em",
+        "Leaflet": "0.05em",
+        "ATProto": "0",
+      };
+      let currentWordIndex = 0;
+      const cyclingWord = document.getElementById("cyclingWord");
+
+      function cycleWord() {
+        cyclingWord.classList.add("transitioning");
+        setTimeout(() => {
+          currentWordIndex = (currentWordIndex + 1) % heroWords.length;
+          const word = heroWords[currentWordIndex];
+          cyclingWord.textContent = word;
+          cyclingWord.style.letterSpacing = wordSpacing[word] || "0";
+          cyclingWord.classList.remove("transitioning");
+          const duration = word === "ATProto" ? 4000 : 2000;
+          setTimeout(cycleWord, duration);
+        }, 100);
+      }
+      setTimeout(cycleWord, 2000);
+
+      fetch("/xrpc/com.atproto.server.describeServer")
+        .then((r) => r.json())
+        .then((info) => {
+          if (info.availableUserDomains?.length) {
+            document.getElementById("hostname").textContent =
+              info.availableUserDomains[0];
+            document.getElementById("hostname").classList.remove(
+              "placeholder",
+            );
+          }
+          if (info.version) {
+            document.getElementById("version").textContent =
+              info.version;
+          }
+        })
+        .catch(() => {});
+
+      fetch("/xrpc/com.atproto.sync.listRepos?limit=1000")
+        .then((r) => r.json())
+        .then((data) => {
+          const count = data.repos?.length || 0;
+          const el = document.getElementById("userCount");
+          el.textContent = count + " " +
+            (count === 1 ? "user" : "users");
+          el.classList.remove("hidden");
+        })
+        .catch(() => {});
+
+      fetch("/logo", { method: "HEAD" })
+        .then((r) => {
+          if (r.ok) {
+            document.getElementById("navLogo").classList.remove(
+              "hidden",
+            );
+          }
+        })
+        .catch(() => {});
+
+      const pattern = document.getElementById("dotPattern");
+      const spacing = 32;
+      const cols = Math.ceil((window.innerWidth + 600) / spacing);
+      const rows = Math.ceil((window.innerHeight + 100) / spacing);
+      const dots = [];
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const dot = document.createElement("div");
+          dot.className = "dot";
+          dot.style.left = (x * spacing) + "px";
+          dot.style.top = (y * spacing) + "px";
+          pattern.appendChild(dot);
+          dots.push({ el: dot, x: x * spacing, y: y * spacing });
+        }
+      }
+
+      let mouseX = -1000, mouseY = -1000;
+      document.addEventListener("mousemove", (e) => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+      });
+
+      function updateDots() {
+        const patternRect = pattern.getBoundingClientRect();
+        dots.forEach((dot) => {
+          const dotX = patternRect.left + dot.x + 5;
+          const dotY = patternRect.top + dot.y + 5;
+          const dist = Math.hypot(mouseX - dotX, mouseY - dotY);
+          const maxDist = 120;
+          const scale = Math.min(1, Math.max(0.1, dist / maxDist));
+          dot.el.style.transform = "scale(" + scale + ")";
+        });
+        requestAnimationFrame(updateDots);
+      }
+      updateDots();
+    </script>
+  </body>
+</html>

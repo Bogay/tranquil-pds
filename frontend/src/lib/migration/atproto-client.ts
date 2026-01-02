@@ -188,11 +188,11 @@ export class AtprotoClient {
     return session;
   }
 
-  async describeServer(): Promise<ServerDescription> {
+  describeServer(): Promise<ServerDescription> {
     return this.xrpc<ServerDescription>("com.atproto.server.describeServer");
   }
 
-  async getServiceAuth(
+  getServiceAuth(
     aud: string,
     lxm?: string,
   ): Promise<{ token: string }> {
@@ -203,7 +203,7 @@ export class AtprotoClient {
     return this.xrpc("com.atproto.server.getServiceAuth", { params });
   }
 
-  async getRepo(did: string): Promise<Uint8Array> {
+  getRepo(did: string): Promise<Uint8Array> {
     return this.xrpc("com.atproto.sync.getRepo", {
       params: { did },
     });
@@ -662,6 +662,61 @@ export function buildOAuthAuthorizationUrl(
   return url.toString();
 }
 
+export async function initiateOAuthWithPAR(
+  metadata: OAuthServerMetadata,
+  params: {
+    clientId: string;
+    redirectUri: string;
+    codeChallenge: string;
+    state: string;
+    scope?: string;
+    dpopJkt?: string;
+    loginHint?: string;
+  },
+): Promise<string> {
+  if (!metadata.pushed_authorization_request_endpoint) {
+    return buildOAuthAuthorizationUrl(metadata, params);
+  }
+
+  const body = new URLSearchParams({
+    response_type: "code",
+    client_id: params.clientId,
+    redirect_uri: params.redirectUri,
+    code_challenge: params.codeChallenge,
+    code_challenge_method: "S256",
+    state: params.state,
+    scope: params.scope ?? "atproto",
+  });
+
+  if (params.dpopJkt) {
+    body.set("dpop_jkt", params.dpopJkt);
+  }
+  if (params.loginHint) {
+    body.set("login_hint", params.loginHint);
+  }
+
+  const res = await fetch(metadata.pushed_authorization_request_endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({
+      error: "par_error",
+      error_description: res.statusText,
+    }));
+    throw new Error(err.error_description || err.error || "PAR request failed");
+  }
+
+  const { request_uri } = await res.json();
+
+  const authUrl = new URL(metadata.authorization_endpoint);
+  authUrl.searchParams.set("client_id", params.clientId);
+  authUrl.searchParams.set("request_uri", request_uri);
+  return authUrl.toString();
+}
+
 export async function exchangeOAuthCode(
   metadata: OAuthServerMetadata,
   params: {
@@ -839,7 +894,7 @@ export function getMigrationOAuthClientId(): string {
 }
 
 export function getMigrationOAuthRedirectUri(): string {
-  return `${globalThis.location.origin}/migrate`;
+  return `${globalThis.location.origin}/app/migrate`;
 }
 
 export interface DPoPKeyPair {

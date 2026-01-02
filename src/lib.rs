@@ -657,8 +657,23 @@ pub fn app(state: AppState) -> Router {
         .exists()
     {
         let index_path = format!("{}/index.html", frontend_dir);
-        let serve_dir = ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(index_path));
-        router.fallback_service(serve_dir)
+        let homepage_path = format!("{}/homepage.html", frontend_dir);
+
+        let homepage_exists = std::path::Path::new(&homepage_path).exists();
+        let homepage_file = if homepage_exists {
+            homepage_path
+        } else {
+            index_path.clone()
+        };
+
+        let spa_router = Router::new().fallback_service(ServeFile::new(&index_path));
+
+        let serve_dir = ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(&index_path));
+
+        router
+            .route_service("/", ServeFile::new(&homepage_file))
+            .nest("/app", spa_router)
+            .fallback_service(serve_dir)
     } else {
         router
     }

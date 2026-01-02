@@ -107,8 +107,7 @@ export async function migrateBlobs(
         errorMessage,
       );
 
-      const isNetworkError =
-        errorMessage.includes("fetch") ||
+      const isNetworkError = errorMessage.includes("fetch") ||
         errorMessage.includes("network") ||
         errorMessage.includes("CORS") ||
         errorMessage.includes("Failed to fetch") ||
@@ -124,7 +123,9 @@ export async function migrateBlobs(
         if (migrated > 0) {
           onProgress({
             currentOperation:
-              `Source PDS unreachable (browser security restriction). ${migrated} media files migrated successfully. ${remaining + 1} could not be fetched - these may need to be re-uploaded.`,
+              `Source PDS unreachable (browser security restriction). ${migrated} media files migrated successfully. ${
+                remaining + 1
+              } could not be fetched - these may need to be re-uploaded.`,
           });
         } else {
           onProgress({

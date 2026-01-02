@@ -2,12 +2,12 @@
   import { _ } from '../lib/i18n'
 
   function getError(): string {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return params.get('error') || 'Unknown error'
   }
 
   function getErrorDescription(): string | null {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return params.get('error_description')
   }
 

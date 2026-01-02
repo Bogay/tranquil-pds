@@ -352,9 +352,9 @@ pub async fn enqueue_email_update(
     let strings = get_strings(&prefs.locale);
     let encoded_email = urlencoding::encode(new_email);
     let encoded_token = urlencoding::encode(code);
-    let verify_page = format!("https://{}/#/verify", hostname);
+    let verify_page = format!("https://{}/app/verify", hostname);
     let verify_link = format!(
-        "https://{}/#/verify?token={}&identifier={}",
+        "https://{}/app/verify?token={}&identifier={}",
         hostname, encoded_token, encoded_email
     );
     let body = format_message(
@@ -389,9 +389,9 @@ pub async fn enqueue_email_update_token(
     let prefs = get_user_comms_prefs(db, user_id).await?;
     let strings = get_strings(&prefs.locale);
     let current_email = prefs.email.clone().unwrap_or_default();
-    let verify_page = format!("https://{}/#/verify?type=email-update", hostname);
+    let verify_page = format!("https://{}/app/verify?type=email-update", hostname);
     let verify_link = format!(
-        "https://{}/#/verify?type=email-update&token={}",
+        "https://{}/app/verify?type=email-update&token={}",
         hostname,
         urlencoding::encode(code)
     );
@@ -556,9 +556,9 @@ pub async fn enqueue_signup_verification(
         let encoded_email = urlencoding::encode(recipient);
         let encoded_token = urlencoding::encode(code);
         (
-            format!("https://{}/#/verify", hostname),
+            format!("https://{}/app/verify", hostname),
             format!(
-                "https://{}/#/verify?token={}&identifier={}",
+                "https://{}/app/verify?token={}&identifier={}",
                 hostname, encoded_token, encoded_email
             ),
         )
@@ -606,9 +606,9 @@ pub async fn enqueue_migration_verification(
     let strings = get_strings(&prefs.locale);
     let encoded_email = urlencoding::encode(email);
     let encoded_token = urlencoding::encode(token);
-    let verify_page = format!("https://{}/#/verify", hostname);
+    let verify_page = format!("https://{}/app/verify", hostname);
     let verify_link = format!(
-        "https://{}/#/verify?token={}&identifier={}",
+        "https://{}/app/verify?token={}&identifier={}",
         hostname, encoded_token, encoded_email
     );
     let body = format_message(

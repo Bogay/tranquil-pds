@@ -166,73 +166,73 @@
 
     <nav class="nav-grid">
       {#if auth.session.status === 'migrated'}
-        <a href="#/did-document" class="nav-card migrated-card">
+        <a href="/app/did-document" class="nav-card migrated-card">
           <h3>{$_('dashboard.navDidDocument')}</h3>
           <p>{$_('dashboard.navDidDocumentDesc')}</p>
         </a>
-        <a href="#/sessions" class="nav-card">
+        <a href="/app/sessions" class="nav-card">
           <h3>{$_('dashboard.navSessions')}</h3>
           <p>{$_('dashboard.navSessionsDesc')}</p>
         </a>
-        <a href="#/security" class="nav-card">
+        <a href="/app/security" class="nav-card">
           <h3>{$_('dashboard.navSecurity')}</h3>
           <p>{$_('dashboard.navSecurityDesc')}</p>
         </a>
-        <a href="#/settings" class="nav-card">
+        <a href="/app/settings" class="nav-card">
           <h3>{$_('dashboard.navSettings')}</h3>
           <p>{$_('dashboard.navSettingsDesc')}</p>
         </a>
-        <a href="#/migrate" class="nav-card">
+        <a href="/app/migrate" class="nav-card">
           <h3>{$_('dashboard.navMigrateAgain')}</h3>
           <p>{$_('dashboard.navMigrateAgainDesc')}</p>
         </a>
       {:else}
-        <a href="#/app-passwords" class="nav-card">
+        <a href="/app/app-passwords" class="nav-card">
           <h3>{$_('dashboard.navAppPasswords')}</h3>
           <p>{$_('dashboard.navAppPasswordsDesc')}</p>
         </a>
-        <a href="#/sessions" class="nav-card">
+        <a href="/app/sessions" class="nav-card">
           <h3>{$_('dashboard.navSessions')}</h3>
           <p>{$_('dashboard.navSessionsDesc')}</p>
         </a>
         {#if inviteCodesEnabled && auth.session.isAdmin}
-          <a href="#/invite-codes" class="nav-card">
+          <a href="/app/invite-codes" class="nav-card">
             <h3>{$_('dashboard.navInviteCodes')}</h3>
             <p>{$_('dashboard.navInviteCodesDesc')}</p>
           </a>
         {/if}
-        <a href="#/settings" class="nav-card">
+        <a href="/app/settings" class="nav-card">
           <h3>{$_('dashboard.navSettings')}</h3>
           <p>{$_('dashboard.navSettingsDesc')}</p>
         </a>
-        <a href="#/security" class="nav-card">
+        <a href="/app/security" class="nav-card">
           <h3>{$_('dashboard.navSecurity')}</h3>
           <p>{$_('dashboard.navSecurityDesc')}</p>
         </a>
-        <a href="#/comms" class="nav-card">
+        <a href="/app/comms" class="nav-card">
           <h3>{$_('dashboard.navComms')}</h3>
           <p>{$_('dashboard.navCommsDesc')}</p>
         </a>
-        <a href="#/repo" class="nav-card">
+        <a href="/app/repo" class="nav-card">
           <h3>{$_('dashboard.navRepo')}</h3>
           <p>{$_('dashboard.navRepoDesc')}</p>
         </a>
-        <a href="#/controllers" class="nav-card">
+        <a href="/app/controllers" class="nav-card">
           <h3>{$_('dashboard.navDelegation')}</h3>
           <p>{$_('dashboard.navDelegationDesc')}</p>
         </a>
         {#if isDidWeb}
-          <a href="#/did-document" class="nav-card did-web-card">
+          <a href="/app/did-document" class="nav-card did-web-card">
             <h3>{$_('dashboard.navDidDocument')}</h3>
             <p>{$_('dashboard.navDidDocumentDescActive')}</p>
           </a>
         {/if}
-        <a href="#/migrate" class="nav-card">
+        <a href="/app/migrate" class="nav-card">
           <h3>{$_('migration.navTitle')}</h3>
           <p>{$_('migration.navDesc')}</p>
         </a>
         {#if auth.session.isAdmin}
-          <a href="#/admin" class="nav-card admin-card">
+          <a href="/app/admin" class="nav-card admin-card">
             <h3>{$_('dashboard.navAdmin')}</h3>
             <p>{$_('dashboard.navAdminDesc')}</p>
           </a>

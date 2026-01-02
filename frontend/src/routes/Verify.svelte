@@ -33,17 +33,10 @@
 
 
   function parseQueryParams() {
-    const hash = window.location.hash
-    const queryIndex = hash.indexOf('?')
-    if (queryIndex === -1) return {}
-
-    const queryString = hash.slice(queryIndex + 1)
     const params: Record<string, string> = {}
-    for (const pair of queryString.split('&')) {
-      const [key, value] = pair.split('=')
-      if (key && value) {
-        params[decodeURIComponent(key)] = decodeURIComponent(value)
-      }
+    const searchParams = new URLSearchParams(window.location.search)
+    for (const [key, value] of searchParams.entries()) {
+      params[key] = value
     }
     return params
   }
@@ -235,13 +228,13 @@
         <p class="subtitle">{$_('verify.emailUpdated')}</p>
         <p class="info-text">{$_('verify.emailUpdatedInfo')}</p>
         <div class="actions">
-          <a href="#/settings" class="btn">{$_('common.backToSettings')}</a>
+          <a href="/app/settings" class="btn">{$_('common.backToSettings')}</a>
         </div>
       {:else if successPurpose === 'migration' || successPurpose === 'signup'}
         <p class="subtitle">{$_('verify.channelVerified', { values: { channel: channelLabel(successChannel || '') } })}</p>
         <p class="info-text">{$_('verify.canNowSignIn')}</p>
         <div class="actions">
-          <a href="#/login" class="btn">{$_('verify.signIn')}</a>
+          <a href="/app/login" class="btn">{$_('verify.signIn')}</a>
         </div>
       {:else}
         <p class="subtitle">
@@ -259,7 +252,7 @@
     {#if !auth.session}
       <div class="message warning">{$_('verify.emailUpdateRequiresAuth')}</div>
       <div class="actions">
-        <a href="#/login" class="btn">{$_('verify.signIn')}</a>
+        <a href="/app/login" class="btn">{$_('verify.signIn')}</a>
       </div>
     {:else}
       {#if error}
@@ -301,7 +294,7 @@
       </form>
 
       <p class="link-text">
-        <a href="#/settings">{$_('common.backToSettings')}</a>
+        <a href="/app/settings">{$_('common.backToSettings')}</a>
       </p>
     {/if}
   {:else if mode === 'token'}
@@ -356,7 +349,7 @@
     </form>
 
     <p class="link-text">
-      <a href="#/login">{$_('common.backToLogin')}</a>
+      <a href="/app/login">{$_('common.backToLogin')}</a>
     </p>
   {:else if pendingVerification}
     <h1>{$_('verify.title')}</h1>
@@ -399,7 +392,7 @@
     </form>
 
     <p class="link-text">
-      <a href="#/register" onclick={() => clearPendingVerification()}>{$_('verify.startOver')}</a>
+      <a href="/app/register" onclick={() => clearPendingVerification()}>{$_('verify.startOver')}</a>
     </p>
   {:else}
     <h1>{$_('verify.title')}</h1>
@@ -407,8 +400,8 @@
     <p class="info-text">{$_('verify.noPendingInfo')}</p>
 
     <div class="actions">
-      <a href="#/register" class="btn">{$_('verify.createAccount')}</a>
-      <a href="#/login" class="btn secondary">{$_('verify.signIn')}</a>
+      <a href="/app/register" class="btn">{$_('verify.createAccount')}</a>
+      <a href="/app/login" class="btn secondary">{$_('verify.signIn')}</a>
     </div>
   {/if}
 </div>

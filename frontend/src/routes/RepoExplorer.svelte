@@ -276,7 +276,7 @@
 <div class="page">
   <header>
     <div class="breadcrumb">
-      <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+      <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
       {#if view !== 'collections'}
         <span class="sep">/</span>
         <button class="breadcrumb-link" onclick={goBack}>

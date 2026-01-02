@@ -39,16 +39,21 @@
     if (errorParam) {
       oauthCallbackProcessed = true
       oauthError = errorDescription || errorParam
-      window.history.replaceState({}, '', '/#/migrate')
+      window.history.replaceState({}, '', '/app/migrate')
       return
     }
 
     if (code && state) {
       oauthCallbackProcessed = true
-      window.history.replaceState({}, '', '/#/migrate')
+      window.history.replaceState({}, '', '/app/migrate')
       direction = 'inbound'
       oauthLoading = true
       inboundFlow = createInboundMigrationFlow()
+
+      const stored = loadMigrationState()
+      if (stored && stored.direction === 'inbound') {
+        inboundFlow.resumeFromState(stored)
+      }
 
       inboundFlow.handleOAuthCallback(code, state)
         .then(() => {

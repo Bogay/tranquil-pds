@@ -22,12 +22,12 @@
   })
 
   function getRequestUri(): string | null {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return params.get('request_uri')
   }
 
   function getErrorFromUrl(): string | null {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return params.get('error')
   }
 
@@ -456,7 +456,7 @@
   </form>
 
   <p class="help-links">
-    <a href="#/reset-password">{$_('login.forgotPassword')}</a> &middot; <a href="#/request-passkey-recovery">{$_('login.lostPasskey')}</a>
+    <a href="/app/reset-password">{$_('login.forgotPassword')}</a> &middot; <a href="/app/request-passkey-recovery">{$_('login.lostPasskey')}</a>
   </p>
 </div>
 

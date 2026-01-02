@@ -141,7 +141,7 @@
   {/if}
 
   <p class="link-text">
-    <a href="#/login">{$_('common.backToLogin')}</a>
+    <a href="/app/login">{$_('common.backToLogin')}</a>
   </p>
 </div>
 

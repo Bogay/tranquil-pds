@@ -21,12 +21,12 @@
   })
 
   function getRequestUri(): string | null {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return params.get('request_uri')
   }
 
   function getDelegatedDid(): string | null {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return params.get('delegated_did')
   }
 

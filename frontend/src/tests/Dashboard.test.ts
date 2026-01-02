@@ -21,7 +21,7 @@ describe("Dashboard", () => {
       setupUnauthenticatedUser();
       render(Dashboard);
       await waitFor(() => {
-        expect(globalThis.location.hash).toBe("#/login");
+        expect(globalThis.location.pathname).toBe("/app/login");
       });
     });
     it("shows loading state while checking auth", () => {
@@ -61,10 +61,10 @@ describe("Dashboard", () => {
       render(Dashboard);
       await waitFor(() => {
         const navCards = [
-          { name: /app passwords/i, href: "#/app-passwords" },
-          { name: /account settings/i, href: "#/settings" },
-          { name: /communication preferences/i, href: "#/comms" },
-          { name: /repository explorer/i, href: "#/repo" },
+          { name: /app passwords/i, href: "/app/app-passwords" },
+          { name: /account settings/i, href: "/app/settings" },
+          { name: /communication preferences/i, href: "/app/comms" },
+          { name: /repository explorer/i, href: "/app/repo" },
         ];
         for (const { name, href } of navCards) {
           const card = screen.getByRole("link", { name });
@@ -84,7 +84,7 @@ describe("Dashboard", () => {
       await waitFor(() => {
         const inviteCard = screen.getByRole("link", { name: /invite codes/i });
         expect(inviteCard).toBeInTheDocument();
-        expect(inviteCard).toHaveAttribute("href", "#/invite-codes");
+        expect(inviteCard).toHaveAttribute("href", "/app/invite-codes");
       });
     });
   });
@@ -92,12 +92,12 @@ describe("Dashboard", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(mockData.session()));
-      mockEndpoint("com.atproto.server.deleteSession", () => jsonResponse({}));
+      mockEndpoint("/oauth/revoke", () => jsonResponse({}));
     });
-    it("calls deleteSession and navigates to login on logout", async () => {
-      let deleteSessionCalled = false;
-      mockEndpoint("com.atproto.server.deleteSession", () => {
-        deleteSessionCalled = true;
+    it("calls oauth revoke and navigates to login on logout", async () => {
+      let revokeCalled = false;
+      mockEndpoint("/oauth/revoke", () => {
+        revokeCalled = true;
         return jsonResponse({});
       });
       render(Dashboard);
@@ -112,8 +112,8 @@ describe("Dashboard", () => {
       });
       await fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
       await waitFor(() => {
-        expect(deleteSessionCalled).toBe(true);
-        expect(globalThis.location.hash).toBe("#/login");
+        expect(revokeCalled).toBe(true);
+        expect(globalThis.location.pathname).toBe("/app/login");
       });
     });
     it("clears session from localStorage after logout", async () => {

@@ -42,11 +42,18 @@ pub async fn delete_record(
     axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<DeleteRecordInput>,
 ) -> Response {
-    let auth =
-        match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
-            Ok(res) => res,
-            Err(err_res) => return err_res,
-        };
+    let auth = match prepare_repo_write(
+        &state,
+        &headers,
+        &input.repo,
+        "POST",
+        &crate::util::build_full_url(&uri.to_string()),
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(err_res) => return err_res,
+    };
 
     if let Err(e) = crate::auth::scope_check::check_repo_scope(
         auth.is_oauth,

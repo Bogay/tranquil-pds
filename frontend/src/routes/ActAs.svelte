@@ -10,7 +10,7 @@
   let actAsInProgress = $state(false)
 
   function getDid(): string | null {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return params.get('did')
   }
 
@@ -89,7 +89,7 @@
 
       const parData = await parResponse.json()
       if (parData.request_uri) {
-        window.location.href = `/#/oauth/login?request_uri=${encodeURIComponent(parData.request_uri)}`
+        window.location.href = `/app/oauth/login?request_uri=${encodeURIComponent(parData.request_uri)}`
       } else {
         error = $_('actAs.invalidResponse')
         loading = false

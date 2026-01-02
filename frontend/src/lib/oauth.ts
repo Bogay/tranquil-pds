@@ -10,7 +10,7 @@ const SCOPES = [
 const CLIENT_ID = !(import.meta.env.DEV)
   ? `${globalThis.location.origin}/oauth/client-metadata.json`
   : `http://localhost/?scope=${SCOPES}`;
-const REDIRECT_URI = `${globalThis.location.origin}/`;
+const REDIRECT_URI = `${globalThis.location.origin}/app/`;
 
 interface OAuthState {
   state: string;
@@ -26,7 +26,7 @@ function generateRandomString(length: number): string {
   );
 }
 
-async function sha256(plain: string): Promise<ArrayBuffer> {
+function sha256(plain: string): Promise<ArrayBuffer> {
   const encoder = new TextEncoder();
   const data = encoder.encode(plain);
   return crypto.subtle.digest("SHA-256", data);
@@ -191,7 +191,7 @@ export async function refreshOAuthToken(
 export function checkForOAuthCallback():
   | { code: string; state: string }
   | null {
-  if (globalThis.location.hash === "#/migrate") {
+  if (globalThis.location.pathname === "/app/migrate") {
     return null;
   }
 

@@ -22,7 +22,7 @@ describe("Settings", () => {
       setupUnauthenticatedUser();
       render(Settings);
       await waitFor(() => {
-        expect(globalThis.location.hash).toBe("#/login");
+        expect(globalThis.location.pathname).toBe("/app/login");
       });
     });
   });
@@ -37,7 +37,7 @@ describe("Settings", () => {
           screen.getByRole("heading", { name: /account settings/i, level: 1 }),
         ).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /dashboard/i }))
-          .toHaveAttribute("href", "#/dashboard");
+          .toHaveAttribute("href", "/app/dashboard");
         expect(screen.getByRole("heading", { name: /change email/i }))
           .toBeInTheDocument();
         expect(screen.getByRole("heading", { name: /change handle/i }))
@@ -463,7 +463,7 @@ describe("Settings", () => {
         screen.getByRole("button", { name: /permanently delete account/i }),
       );
       await waitFor(() => {
-        expect(globalThis.location.hash).toBe("#/login");
+        expect(globalThis.location.pathname).toBe("/app/login");
       });
     });
     it("shows cancel button to return to request state", async () => {

@@ -25,7 +25,7 @@ fn redirect_see_other(uri: &str) -> Response {
 
 fn redirect_to_frontend_error(error: &str, description: &str) -> Response {
     redirect_see_other(&format!(
-        "/#/oauth/error?error={}&error_description={}",
+        "/app/oauth/error?error={}&error_description={}",
         url_encode(error),
         url_encode(description)
     ))
@@ -236,7 +236,7 @@ pub async fn authorize_get(
                 if is_delegated && !has_password {
                     tracing::info!("Redirecting to delegation auth");
                     return redirect_see_other(&format!(
-                        "/#/oauth/delegation?request_uri={}&delegated_did={}",
+                        "/app/oauth/delegation?request_uri={}&delegated_did={}",
                         url_encode(&request_uri),
                         url_encode(&user.did)
                     ));
@@ -259,12 +259,12 @@ pub async fn authorize_get(
         && !accounts.is_empty()
     {
         return redirect_see_other(&format!(
-            "/#/oauth/accounts?request_uri={}",
+            "/app/oauth/accounts?request_uri={}",
             url_encode(&request_uri)
         ));
     }
     redirect_see_other(&format!(
-        "/#/oauth/login?request_uri={}",
+        "/app/oauth/login?request_uri={}",
         url_encode(&request_uri)
     ))
 }
@@ -466,7 +466,7 @@ pub async fn authorize_post(
                 .into_response();
         }
         redirect_see_other(&format!(
-            "/#/oauth/login?request_uri={}&error={}",
+            "/app/oauth/login?request_uri={}&error={}",
             url_encode(&form.request_uri),
             url_encode(error_msg)
         ))
@@ -539,7 +539,7 @@ pub async fn authorize_post(
             return show_login_error("An error occurred. Please try again.", json_response);
         }
         let redirect_url = format!(
-            "/#/oauth/delegation?request_uri={}&delegated_did={}",
+            "/app/oauth/delegation?request_uri={}&delegated_did={}",
             url_encode(&form.request_uri),
             url_encode(&user.did)
         );
@@ -565,7 +565,7 @@ pub async fn authorize_post(
             return show_login_error("An error occurred. Please try again.", json_response);
         }
         let redirect_url = format!(
-            "/#/oauth/passkey?request_uri={}",
+            "/app/oauth/passkey?request_uri={}",
             url_encode(&form.request_uri)
         );
         if json_response {
@@ -620,7 +620,7 @@ pub async fn authorize_post(
                 .into_response();
             }
             return redirect_see_other(&format!(
-                "/#/oauth/totp?request_uri={}",
+                "/app/oauth/totp?request_uri={}",
                 url_encode(&form.request_uri)
             ));
         }
@@ -649,7 +649,7 @@ pub async fn authorize_post(
                     .into_response();
                 }
                 return redirect_see_other(&format!(
-                    "/#/oauth/2fa?request_uri={}&channel={}",
+                    "/app/oauth/2fa?request_uri={}&channel={}",
                     url_encode(&form.request_uri),
                     url_encode(channel_name)
                 ));
@@ -713,7 +713,7 @@ pub async fn authorize_post(
     .unwrap_or(true);
     if needs_consent {
         let consent_url = format!(
-            "/#/oauth/consent?request_uri={}",
+            "/app/oauth/consent?request_uri={}",
             url_encode(&form.request_uri)
         );
         if json_response {
@@ -1103,7 +1103,7 @@ pub async fn authorize_2fa_get(
     };
     let channel = query.channel.as_deref().unwrap_or("email");
     redirect_see_other(&format!(
-        "/#/oauth/2fa?request_uri={}&channel={}",
+        "/app/oauth/2fa?request_uri={}&channel={}",
         url_encode(&query.request_uri),
         url_encode(channel)
     ))
@@ -1464,6 +1464,7 @@ pub async fn consent_post(
             || s.starts_with("blob:")
             || s.starts_with("rpc:")
             || s.starts_with("account:")
+            || s.starts_with("identity:")
             || s.starts_with("include:")
     });
     if !has_valid_scope {
@@ -1708,7 +1709,7 @@ pub async fn authorize_2fa_post(
     .unwrap_or(true);
     if needs_consent {
         let consent_url = format!(
-            "/#/oauth/consent?request_uri={}",
+            "/app/oauth/consent?request_uri={}",
             url_encode(&form.request_uri)
         );
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
@@ -2345,7 +2346,7 @@ pub async fn passkey_finish(
 
     if needs_consent {
         let consent_url = format!(
-            "/#/oauth/consent?request_uri={}",
+            "/app/oauth/consent?request_uri={}",
             url_encode(&form.request_uri)
         );
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
@@ -2729,7 +2730,7 @@ pub async fn authorize_passkey_finish(
                     }
                     let channel_name = channel_display_name(user.preferred_comms_channel);
                     let redirect_url = format!(
-                        "/#/oauth/2fa?request_uri={}&channel={}",
+                        "/app/oauth/2fa?request_uri={}&channel={}",
                         url_encode(&form.request_uri),
                         url_encode(channel_name)
                     );
@@ -2754,7 +2755,7 @@ pub async fn authorize_passkey_finish(
     }
 
     let redirect_url = format!(
-        "/#/oauth/consent?request_uri={}",
+        "/app/oauth/consent?request_uri={}",
         url_encode(&form.request_uri)
     );
     (

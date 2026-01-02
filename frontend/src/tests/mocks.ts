@@ -1,6 +1,44 @@
 import { vi } from "vitest";
 import type { AppPassword, InviteCode, Session } from "../lib/api";
 import { _testSetState } from "../lib/auth.svelte";
+
+const originalPushState = globalThis.history.pushState.bind(globalThis.history);
+const originalReplaceState = globalThis.history.replaceState.bind(
+  globalThis.history,
+);
+
+globalThis.history.pushState = (
+  data: unknown,
+  unused: string,
+  url?: string | URL | null,
+) => {
+  originalPushState(data, unused, url);
+  if (url) {
+    const urlStr = typeof url === "string" ? url : url.toString();
+    Object.defineProperty(globalThis.location, "pathname", {
+      value: urlStr.split("?")[0],
+      writable: true,
+      configurable: true,
+    });
+  }
+};
+
+globalThis.history.replaceState = (
+  data: unknown,
+  unused: string,
+  url?: string | URL | null,
+) => {
+  originalReplaceState(data, unused, url);
+  if (url) {
+    const urlStr = typeof url === "string" ? url : url.toString();
+    Object.defineProperty(globalThis.location, "pathname", {
+      value: urlStr.split("?")[0],
+      writable: true,
+      configurable: true,
+    });
+  }
+};
+
 export interface MockResponse {
   ok: boolean;
   status: number;
@@ -49,23 +87,26 @@ export function setupFetchMock(): void {
           clone: () => ({ ...result }) as Response,
           body: null,
           bodyUsed: false,
-          arrayBuffer: async () => new ArrayBuffer(0),
-          blob: async () => new Blob(),
-          formData: async () => new FormData(),
+          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+          blob: () => Promise.resolve(new Blob()),
+          formData: () => Promise.resolve(new FormData()),
         } as Response;
       }
       return {
         ok: false,
         status: 404,
-        json: async () => ({
-          error: "NotFound",
-          message: `No mock for ${endpoint}`,
-        }),
-        text: async () =>
-          JSON.stringify({
+        json: () =>
+          Promise.resolve({
             error: "NotFound",
             message: `No mock for ${endpoint}`,
           }),
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error: "NotFound",
+              message: `No mock for ${endpoint}`,
+            }),
+          ),
         headers: new Headers(),
         redirected: false,
         statusText: "Not Found",
@@ -76,9 +117,9 @@ export function setupFetchMock(): void {
         },
         body: null,
         bodyUsed: false,
-        arrayBuffer: async () => new ArrayBuffer(0),
-        blob: async () => new Blob(),
-        formData: async () => new FormData(),
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        blob: () => Promise.resolve(new Blob()),
+        formData: () => Promise.resolve(new FormData()),
       } as Response;
     },
   );
@@ -87,7 +128,7 @@ export function jsonResponse<T>(data: T, status = 200): MockResponse {
   return {
     ok: status >= 200 && status < 300,
     status,
-    json: async () => data,
+    json: () => Promise.resolve(data),
   };
 }
 export function errorResponse(
@@ -98,7 +139,7 @@ export function errorResponse(
   return {
     ok: false,
     status,
-    json: async () => ({ error, message }),
+    json: () => Promise.resolve({ error, message }),
   };
 }
 export const mockData = {

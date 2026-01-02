@@ -168,7 +168,7 @@
 </script>
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('comms.title')}</h1>
     <p class="description">{$_('comms.description')}</p>
   </header>

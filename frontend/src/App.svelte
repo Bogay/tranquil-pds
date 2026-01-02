@@ -2,7 +2,7 @@
   import { getCurrentPath, navigate } from './lib/router.svelte'
   import { initAuth, getAuthState } from './lib/auth.svelte'
   import { initServerConfig } from './lib/serverConfig.svelte'
-  import { initI18n, _ } from './lib/i18n'
+  import { initI18n } from './lib/i18n'
   import { isLoading as i18nLoading } from 'svelte-i18n'
   import Login from './routes/Login.svelte'
   import Register from './routes/Register.svelte'
@@ -34,13 +34,6 @@
   import ActAs from './routes/ActAs.svelte'
   import Migration from './routes/Migration.svelte'
   import DidDocumentEditor from './routes/DidDocumentEditor.svelte'
-  import Home from './routes/Home.svelte'
-
-  if (window.location.pathname === '/migrate') {
-    const newUrl = `${window.location.origin}/${window.location.search}#/migrate`
-    window.location.replace(newUrl)
-  }
-
   initI18n()
 
   const auth = getAuthState()
@@ -48,7 +41,7 @@
   let oauthCallbackPending = $state(hasOAuthCallback())
 
   function hasOAuthCallback(): boolean {
-    if (window.location.hash === '#/migrate') {
+    if (window.location.pathname === '/app/migrate') {
       return false
     }
     const params = new URLSearchParams(window.location.search)
@@ -59,10 +52,22 @@
     initServerConfig()
     initAuth().then(({ oauthLoginCompleted }) => {
       if (oauthLoginCompleted) {
-        navigate('/dashboard')
+        navigate('/dashboard', true)
       }
       oauthCallbackPending = false
     })
+  })
+
+  $effect(() => {
+    if (auth.loading) return
+    const path = getCurrentPath()
+    if (path === '/') {
+      if (auth.session) {
+        navigate('/dashboard', true)
+      } else {
+        navigate('/login', true)
+      }
+    }
   })
 
   function getComponent(path: string) {
@@ -128,7 +133,7 @@
       case '/did-document':
         return DidDocumentEditor
       default:
-        return Home
+        return Login
     }
   }
 

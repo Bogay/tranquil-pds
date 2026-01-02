@@ -174,7 +174,7 @@
       <div class="migrate-content">
         <strong>{$_('register.migrateTitle')}</strong>
         <p>{$_('register.migrateDescription')}</p>
-        <a href="#/migrate" class="migrate-link">
+        <a href="/app/migrate" class="migrate-link">
           {$_('register.migrateLink')} →
         </a>
       </div>
@@ -381,10 +381,10 @@
 
         <div class="form-links">
           <p class="link-text">
-            {$_('register.alreadyHaveAccount')} <a href="#/login">{$_('register.signIn')}</a>
+            {$_('register.alreadyHaveAccount')} <a href="/app/login">{$_('register.signIn')}</a>
           </p>
           <p class="link-text">
-            {$_('register.wantPasswordless')} <a href="#/register-passkey">{$_('register.createPasskeyAccount')}</a>
+            {$_('register.wantPasswordless')} <a href="/app/register-passkey">{$_('register.createPasskeyAccount')}</a>
           </p>
         </div>
       </div>

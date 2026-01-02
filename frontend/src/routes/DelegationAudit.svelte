@@ -108,7 +108,7 @@
 
 <div class="page">
   <header>
-    <a href="#/controllers" class="back">{$_('delegation.backToControllers')}</a>
+    <a href="/app/controllers" class="back">{$_('delegation.backToControllers')}</a>
     <h1>{$_('delegation.auditLogTitle')}</h1>
   </header>
 

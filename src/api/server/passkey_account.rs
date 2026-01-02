@@ -1257,7 +1257,7 @@ pub async fn request_passkey_recovery(
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let recovery_url = format!(
-        "https://{}/#/recover-passkey?did={}&token={}",
+        "https://{}/app/recover-passkey?did={}&token={}",
         hostname,
         urlencoding::encode(&user.did),
         urlencoding::encode(&recovery_token)

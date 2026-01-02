@@ -22,7 +22,7 @@ describe("AppPasswords", () => {
       setupUnauthenticatedUser();
       render(AppPasswords);
       await waitFor(() => {
-        expect(globalThis.location.hash).toBe("#/login");
+        expect(globalThis.location.pathname).toBe("/app/login");
       });
     });
   });
@@ -41,7 +41,7 @@ describe("AppPasswords", () => {
           screen.getByRole("heading", { name: /app passwords/i, level: 1 }),
         ).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /dashboard/i }))
-          .toHaveAttribute("href", "#/dashboard");
+          .toHaveAttribute("href", "/app/dashboard");
         expect(screen.getByText(/third-party apps/i)).toBeInTheDocument();
       });
     });
@@ -50,11 +50,14 @@ describe("AppPasswords", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
     });
-    it("shows loading text while fetching passwords", async () => {
-      mockEndpoint("com.atproto.server.listAppPasswords", async () => {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return jsonResponse({ passwords: [] });
-      });
+    it("shows loading text while fetching passwords", () => {
+      mockEndpoint(
+        "com.atproto.server.listAppPasswords",
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(jsonResponse({ passwords: [] })), 100)
+          ),
+      );
       render(AppPasswords);
       expect(screen.getByText(/loading/i)).toBeInTheDocument();
     });

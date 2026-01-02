@@ -42,21 +42,38 @@ pub async fn verify_oauth_access_token(
     http_uri: &str,
 ) -> Result<VerifyResult, OAuthError> {
     let token_info = extract_oauth_token_info(access_token)?;
+    tracing::debug!(
+        token_id = %token_info.token_id,
+        has_dpop_proof = dpop_proof.is_some(),
+        "Verifying OAuth access token"
+    );
     let token_data = db::get_token_by_id(pool, &token_info.token_id)
         .await?
-        .ok_or_else(|| OAuthError::InvalidToken("Token not found or revoked".to_string()))?;
+        .ok_or_else(|| {
+            tracing::warn!(token_id = %token_info.token_id, "Token not found in database");
+            OAuthError::InvalidToken("Token not found or revoked".to_string())
+        })?;
     let now = chrono::Utc::now();
     if token_data.expires_at < now {
-        return Err(OAuthError::InvalidToken("Token has expired".to_string()));
+        return Err(OAuthError::ExpiredToken(
+            "Token session has expired".to_string(),
+        ));
     }
     if let Some(expected_jkt) = &token_data.parameters.dpop_jkt {
-        let proof = dpop_proof
-            .ok_or_else(|| OAuthError::UseDpopNonce("DPoP proof required".to_string()))?;
+        tracing::debug!(expected_jkt = %expected_jkt, "Token requires DPoP");
+        let proof = dpop_proof.ok_or_else(|| {
+            tracing::warn!("DPoP proof required but not provided");
+            OAuthError::UseDpopNonce("DPoP proof required".to_string())
+        })?;
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
         let access_token_hash = compute_ath(access_token);
-        let result =
-            verifier.verify_proof(proof, http_method, http_uri, Some(&access_token_hash))?;
+        let result = verifier
+            .verify_proof(proof, http_method, http_uri, Some(&access_token_hash))
+            .map_err(|e| {
+                tracing::warn!(error = ?e, http_method = %http_method, http_uri = %http_uri, "DPoP proof verification failed");
+                e
+            })?;
         if !db::check_and_record_dpop_jti(pool, &result.jti).await? {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP proof has already been used".to_string(),
@@ -123,7 +140,7 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         .ok_or_else(|| OAuthError::InvalidToken("Missing exp claim".to_string()))?;
     let now = chrono::Utc::now().timestamp();
     if exp < now {
-        return Err(OAuthError::InvalidToken("Token has expired".to_string()));
+        return Err(OAuthError::ExpiredToken("Token has expired".to_string()));
     }
     let token_id = payload
         .get("jti")
@@ -191,6 +208,7 @@ pub struct OAuthAuthError {
     pub error: String,
     pub message: String,
     pub dpop_nonce: Option<String>,
+    pub www_authenticate: Option<String>,
 }
 
 impl IntoResponse for OAuthAuthError {
@@ -207,6 +225,11 @@ impl IntoResponse for OAuthAuthError {
             response
                 .headers_mut()
                 .insert("DPoP-Nonce", nonce.parse().unwrap());
+        }
+        if let Some(www_auth) = self.www_authenticate {
+            response
+                .headers_mut()
+                .insert("WWW-Authenticate", www_auth.parse().unwrap());
         }
         response
     }
@@ -228,6 +251,7 @@ impl FromRequestParts<AppState> for OAuthUser {
                 error: "AuthenticationRequired".to_string(),
                 message: "Authorization header required".to_string(),
                 dpop_nonce: None,
+                www_authenticate: None,
             })?;
         let auth_header_trimmed = auth_header.trim();
         let (token, is_dpop_token) = if auth_header_trimmed.len() >= 7
@@ -244,6 +268,7 @@ impl FromRequestParts<AppState> for OAuthUser {
                 error: "InvalidRequest".to_string(),
                 message: "Invalid authorization scheme".to_string(),
                 dpop_nonce: None,
+                www_authenticate: None,
             });
         };
         let dpop_proof = parts.headers.get("DPoP").and_then(|v| v.to_str().ok());
@@ -275,6 +300,7 @@ impl FromRequestParts<AppState> for OAuthUser {
                 error: "use_dpop_nonce".to_string(),
                 message: "DPoP nonce required".to_string(),
                 dpop_nonce: Some(nonce),
+                www_authenticate: Some("DPoP error=\"use_dpop_nonce\"".to_string()),
             }),
             Err(OAuthError::InvalidDpopProof(msg)) => {
                 let nonce = generate_dpop_nonce();
@@ -283,6 +309,45 @@ impl FromRequestParts<AppState> for OAuthUser {
                     error: "invalid_dpop_proof".to_string(),
                     message: msg,
                     dpop_nonce: Some(nonce),
+                    www_authenticate: None,
+                })
+            }
+            Err(OAuthError::ExpiredToken(msg)) => {
+                let nonce = if is_dpop_token {
+                    Some(generate_dpop_nonce())
+                } else {
+                    None
+                };
+                let scheme = if is_dpop_token { "DPoP" } else { "Bearer" };
+                let www_auth = format!(
+                    "{} error=\"invalid_token\", error_description=\"{}\"",
+                    scheme, msg
+                );
+                Err(OAuthAuthError {
+                    status: StatusCode::UNAUTHORIZED,
+                    error: "ExpiredToken".to_string(),
+                    message: msg,
+                    dpop_nonce: nonce,
+                    www_authenticate: Some(www_auth),
+                })
+            }
+            Err(OAuthError::InvalidToken(msg)) => {
+                let nonce = if is_dpop_token {
+                    Some(generate_dpop_nonce())
+                } else {
+                    None
+                };
+                let scheme = if is_dpop_token { "DPoP" } else { "Bearer" };
+                let www_auth = format!(
+                    "{} error=\"invalid_token\", error_description=\"{}\"",
+                    scheme, msg
+                );
+                Err(OAuthAuthError {
+                    status: StatusCode::UNAUTHORIZED,
+                    error: "InvalidToken".to_string(),
+                    message: msg,
+                    dpop_nonce: nonce,
+                    www_authenticate: Some(www_auth),
                 })
             }
             Err(e) => {
@@ -296,6 +361,7 @@ impl FromRequestParts<AppState> for OAuthUser {
                     error: "AuthenticationFailed".to_string(),
                     message: format!("{:?}", e),
                     dpop_nonce: nonce,
+                    www_authenticate: None,
                 })
             }
         }

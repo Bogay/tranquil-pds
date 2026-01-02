@@ -263,7 +263,7 @@ describe("migration/atproto-client", () => {
   describe("getMigrationOAuthRedirectUri", () => {
     it("returns migrate path based on origin", () => {
       const redirectUri = getMigrationOAuthRedirectUri();
-      expect(redirectUri).toBe(`${globalThis.location.origin}/migrate`);
+      expect(redirectUri).toBe(`${globalThis.location.origin}/app/migrate`);
     });
   });
 

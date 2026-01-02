@@ -21,7 +21,7 @@ describe("Comms", () => {
       setupUnauthenticatedUser();
       render(Comms);
       await waitFor(() => {
-        expect(globalThis.location.hash).toBe("#/login");
+        expect(globalThis.location.pathname).toBe("/app/login");
       });
     });
   });
@@ -51,7 +51,7 @@ describe("Comms", () => {
           }),
         ).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /dashboard/i }))
-          .toHaveAttribute("href", "#/dashboard");
+          .toHaveAttribute("href", "/app/dashboard");
         expect(screen.getByRole("heading", { name: /preferred channel/i }))
           .toBeInTheDocument();
         expect(screen.getByRole("heading", { name: /channel configuration/i }))
@@ -71,11 +71,17 @@ describe("Comms", () => {
         () => jsonResponse({ notifications: [] }),
       );
     });
-    it("shows loading text while fetching preferences", async () => {
-      mockEndpoint("_account.getNotificationPrefs", async () => {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return jsonResponse(mockData.notificationPrefs());
-      });
+    it("shows loading text while fetching preferences", () => {
+      mockEndpoint(
+        "_account.getNotificationPrefs",
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () => resolve(jsonResponse(mockData.notificationPrefs())),
+              100,
+            )
+          ),
+      );
       render(Comms);
       expect(screen.getByText(/loading/i)).toBeInTheDocument();
     });

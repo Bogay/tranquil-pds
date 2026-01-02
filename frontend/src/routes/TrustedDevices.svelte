@@ -112,7 +112,7 @@
 
 <div class="page">
   <header>
-    <a href="#/security" class="back">{$_('trustedDevices.backToSecurity')}</a>
+    <a href="/app/security" class="back">{$_('trustedDevices.backToSecurity')}</a>
     <h1>{$_('trustedDevices.title')}</h1>
   </header>
 

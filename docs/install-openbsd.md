@@ -72,12 +72,13 @@ chmod +x /etc/rc.d/minio
 rcctl enable minio
 rcctl start minio
 ```
-Create the blob bucket:
+Create the buckets:
 ```sh
 ftp -o /usr/local/bin/mc https://dl.min.io/client/mc/release/openbsd-amd64/mc
 chmod +x /usr/local/bin/mc
 mc alias set local http://localhost:9000 minioadmin your-minio-password
 mc mb local/pds-blobs
+mc mb local/pds-backups
 ```
 ## 5. Install redis
 OpenBSD has redis in ports (valkey not available yet):
@@ -250,4 +251,27 @@ rcctl start tranquil_pds
 Backup database:
 ```sh
 pg_dump -U postgres pds > /var/backups/pds-$(date +%Y%m%d).sql
+```
+
+## Custom Homepage
+
+Drop a `homepage.html` in `/var/tranquil-pds/frontend/` and it becomes your landing page. Go nuts with it. Account dashboard is at `/app/` so you won't break anything.
+
+```sh
+cat > /var/tranquil-pds/frontend/homepage.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Welcome to my PDS</title>
+    <style>
+        body { font-family: system-ui; max-width: 600px; margin: 100px auto; padding: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to my uma musume shipping site!</h1>
+    <p>This is a <a href="https://atproto.com">AT Protocol</a> Personal Data Server.</p>
+    <p><a href="/app/">Sign in</a> or learn more at <a href="https://bsky.social">Bluesky</a>.</p>
+</body>
+</html>
+EOF
 ```

@@ -413,7 +413,7 @@
     </form>
 
     <p class="link-text">
-      {$_('registerPasskey.wantTraditional')} <a href="#/register">{$_('registerPasskey.registerWithPassword')}</a>
+      {$_('registerPasskey.wantTraditional')} <a href="/app/register">{$_('registerPasskey.registerWithPassword')}</a>
     </p>
 
   {:else if flow.state.step === 'key-choice'}

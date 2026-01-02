@@ -396,6 +396,7 @@ pub async fn validate_token_with_dpop(
                 controller_did: None,
             })
         }
+        Err(crate::oauth::OAuthError::ExpiredToken(_)) => Err(TokenValidationError::TokenExpired),
         Err(_) => Err(TokenValidationError::AuthenticationFailed),
     }
 }

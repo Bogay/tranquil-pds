@@ -14,7 +14,6 @@ describe("Login", () => {
   beforeEach(() => {
     clearMocks();
     setupFetchMock();
-    globalThis.location.hash = "";
     mockEndpoint(
       "/oauth/par",
       () => jsonResponse({ request_uri: "urn:mock:request" }),
@@ -47,7 +46,7 @@ describe("Login", () => {
         expect(screen.getByText(/don't have an account/i)).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /create/i })).toHaveAttribute(
           "href",
-          "#/register",
+          "/app/register",
         );
       });
     });
@@ -56,9 +55,9 @@ describe("Login", () => {
       render(Login);
       await waitFor(() => {
         expect(screen.getByRole("link", { name: /forgot password/i }))
-          .toHaveAttribute("href", "#/reset-password");
+          .toHaveAttribute("href", "/app/reset-password");
         expect(screen.getByRole("link", { name: /lost passkey/i }))
-          .toHaveAttribute("href", "#/request-passkey-recovery");
+          .toHaveAttribute("href", "/app/request-passkey-recovery");
       });
     });
   });
@@ -122,7 +121,7 @@ describe("Login", () => {
         await fireEvent.click(aliceAccount);
       }
       await waitFor(() => {
-        expect(globalThis.location.hash).toBe("#/dashboard");
+        expect(globalThis.location.pathname).toBe("/app/dashboard");
       });
     });
 
@@ -163,13 +162,13 @@ describe("Login", () => {
       });
     });
 
-    it("shows verification form when pending verification exists", async () => {
+    it("shows verification form when pending verification exists", () => {
       render(Login);
     });
   });
 
   describe("loading state", () => {
-    it("shows loading state while auth is initializing", async () => {
+    it("shows loading state while auth is initializing", () => {
       _testSetState({
         session: null,
         loading: true,

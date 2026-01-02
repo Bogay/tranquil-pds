@@ -368,7 +368,7 @@
 </script>
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('settings.title')}</h1>
   </header>
   {#if message}

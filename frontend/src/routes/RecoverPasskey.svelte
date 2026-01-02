@@ -10,7 +10,7 @@
   let success = $state(false)
 
   function getUrlParams(): { did: string | null; token: string | null } {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     return {
       did: params.get('did'),
       token: params.get('token'),

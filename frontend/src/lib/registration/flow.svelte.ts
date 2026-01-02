@@ -29,7 +29,7 @@ export function createRegistrationFlow(
   mode: RegistrationMode,
   pdsHostname: string,
 ) {
-  let state = $state<RegistrationFlowState>({
+  const state = $state<RegistrationFlowState>({
     mode,
     step: "info",
     info: {
@@ -80,7 +80,7 @@ export function createRegistrationFlow(
     }
   }
 
-  async function proceedFromInfo() {
+  function proceedFromInfo() {
     state.error = null;
     if (state.info.didType === "web-external") {
       state.step = "key-choice";
@@ -130,7 +130,7 @@ export function createRegistrationFlow(
     }
   }
 
-  async function confirmInitialDidDoc() {
+  function confirmInitialDidDoc() {
     state.step = "creating";
   }
 

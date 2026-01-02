@@ -89,11 +89,28 @@ pub async fn prepare_repo_write(
     )
     .await
     .map_err(|e| {
-        (
+        tracing::warn!(error = ?e, is_dpop = extracted.is_dpop, "Token validation failed in prepare_repo_write");
+        let mut response = (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": e.to_string()})),
         )
-            .into_response()
+            .into_response();
+        if matches!(e, crate::auth::TokenValidationError::TokenExpired) {
+            let scheme = if extracted.is_dpop { "DPoP" } else { "Bearer" };
+            let www_auth = format!(
+                "{} error=\"invalid_token\", error_description=\"Token has expired\"",
+                scheme
+            );
+            response.headers_mut().insert(
+                "WWW-Authenticate",
+                www_auth.parse().unwrap(),
+            );
+            if extracted.is_dpop {
+                let nonce = crate::oauth::verify::generate_dpop_nonce();
+                response.headers_mut().insert("DPoP-Nonce", nonce.parse().unwrap());
+            }
+        }
+        response
     })?;
     if repo_did != auth_user.did {
         return Err((
@@ -219,11 +236,18 @@ pub async fn create_record(
     axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<CreateRecordInput>,
 ) -> Response {
-    let auth =
-        match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
-            Ok(res) => res,
-            Err(err_res) => return err_res,
-        };
+    let auth = match prepare_repo_write(
+        &state,
+        &headers,
+        &input.repo,
+        "POST",
+        &crate::util::build_full_url(&uri.to_string()),
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(err_res) => return err_res,
+    };
 
     if let Err(e) = crate::auth::scope_check::check_repo_scope(
         auth.is_oauth,
@@ -459,11 +483,18 @@ pub async fn put_record(
     axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Json(input): Json<PutRecordInput>,
 ) -> Response {
-    let auth =
-        match prepare_repo_write(&state, &headers, &input.repo, "POST", &uri.to_string()).await {
-            Ok(res) => res,
-            Err(err_res) => return err_res,
-        };
+    let auth = match prepare_repo_write(
+        &state,
+        &headers,
+        &input.repo,
+        "POST",
+        &crate::util::build_full_url(&uri.to_string()),
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(err_res) => return err_res,
+    };
 
     if let Err(e) = crate::auth::scope_check::check_repo_scope(
         auth.is_oauth,

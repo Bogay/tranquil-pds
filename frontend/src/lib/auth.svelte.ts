@@ -40,7 +40,7 @@ interface AuthState {
   savedAccounts: SavedAccount[];
 }
 
-let state = $state<AuthState>({
+const state = $state<AuthState>({
   session: null,
   loading: true,
   error: null,
@@ -318,11 +318,18 @@ export function setSession(
 
 export async function logout(): Promise<void> {
   if (state.session) {
+    const did = state.session.did;
+    const refreshToken = state.session.refreshJwt;
     try {
-      await api.deleteSession(state.session.accessJwt);
+      await fetch("/oauth/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: refreshToken }),
+      });
     } catch {
       // Ignore errors on logout
     }
+    removeSavedAccount(did);
   }
   state.session = null;
   saveSession(null);

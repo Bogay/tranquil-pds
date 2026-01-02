@@ -10,7 +10,7 @@ interface ServerConfigState {
   loading: boolean;
 }
 
-let state = $state<ServerConfigState>({
+const state = $state<ServerConfigState>({
   serverName: null,
   primaryColor: null,
   primaryColorDark: null,

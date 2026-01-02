@@ -237,7 +237,7 @@ export const api = {
     return data;
   },
 
-  async confirmSignup(
+  confirmSignup(
     did: string,
     verificationCode: string,
   ): Promise<ConfirmSignupResult> {
@@ -247,32 +247,32 @@ export const api = {
     });
   },
 
-  async resendVerification(did: string): Promise<{ success: boolean }> {
+  resendVerification(did: string): Promise<{ success: boolean }> {
     return xrpc("com.atproto.server.resendVerification", {
       method: "POST",
       body: { did },
     });
   },
 
-  async createSession(identifier: string, password: string): Promise<Session> {
+  createSession(identifier: string, password: string): Promise<Session> {
     return xrpc("com.atproto.server.createSession", {
       method: "POST",
       body: { identifier, password },
     });
   },
 
-  async checkEmailVerified(identifier: string): Promise<{ verified: boolean }> {
+  checkEmailVerified(identifier: string): Promise<{ verified: boolean }> {
     return xrpc("_checkEmailVerified", {
       method: "POST",
       body: { identifier },
     });
   },
 
-  async getSession(token: string): Promise<Session> {
+  getSession(token: string): Promise<Session> {
     return xrpc("com.atproto.server.getSession", { token });
   },
 
-  async refreshSession(refreshJwt: string): Promise<Session> {
+  refreshSession(refreshJwt: string): Promise<Session> {
     return xrpc("com.atproto.server.refreshSession", {
       method: "POST",
       token: refreshJwt,
@@ -286,11 +286,11 @@ export const api = {
     });
   },
 
-  async listAppPasswords(token: string): Promise<{ passwords: AppPassword[] }> {
+  listAppPasswords(token: string): Promise<{ passwords: AppPassword[] }> {
     return xrpc("com.atproto.server.listAppPasswords", { token });
   },
 
-  async createAppPassword(
+  createAppPassword(
     token: string,
     name: string,
     scopes?: string,
@@ -312,11 +312,11 @@ export const api = {
     });
   },
 
-  async getAccountInviteCodes(token: string): Promise<{ codes: InviteCode[] }> {
+  getAccountInviteCodes(token: string): Promise<{ codes: InviteCode[] }> {
     return xrpc("com.atproto.server.getAccountInviteCodes", { token });
   },
 
-  async createInviteCode(
+  createInviteCode(
     token: string,
     useCount: number = 1,
   ): Promise<{ code: string }> {
@@ -341,7 +341,7 @@ export const api = {
     });
   },
 
-  async requestEmailUpdate(
+  requestEmailUpdate(
     token: string,
   ): Promise<{ tokenRequired: boolean }> {
     return xrpc("com.atproto.server.requestEmailUpdate", {
@@ -388,7 +388,7 @@ export const api = {
     });
   },
 
-  async describeServer(): Promise<{
+  describeServer(): Promise<{
     availableUserDomains: string[];
     inviteCodeRequired: boolean;
     links?: { privacyPolicy?: string; termsOfService?: string };
@@ -399,7 +399,7 @@ export const api = {
     return xrpc("com.atproto.server.describeServer");
   },
 
-  async listRepos(limit?: number): Promise<{
+  listRepos(limit?: number): Promise<{
     repos: Array<{ did: string; head: string; rev: string }>;
     cursor?: string;
   }> {
@@ -408,7 +408,7 @@ export const api = {
     return xrpc("com.atproto.sync.listRepos", { params });
   },
 
-  async getNotificationPrefs(token: string): Promise<{
+  getNotificationPrefs(token: string): Promise<{
     preferredChannel: string;
     email: string;
     discordId: string | null;
@@ -421,7 +421,7 @@ export const api = {
     return xrpc("_account.getNotificationPrefs", { token });
   },
 
-  async updateNotificationPrefs(token: string, prefs: {
+  updateNotificationPrefs(token: string, prefs: {
     preferredChannel?: string;
     discordId?: string;
     telegramUsername?: string;
@@ -434,7 +434,7 @@ export const api = {
     });
   },
 
-  async confirmChannelVerification(
+  confirmChannelVerification(
     token: string,
     channel: string,
     identifier: string,
@@ -447,7 +447,7 @@ export const api = {
     });
   },
 
-  async getNotificationHistory(token: string): Promise<{
+  getNotificationHistory(token: string): Promise<{
     notifications: Array<{
       createdAt: string;
       channel: string;
@@ -460,7 +460,7 @@ export const api = {
     return xrpc("_account.getNotificationHistory", { token });
   },
 
-  async getServerStats(token: string): Promise<{
+  getServerStats(token: string): Promise<{
     userCount: number;
     repoCount: number;
     recordCount: number;
@@ -469,7 +469,7 @@ export const api = {
     return xrpc("_admin.getServerStats", { token });
   },
 
-  async getServerConfig(): Promise<{
+  getServerConfig(): Promise<{
     serverName: string;
     primaryColor: string | null;
     primaryColorDark: string | null;
@@ -480,7 +480,7 @@ export const api = {
     return xrpc("_server.getConfig");
   },
 
-  async updateServerConfig(
+  updateServerConfig(
     token: string,
     config: {
       serverName?: string;
@@ -541,24 +541,24 @@ export const api = {
     });
   },
 
-  async removePassword(token: string): Promise<{ success: boolean }> {
+  removePassword(token: string): Promise<{ success: boolean }> {
     return xrpc("_account.removePassword", {
       method: "POST",
       token,
     });
   },
 
-  async getPasswordStatus(token: string): Promise<{ hasPassword: boolean }> {
+  getPasswordStatus(token: string): Promise<{ hasPassword: boolean }> {
     return xrpc("_account.getPasswordStatus", { token });
   },
 
-  async getLegacyLoginPreference(
+  getLegacyLoginPreference(
     token: string,
   ): Promise<{ allowLegacyLogin: boolean; hasMfa: boolean }> {
     return xrpc("_account.getLegacyLoginPreference", { token });
   },
 
-  async updateLegacyLoginPreference(
+  updateLegacyLoginPreference(
     token: string,
     allowLegacyLogin: boolean,
   ): Promise<{ allowLegacyLogin: boolean }> {
@@ -569,7 +569,7 @@ export const api = {
     });
   },
 
-  async updateLocale(
+  updateLocale(
     token: string,
     preferredLocale: string,
   ): Promise<{ preferredLocale: string }> {
@@ -580,7 +580,7 @@ export const api = {
     });
   },
 
-  async listSessions(token: string): Promise<{
+  listSessions(token: string): Promise<{
     sessions: Array<{
       id: string;
       sessionType: string;
@@ -601,14 +601,14 @@ export const api = {
     });
   },
 
-  async revokeAllSessions(token: string): Promise<{ revokedCount: number }> {
+  revokeAllSessions(token: string): Promise<{ revokedCount: number }> {
     return xrpc("_account.revokeAllSessions", {
       method: "POST",
       token,
     });
   },
 
-  async searchAccounts(token: string, options?: {
+  searchAccounts(token: string, options?: {
     handle?: string;
     cursor?: string;
     limit?: number;
@@ -630,7 +630,7 @@ export const api = {
     return xrpc("com.atproto.admin.searchAccounts", { token, params });
   },
 
-  async getInviteCodes(token: string, options?: {
+  getInviteCodes(token: string, options?: {
     sort?: "recent" | "usage";
     cursor?: string;
     limit?: number;
@@ -665,7 +665,7 @@ export const api = {
     });
   },
 
-  async getAccountInfo(token: string, did: string): Promise<{
+  getAccountInfo(token: string, did: string): Promise<{
     did: string;
     handle: string;
     email?: string;
@@ -701,7 +701,7 @@ export const api = {
     });
   },
 
-  async describeRepo(token: string, repo: string): Promise<{
+  describeRepo(token: string, repo: string): Promise<{
     handle: string;
     did: string;
     didDoc: unknown;
@@ -714,7 +714,7 @@ export const api = {
     });
   },
 
-  async listRecords(token: string, repo: string, collection: string, options?: {
+  listRecords(token: string, repo: string, collection: string, options?: {
     limit?: number;
     cursor?: string;
     reverse?: boolean;
@@ -729,7 +729,7 @@ export const api = {
     return xrpc("com.atproto.repo.listRecords", { token, params });
   },
 
-  async getRecord(
+  getRecord(
     token: string,
     repo: string,
     collection: string,
@@ -745,7 +745,7 @@ export const api = {
     });
   },
 
-  async createRecord(
+  createRecord(
     token: string,
     repo: string,
     collection: string,
@@ -762,7 +762,7 @@ export const api = {
     });
   },
 
-  async putRecord(
+  putRecord(
     token: string,
     repo: string,
     collection: string,
@@ -792,13 +792,13 @@ export const api = {
     });
   },
 
-  async getTotpStatus(
+  getTotpStatus(
     token: string,
   ): Promise<{ enabled: boolean; hasBackupCodes: boolean }> {
     return xrpc("com.atproto.server.getTotpStatus", { token });
   },
 
-  async createTotpSecret(
+  createTotpSecret(
     token: string,
   ): Promise<{ uri: string; qrBase64: string }> {
     return xrpc("com.atproto.server.createTotpSecret", {
@@ -807,7 +807,7 @@ export const api = {
     });
   },
 
-  async enableTotp(
+  enableTotp(
     token: string,
     code: string,
   ): Promise<{ success: boolean; backupCodes: string[] }> {
@@ -818,7 +818,7 @@ export const api = {
     });
   },
 
-  async disableTotp(
+  disableTotp(
     token: string,
     password: string,
     code: string,
@@ -830,7 +830,7 @@ export const api = {
     });
   },
 
-  async regenerateBackupCodes(
+  regenerateBackupCodes(
     token: string,
     password: string,
     code: string,
@@ -842,7 +842,7 @@ export const api = {
     });
   },
 
-  async startPasskeyRegistration(
+  startPasskeyRegistration(
     token: string,
     friendlyName?: string,
   ): Promise<{ options: unknown }> {
@@ -853,7 +853,7 @@ export const api = {
     });
   },
 
-  async finishPasskeyRegistration(
+  finishPasskeyRegistration(
     token: string,
     credential: unknown,
     friendlyName?: string,
@@ -865,7 +865,7 @@ export const api = {
     });
   },
 
-  async listPasskeys(token: string): Promise<{
+  listPasskeys(token: string): Promise<{
     passkeys: Array<{
       id: string;
       credentialId: string;
@@ -897,7 +897,7 @@ export const api = {
     });
   },
 
-  async listTrustedDevices(token: string): Promise<{
+  listTrustedDevices(token: string): Promise<{
     devices: Array<{
       id: string;
       userAgent: string | null;
@@ -910,7 +910,7 @@ export const api = {
     return xrpc("_account.listTrustedDevices", { token });
   },
 
-  async revokeTrustedDevice(
+  revokeTrustedDevice(
     token: string,
     deviceId: string,
   ): Promise<{ success: boolean }> {
@@ -921,7 +921,7 @@ export const api = {
     });
   },
 
-  async updateTrustedDevice(
+  updateTrustedDevice(
     token: string,
     deviceId: string,
     friendlyName: string,
@@ -933,7 +933,7 @@ export const api = {
     });
   },
 
-  async getReauthStatus(token: string): Promise<{
+  getReauthStatus(token: string): Promise<{
     requiresReauth: boolean;
     lastReauthAt: string | null;
     availableMethods: string[];
@@ -941,7 +941,7 @@ export const api = {
     return xrpc("_account.getReauthStatus", { token });
   },
 
-  async reauthPassword(
+  reauthPassword(
     token: string,
     password: string,
   ): Promise<{ success: boolean; reauthAt: string }> {
@@ -952,7 +952,7 @@ export const api = {
     });
   },
 
-  async reauthTotp(
+  reauthTotp(
     token: string,
     code: string,
   ): Promise<{ success: boolean; reauthAt: string }> {
@@ -963,14 +963,14 @@ export const api = {
     });
   },
 
-  async reauthPasskeyStart(token: string): Promise<{ options: unknown }> {
+  reauthPasskeyStart(token: string): Promise<{ options: unknown }> {
     return xrpc("_account.reauthPasskeyStart", {
       method: "POST",
       token,
     });
   },
 
-  async reauthPasskeyFinish(
+  reauthPasskeyFinish(
     token: string,
     credential: unknown,
   ): Promise<{ success: boolean; reauthAt: string }> {
@@ -981,14 +981,14 @@ export const api = {
     });
   },
 
-  async reserveSigningKey(did?: string): Promise<{ signingKey: string }> {
+  reserveSigningKey(did?: string): Promise<{ signingKey: string }> {
     return xrpc("com.atproto.server.reserveSigningKey", {
       method: "POST",
       body: { did },
     });
   },
 
-  async getRecommendedDidCredentials(token: string): Promise<{
+  getRecommendedDidCredentials(token: string): Promise<{
     rotationKeys?: string[];
     alsoKnownAs?: string[];
     verificationMethods?: { atproto?: string };
@@ -1043,7 +1043,7 @@ export const api = {
     return res.json();
   },
 
-  async startPasskeyRegistrationForSetup(
+  startPasskeyRegistrationForSetup(
     did: string,
     setupToken: string,
     friendlyName?: string,
@@ -1054,7 +1054,7 @@ export const api = {
     });
   },
 
-  async completePasskeySetup(
+  completePasskeySetup(
     did: string,
     setupToken: string,
     passkeyCredential: unknown,
@@ -1071,14 +1071,14 @@ export const api = {
     });
   },
 
-  async requestPasskeyRecovery(email: string): Promise<{ success: boolean }> {
+  requestPasskeyRecovery(email: string): Promise<{ success: boolean }> {
     return xrpc("_account.requestPasskeyRecovery", {
       method: "POST",
       body: { email },
     });
   },
 
-  async recoverPasskeyAccount(
+  recoverPasskeyAccount(
     did: string,
     recoveryToken: string,
     newPassword: string,
@@ -1089,7 +1089,7 @@ export const api = {
     });
   },
 
-  async verifyMigrationEmail(
+  verifyMigrationEmail(
     token: string,
     email: string,
   ): Promise<{ success: boolean; did: string }> {
@@ -1099,14 +1099,14 @@ export const api = {
     });
   },
 
-  async resendMigrationVerification(email: string): Promise<{ sent: boolean }> {
+  resendMigrationVerification(email: string): Promise<{ sent: boolean }> {
     return xrpc("com.atproto.server.resendMigrationVerification", {
       method: "POST",
       body: { email },
     });
   },
 
-  async verifyToken(
+  verifyToken(
     token: string,
     identifier: string,
     accessToken?: string,
@@ -1123,11 +1123,11 @@ export const api = {
     });
   },
 
-  async getDidDocument(token: string): Promise<DidDocument> {
+  getDidDocument(token: string): Promise<DidDocument> {
     return xrpc("_account.getDidDocument", { token });
   },
 
-  async updateDidDocument(
+  updateDidDocument(
     token: string,
     params: {
       verificationMethods?: VerificationMethod[];
@@ -1170,7 +1170,7 @@ export const api = {
     return res.arrayBuffer();
   },
 
-  async listBackups(token: string): Promise<{
+  listBackups(token: string): Promise<{
     backups: Array<{
       id: string;
       repoRev: string;
@@ -1199,7 +1199,7 @@ export const api = {
     return res.blob();
   },
 
-  async createBackup(token: string): Promise<{
+  createBackup(token: string): Promise<{
     id: string;
     repoRev: string;
     sizeBytes: number;
@@ -1219,7 +1219,7 @@ export const api = {
     });
   },
 
-  async setBackupEnabled(
+  setBackupEnabled(
     token: string,
     enabled: boolean,
   ): Promise<{ enabled: boolean }> {

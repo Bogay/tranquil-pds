@@ -168,8 +168,8 @@ pub async fn frontend_client_metadata(
         client_name: "PDS Account Manager".to_string(),
         client_uri: base_url.clone(),
         redirect_uris: vec![
-            format!("{}/", base_url),
-            format!("{}/migrate", base_url),
+            format!("{}/app/", base_url),
+            format!("{}/app/migrate", base_url),
         ],
         grant_types: vec![
             "authorization_code".to_string(),

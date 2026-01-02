@@ -206,7 +206,7 @@ pub async fn delegation_auth(
             success: true,
             needs_totp: Some(true),
             redirect_uri: Some(format!(
-                "/#/oauth/delegation-totp?request_uri={}",
+                "/app/oauth/delegation-totp?request_uri={}",
                 urlencoding::encode(&form.request_uri)
             )),
             error: None,
@@ -239,7 +239,7 @@ pub async fn delegation_auth(
         success: true,
         needs_totp: None,
         redirect_uri: Some(format!(
-            "/#/oauth/consent?request_uri={}",
+            "/app/oauth/consent?request_uri={}",
             urlencoding::encode(&form.request_uri)
         )),
         error: None,
@@ -374,7 +374,7 @@ pub async fn delegation_totp_verify(
         success: true,
         needs_totp: None,
         redirect_uri: Some(format!(
-            "/#/oauth/consent?request_uri={}",
+            "/app/oauth/consent?request_uri={}",
             urlencoding::encode(&form.request_uri)
         )),
         error: None,

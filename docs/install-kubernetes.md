@@ -12,6 +12,7 @@ You'll need a wildcard TLS certificate for `*.your-pds-hostname.example.com`. Us
 The container image expects:
 - `DATABASE_URL` - postgres connection string
 - `S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`
+- `BACKUP_S3_BUCKET` - bucket for repo backups (optional but recommended)
 - `VALKEY_URL` - redis:// connection string
 - `PDS_HOSTNAME` - your PDS hostname (without protocol)
 - `JWT_SECRET`, `DPOP_SECRET`, `MASTER_KEY` - generate with `openssl rand -base64 48`
@@ -19,4 +20,25 @@ The container image expects:
 and more, check the .env.example.
 
 Health check: `GET /xrpc/_health`
+
+## Custom Homepage
+
+Mount a ConfigMap with your `homepage.html` into the container's frontend directory and it becomes your landing page. Go nuts with it. Account dashboard is at `/app/` so you won't break anything.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pds-homepage
+data:
+  homepage.html: |
+    <!DOCTYPE html>
+    <html>
+    <head><title>Welcome to my PDS</title></head>
+    <body>
+      <h1>Welcome to my little evil secret lab!!!</h1>
+      <p><a href="/app/">Sign in</a></p>
+    </body>
+    </html>
+```
 

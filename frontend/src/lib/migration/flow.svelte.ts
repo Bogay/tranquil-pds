@@ -8,7 +8,6 @@ import type {
 } from "./types";
 import {
   AtprotoClient,
-  buildOAuthAuthorizationUrl,
   clearDPoPKey,
   createLocalClient,
   exchangeOAuthCode,
@@ -18,6 +17,7 @@ import {
   getMigrationOAuthClientId,
   getMigrationOAuthRedirectUri,
   getOAuthServerMetadata,
+  initiateOAuthWithPAR,
   loadDPoPKey,
   resolvePdsUrl,
   saveDPoPKey,
@@ -84,8 +84,6 @@ export function createInboundMigrationFlow() {
   let sourceClient: AtprotoClient | null = null;
   let localClient: AtprotoClient | null = null;
   let localServerInfo: ServerDescription | null = null;
-  let sourceOAuthMetadata: Awaited<ReturnType<typeof getOAuthServerMetadata>> =
-    null;
 
   function setStep(step: InboundStep) {
     state.step = step;
@@ -141,7 +139,6 @@ export function createInboundMigrationFlow() {
         "Source PDS does not support OAuth. This PDS only supports OAuth-based migrations.",
       );
     }
-    sourceOAuthMetadata = metadata;
 
     const { codeVerifier, codeChallenge } = await generatePKCE();
     const oauthState = generateOAuthState();
@@ -155,8 +152,11 @@ export function createInboundMigrationFlow() {
     localStorage.setItem("migration_source_did", state.sourceDid);
     localStorage.setItem("migration_source_handle", state.sourceHandle);
     localStorage.setItem("migration_oauth_issuer", metadata.issuer);
+    if (state.resumeToStep) {
+      localStorage.setItem("migration_resume_to_step", state.resumeToStep);
+    }
 
-    const authUrl = buildOAuthAuthorizationUrl(metadata, {
+    const authUrl = await initiateOAuthWithPAR(metadata, {
       clientId: getMigrationOAuthClientId(),
       redirectUri: getMigrationOAuthRedirectUri(),
       codeChallenge,
@@ -185,6 +185,7 @@ export function createInboundMigrationFlow() {
     localStorage.removeItem("migration_source_did");
     localStorage.removeItem("migration_source_handle");
     localStorage.removeItem("migration_oauth_issuer");
+    localStorage.removeItem("migration_resume_to_step");
   }
 
   async function handleOAuthCallback(
@@ -199,6 +200,12 @@ export function createInboundMigrationFlow() {
     const sourceDid = localStorage.getItem("migration_source_did");
     const sourceHandle = localStorage.getItem("migration_source_handle");
     const oauthIssuer = localStorage.getItem("migration_oauth_issuer");
+    const savedResumeToStep = localStorage.getItem("migration_resume_to_step");
+
+    if (savedResumeToStep) {
+      state.needsReauth = true;
+      state.resumeToStep = savedResumeToStep as InboundMigrationState["step"];
+    }
 
     if (returnedState !== savedState) {
       cleanupOAuthSessionData();
@@ -229,7 +236,6 @@ export function createInboundMigrationFlow() {
       cleanupOAuthSessionData();
       throw new Error("Could not fetch OAuth server metadata");
     }
-    sourceOAuthMetadata = metadata;
 
     migrationLog("handleOAuthCallback: Exchanging code for tokens");
 
@@ -269,8 +275,8 @@ export function createInboundMigrationFlow() {
       ];
 
       if (postEmailSteps.includes(targetStep)) {
+        localClient = createLocalClient();
         if (state.authMethod === "passkey" && state.passkeySetupToken) {
-          localClient = createLocalClient();
           setStep("passkey-setup");
           migrationLog(
             "handleOAuthCallback: Resuming passkey flow at passkey-setup",
@@ -281,6 +287,10 @@ export function createInboundMigrationFlow() {
             "handleOAuthCallback: Resuming at email-verify for re-auth",
           );
         }
+      } else if (targetStep === "email-verify") {
+        localClient = createLocalClient();
+        setStep("email-verify");
+        migrationLog("handleOAuthCallback: Resuming at email-verify");
       } else {
         setStep(targetStep);
       }
@@ -550,21 +560,34 @@ export function createInboundMigrationFlow() {
 
   async function checkEmailVerifiedAndProceed(): Promise<boolean> {
     if (checkingEmailVerification) return false;
-    if (!sourceClient || !localClient) return false;
-
-    if (state.authMethod === "passkey") {
-      return false;
-    }
+    if (!localClient) return false;
 
     checkingEmailVerification = true;
     try {
       const verified = await localClient.checkEmailVerified(state.targetEmail);
       if (!verified) return false;
 
+      if (state.authMethod === "passkey") {
+        migrationLog(
+          "checkEmailVerifiedAndProceed: Email verified, proceeding to passkey setup",
+        );
+        setStep("passkey-setup");
+        return true;
+      }
+
       await localClient.loginDeactivated(
         state.targetEmail,
         state.targetPassword,
       );
+
+      if (!sourceClient) {
+        setStep("source-handle");
+        setError(
+          "Email verified! Please log in to your old account again to complete the migration.",
+        );
+        return true;
+      }
+
       if (state.sourceDid.startsWith("did:web:")) {
         const credentials = await localClient.getRecommendedDidCredentials();
         state.targetVerificationMethod =
@@ -856,7 +879,6 @@ export function createInboundMigrationFlow() {
     };
     sourceClient = null;
     passkeySetup = null;
-    sourceOAuthMetadata = null;
     clearMigrationState();
     clearDPoPKey();
   }

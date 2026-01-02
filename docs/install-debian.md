@@ -59,13 +59,14 @@ systemctl daemon-reload
 systemctl enable minio
 systemctl start minio
 ```
-Create the blob bucket (wait a few seconds for minio to start):
+Create the buckets (wait a few seconds for minio to start):
 ```bash
 curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
 chmod +x mc
 mv mc /usr/local/bin/
 mc alias set local http://localhost:9000 minioadmin your-minio-password
 mc mb local/pds-blobs
+mc mb local/pds-backups
 ```
 ## 5. Install valkey
 ```bash
@@ -211,4 +212,27 @@ systemctl start tranquil-pds
 Backup database:
 ```bash
 sudo -u postgres pg_dump pds > /var/backups/pds-$(date +%Y%m%d).sql
+```
+
+## Custom Homepage
+
+Drop a `homepage.html` in `/var/lib/tranquil-pds/frontend/` and it becomes your landing page. Go nuts with it. Account dashboard is at `/app/` so you won't break anything.
+
+```bash
+cat > /var/lib/tranquil-pds/frontend/homepage.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Welcome to my PDS</title>
+    <style>
+        body { font-family: system-ui; max-width: 600px; margin: 100px auto; padding: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to my secret PDS</h1>
+    <p>This is a <a href="https://atproto.com">AT Protocol</a> Personal Data Server.</p>
+    <p><a href="/app/">Sign in</a> or learn more at <a href="https://bsky.social">Bluesky</a>.</p>
+</body>
+</html>
+EOF
 ```

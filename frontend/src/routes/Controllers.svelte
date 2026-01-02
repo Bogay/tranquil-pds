@@ -232,7 +232,7 @@
 
 <div class="page">
   <header>
-    <a href="#/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('delegation.title')}</h1>
   </header>
 
@@ -358,7 +358,7 @@
                 </div>
               </div>
               <div class="item-actions">
-                <a href="/#/act-as?did={encodeURIComponent(account.did)}" class="btn-link">
+                <a href="/app/act-as?did={encodeURIComponent(account.did)}" class="btn-link">
                   {$_('delegation.actAs')}
                 </a>
               </div>
@@ -423,7 +423,7 @@
         <h2>{$_('delegation.auditLog')}</h2>
         <p class="section-description">{$_('delegation.auditLogDesc')}</p>
       </div>
-      <a href="#/delegation-audit" class="btn-link">{$_('delegation.viewAuditLog')}</a>
+      <a href="/app/delegation-audit" class="btn-link">{$_('delegation.viewAuditLog')}</a>
     </section>
   {/if}
 </div>
