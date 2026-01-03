@@ -1,13 +1,18 @@
+use std::convert::Infallible;
+
 use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
 use axum::{
     Json,
     body::Bytes,
-    extract::{Path, RawQuery, State},
+    extract::{RawQuery, Request, State},
+    handler::Handler,
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
+use futures_util::future::Either;
 use serde_json::json;
+use tower::{Service, util::BoxCloneSyncService};
 use tracing::{error, info, warn};
 
 const PROTECTED_METHODS: &[&str] = &[
@@ -33,14 +38,86 @@ fn is_protected_method(method: &str) -> bool {
     PROTECTED_METHODS.contains(&method)
 }
 
-pub async fn proxy_handler(
+pub struct XrpcProxyLayer {
+    state: AppState,
+}
+
+impl XrpcProxyLayer {
+    pub fn new(state: AppState) -> Self {
+        XrpcProxyLayer { state }
+    }
+}
+
+impl<S> tower_layer::Layer<S> for XrpcProxyLayer {
+    type Service = XrpcProxyingService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        XrpcProxyingService {
+            inner,
+            // TODO(nel): make our own service here instead of boxing a HandlerService
+            handler: BoxCloneSyncService::new(proxy_handler.with_state(self.state.clone())),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct XrpcProxyingService<S> {
+    inner: S,
+    handler: BoxCloneSyncService<Request, Response, Infallible>,
+}
+
+impl<S: Service<Request, Response = Response, Error = Infallible>> Service<Request>
+    for XrpcProxyingService<S>
+{
+    type Response = Response;
+
+    type Error = Infallible;
+
+    type Future = Either<
+        <BoxCloneSyncService<Request, Response, Infallible> as Service<Request>>::Future,
+        S::Future,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        if req
+            .headers()
+            .contains_key(http::HeaderName::from(jacquard::xrpc::Header::AtprotoProxy))
+        {
+            // If the age assurance override is set and this is an age assurance call then we dont want to proxy even if the client requests it.
+            if !std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_err()
+                && (req.uri().path().ends_with("app.bsky.ageassurance.getState")
+                    || req
+                        .uri()
+                        .path()
+                        .ends_with("app.bsky.unspecced.getAgeAssuranceState"))
+            {
+                return Either::Right(self.inner.call(req));
+            }
+
+            Either::Left(self.handler.call(req))
+        } else {
+            Either::Right(self.inner.call(req))
+        }
+    }
+}
+
+async fn proxy_handler(
     State(state): State<AppState>,
-    Path(method): Path<String>,
+    uri: http::Uri,
     method_verb: Method,
     headers: HeaderMap,
     RawQuery(query): RawQuery,
     body: Bytes,
 ) -> Response {
+    // This layer is nested under /xrpc in an axum router so the extracted uri will look like /<method> and thus we can just strip the /
+    let method = uri.path().trim_start_matches("/");
     if is_protected_method(&method) {
         warn!(method = %method, "Attempted to proxy protected method");
         return (

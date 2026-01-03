@@ -64,6 +64,10 @@ totp-rs = { version = "5", features = ["qr"] }
 webauthn-rs = { version = "0.5.4", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
 webauthn-rs-proto = "0.5.4"
 zip = { version = "7.0.0", default-features = false, features = ["deflate"] }
+tower = "0.5.2"
+tower-layer = "0.3.3"
+futures-util = "0.3.31"
+http = "1.4.0"
 [features]
 external-infra = []
 [dev-dependencies]

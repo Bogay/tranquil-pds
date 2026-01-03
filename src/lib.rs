@@ -22,14 +22,18 @@ pub mod sync;
 pub mod util;
 pub mod validation;
 
+use api::proxy::XrpcProxyLayer;
 use axum::{
-    Router,
+    Json, Router,
     extract::DefaultBodyLimit,
     http::Method,
     middleware,
-    routing::{any, get, post},
+    routing::{get, post},
 };
+use http::StatusCode;
+use serde_json::json;
 use state::AppState;
+use tower::{Layer, ServiceBuilder};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -494,8 +498,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/app.bsky.unspecced.getAgeAssuranceState",
             get(api::age_assurance::get_age_assurance_state),
-        )
-        .route("/{*method}", any(api::proxy::proxy_handler));
+        );
+    let xrpc_service = ServiceBuilder::new()
+        .layer(XrpcProxyLayer::new(state.clone()))
+        .service(xrpc_router.with_state(state.clone()));
 
     let oauth_router = Router::new()
         .route("/jwks", get(oauth::endpoints::oauth_jwks))
@@ -559,7 +565,7 @@ pub fn app(state: AppState) -> Router {
         );
 
     let router = Router::new()
-        .nest("/xrpc", xrpc_router)
+        .nest_service("/xrpc", xrpc_service)
         .nest("/oauth", oauth_router)
         .route("/metrics", get(metrics::metrics_handler))
         .route("/health", get(api::server::health))
