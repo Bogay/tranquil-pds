@@ -17,6 +17,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp target/release/tranquil-pds /tmp/tranquil-pds
 
 FROM alpine:3.23
+RUN apk add --no-cache msmtp ca-certificates && ln -sf /usr/bin/msmtp /usr/sbin/sendmail
 COPY --from=builder /tmp/tranquil-pds /usr/local/bin/tranquil-pds
 COPY --from=builder /app/migrations /app/migrations
 COPY --from=frontend-builder /frontend/dist /app/frontend/dist
