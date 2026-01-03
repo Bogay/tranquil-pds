@@ -14,6 +14,7 @@
   rustfmt,
   rust-analyzer,
   sqlx-cli,
+  mold,
 
   # frontend tooling
   deno,
@@ -53,6 +54,7 @@ in mkShell {
     rustfmt
     rust-analyzer
     sqlx-cli
+    mold
     
     deno
     svelte-language-server
