@@ -53,7 +53,9 @@ pub async fn create_invite_code(
         return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
 
-    let for_account = input.for_account.unwrap_or_else(|| auth_user.did.to_string());
+    let for_account = input
+        .for_account
+        .unwrap_or_else(|| auth_user.did.to_string());
     let code = gen_invite_code();
 
     match sqlx::query!(

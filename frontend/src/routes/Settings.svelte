@@ -5,6 +5,7 @@
   import { api, ApiError } from '../lib/api'
   import { locale, setLocale, getSupportedLocales, localeNames, _, type SupportedLocale } from '../lib/i18n'
   import { isOk } from '../lib/types/result'
+  import { unsafeAsHandle } from '../lib/types/branded'
   import type { Session } from '../lib/types/api'
   import { toast } from '../lib/toast.svelte'
 
@@ -113,7 +114,7 @@
       const fullHandle = showBYOHandle
         ? newHandle
         : `${newHandle}.${pdsHostname}`
-      await api.updateHandle(session.accessJwt, fullHandle)
+      await api.updateHandle(session.accessJwt, unsafeAsHandle(fullHandle))
       await refreshSession()
       toast.success($_('settings.messages.handleUpdated'))
       newHandle = ''

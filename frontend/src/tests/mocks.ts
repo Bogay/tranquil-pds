@@ -1,6 +1,15 @@
 import { vi } from "vitest";
-import type { AppPassword, InviteCode, Session } from "../lib/api";
-import { _testSetState } from "../lib/auth.svelte";
+import type { AppPassword, InviteCode, Session } from "../lib/api.ts";
+import { _testSetState } from "../lib/auth.svelte.ts";
+import {
+  unsafeAsAccessToken,
+  unsafeAsDid,
+  unsafeAsEmail,
+  unsafeAsHandle,
+  unsafeAsInviteCode,
+  unsafeAsISODateString,
+  unsafeAsRefreshToken,
+} from "../lib/types/branded.ts";
 
 const originalPushState = globalThis.history.pushState.bind(globalThis.history);
 const originalReplaceState = globalThis.history.replaceState.bind(
@@ -144,26 +153,26 @@ export function errorResponse(
 }
 export const mockData = {
   session: (overrides?: Partial<Session>): Session => ({
-    did: "did:web:test.tranquil.dev:u:testuser",
-    handle: "testuser.test.tranquil.dev",
-    email: "test@example.com",
+    did: unsafeAsDid("did:web:test.tranquil.dev:u:testuser"),
+    handle: unsafeAsHandle("testuser.test.tranquil.dev"),
+    email: unsafeAsEmail("test@example.com"),
     emailConfirmed: true,
-    accessJwt: "mock-access-jwt-token",
-    refreshJwt: "mock-refresh-jwt-token",
+    accessJwt: unsafeAsAccessToken("mock-access-jwt-token"),
+    refreshJwt: unsafeAsRefreshToken("mock-refresh-jwt-token"),
     ...overrides,
   }),
   appPassword: (overrides?: Partial<AppPassword>): AppPassword => ({
     name: "Test App",
-    createdAt: new Date().toISOString(),
+    createdAt: unsafeAsISODateString(new Date().toISOString()),
     ...overrides,
   }),
   inviteCode: (overrides?: Partial<InviteCode>): InviteCode => ({
-    code: "test-invite-123",
+    code: unsafeAsInviteCode("test-invite-123"),
     available: 1,
     disabled: false,
-    forAccount: "did:web:test.tranquil.dev:u:testuser",
-    createdBy: "did:web:test.tranquil.dev:u:testuser",
-    createdAt: new Date().toISOString(),
+    forAccount: unsafeAsDid("did:web:test.tranquil.dev:u:testuser"),
+    createdBy: unsafeAsDid("did:web:test.tranquil.dev:u:testuser"),
+    createdAt: unsafeAsISODateString(new Date().toISOString()),
     uses: [],
     ...overrides,
   }),

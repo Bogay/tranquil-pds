@@ -4,10 +4,21 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 pub enum RefreshTokenLookup {
-    Valid { db_id: i32, token_data: TokenData },
-    InGracePeriod { db_id: i32, token_data: TokenData, rotated_at: DateTime<Utc> },
-    Used { original_token_id: i32 },
-    Expired { db_id: i32 },
+    Valid {
+        db_id: i32,
+        token_data: TokenData,
+    },
+    InGracePeriod {
+        db_id: i32,
+        token_data: TokenData,
+        rotated_at: DateTime<Utc>,
+    },
+    Used {
+        original_token_id: i32,
+    },
+    Expired {
+        db_id: i32,
+    },
     NotFound,
 }
 
@@ -16,7 +27,9 @@ impl RefreshTokenLookup {
         match self {
             RefreshTokenLookup::Valid { .. } => RefreshTokenState::Valid,
             RefreshTokenLookup::InGracePeriod { rotated_at, .. } => {
-                RefreshTokenState::InGracePeriod { rotated_at: *rotated_at }
+                RefreshTokenState::InGracePeriod {
+                    rotated_at: *rotated_at,
+                }
             }
             RefreshTokenLookup::Used { .. } => RefreshTokenState::Used { at: Utc::now() },
             RefreshTokenLookup::Expired { .. } => RefreshTokenState::Expired,
@@ -30,11 +43,19 @@ pub async fn lookup_refresh_token(
     refresh_token: &str,
 ) -> Result<RefreshTokenLookup, OAuthError> {
     if let Some(token_id) = check_refresh_token_used(pool, refresh_token).await? {
-        if let Some((db_id, token_data)) = get_token_by_previous_refresh_token(pool, refresh_token).await? {
+        if let Some((db_id, token_data)) =
+            get_token_by_previous_refresh_token(pool, refresh_token).await?
+        {
             let rotated_at = token_data.updated_at;
-            return Ok(RefreshTokenLookup::InGracePeriod { db_id, token_data, rotated_at });
+            return Ok(RefreshTokenLookup::InGracePeriod {
+                db_id,
+                token_data,
+                rotated_at,
+            });
         }
-        return Ok(RefreshTokenLookup::Used { original_token_id: token_id });
+        return Ok(RefreshTokenLookup::Used {
+            original_token_id: token_id,
+        });
     }
 
     match get_token_by_refresh_token(pool, refresh_token).await? {

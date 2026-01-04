@@ -2,6 +2,7 @@
   import { navigate, routes } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
+  import { unsafeAsDid } from '../lib/types/branded'
 
   let newPassword = $state('')
   let confirmPassword = $state('')
@@ -44,7 +45,7 @@
     error = null
 
     try {
-      await api.recoverPasskeyAccount(did, token, newPassword)
+      await api.recoverPasskeyAccount(unsafeAsDid(did), token, newPassword)
       success = true
     } catch (err) {
       if (err instanceof ApiError) {

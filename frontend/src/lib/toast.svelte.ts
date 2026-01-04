@@ -1,66 +1,66 @@
-export type ToastType = 'success' | 'error' | 'warning' | 'info'
+export type ToastType = "success" | "error" | "warning" | "info";
 
 export interface Toast {
-  id: number
-  type: ToastType
-  message: string
-  duration: number
-  dismissing?: boolean
+  id: number;
+  type: ToastType;
+  message: string;
+  duration: number;
+  dismissing?: boolean;
 }
 
-let nextId = 0
-let toasts = $state<Toast[]>([])
+let nextId = 0;
+let toasts = $state<Toast[]>([]);
 
 export function getToasts(): readonly Toast[] {
-  return toasts
+  return toasts;
 }
 
 export function showToast(
   type: ToastType,
   message: string,
-  duration = 5000
+  duration = 5000,
 ): number {
-  const id = nextId++
-  toasts = [...toasts, { id, type, message, duration }]
+  const id = nextId++;
+  toasts = [...toasts, { id, type, message, duration }];
 
   if (duration > 0) {
     setTimeout(() => {
-      dismissToast(id)
-    }, duration)
+      dismissToast(id);
+    }, duration);
   }
 
-  return id
+  return id;
 }
 
 export function dismissToast(id: number): void {
-  const toast = toasts.find(t => t.id === id)
-  if (!toast || toast.dismissing) return
+  const toast = toasts.find((t) => t.id === id);
+  if (!toast || toast.dismissing) return;
 
-  toasts = toasts.map(t => t.id === id ? { ...t, dismissing: true } : t)
+  toasts = toasts.map((t) => t.id === id ? { ...t, dismissing: true } : t);
 
   setTimeout(() => {
-    toasts = toasts.filter(t => t.id !== id)
-  }, 150)
+    toasts = toasts.filter((t) => t.id !== id);
+  }, 150);
 }
 
 export function clearAllToasts(): void {
-  toasts = []
+  toasts = [];
 }
 
 export function success(message: string, duration?: number): number {
-  return showToast('success', message, duration)
+  return showToast("success", message, duration);
 }
 
 export function error(message: string, duration?: number): number {
-  return showToast('error', message, duration)
+  return showToast("error", message, duration);
 }
 
 export function warning(message: string, duration?: number): number {
-  return showToast('warning', message, duration)
+  return showToast("warning", message, duration);
 }
 
 export function info(message: string, duration?: number): number {
-  return showToast('info', message, duration)
+  return showToast("info", message, duration);
 }
 
 export const toast = {
@@ -71,4 +71,4 @@ export const toast = {
   info,
   dismiss: dismissToast,
   clear: clearAllToasts,
-}
+};

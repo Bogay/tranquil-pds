@@ -28,7 +28,7 @@ pub struct DidResponse {
 }
 
 impl DidResponse {
-    pub fn new(did: impl Into<Did>) -> impl IntoResponse {
+    pub fn response(did: impl Into<Did>) -> impl IntoResponse {
         Json(Self { did: did.into() })
     }
 }
@@ -40,8 +40,10 @@ pub struct TokenRequiredResponse {
 }
 
 impl TokenRequiredResponse {
-    pub fn new(required: bool) -> impl IntoResponse {
-        Json(Self { token_required: required })
+    pub fn response(required: bool) -> impl IntoResponse {
+        Json(Self {
+            token_required: required,
+        })
     }
 }
 
@@ -52,7 +54,7 @@ pub struct HasPasswordResponse {
 }
 
 impl HasPasswordResponse {
-    pub fn new(has_password: bool) -> impl IntoResponse {
+    pub fn response(has_password: bool) -> impl IntoResponse {
         Json(Self { has_password })
     }
 }
@@ -63,7 +65,7 @@ pub struct VerifiedResponse {
 }
 
 impl VerifiedResponse {
-    pub fn new(verified: bool) -> impl IntoResponse {
+    pub fn response(verified: bool) -> impl IntoResponse {
         Json(Self { verified })
     }
 }
@@ -74,7 +76,7 @@ pub struct EnabledResponse {
 }
 
 impl EnabledResponse {
-    pub fn new(enabled: bool) -> impl IntoResponse {
+    pub fn response(enabled: bool) -> impl IntoResponse {
         Json(Self { enabled })
     }
 }
@@ -85,8 +87,10 @@ pub struct StatusResponse {
 }
 
 impl StatusResponse {
-    pub fn new(status: impl Into<String>) -> impl IntoResponse {
-        Json(Self { status: status.into() })
+    pub fn response(status: impl Into<String>) -> impl IntoResponse {
+        Json(Self {
+            status: status.into(),
+        })
     }
 }
 
@@ -97,7 +101,7 @@ pub struct DidDocumentResponse {
 }
 
 impl DidDocumentResponse {
-    pub fn new(did_document: serde_json::Value) -> impl IntoResponse {
+    pub fn response(did_document: serde_json::Value) -> impl IntoResponse {
         Json(Self { did_document })
     }
 }

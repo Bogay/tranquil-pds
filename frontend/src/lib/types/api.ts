@@ -1,486 +1,495 @@
 import type {
-  Did,
-  Handle,
   AccessToken,
-  RefreshToken,
-  Cid,
-  Rkey,
   AtUri,
-  Nsid,
-  ISODateString,
+  Cid,
+  Did,
   EmailAddress,
+  Handle,
   InviteCode as InviteCodeBrand,
+  ISODateString,
+  Nsid,
   PublicKeyMultibase,
-} from './branded'
+  RefreshToken,
+} from "./branded.ts";
 
 export type ApiErrorCode =
-  | 'InvalidRequest'
-  | 'AuthenticationRequired'
-  | 'ExpiredToken'
-  | 'InvalidToken'
-  | 'AccountNotFound'
-  | 'HandleNotAvailable'
-  | 'InvalidHandle'
-  | 'InvalidPassword'
-  | 'RateLimitExceeded'
-  | 'InternalServerError'
-  | 'AccountTakedown'
-  | 'AccountDeactivated'
-  | 'AccountNotVerified'
-  | 'RepoNotFound'
-  | 'RecordNotFound'
-  | 'BlobNotFound'
-  | 'InvalidInviteCode'
-  | 'DuplicateCreate'
-  | 'Unknown'
+  | "InvalidRequest"
+  | "AuthenticationRequired"
+  | "ExpiredToken"
+  | "InvalidToken"
+  | "AccountNotFound"
+  | "HandleNotAvailable"
+  | "InvalidHandle"
+  | "InvalidPassword"
+  | "RateLimitExceeded"
+  | "InternalServerError"
+  | "AccountTakedown"
+  | "AccountDeactivated"
+  | "AccountNotVerified"
+  | "RepoNotFound"
+  | "RecordNotFound"
+  | "BlobNotFound"
+  | "InvalidInviteCode"
+  | "DuplicateCreate"
+  | "ReauthRequired"
+  | "MfaVerificationRequired"
+  | "RecoveryLinkExpired"
+  | "InvalidRecoveryLink"
+  | "Unknown";
 
-export type AccountStatus = 'active' | 'deactivated' | 'migrated' | 'suspended' | 'deleted'
+export type AccountStatus =
+  | "active"
+  | "deactivated"
+  | "migrated"
+  | "suspended"
+  | "deleted";
 
-export type SessionType = 'oauth' | 'legacy' | 'app_password'
+export type SessionType = "oauth" | "legacy" | "app_password";
 
-export type VerificationChannel = 'email' | 'discord' | 'telegram' | 'signal'
+export type VerificationChannel = "email" | "discord" | "telegram" | "signal";
 
-export type DidType = 'plc' | 'web' | 'web-external'
+export type DidType = "plc" | "web" | "web-external";
 
-export type ReauthMethod = 'password' | 'totp' | 'passkey'
+export type ReauthMethod = "password" | "totp" | "passkey";
 
 export interface Session {
-  did: Did
-  handle: Handle
-  email?: EmailAddress
-  emailConfirmed?: boolean
-  preferredChannel?: VerificationChannel
-  preferredChannelVerified?: boolean
-  isAdmin?: boolean
-  active?: boolean
-  status?: AccountStatus
-  migratedToPds?: string
-  migratedAt?: ISODateString
-  accessJwt: AccessToken
-  refreshJwt: RefreshToken
+  did: Did;
+  handle: Handle;
+  email?: EmailAddress;
+  emailConfirmed?: boolean;
+  preferredChannel?: VerificationChannel;
+  preferredChannelVerified?: boolean;
+  preferredLocale?: string | null;
+  isAdmin?: boolean;
+  active?: boolean;
+  status?: AccountStatus;
+  migratedToPds?: string;
+  migratedAt?: ISODateString;
+  accessJwt: AccessToken;
+  refreshJwt: RefreshToken;
 }
 
 export interface VerificationMethod {
-  id: string
-  type: string
-  controller: string
-  publicKeyMultibase: PublicKeyMultibase
+  id: string;
+  type: string;
+  controller: string;
+  publicKeyMultibase: PublicKeyMultibase;
 }
 
 export interface ServiceEndpoint {
-  id: string
-  type: string
-  serviceEndpoint: string
+  id: string;
+  type: string;
+  serviceEndpoint: string;
 }
 
 export interface DidDocument {
-  '@context': string[]
-  id: Did
-  alsoKnownAs: string[]
-  verificationMethod: VerificationMethod[]
-  service: ServiceEndpoint[]
+  "@context": string[];
+  id: Did;
+  alsoKnownAs: string[];
+  verificationMethod: VerificationMethod[];
+  service: ServiceEndpoint[];
 }
 
 export interface AppPassword {
-  name: string
-  createdAt: ISODateString
-  scopes?: string
-  createdByController?: string
+  name: string;
+  createdAt: ISODateString;
+  scopes?: string;
+  createdByController?: string;
 }
 
 export interface CreatedAppPassword {
-  name: string
-  password: string
-  createdAt: ISODateString
-  scopes?: string
+  name: string;
+  password: string;
+  createdAt: ISODateString;
+  scopes?: string;
 }
 
 export interface InviteCodeUse {
-  usedBy: Did
-  usedByHandle?: Handle
-  usedAt: ISODateString
+  usedBy: Did;
+  usedByHandle?: Handle;
+  usedAt: ISODateString;
 }
 
 export interface InviteCodeInfo {
-  code: InviteCodeBrand
-  available: number
-  disabled: boolean
-  forAccount: Did
-  createdBy: Did
-  createdAt: ISODateString
-  uses: InviteCodeUse[]
+  code: InviteCodeBrand;
+  available: number;
+  disabled: boolean;
+  forAccount: Did;
+  createdBy: Did;
+  createdAt: ISODateString;
+  uses: InviteCodeUse[];
 }
 
 export interface CreateAccountParams {
-  handle: string
-  email: string
-  password: string
-  inviteCode?: string
-  didType?: DidType
-  did?: string
-  signingKey?: string
-  verificationChannel?: VerificationChannel
-  discordId?: string
-  telegramUsername?: string
-  signalNumber?: string
+  handle: string;
+  email: string;
+  password: string;
+  inviteCode?: string;
+  didType?: DidType;
+  did?: string;
+  signingKey?: string;
+  verificationChannel?: VerificationChannel;
+  discordId?: string;
+  telegramUsername?: string;
+  signalNumber?: string;
 }
 
 export interface CreateAccountResult {
-  handle: Handle
-  did: Did
-  verificationRequired: boolean
-  verificationChannel: VerificationChannel
+  handle: Handle;
+  did: Did;
+  verificationRequired: boolean;
+  verificationChannel: VerificationChannel;
 }
 
 export interface ConfirmSignupResult {
-  accessJwt: AccessToken
-  refreshJwt: RefreshToken
-  handle: Handle
-  did: Did
-  email?: EmailAddress
-  emailConfirmed?: boolean
-  preferredChannel?: VerificationChannel
-  preferredChannelVerified?: boolean
+  accessJwt: AccessToken;
+  refreshJwt: RefreshToken;
+  handle: Handle;
+  did: Did;
+  email?: EmailAddress;
+  emailConfirmed?: boolean;
+  preferredChannel?: VerificationChannel;
+  preferredChannelVerified?: boolean;
 }
 
 export interface ListAppPasswordsResponse {
-  passwords: AppPassword[]
+  passwords: AppPassword[];
 }
 
 export interface AccountInviteCodesResponse {
-  codes: InviteCodeInfo[]
+  codes: InviteCodeInfo[];
 }
 
 export interface CreateInviteCodeResponse {
-  code: InviteCodeBrand
+  code: InviteCodeBrand;
 }
 
 export interface ServerLinks {
-  privacyPolicy?: string
-  termsOfService?: string
+  privacyPolicy?: string;
+  termsOfService?: string;
 }
 
 export interface ServerDescription {
-  availableUserDomains: string[]
-  inviteCodeRequired: boolean
-  links?: ServerLinks
-  version?: string
-  availableCommsChannels?: VerificationChannel[]
-  selfHostedDidWebEnabled?: boolean
+  availableUserDomains: string[];
+  inviteCodeRequired: boolean;
+  links?: ServerLinks;
+  version?: string;
+  availableCommsChannels?: VerificationChannel[];
+  selfHostedDidWebEnabled?: boolean;
 }
 
 export interface RepoInfo {
-  did: Did
-  head: Cid
-  rev: string
+  did: Did;
+  head: Cid;
+  rev: string;
 }
 
 export interface ListReposResponse {
-  repos: RepoInfo[]
-  cursor?: string
+  repos: RepoInfo[];
+  cursor?: string;
 }
 
 export interface NotificationPrefs {
-  preferredChannel: VerificationChannel
-  email: EmailAddress
-  discordId: string | null
-  discordVerified: boolean
-  telegramUsername: string | null
-  telegramVerified: boolean
-  signalNumber: string | null
-  signalVerified: boolean
+  preferredChannel: VerificationChannel;
+  email: EmailAddress;
+  discordId: string | null;
+  discordVerified: boolean;
+  telegramUsername: string | null;
+  telegramVerified: boolean;
+  signalNumber: string | null;
+  signalVerified: boolean;
 }
 
 export interface NotificationHistoryItem {
-  createdAt: ISODateString
-  channel: VerificationChannel
-  notificationType: string
-  status: string
-  subject: string | null
-  body: string
+  createdAt: ISODateString;
+  channel: VerificationChannel;
+  notificationType: string;
+  status: string;
+  subject: string | null;
+  body: string;
 }
 
 export interface NotificationHistoryResponse {
-  notifications: NotificationHistoryItem[]
+  notifications: NotificationHistoryItem[];
 }
 
 export interface ServerStats {
-  userCount: number
-  repoCount: number
-  recordCount: number
-  blobStorageBytes: number
+  userCount: number;
+  repoCount: number;
+  recordCount: number;
+  blobStorageBytes: number;
 }
 
 export interface ServerConfig {
-  serverName: string
-  primaryColor: string | null
-  primaryColorDark: string | null
-  secondaryColor: string | null
-  secondaryColorDark: string | null
-  logoCid: Cid | null
+  serverName: string;
+  primaryColor: string | null;
+  primaryColorDark: string | null;
+  secondaryColor: string | null;
+  secondaryColorDark: string | null;
+  logoCid: Cid | null;
 }
 
 export interface BlobRef {
-  $type: 'blob'
-  ref: { $link: Cid }
-  mimeType: string
-  size: number
+  $type: "blob";
+  ref: { $link: Cid };
+  mimeType: string;
+  size: number;
 }
 
 export interface UploadBlobResponse {
-  blob: BlobRef
+  blob: BlobRef;
 }
 
 export interface SessionInfo {
-  id: string
-  sessionType: SessionType
-  clientName: string | null
-  createdAt: ISODateString
-  expiresAt: ISODateString
-  isCurrent: boolean
+  id: string;
+  sessionType: SessionType;
+  clientName: string | null;
+  createdAt: ISODateString;
+  expiresAt: ISODateString;
+  isCurrent: boolean;
 }
 
 export interface ListSessionsResponse {
-  sessions: SessionInfo[]
+  sessions: SessionInfo[];
 }
 
 export interface RevokeAllSessionsResponse {
-  revokedCount: number
+  revokedCount: number;
 }
 
 export interface AccountSearchResult {
-  did: Did
-  handle: Handle
-  email?: EmailAddress
-  indexedAt: ISODateString
-  emailConfirmedAt?: ISODateString
-  deactivatedAt?: ISODateString
+  did: Did;
+  handle: Handle;
+  email?: EmailAddress;
+  indexedAt: ISODateString;
+  emailConfirmedAt?: ISODateString;
+  deactivatedAt?: ISODateString;
 }
 
 export interface SearchAccountsResponse {
-  cursor?: string
-  accounts: AccountSearchResult[]
+  cursor?: string;
+  accounts: AccountSearchResult[];
 }
 
 export interface AdminInviteCodeUse {
-  usedBy: Did
-  usedAt: ISODateString
+  usedBy: Did;
+  usedAt: ISODateString;
 }
 
 export interface AdminInviteCode {
-  code: InviteCodeBrand
-  available: number
-  disabled: boolean
-  forAccount: Did
-  createdBy: Did
-  createdAt: ISODateString
-  uses: AdminInviteCodeUse[]
+  code: InviteCodeBrand;
+  available: number;
+  disabled: boolean;
+  forAccount: Did;
+  createdBy: Did;
+  createdAt: ISODateString;
+  uses: AdminInviteCodeUse[];
 }
 
 export interface GetInviteCodesResponse {
-  cursor?: string
-  codes: AdminInviteCode[]
+  cursor?: string;
+  codes: AdminInviteCode[];
 }
 
 export interface AccountInfo {
-  did: Did
-  handle: Handle
-  email?: EmailAddress
-  indexedAt: ISODateString
-  emailConfirmedAt?: ISODateString
-  invitesDisabled?: boolean
-  deactivatedAt?: ISODateString
+  did: Did;
+  handle: Handle;
+  email?: EmailAddress;
+  indexedAt: ISODateString;
+  emailConfirmedAt?: ISODateString;
+  invitesDisabled?: boolean;
+  deactivatedAt?: ISODateString;
 }
 
 export interface RepoDescription {
-  handle: Handle
-  did: Did
-  didDoc: DidDocument
-  collections: Nsid[]
-  handleIsCorrect: boolean
+  handle: Handle;
+  did: Did;
+  didDoc: DidDocument;
+  collections: Nsid[];
+  handleIsCorrect: boolean;
 }
 
 export interface RecordInfo {
-  uri: AtUri
-  cid: Cid
-  value: unknown
+  uri: AtUri;
+  cid: Cid;
+  value: unknown;
 }
 
 export interface ListRecordsResponse {
-  records: RecordInfo[]
-  cursor?: string
+  records: RecordInfo[];
+  cursor?: string;
 }
 
 export interface RecordResponse {
-  uri: AtUri
-  cid: Cid
-  value: unknown
+  uri: AtUri;
+  cid: Cid;
+  value: unknown;
 }
 
 export interface CreateRecordResponse {
-  uri: AtUri
-  cid: Cid
+  uri: AtUri;
+  cid: Cid;
 }
 
 export interface TotpStatus {
-  enabled: boolean
-  hasBackupCodes: boolean
+  enabled: boolean;
+  hasBackupCodes: boolean;
 }
 
 export interface TotpSecret {
-  uri: string
-  qrBase64: string
+  uri: string;
+  qrBase64: string;
 }
 
 export interface EnableTotpResponse {
-  success: boolean
-  backupCodes: string[]
+  success: boolean;
+  backupCodes: string[];
 }
 
 export interface RegenerateBackupCodesResponse {
-  backupCodes: string[]
+  backupCodes: string[];
 }
 
 export interface PasskeyInfo {
-  id: string
-  credentialId: string
-  friendlyName: string | null
-  createdAt: ISODateString
-  lastUsed: ISODateString | null
+  id: string;
+  credentialId: string;
+  friendlyName: string | null;
+  createdAt: ISODateString;
+  lastUsed: ISODateString | null;
 }
 
 export interface ListPasskeysResponse {
-  passkeys: PasskeyInfo[]
+  passkeys: PasskeyInfo[];
 }
 
 export interface StartPasskeyRegistrationResponse {
-  options: PublicKeyCredentialCreationOptions
+  options: PublicKeyCredentialCreationOptions;
 }
 
 export interface FinishPasskeyRegistrationResponse {
-  id: string
-  credentialId: string
+  id: string;
+  credentialId: string;
 }
 
 export interface TrustedDevice {
-  id: string
-  userAgent: string | null
-  friendlyName: string | null
-  trustedAt: ISODateString | null
-  trustedUntil: ISODateString | null
-  lastSeenAt: ISODateString
+  id: string;
+  userAgent: string | null;
+  friendlyName: string | null;
+  trustedAt: ISODateString | null;
+  trustedUntil: ISODateString | null;
+  lastSeenAt: ISODateString;
 }
 
 export interface ListTrustedDevicesResponse {
-  devices: TrustedDevice[]
+  devices: TrustedDevice[];
 }
 
 export interface ReauthStatus {
-  requiresReauth: boolean
-  lastReauthAt: ISODateString | null
-  availableMethods: ReauthMethod[]
+  requiresReauth: boolean;
+  lastReauthAt: ISODateString | null;
+  availableMethods: ReauthMethod[];
 }
 
 export interface ReauthResponse {
-  success: boolean
-  reauthAt: ISODateString
+  success: boolean;
+  reauthAt: ISODateString;
 }
 
 export interface ReauthPasskeyStartResponse {
-  options: PublicKeyCredentialRequestOptions
+  options: PublicKeyCredentialRequestOptions;
 }
 
 export interface ReserveSigningKeyResponse {
-  signingKey: PublicKeyMultibase
+  signingKey: PublicKeyMultibase;
 }
 
 export interface RecommendedDidCredentials {
-  rotationKeys?: PublicKeyMultibase[]
-  alsoKnownAs?: string[]
-  verificationMethods?: { atproto?: PublicKeyMultibase }
-  services?: { atproto_pds?: { type: string; endpoint: string } }
+  rotationKeys?: PublicKeyMultibase[];
+  alsoKnownAs?: string[];
+  verificationMethods?: { atproto?: PublicKeyMultibase };
+  services?: { atproto_pds?: { type: string; endpoint: string } };
 }
 
 export interface PasskeyAccountCreateResponse {
-  did: Did
-  handle: Handle
-  setupToken: string
-  setupExpiresAt: ISODateString
+  did: Did;
+  handle: Handle;
+  setupToken: string;
+  setupExpiresAt: ISODateString;
 }
 
 export interface CompletePasskeySetupResponse {
-  did: Did
-  handle: Handle
-  appPassword: string
-  appPasswordName: string
+  did: Did;
+  handle: Handle;
+  appPassword: string;
+  appPasswordName: string;
 }
 
 export interface VerifyTokenResponse {
-  success: boolean
-  did: Did
-  purpose: string
-  channel: VerificationChannel
+  success: boolean;
+  did: Did;
+  purpose: string;
+  channel: VerificationChannel;
 }
 
 export interface BackupInfo {
-  id: string
-  repoRev: string
-  repoRootCid: Cid
-  blockCount: number
-  sizeBytes: number
-  createdAt: ISODateString
+  id: string;
+  repoRev: string;
+  repoRootCid: Cid;
+  blockCount: number;
+  sizeBytes: number;
+  createdAt: ISODateString;
 }
 
 export interface ListBackupsResponse {
-  backups: BackupInfo[]
-  backupEnabled: boolean
+  backups: BackupInfo[];
+  backupEnabled: boolean;
 }
 
 export interface CreateBackupResponse {
-  id: string
-  repoRev: string
-  sizeBytes: number
-  blockCount: number
+  id: string;
+  repoRev: string;
+  sizeBytes: number;
+  blockCount: number;
 }
 
 export interface SetBackupEnabledResponse {
-  enabled: boolean
+  enabled: boolean;
 }
 
 export interface EmailUpdateResponse {
-  tokenRequired: boolean
+  tokenRequired: boolean;
 }
 
 export interface LegacyLoginPreference {
-  allowLegacyLogin: boolean
-  hasMfa: boolean
+  allowLegacyLogin: boolean;
+  hasMfa: boolean;
 }
 
 export interface UpdateLegacyLoginResponse {
-  allowLegacyLogin: boolean
+  allowLegacyLogin: boolean;
 }
 
 export interface UpdateLocaleResponse {
-  preferredLocale: string
+  preferredLocale: string;
 }
 
 export interface PasswordStatus {
-  hasPassword: boolean
+  hasPassword: boolean;
 }
 
 export interface SuccessResponse {
-  success: boolean
+  success: boolean;
 }
 
 export interface CheckEmailVerifiedResponse {
-  verified: boolean
+  verified: boolean;
 }
 
 export interface VerifyMigrationEmailResponse {
-  success: boolean
-  did: Did
+  success: boolean;
+  did: Did;
 }
 
 export interface ResendMigrationVerificationResponse {
-  sent: boolean
+  sent: boolean;
 }

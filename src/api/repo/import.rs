@@ -1,6 +1,6 @@
+use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
 use crate::api::repo::record::create_signed_commit;
-use crate::api::EmptyResponse;
 use crate::state::AppState;
 use crate::sync::import::{ImportError, apply_import, parse_car};
 use crate::sync::verify::CarVerifier;
@@ -371,18 +371,18 @@ pub async fn import_repo(
             ApiError::InvalidRequest(format!("Referenced block not found in CAR: {}", cid))
                 .into_response()
         }
-        Err(ImportError::ConcurrentModification) => ApiError::InvalidSwap(Some("Repository is being modified by another operation, please retry".into(),))
+        Err(ImportError::ConcurrentModification) => ApiError::InvalidSwap(Some(
+            "Repository is being modified by another operation, please retry".into(),
+        ))
         .into_response(),
         Err(ImportError::VerificationFailed(ve)) => {
             ApiError::InvalidRequest(format!("CAR verification failed: {}", ve)).into_response()
         }
-        Err(ImportError::DidMismatch { car_did, auth_did }) => {
-            ApiError::InvalidRequest(format!(
-                "CAR is for {} but authenticated as {}",
-                car_did, auth_did
-            ))
-            .into_response()
-        }
+        Err(ImportError::DidMismatch { car_did, auth_did }) => ApiError::InvalidRequest(format!(
+            "CAR is for {} but authenticated as {}",
+            car_did, auth_did
+        ))
+        .into_response(),
         Err(e) => {
             error!("Import error: {:?}", e);
             ApiError::InternalError(None).into_response()

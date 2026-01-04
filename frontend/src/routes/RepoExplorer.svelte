@@ -4,6 +4,7 @@
   import { api, ApiError } from '../lib/api'
   import { _, locale } from '../lib/i18n'
   import type { Session } from '../lib/types/api'
+  import { unsafeAsNsid, unsafeAsRkey } from '../lib/types/branded'
 
   const auth = $derived(getAuthState())
 
@@ -75,7 +76,7 @@
     loading = true
     error = null
     try {
-      const result = await api.listRecords(session.accessJwt, session.did, collection, { limit: 50 })
+      const result = await api.listRecords(session.accessJwt, session.did, unsafeAsNsid(collection), { limit: 50 })
       records = result.records.map(r => ({
         ...r,
         rkey: r.uri.split('/').pop()!
@@ -91,7 +92,7 @@
     if (!session || !selectedCollection || !recordsCursor || loadingMore) return
     loadingMore = true
     try {
-      const result = await api.listRecords(session.accessJwt, session.did, selectedCollection, {
+      const result = await api.listRecords(session.accessJwt, session.did, unsafeAsNsid(selectedCollection), {
         limit: 50,
         cursor: recordsCursor
       })
@@ -180,9 +181,9 @@
       const result = await api.createRecord(
         session.accessJwt,
         session.did,
-        newCollection.trim(),
+        unsafeAsNsid(newCollection.trim()),
         record,
-        newRkey.trim() || undefined
+        newRkey.trim() ? unsafeAsRkey(newRkey.trim()) : undefined
       )
       success = $_('repoExplorer.recordCreated', { values: { uri: result.uri } })
       await loadCollections()
@@ -204,16 +205,16 @@
       await api.putRecord(
         session.accessJwt,
         session.did,
-        selectedCollection,
-        selectedRecord.rkey,
+        unsafeAsNsid(selectedCollection),
+        unsafeAsRkey(selectedRecord.rkey),
         record
       )
       success = $_('repoExplorer.recordUpdated')
       const updated = await api.getRecord(
         session.accessJwt,
         session.did,
-        selectedCollection,
-        selectedRecord.rkey
+        unsafeAsNsid(selectedCollection),
+        unsafeAsRkey(selectedRecord.rkey)
       )
       selectedRecord = { ...updated, rkey: selectedRecord.rkey }
       recordJson = JSON.stringify(updated.value, null, 2)
@@ -232,8 +233,8 @@
       await api.deleteRecord(
         session.accessJwt,
         session.did,
-        selectedCollection,
-        selectedRecord.rkey
+        unsafeAsNsid(selectedCollection),
+        unsafeAsRkey(selectedRecord.rkey)
       )
       success = $_('repoExplorer.recordDeleted')
       selectedRecord = null

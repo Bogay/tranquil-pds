@@ -146,7 +146,9 @@ impl FromRequestParts<AppState> for BearerAuth {
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         } else {
-            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token).await {
+            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token)
+                .await
+            {
                 Ok(user) => Ok(BearerAuth(user)),
                 Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
                 Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
@@ -262,7 +264,9 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
                 Err(_) => return Err(AuthError::AuthenticationFailed),
             }
         } else {
-            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token).await {
+            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token)
+                .await
+            {
                 Ok(user) => user,
                 Err(TokenValidationError::AccountDeactivated) => {
                     return Err(AuthError::AccountDeactivated);

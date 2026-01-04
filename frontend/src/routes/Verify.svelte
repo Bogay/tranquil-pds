@@ -5,11 +5,12 @@
   import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
   import type { Session } from '../lib/types/api'
+  import { unsafeAsDid, unsafeAsEmail, type Did } from '../lib/types/branded'
 
   const STORAGE_KEY = 'tranquil_pds_pending_verification'
 
   interface PendingVerification {
-    did: string
+    did: Did
     handle: string
     channel: string
   }
@@ -66,7 +67,12 @@
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         try {
-          pendingVerification = JSON.parse(stored)
+          const parsed = JSON.parse(stored)
+          pendingVerification = {
+            did: unsafeAsDid(parsed.did),
+            handle: parsed.handle,
+            channel: parsed.channel,
+          }
         } catch {
           pendingVerification = null
         }
@@ -114,7 +120,7 @@
       const result = await api.verifyToken(
         verificationCode.trim(),
         identifier.trim(),
-        auth.session?.accessJwt
+        session?.accessJwt
       )
       success = true
       successPurpose = result.purpose
@@ -137,7 +143,7 @@
   async function handleEmailUpdate() {
     if (!verificationCode.trim() || !newEmail.trim()) return
 
-    if (!auth.session) {
+    if (!session) {
       error = $_('verify.emailUpdateRequiresAuth')
       return
     }
@@ -146,7 +152,7 @@
     error = null
 
     try {
-      await api.updateEmail(auth.session.accessJwt, newEmail.trim(), verificationCode.trim())
+      await api.updateEmail(session.accessJwt, newEmail.trim(), verificationCode.trim())
       success = true
       successPurpose = 'email-update'
       successChannel = 'email'
@@ -185,7 +191,7 @@
       error = null
 
       try {
-        await api.resendMigrationVerification(identifier.trim())
+        await api.resendMigrationVerification(unsafeAsEmail(identifier.trim()))
         resendMessage = $_('verify.codeResentDetail')
       } catch (e) {
         error = e instanceof Error ? e.message : 'Failed to resend verification'
@@ -250,7 +256,7 @@
     <h1>{$_('verify.emailUpdateTitle')}</h1>
     <p class="subtitle">{$_('verify.emailUpdateSubtitle')}</p>
 
-    {#if !auth.session}
+    {#if !session}
       <div class="message warning">{$_('verify.emailUpdateRequiresAuth')}</div>
       <div class="actions">
         <a href="/app/login" class="btn">{$_('verify.signIn')}</a>

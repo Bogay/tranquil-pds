@@ -3,10 +3,10 @@ use sqlx::PgPool;
 use std::fmt;
 use std::time::Duration;
 
-use crate::types::Did;
 use crate::AccountStatus;
 use crate::cache::Cache;
 use crate::oauth::scopes::ScopePermissions;
+use crate::types::Did;
 
 pub mod extractor;
 pub mod scope_check;
@@ -334,10 +334,8 @@ async fn validate_bearer_token_with_options_internal(
                             .act
                             .as_ref()
                             .map(|a| Did::new_unchecked(a.sub.clone()));
-                        let status = AccountStatus::from_db_fields(
-                            takedown_ref.as_deref(),
-                            deactivated_at,
-                        );
+                        let status =
+                            AccountStatus::from_db_fields(takedown_ref.as_deref(), deactivated_at);
                         return Ok(AuthenticatedUser {
                             did: Did::new_unchecked(did.clone()),
                             key_bytes: Some(decrypted_key),

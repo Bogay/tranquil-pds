@@ -1,5 +1,5 @@
-use crate::api::error::ApiError;
 use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use crate::types::{Did, PlainPassword};
@@ -87,9 +87,13 @@ pub async fn update_account_handle(
     if let Ok(Some(_)) = existing {
         return ApiError::HandleTaken.into_response();
     }
-    let result = sqlx::query!("UPDATE users SET handle = $1 WHERE did = $2", handle, did.as_str())
-        .execute(&state.db)
-        .await;
+    let result = sqlx::query!(
+        "UPDATE users SET handle = $1 WHERE did = $2",
+        handle,
+        did.as_str()
+    )
+    .execute(&state.db)
+    .await;
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {
@@ -99,15 +103,20 @@ pub async fn update_account_handle(
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
-            if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, did.as_str(), Some(&handle)).await
+            if let Err(e) = crate::api::repo::record::sequence_identity_event(
+                &state,
+                did.as_str(),
+                Some(&handle),
+            )
+            .await
             {
                 warn!(
                     "Failed to sequence identity event for admin handle update: {}",
                     e
                 );
             }
-            if let Err(e) = crate::api::identity::did::update_plc_handle(&state, did.as_str(), &handle).await
+            if let Err(e) =
+                crate::api::identity::did::update_plc_handle(&state, did.as_str(), &handle).await
             {
                 warn!("Failed to update PLC handle for admin handle update: {}", e);
             }

@@ -144,7 +144,9 @@ fn parse_query_params(query: &str) -> HashMap<String, Vec<String>> {
         .split('&')
         .filter_map(|part| part.split_once('='))
         .fold(HashMap::new(), |mut acc, (key, value)| {
-            acc.entry(key.to_string()).or_default().push(value.to_string());
+            acc.entry(key.to_string())
+                .or_default()
+                .push(value.to_string());
             acc
         })
 }

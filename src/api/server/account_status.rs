@@ -1,5 +1,5 @@
-use crate::api::error::ApiError;
 use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
@@ -74,9 +74,12 @@ pub async fn check_account_status(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let user_status = sqlx::query!("SELECT deactivated_at FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
-        .await;
+    let user_status = sqlx::query!(
+        "SELECT deactivated_at FROM users WHERE did = $1",
+        did.as_str()
+    )
+    .fetch_optional(&state.db)
+    .await;
     let deactivated_at = match user_status {
         Ok(Some(row)) => row.deactivated_at,
         _ => None,
@@ -399,7 +402,8 @@ pub async fn activate_account(
     );
     let did_validation_start = std::time::Instant::now();
     if let Err(e) =
-        assert_valid_did_document_for_service(&state.db, state.cache.clone(), did.as_str(), true).await
+        assert_valid_did_document_for_service(&state.db, state.cache.clone(), did.as_str(), true)
+            .await
     {
         info!(
             "[MIGRATION] activateAccount: DID document validation FAILED for {} (took {:?})",
@@ -423,9 +427,12 @@ pub async fn activate_account(
         "[MIGRATION] activateAccount: Activating account did={} handle={:?}",
         did, handle
     );
-    let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did.as_str())
-        .execute(&state.db)
-        .await;
+    let result = sqlx::query!(
+        "UPDATE users SET deactivated_at = NULL WHERE did = $1",
+        did.as_str()
+    )
+    .execute(&state.db)
+    .await;
     match result {
         Ok(_) => {
             info!(
@@ -440,7 +447,8 @@ pub async fn activate_account(
                 did
             );
             if let Err(e) =
-                crate::api::repo::record::sequence_account_event(&state, did.as_str(), true, None).await
+                crate::api::repo::record::sequence_account_event(&state, did.as_str(), true, None)
+                    .await
             {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to sequence account activation event: {}",
@@ -453,9 +461,12 @@ pub async fn activate_account(
                 "[MIGRATION] activateAccount: Sequencing identity event for did={} handle={:?}",
                 did, handle
             );
-            if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, did.as_str(), handle.as_deref())
-                    .await
+            if let Err(e) = crate::api::repo::record::sequence_identity_event(
+                &state,
+                did.as_str(),
+                handle.as_deref(),
+            )
+            .await
             {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to sequence identity event for activation: {}",
@@ -644,7 +655,8 @@ pub async fn request_account_delete(
     let did = validated.did.clone();
 
     if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, did.as_str()).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, did.as_str()).await;
+        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, did.as_str())
+            .await;
     }
 
     let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())

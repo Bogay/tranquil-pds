@@ -1,5 +1,5 @@
-use crate::api::error::ApiError;
 use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use crate::types::Did;
@@ -47,7 +47,8 @@ pub async fn delete_account(
         .await
     {
         error!("Failed to delete session tokens for {}: {:?}", did, e);
-        return ApiError::InternalError(Some("Failed to delete session tokens".into())).into_response();
+        return ApiError::InternalError(Some("Failed to delete session tokens".into()))
+            .into_response();
     }
     if let Err(e) = sqlx::query!("DELETE FROM used_refresh_tokens WHERE session_id IN (SELECT id FROM session_tokens WHERE did = $1)", did.as_str())
         .execute(&mut *tx)
@@ -84,7 +85,8 @@ pub async fn delete_account(
             "Failed to delete app passwords for user {}: {:?}",
             user_id, e
         );
-        return ApiError::InternalError(Some("Failed to delete app passwords".into())).into_response();
+        return ApiError::InternalError(Some("Failed to delete app passwords".into()))
+            .into_response();
     }
     if let Err(e) = sqlx::query!(
         "DELETE FROM invite_code_uses WHERE used_by_user = $1",
@@ -128,8 +130,13 @@ pub async fn delete_account(
         error!("Failed to commit account deletion transaction: {:?}", e);
         return ApiError::InternalError(Some("Failed to commit deletion".into())).into_response();
     }
-    if let Err(e) =
-        crate::api::repo::record::sequence_account_event(&state, did.as_str(), false, Some("deleted")).await
+    if let Err(e) = crate::api::repo::record::sequence_account_event(
+        &state,
+        did.as_str(),
+        false,
+        Some("deleted"),
+    )
+    .await
     {
         warn!(
             "Failed to sequence account deletion event for {}: {}",

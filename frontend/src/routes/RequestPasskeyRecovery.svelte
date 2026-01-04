@@ -2,6 +2,7 @@
   import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
+  import { unsafeAsEmail } from '../lib/types/branded'
 
   let identifier = $state('')
   let submitting = $state(false)
@@ -14,7 +15,7 @@
     error = null
 
     try {
-      await api.requestPasskeyRecovery(identifier)
+      await api.requestPasskeyRecovery(unsafeAsEmail(identifier))
       success = true
     } catch (err) {
       if (err instanceof ApiError) {

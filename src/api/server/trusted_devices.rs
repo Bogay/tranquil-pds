@@ -1,5 +1,5 @@
-use crate::api::error::ApiError;
 use crate::api::SuccessResponse;
+use crate::api::error::ApiError;
 use axum::{
     Json,
     extract::State,
@@ -87,7 +87,8 @@ pub async fn list_trusted_devices(State(state): State<AppState>, auth: BearerAut
             let devices = rows
                 .into_iter()
                 .map(|row| {
-                    let trust_state = DeviceTrustState::from_timestamps(row.trusted_at, row.trusted_until);
+                    let trust_state =
+                        DeviceTrustState::from_timestamps(row.trusted_at, row.trusted_until);
                     TrustedDevice {
                         id: row.id,
                         user_agent: row.user_agent,
@@ -230,7 +231,9 @@ pub async fn get_device_trust_state(db: &PgPool, device_id: &str, did: &str) -> 
 }
 
 pub async fn is_device_trusted(db: &PgPool, device_id: &str, did: &str) -> bool {
-    get_device_trust_state(db, device_id, did).await.is_trusted()
+    get_device_trust_state(db, device_id, did)
+        .await
+        .is_trusted()
 }
 
 pub async fn trust_device(db: &PgPool, device_id: &str) -> Result<(), sqlx::Error> {

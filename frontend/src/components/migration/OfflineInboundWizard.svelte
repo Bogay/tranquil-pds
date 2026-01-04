@@ -62,6 +62,7 @@
       }, 3000)
       return () => clearInterval(interval)
     }
+    return undefined
   })
 
   async function loadServerInfo() {

@@ -53,7 +53,7 @@
     initServerConfig()
     initAuth().then(({ oauthLoginCompleted }) => {
       if (oauthLoginCompleted) {
-        navigate('/dashboard', true)
+        navigate('/dashboard', { replace: true })
       }
       oauthCallbackPending = false
     })
@@ -64,9 +64,9 @@
     const path = getCurrentPath()
     if (path === '/') {
       if (auth.kind === 'authenticated') {
-        navigate('/dashboard', true)
+        navigate('/dashboard', { replace: true })
       } else {
-        navigate('/login', true)
+        navigate('/login', { replace: true })
       }
     }
   })

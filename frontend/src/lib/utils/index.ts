@@ -1,3 +1,27 @@
-export * from './option'
-export * from './array'
-export * from './async'
+export * from "./option.ts";
+export {
+  at,
+  chunk,
+  find,
+  findIndex,
+  findMap,
+  first,
+  groupBy,
+  intersperse,
+  isEmpty,
+  isNonEmpty,
+  last,
+  maxBy,
+  minBy,
+  partition,
+  range,
+  sortBy,
+  sortByDesc,
+  sum,
+  sumBy,
+  unique,
+  uniqueBy,
+  zip as zipArrays,
+  zipWith as zipArraysWith,
+} from "./array.ts";
+export * from "./async.ts";

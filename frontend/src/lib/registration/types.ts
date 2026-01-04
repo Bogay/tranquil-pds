@@ -1,4 +1,10 @@
-import type { DidType, VerificationChannel } from "../api";
+import type { DidType, VerificationChannel } from "../api.ts";
+import type {
+  AccessToken,
+  Did,
+  Handle,
+  RefreshToken,
+} from "../types/branded.ts";
 
 export type RegistrationMode = "password" | "passkey";
 
@@ -37,14 +43,14 @@ export interface ExternalDidWebState {
 }
 
 export interface AccountResult {
-  did: string;
-  handle: string;
+  did: Did;
+  handle: Handle;
   setupToken?: string;
   appPassword?: string;
   appPasswordName?: string;
 }
 
 export interface SessionState {
-  accessJwt: string;
-  refreshJwt: string;
+  accessJwt: AccessToken;
+  refreshJwt: RefreshToken;
 }

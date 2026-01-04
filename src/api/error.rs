@@ -115,9 +115,7 @@ impl ApiError {
             Self::UpstreamFailure | Self::UpstreamUnavailable(_) | Self::UpstreamErrorMsg(_) => {
                 StatusCode::BAD_GATEWAY
             }
-            Self::ServiceUnavailable(_) | Self::BackupsDisabled => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
+            Self::ServiceUnavailable(_) | Self::BackupsDisabled => StatusCode::SERVICE_UNAVAILABLE,
             Self::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
             Self::UpstreamError { status, .. } => {
                 StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY)
@@ -155,12 +153,10 @@ impl ApiError {
             | Self::SubjectNotFound
             | Self::BlobNotFound(_)
             | Self::NotFoundMsg(_) => StatusCode::NOT_FOUND,
-            Self::RepoTakendown
-            | Self::RepoDeactivated
-            | Self::RepoNotFound(_) => StatusCode::BAD_REQUEST,
-            Self::InvalidSwap(_) | Self::TotpAlreadyEnabled => {
-                StatusCode::CONFLICT
+            Self::RepoTakendown | Self::RepoDeactivated | Self::RepoNotFound(_) => {
+                StatusCode::BAD_REQUEST
             }
+            Self::InvalidSwap(_) | Self::TotpAlreadyEnabled => StatusCode::CONFLICT,
             Self::InvalidRequest(_)
             | Self::InvalidHandle(_)
             | Self::HandleNotAvailable(_)
@@ -435,7 +431,6 @@ impl IntoResponse for ApiError {
     }
 }
 
-
 impl From<sqlx::Error> for ApiError {
     fn from(e: sqlx::Error) -> Self {
         tracing::error!("Database error: {:?}", e);
@@ -522,9 +517,9 @@ impl From<crate::auth::verification_token::VerifyError> for ApiError {
             VerifyError::UnsupportedVersion => {
                 Self::InvalidRequest("This verification code version is not supported".to_string())
             }
-            VerifyError::Expired => {
-                Self::InvalidRequest("The verification code has expired. Please request a new one.".to_string())
-            }
+            VerifyError::Expired => Self::InvalidRequest(
+                "The verification code has expired. Please request a new one.".to_string(),
+            ),
             VerifyError::InvalidSignature => {
                 Self::InvalidRequest("The verification code is invalid".to_string())
             }
@@ -565,9 +560,9 @@ impl From<crate::plc::PlcError> for ApiError {
             PlcError::NotFound => Self::NotFoundMsg("DID not found in PLC directory".into()),
             PlcError::Tombstoned => Self::InvalidRequest("DID is tombstoned".into()),
             PlcError::Timeout => Self::UpstreamTimeout,
-            PlcError::CircuitBreakerOpen => {
-                Self::ServiceUnavailable(Some("PLC directory service temporarily unavailable".into()))
-            }
+            PlcError::CircuitBreakerOpen => Self::ServiceUnavailable(Some(
+                "PLC directory service temporarily unavailable".into(),
+            )),
             PlcError::Http(err) => {
                 tracing::error!("PLC HTTP error: {:?}", err);
                 Self::UpstreamErrorMsg("Failed to communicate with PLC directory".into())

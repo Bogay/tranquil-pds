@@ -4,6 +4,7 @@
   import { getAuthState } from '../lib/auth.svelte'
   import { _ } from '../lib/i18n'
   import type { Session } from '../lib/types/api'
+  import { unsafeAsEmail } from '../lib/types/branded'
 
   const auth = $derived(getAuthState())
 
@@ -35,7 +36,7 @@
     error = null
     success = null
     try {
-      await api.requestPasswordReset(email)
+      await api.requestPasswordReset(unsafeAsEmail(email))
       tokenSent = true
       success = $_('resetPassword.codeSent')
     } catch (e) {

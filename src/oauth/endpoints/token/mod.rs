@@ -13,7 +13,9 @@ pub use helpers::{TokenClaims, create_access_token, extract_token_claims, verify
 pub use introspect::{
     IntrospectRequest, IntrospectResponse, RevokeRequest, introspect_token, revoke_token,
 };
-pub use types::{ClientAuthParams, GrantType, TokenGrant, TokenRequest, TokenResponse, ValidatedTokenRequest};
+pub use types::{
+    ClientAuthParams, GrantType, TokenGrant, TokenRequest, TokenResponse, ValidatedTokenRequest,
+};
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")

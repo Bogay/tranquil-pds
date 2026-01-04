@@ -1,83 +1,83 @@
 export const routes = {
-  login: '/login',
-  register: '/register',
-  registerPasskey: '/register-passkey',
-  dashboard: '/dashboard',
-  settings: '/settings',
-  security: '/security',
-  sessions: '/sessions',
-  appPasswords: '/app-passwords',
-  trustedDevices: '/trusted-devices',
-  inviteCodes: '/invite-codes',
-  comms: '/comms',
-  repo: '/repo',
-  controllers: '/controllers',
-  delegationAudit: '/delegation-audit',
-  actAs: '/act-as',
-  didDocument: '/did-document',
-  migrate: '/migrate',
-  admin: '/admin',
-  verify: '/verify',
-  resetPassword: '/reset-password',
-  recoverPasskey: '/recover-passkey',
-  requestPasskeyRecovery: '/request-passkey-recovery',
-  oauthLogin: '/oauth/login',
-  oauthConsent: '/oauth/consent',
-  oauthAccounts: '/oauth/accounts',
-  oauth2fa: '/oauth/2fa',
-  oauthTotp: '/oauth/totp',
-  oauthPasskey: '/oauth/passkey',
-  oauthDelegation: '/oauth/delegation',
-  oauthError: '/oauth/error',
-} as const
+  login: "/login",
+  register: "/register",
+  registerPasskey: "/register-passkey",
+  dashboard: "/dashboard",
+  settings: "/settings",
+  security: "/security",
+  sessions: "/sessions",
+  appPasswords: "/app-passwords",
+  trustedDevices: "/trusted-devices",
+  inviteCodes: "/invite-codes",
+  comms: "/comms",
+  repo: "/repo",
+  controllers: "/controllers",
+  delegationAudit: "/delegation-audit",
+  actAs: "/act-as",
+  didDocument: "/did-document",
+  migrate: "/migrate",
+  admin: "/admin",
+  verify: "/verify",
+  resetPassword: "/reset-password",
+  recoverPasskey: "/recover-passkey",
+  requestPasskeyRecovery: "/request-passkey-recovery",
+  oauthLogin: "/oauth/login",
+  oauthConsent: "/oauth/consent",
+  oauthAccounts: "/oauth/accounts",
+  oauth2fa: "/oauth/2fa",
+  oauthTotp: "/oauth/totp",
+  oauthPasskey: "/oauth/passkey",
+  oauthDelegation: "/oauth/delegation",
+  oauthError: "/oauth/error",
+} as const;
 
-export type Route = (typeof routes)[keyof typeof routes]
+export type Route = (typeof routes)[keyof typeof routes];
 
-export type RouteKey = keyof typeof routes
+export type RouteKey = keyof typeof routes;
 
 export function isValidRoute(path: string): path is Route {
-  return Object.values(routes).includes(path as Route)
+  return Object.values(routes).includes(path as Route);
 }
 
 export interface RouteParams {
-  [routes.verify]: { token?: string; email?: string }
-  [routes.resetPassword]: { token?: string }
-  [routes.recoverPasskey]: { token?: string; did?: string }
-  [routes.oauthLogin]: { request_uri?: string; error?: string }
-  [routes.oauthConsent]: { request_uri?: string; client_id?: string }
-  [routes.oauthAccounts]: { request_uri?: string }
-  [routes.oauth2fa]: { request_uri?: string; channel?: string }
-  [routes.oauthTotp]: { request_uri?: string }
-  [routes.oauthPasskey]: { request_uri?: string }
-  [routes.oauthDelegation]: { request_uri?: string; delegated_did?: string }
-  [routes.oauthError]: { error?: string; error_description?: string }
-  [routes.migrate]: { code?: string; state?: string }
+  [routes.verify]: { token?: string; email?: string };
+  [routes.resetPassword]: { token?: string };
+  [routes.recoverPasskey]: { token?: string; did?: string };
+  [routes.oauthLogin]: { request_uri?: string; error?: string };
+  [routes.oauthConsent]: { request_uri?: string; client_id?: string };
+  [routes.oauthAccounts]: { request_uri?: string };
+  [routes.oauth2fa]: { request_uri?: string; channel?: string };
+  [routes.oauthTotp]: { request_uri?: string };
+  [routes.oauthPasskey]: { request_uri?: string };
+  [routes.oauthDelegation]: { request_uri?: string; delegated_did?: string };
+  [routes.oauthError]: { error?: string; error_description?: string };
+  [routes.migrate]: { code?: string; state?: string };
 }
 
-export type RoutesWithParams = keyof RouteParams
+export type RoutesWithParams = keyof RouteParams;
 
 export function buildUrl<R extends Route>(
   route: R,
-  params?: R extends RoutesWithParams ? RouteParams[R] : never
+  params?: R extends RoutesWithParams ? RouteParams[R] : never,
 ): string {
-  if (!params) return route
-  const searchParams = new URLSearchParams()
+  if (!params) return route;
+  const searchParams = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value != null) {
-      searchParams.set(key, String(value))
+      searchParams.set(key, String(value));
     }
   }
-  const queryString = searchParams.toString()
-  return queryString ? `${route}?${queryString}` : route
+  const queryString = searchParams.toString();
+  return queryString ? `${route}?${queryString}` : route;
 }
 
 export function parseRouteParams<R extends RoutesWithParams>(
-  route: R
+  _route: R,
 ): RouteParams[R] {
-  const params = new URLSearchParams(globalThis.location.search)
-  const result: Record<string, string> = {}
+  const params = new URLSearchParams(globalThis.location.search);
+  const result: Record<string, string> = {};
   for (const [key, value] of params.entries()) {
-    result[key] = value
+    result[key] = value;
   }
-  return result as RouteParams[R]
+  return result as RouteParams[R];
 }

@@ -138,8 +138,9 @@ pub async fn prepare_repo_write(
         ApiError::InternalError(None).into_response()
     })?
     .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())).into_response())?;
-    let current_root_cid = Cid::from_str(&root_cid_str)
-        .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())).into_response())?;
+    let current_root_cid = Cid::from_str(&root_cid_str).map_err(|_| {
+        ApiError::InternalError(Some("Invalid repo root CID".into())).into_response()
+    })?;
     Ok(RepoWriteAuth {
         did: auth_user.did.clone(),
         user_id,
@@ -247,7 +248,8 @@ pub async fn create_record(
     let record_cid = match tracking_store.put(&record_bytes).await {
         Ok(c) => c,
         _ => {
-            return ApiError::InternalError(Some("Failed to save record block".into())).into_response()
+            return ApiError::InternalError(Some("Failed to save record block".into()))
+                .into_response();
         }
     };
     let key = format!("{}/{}", input.collection, rkey);
@@ -442,8 +444,10 @@ pub async fn put_record(
         let expected_cid = Cid::from_str(swap_record_str).ok();
         let actual_cid = mst.get(&key).await.ok().flatten();
         if expected_cid != actual_cid {
-            return ApiError::InvalidSwap(Some("Record has been modified or does not exist".into()))
-                .into_response();
+            return ApiError::InvalidSwap(Some(
+                "Record has been modified or does not exist".into(),
+            ))
+            .into_response();
         }
     }
     let existing_cid = mst.get(&key).await.ok().flatten();
@@ -455,7 +459,8 @@ pub async fn put_record(
     let record_cid = match tracking_store.put(&record_bytes).await {
         Ok(c) => c,
         _ => {
-            return ApiError::InternalError(Some("Failed to save record block".into())).into_response()
+            return ApiError::InternalError(Some("Failed to save record block".into()))
+                .into_response();
         }
     };
     if existing_cid == Some(record_cid) {
@@ -474,21 +479,23 @@ pub async fn put_record(
         match mst.update(&key, record_cid).await {
             Ok(m) => m,
             Err(_) => {
-                return ApiError::InternalError(Some("Failed to update MST".into())).into_response()
+                return ApiError::InternalError(Some("Failed to update MST".into()))
+                    .into_response();
             }
         }
     } else {
         match mst.add(&key, record_cid).await {
             Ok(m) => m,
             Err(_) => {
-                return ApiError::InternalError(Some("Failed to add to MST".into())).into_response()
+                return ApiError::InternalError(Some("Failed to add to MST".into()))
+                    .into_response();
             }
         }
     };
     let new_mst_root = match new_mst.persist().await {
         Ok(c) => c,
         Err(_) => {
-            return ApiError::InternalError(Some("Failed to persist MST".into())).into_response()
+            return ApiError::InternalError(Some("Failed to persist MST".into())).into_response();
         }
     };
     let op = if existing_cid.is_some() {

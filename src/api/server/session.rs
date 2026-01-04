@@ -479,7 +479,8 @@ pub async fn refresh_session(
             }
         };
     if crate::auth::verify_refresh_token(&refresh_token, &key_bytes).is_err() {
-        return ApiError::AuthenticationFailed(Some("Invalid refresh token".into())).into_response();
+        return ApiError::AuthenticationFailed(Some("Invalid refresh token".into()))
+            .into_response();
     }
     let new_access_meta = match crate::auth::create_access_token_with_delegation(
         &session_row.did,
@@ -566,12 +567,8 @@ pub async fn refresh_session(
             let pds_hostname =
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&u.handle, &pds_hostname);
-            let account_state = AccountState::from_db_fields(
-                u.deactivated_at,
-                u.takedown_ref.clone(),
-                None,
-                None,
-            );
+            let account_state =
+                AccountState::from_db_fields(u.deactivated_at, u.takedown_ref.clone(), None, None);
             let mut response = json!({
                 "accessJwt": new_access_meta.token,
                 "refreshJwt": new_refresh_meta.token,

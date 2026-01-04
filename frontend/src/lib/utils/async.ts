@@ -1,246 +1,245 @@
-import { ok, err, type Result } from '../types/result'
+import { err, type Result } from "../types/result.ts";
 
 export function debounce<T extends (...args: Parameters<T>) => void>(
   fn: T,
-  ms: number
+  ms: number,
 ): T & { cancel: () => void } {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const debounced = ((...args: Parameters<T>) => {
-    if (timeoutId) clearTimeout(timeoutId)
+    if (timeoutId) clearTimeout(timeoutId);
     timeoutId = setTimeout(() => {
-      fn(...args)
-      timeoutId = null
-    }, ms)
-  }) as T & { cancel: () => void }
+      fn(...args);
+      timeoutId = null;
+    }, ms);
+  }) as T & { cancel: () => void };
 
   debounced.cancel = () => {
     if (timeoutId) {
-      clearTimeout(timeoutId)
-      timeoutId = null
+      clearTimeout(timeoutId);
+      timeoutId = null;
     }
-  }
+  };
 
-  return debounced
+  return debounced;
 }
 
 export function throttle<T extends (...args: Parameters<T>) => void>(
   fn: T,
-  ms: number
+  ms: number,
 ): T {
-  let lastCall = 0
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let lastCall = 0;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   return ((...args: Parameters<T>) => {
-    const now = Date.now()
-    const remaining = ms - (now - lastCall)
+    const now = Date.now();
+    const remaining = ms - (now - lastCall);
 
     if (remaining <= 0) {
       if (timeoutId) {
-        clearTimeout(timeoutId)
-        timeoutId = null
+        clearTimeout(timeoutId);
+        timeoutId = null;
       }
-      lastCall = now
-      fn(...args)
+      lastCall = now;
+      fn(...args);
     } else if (!timeoutId) {
       timeoutId = setTimeout(() => {
-        lastCall = Date.now()
-        timeoutId = null
-        fn(...args)
-      }, remaining)
+        lastCall = Date.now();
+        timeoutId = null;
+        fn(...args);
+      }, remaining);
     }
-  }) as T
+  }) as T;
 }
 
 export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function retry<T>(
   fn: () => Promise<T>,
   options: {
-    attempts?: number
-    delay?: number
-    backoff?: number
-    shouldRetry?: (error: unknown, attempt: number) => boolean
-  } = {}
+    attempts?: number;
+    delay?: number;
+    backoff?: number;
+    shouldRetry?: (error: unknown, attempt: number) => boolean;
+  } = {},
 ): Promise<T> {
   const {
     attempts = 3,
     delay = 1000,
     backoff = 2,
     shouldRetry = () => true,
-  } = options
+  } = options;
 
-  let lastError: unknown
-  let currentDelay = delay
+  let lastError: unknown;
+  let currentDelay = delay;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      return await fn()
+      return await fn();
     } catch (error) {
-      lastError = error
+      lastError = error;
       if (attempt === attempts || !shouldRetry(error, attempt)) {
-        throw error
+        throw error;
       }
-      await sleep(currentDelay)
-      currentDelay *= backoff
+      await sleep(currentDelay);
+      currentDelay *= backoff;
     }
   }
 
-  throw lastError
+  throw lastError;
 }
 
 export async function retryResult<T, E>(
   fn: () => Promise<Result<T, E>>,
   options: {
-    attempts?: number
-    delay?: number
-    backoff?: number
-    shouldRetry?: (error: E, attempt: number) => boolean
-  } = {}
+    attempts?: number;
+    delay?: number;
+    backoff?: number;
+    shouldRetry?: (error: E, attempt: number) => boolean;
+  } = {},
 ): Promise<Result<T, E>> {
   const {
     attempts = 3,
     delay = 1000,
     backoff = 2,
     shouldRetry = () => true,
-  } = options
+  } = options;
 
-  let lastResult: Result<T, E> | null = null
-  let currentDelay = delay
+  let lastResult: Result<T, E> | null = null;
+  let currentDelay = delay;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const result = await fn()
-    lastResult = result
+    const result = await fn();
+    lastResult = result;
 
     if (result.ok) {
-      return result
+      return result;
     }
 
     if (attempt === attempts || !shouldRetry(result.error, attempt)) {
-      return result
+      return result;
     }
 
-    await sleep(currentDelay)
-    currentDelay *= backoff
+    await sleep(currentDelay);
+    currentDelay *= backoff;
   }
 
-  return lastResult!
+  return lastResult!;
 }
 
 export function timeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
-      reject(new Error(`Timeout after ${ms}ms`))
-    }, ms)
+      reject(new Error(`Timeout after ${ms}ms`));
+    }, ms);
 
     promise
       .then((value) => {
-        clearTimeout(timeoutId)
-        resolve(value)
+        clearTimeout(timeoutId);
+        resolve(value);
       })
       .catch((error) => {
-        clearTimeout(timeoutId)
-        reject(error)
-      })
-  })
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
 }
 
 export async function timeoutResult<T>(
   promise: Promise<Result<T, Error>>,
-  ms: number
+  ms: number,
 ): Promise<Result<T, Error>> {
   try {
-    return await timeout(promise, ms)
+    return await timeout(promise, ms);
   } catch (e) {
-    return err(e instanceof Error ? e : new Error(String(e)))
+    return err(e instanceof Error ? e : new Error(String(e)));
   }
 }
 
 export async function parallel<T>(
   tasks: (() => Promise<T>)[],
-  concurrency: number
+  concurrency: number,
 ): Promise<T[]> {
-  const results: T[] = []
-  const executing: Promise<void>[] = []
+  const results: T[] = [];
+  const executing: Promise<void>[] = [];
 
   for (const task of tasks) {
     const p = task().then((result) => {
-      results.push(result)
-    })
+      results.push(result);
+    });
 
-    executing.push(p)
+    executing.push(p);
 
     if (executing.length >= concurrency) {
-      await Promise.race(executing)
+      await Promise.race(executing);
       executing.splice(
         executing.findIndex((e) => e === p),
-        1
-      )
+        1,
+      );
     }
   }
 
-  await Promise.all(executing)
-  return results
+  await Promise.all(executing);
+  return results;
 }
 
 export async function mapParallel<T, U>(
   items: T[],
   fn: (item: T, index: number) => Promise<U>,
-  concurrency: number
+  concurrency: number,
 ): Promise<U[]> {
-  const results: U[] = new Array(items.length)
-  const executing: Promise<void>[] = []
+  const results: U[] = new Array(items.length);
+  const executing: Promise<void>[] = [];
 
   for (let i = 0; i < items.length; i++) {
-    const index = i
+    const index = i;
     const p = fn(items[index], index).then((result) => {
-      results[index] = result
-    })
+      results[index] = result;
+    });
 
-    executing.push(p)
+    executing.push(p);
 
     if (executing.length >= concurrency) {
-      await Promise.race(executing)
+      await Promise.race(executing);
       const doneIndex = executing.findIndex(
-        (e) =>
-          (e as Promise<void> & { _done?: boolean })._done !== false
-      )
+        (e) => (e as Promise<void> & { _done?: boolean })._done !== false,
+      );
       if (doneIndex >= 0) {
-        executing.splice(doneIndex, 1)
+        executing.splice(doneIndex, 1);
       }
     }
   }
 
-  await Promise.all(executing)
-  return results
+  await Promise.all(executing);
+  return results;
 }
 
 export function createAbortable<T>(
-  fn: (signal: AbortSignal) => Promise<T>
+  fn: (signal: AbortSignal) => Promise<T>,
 ): { promise: Promise<T>; abort: () => void } {
-  const controller = new AbortController()
+  const controller = new AbortController();
   return {
     promise: fn(controller.signal),
     abort: () => controller.abort(),
-  }
+  };
 }
 
 export interface Deferred<T> {
-  promise: Promise<T>
-  resolve: (value: T) => void
-  reject: (error: unknown) => void
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
 }
 
 export function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void
-  let reject!: (error: unknown) => void
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
 
   const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
+    resolve = res;
+    reject = rej;
+  });
 
-  return { promise, resolve, reject }
+  return { promise, resolve, reject };
 }

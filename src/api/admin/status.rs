@@ -119,10 +119,8 @@ pub async fn get_subject_status(
         let did = match &params.did {
             Some(d) => d,
             None => {
-                return ApiError::InvalidRequest(
-                    "Must provide a did to request blob state".into(),
-                )
-                .into_response();
+                return ApiError::InvalidRequest("Must provide a did to request blob state".into())
+                    .into_response();
             }
         };
         let blob = sqlx::query!(

@@ -374,7 +374,9 @@ struct LegacyAuthResult {
 
 async fn try_legacy_auth(pool: &PgPool, token: &str) -> Result<LegacyAuthResult, ()> {
     match crate::auth::validate_bearer_token(pool, token).await {
-        Ok(user) if !user.is_oauth => Ok(LegacyAuthResult { did: user.did.to_string() }),
+        Ok(user) if !user.is_oauth => Ok(LegacyAuthResult {
+            did: user.did.to_string(),
+        }),
         _ => Err(()),
     }
 }

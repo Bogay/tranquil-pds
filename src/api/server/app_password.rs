@@ -1,5 +1,5 @@
-use crate::api::error::ApiError;
 use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::auth::BearerAuth;
 use crate::delegation::{self, DelegationActionType};
 use crate::state::{AppState, RateLimitKind};

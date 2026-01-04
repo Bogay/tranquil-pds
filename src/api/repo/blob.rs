@@ -29,13 +29,14 @@ fn detect_mime_type(data: &[u8], client_hint: &str) -> String {
             );
         }
         detected
+    } else if client_hint == "*/*" || client_hint.is_empty() {
+        warn!(
+            "Could not detect MIME type and client sent invalid hint: '{}'",
+            client_hint
+        );
+        "application/octet-stream".to_string()
     } else {
-        if client_hint == "*/*" || client_hint.is_empty() {
-            warn!("Could not detect MIME type and client sent invalid hint: '{}'", client_hint);
-            "application/octet-stream".to_string()
-        } else {
-            client_hint.to_string()
-        }
+        client_hint.to_string()
     }
 }
 

@@ -17,7 +17,7 @@
 
   type PageState =
     | { kind: 'login' }
-    | { kind: 'verification'; did: string }
+    | { kind: 'verification'; did: Did }
 
   let pageState = $state<PageState>({ kind: 'login' })
   let submitting = $state(false)

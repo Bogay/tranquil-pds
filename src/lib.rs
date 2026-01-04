@@ -24,8 +24,6 @@ pub mod util;
 pub mod validation;
 
 use api::proxy::XrpcProxyLayer;
-pub use sync::util::AccountStatus;
-pub use types::{AccountState, AtIdentifier, AtUri, Did, Handle, Nsid, Rkey};
 use axum::{
     Json, Router,
     extract::DefaultBodyLimit,
@@ -36,9 +34,11 @@ use axum::{
 use http::StatusCode;
 use serde_json::json;
 use state::AppState;
+pub use sync::util::AccountStatus;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
+pub use types::{AccountState, AtIdentifier, AtUri, Did, Handle, Nsid, Rkey};
 
 pub fn app(state: AppState) -> Router {
     let xrpc_router = Router::new()

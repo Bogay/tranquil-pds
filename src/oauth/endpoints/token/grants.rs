@@ -24,10 +24,16 @@ pub async fn handle_authorization_code_grant(
     dpop_proof: Option<String>,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
     let (code, code_verifier, redirect_uri) = match request.grant {
-        TokenGrant::AuthorizationCode { code, code_verifier, redirect_uri } => {
-            (code, code_verifier, redirect_uri)
+        TokenGrant::AuthorizationCode {
+            code,
+            code_verifier,
+            redirect_uri,
+        } => (code, code_verifier, redirect_uri),
+        _ => {
+            return Err(OAuthError::InvalidRequest(
+                "Expected authorization_code grant".to_string(),
+            ));
         }
-        _ => return Err(OAuthError::InvalidRequest("Expected authorization_code grant".to_string())),
     };
     let auth_request = db::consume_authorization_request_by_code(&state.db, &code)
         .await?
@@ -53,9 +59,10 @@ pub async fn handle_authorization_code_grant(
     let did = flow_state.did().unwrap().to_string();
     let client_metadata_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_metadata_cache.get(&auth_request.client_id).await?;
-    let client_auth = if let (Some(assertion), Some(assertion_type)) =
-        (&request.client_auth.client_assertion, &request.client_auth.client_assertion_type)
-    {
+    let client_auth = if let (Some(assertion), Some(assertion_type)) = (
+        &request.client_auth.client_assertion,
+        &request.client_auth.client_assertion_type,
+    ) {
         if assertion_type != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
             return Err(OAuthError::InvalidClient(
                 "Unsupported client_assertion_type".to_string(),
@@ -198,7 +205,11 @@ pub async fn handle_refresh_token_grant(
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
     let refresh_token_str = match request.grant {
         TokenGrant::RefreshToken { refresh_token } => refresh_token,
-        _ => return Err(OAuthError::InvalidRequest("Expected refresh_token grant".to_string())),
+        _ => {
+            return Err(OAuthError::InvalidRequest(
+                "Expected refresh_token grant".to_string(),
+            ));
+        }
     };
     let token_prefix = &refresh_token_str[..std::cmp::min(16, refresh_token_str.len())];
     tracing::info!(
@@ -213,7 +224,11 @@ pub async fn handle_refresh_token_grant(
 
     let (db_id, token_data) = match lookup {
         RefreshTokenLookup::Valid { db_id, token_data } => (db_id, token_data),
-        RefreshTokenLookup::InGracePeriod { db_id: _, token_data, rotated_at } => {
+        RefreshTokenLookup::InGracePeriod {
+            db_id: _,
+            token_data,
+            rotated_at,
+        } => {
             tracing::info!(
                 refresh_token_prefix = %token_prefix,
                 rotated_at = %rotated_at,
@@ -262,7 +277,9 @@ pub async fn handle_refresh_token_grant(
         }
         RefreshTokenLookup::NotFound => {
             tracing::warn!(refresh_token_prefix = %token_prefix, "Refresh token not found");
-            return Err(OAuthError::InvalidGrant("Invalid refresh token".to_string()));
+            return Err(OAuthError::InvalidGrant(
+                "Invalid refresh token".to_string(),
+            ));
         }
     };
     let dpop_jkt = if let Some(proof) = &dpop_proof {

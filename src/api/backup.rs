@@ -144,7 +144,8 @@ pub async fn get_backup(
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to fetch backup from storage: {:?}", e);
-            return ApiError::InternalError(Some("Failed to retrieve backup".into())).into_response();
+            return ApiError::InternalError(Some("Failed to retrieve backup".into()))
+                .into_response();
         }
     };
 
@@ -223,7 +224,8 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to generate CAR: {:?}", e);
-            return ApiError::InternalError(Some("Failed to generate backup".into())).into_response();
+            return ApiError::InternalError(Some("Failed to generate backup".into()))
+                .into_response();
         }
     };
 
@@ -448,7 +450,7 @@ pub async fn set_backup_enabled(
 
     info!(did = %auth.0.did, enabled = input.enabled, "Updated backup_enabled setting");
 
-    EnabledResponse::new(input.enabled).into_response()
+    EnabledResponse::response(input.enabled).into_response()
 }
 
 pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Response {
@@ -575,7 +577,8 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
 
         if let Err(e) = zip.finish() {
             error!("Failed to finish zip: {:?}", e);
-            return ApiError::InternalError(Some("Failed to create zip file".into())).into_response();
+            return ApiError::InternalError(Some("Failed to create zip file".into()))
+                .into_response();
         }
     }
 

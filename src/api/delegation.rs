@@ -39,7 +39,8 @@ pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to list controllers: {:?}", e);
-            return ApiError::InternalError(Some("Failed to list controllers".into())).into_response();
+            return ApiError::InternalError(Some("Failed to list controllers".into()))
+                .into_response();
         }
     };
 
@@ -269,7 +270,8 @@ pub async fn update_controller_scopes(
         Ok(false) => ApiError::DelegationNotFound.into_response(),
         Err(e) => {
             tracing::error!("Failed to update controller scopes: {:?}", e);
-            ApiError::InternalError(Some("Failed to update controller scopes".into())).into_response()
+            ApiError::InternalError(Some("Failed to update controller scopes".into()))
+                .into_response()
         }
     }
 }
@@ -357,7 +359,8 @@ pub async fn get_audit_log(
             Ok(e) => e,
             Err(e) => {
                 tracing::error!("Failed to get audit log: {:?}", e);
-                return ApiError::InternalError(Some("Failed to get audit log".into())).into_response();
+                return ApiError::InternalError(Some("Failed to get audit log".into()))
+                    .into_response();
             }
         };
 
@@ -762,5 +765,9 @@ pub async fn create_delegated_account(
 
     info!(did = %did, handle = %handle, controller = %&auth.0.did, "Delegated account created");
 
-    Json(CreateDelegatedAccountResponse { did: did.into(), handle: handle.into() }).into_response()
+    Json(CreateDelegatedAccountResponse {
+        did: did.into(),
+        handle: handle.into(),
+    })
+    .into_response()
 }

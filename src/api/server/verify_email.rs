@@ -33,7 +33,7 @@ pub async fn verify_migration_email(
 
     Ok(Json(VerifyMigrationEmailOutput {
         success: result.success,
-        did: result.did.clone().into(),
+        did: result.did.clone(),
     }))
 }
 

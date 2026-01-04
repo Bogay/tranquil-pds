@@ -5,6 +5,7 @@
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDate, formatDateTime } from '../lib/date'
+  import { unsafeAsDid } from '../lib/types/branded'
   import type { Session } from '../lib/types/api'
   import { toast } from '../lib/toast.svelte'
 
@@ -257,7 +258,7 @@
     if (!session) return
     userDetailLoading = true
     try {
-      selectedUser = await api.getAccountInfo(session.accessJwt, did)
+      selectedUser = await api.getAccountInfo(session.accessJwt, unsafeAsDid(did))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('admin.failedToLoadUserDetails'))
     } finally {
@@ -272,11 +273,11 @@
     userActionLoading = true
     try {
       if (selectedUser.invitesDisabled) {
-        await api.enableAccountInvites(session.accessJwt, selectedUser.did)
+        await api.enableAccountInvites(session.accessJwt, unsafeAsDid(selectedUser.did))
         selectedUser = { ...selectedUser, invitesDisabled: false }
         toast.success($_('admin.invitesEnabled'))
       } else {
-        await api.disableAccountInvites(session.accessJwt, selectedUser.did)
+        await api.disableAccountInvites(session.accessJwt, unsafeAsDid(selectedUser.did))
         selectedUser = { ...selectedUser, invitesDisabled: true }
         toast.success($_('admin.invitesDisabled'))
       }
@@ -291,7 +292,7 @@
     if (!confirm($_('admin.deleteConfirm', { values: { handle: selectedUser.handle } }))) return
     userActionLoading = true
     try {
-      await api.adminDeleteAccount(session.accessJwt, selectedUser.did)
+      await api.adminDeleteAccount(session.accessJwt, unsafeAsDid(selectedUser.did))
       users = users.filter(u => u.did !== selectedUser!.did)
       selectedUser = null
       toast.success($_('admin.userDeleted'))
@@ -639,7 +640,7 @@
       </div>
     </div>
   {/if}
-{:else if auth.loading}
+{:else if authLoading}
   <div class="loading">{$_('admin.loading')}</div>
 {/if}
 <style>

@@ -916,7 +916,11 @@ impl Datetime {
     }
 
     pub fn now() -> Self {
-        Self(chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+        Self(
+            chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
+        )
     }
 
     pub fn as_str(&self) -> &str {
@@ -1296,7 +1300,10 @@ impl AccountState {
     }
 
     pub fn can_access_repo(&self) -> bool {
-        matches!(self, AccountState::Active | AccountState::Deactivated { .. })
+        matches!(
+            self,
+            AccountState::Active | AccountState::Deactivated { .. }
+        )
     }
 
     pub fn status_string(&self) -> &'static str {
@@ -1405,8 +1412,13 @@ impl From<String> for PasswordHash {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenSource {
     Session,
-    OAuth { client_id: Option<String> },
-    ServiceAuth { lxm: Option<String>, aud: Option<String> },
+    OAuth {
+        client_id: Option<String>,
+    },
+    ServiceAuth {
+        lxm: Option<String>,
+        aud: Option<String>,
+    },
 }
 
 impl TokenSource {
@@ -1642,7 +1654,9 @@ mod tests {
 
     #[test]
     fn test_cidlink_validation() {
-        assert!(CidLink::new("bafyreib74ckyq525l3y6an5txykwwtb3dgex6ofzakml53di77oxwr5pfe").is_ok());
+        assert!(
+            CidLink::new("bafyreib74ckyq525l3y6an5txykwwtb3dgex6ofzakml53di77oxwr5pfe").is_ok()
+        );
         assert!(CidLink::new("not-a-cid").is_err());
     }
 

@@ -1,5 +1,5 @@
-import type { AtprotoClient } from "./atproto-client";
-import type { MigrationProgress } from "./types";
+import type { AtprotoClient } from "./atproto-client.ts";
+import type { MigrationProgress } from "./types.ts";
 
 export interface BlobMigrationResult {
   migrated: number;
@@ -85,7 +85,8 @@ export async function migrateBlobs(
       });
 
       console.log("[blob-migration] Fetching blob", cid, "from source");
-      const { data: blobData, contentType } = await sourceClient.getBlobWithContentType(userDid, cid);
+      const { data: blobData, contentType } = await sourceClient
+        .getBlobWithContentType(userDid, cid);
       console.log(
         "[blob-migration] Got blob",
         cid,
@@ -95,7 +96,12 @@ export async function migrateBlobs(
         contentType,
       );
       await localClient.uploadBlob(blobData, contentType);
-      console.log("[blob-migration] Uploaded blob", cid, "with contentType:", contentType);
+      console.log(
+        "[blob-migration] Uploaded blob",
+        cid,
+        "with contentType:",
+        contentType,
+      );
       migrated++;
       onProgress({ blobsMigrated: migrated });
     } catch (e) {

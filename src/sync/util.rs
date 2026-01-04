@@ -67,7 +67,10 @@ impl AccountStatus {
         matches!(self, Self::Active)
     }
 
-    pub fn from_db_fields(takedown_ref: Option<&str>, deactivated_at: Option<chrono::DateTime<chrono::Utc>>) -> Self {
+    pub fn from_db_fields(
+        takedown_ref: Option<&str>,
+        deactivated_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Self {
         if takedown_ref.is_some() {
             Self::Takendown
         } else if deactivated_at.is_some() {

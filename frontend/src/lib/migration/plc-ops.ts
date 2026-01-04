@@ -28,7 +28,7 @@ export interface PlcService {
 
 export interface PlcOperationData {
   type: "plc_operation";
-  prev: string;
+  prev: string | null;
   alsoKnownAs: string[];
   rotationKeys: string[];
   services: Record<string, PlcService>;
@@ -65,6 +65,9 @@ export class PlcOps {
     const lastOp = logs.at(-1);
     if (!lastOp) {
       throw new Error("No PLC operations found for this DID");
+    }
+    if (lastOp.operation.type === "plc_tombstone") {
+      throw new Error("DID has been tombstoned");
     }
     return { lastOperation: normalizeOp(lastOp.operation), base: lastOp };
   }
@@ -108,7 +111,9 @@ export class PlcOps {
       } else if (match.type === "secp256k1") {
         keypair = await Secp256k1PrivateKey.importRaw(privateKeyBytes);
       } else {
-        throw new Error(`Unsupported key type: ${match.type}`);
+        throw new Error(
+          `Unsupported key type: ${(match as { type: string }).type}`,
+        );
       }
     } else {
       throw new Error(

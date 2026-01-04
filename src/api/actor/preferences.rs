@@ -70,7 +70,8 @@ pub async fn get_preferences(
     let prefs = match prefs_result {
         Ok(rows) => rows,
         Err(_) => {
-            return ApiError::InternalError(Some("Failed to fetch preferences".into())).into_response();
+            return ApiError::InternalError(Some("Failed to fetch preferences".into()))
+                .into_response();
         }
     };
     let mut personal_details_pref: Option<Value> = None;
@@ -192,7 +193,8 @@ pub async fn put_preferences(
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(_) => {
-            return ApiError::InternalError(Some("Failed to start transaction".into())).into_response();
+            return ApiError::InternalError(Some("Failed to start transaction".into()))
+                .into_response();
         }
     };
     let delete_result = sqlx::query!(
@@ -225,11 +227,13 @@ pub async fn put_preferences(
         .await;
         if insert_result.is_err() {
             let _ = tx.rollback().await;
-            return ApiError::InternalError(Some("Failed to save preference".into())).into_response();
+            return ApiError::InternalError(Some("Failed to save preference".into()))
+                .into_response();
         }
     }
     if tx.commit().await.is_err() {
-        return ApiError::InternalError(Some("Failed to commit transaction".into())).into_response();
+        return ApiError::InternalError(Some("Failed to commit transaction".into()))
+            .into_response();
     }
     StatusCode::OK.into_response()
 }

@@ -69,9 +69,12 @@ pub async fn reauth_password(
     auth: BearerAuth,
     Json(input): Json<PasswordReauthInput>,
 ) -> Response {
-    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", &*&auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
+    let user = sqlx::query!(
+        "SELECT password_hash FROM users WHERE did = $1",
+        &*&auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
 
     let password_hash = match user {
         Ok(Some(row)) => row.password_hash,
@@ -138,7 +141,9 @@ pub async fn reauth_totp(
         .await
     {
         warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
-        return ApiError::RateLimitExceeded(Some("Too many verification attempts. Please try again in a few minutes.".into(),))
+        return ApiError::RateLimitExceeded(Some(
+            "Too many verification attempts. Please try again in a few minutes.".into(),
+        ))
         .into_response();
     }
 

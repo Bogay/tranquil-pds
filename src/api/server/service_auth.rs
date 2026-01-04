@@ -1,7 +1,7 @@
-use crate::types::Did;
 use crate::AccountStatus;
 use crate::api::error::ApiError;
 use crate::state::AppState;
+use crate::types::Did;
 use axum::{
     Json,
     extract::{Query, State},
@@ -165,8 +165,10 @@ pub async fn get_service_auth(
                 }
                 Err(e) => {
                     error!(error = ?e, "DB error fetching user key");
-                    return ApiError::AuthenticationFailed(Some("Failed to get signing key".into()))
-                        .into_response();
+                    return ApiError::AuthenticationFailed(Some(
+                        "Failed to get signing key".into(),
+                    ))
+                    .into_response();
                 }
             }
         }

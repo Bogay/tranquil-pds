@@ -186,7 +186,7 @@ async fn proxy_handler(
 ) -> Response {
     // This layer is nested under /xrpc in an axum router so the extracted uri will look like /<method> and thus we can just strip the /
     let method = uri.path().trim_start_matches("/");
-    if is_protected_method(&method) {
+    if is_protected_method(method) {
         warn!(method = %method, "Attempted to proxy protected method");
         return ApiError::InvalidRequest(format!("Cannot proxy protected method: {}", method))
             .into_response();
@@ -226,7 +226,7 @@ async fn proxy_handler(
                     auth_user.is_oauth,
                     auth_user.scope.as_deref(),
                     &resolved.did,
-                    &method,
+                    method,
                 ) {
                     return e;
                 }
@@ -235,7 +235,7 @@ async fn proxy_handler(
                     match crate::auth::create_service_token(
                         &auth_user.did,
                         &resolved.did,
-                        &method,
+                        method,
                         &key_bytes,
                     ) {
                         Ok(new_token) => {

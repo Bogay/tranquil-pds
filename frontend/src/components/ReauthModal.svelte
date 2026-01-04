@@ -106,7 +106,7 @@
         return
       }
       const { options } = await api.reauthPasskeyStart(token)
-      const publicKeyOptions = prepareRequestOptions(options as WebAuthnRequestOptionsResponse)
+      const publicKeyOptions = prepareRequestOptions(options as unknown as WebAuthnRequestOptionsResponse)
       const credential = await navigator.credentials.get({
         publicKey: publicKeyOptions
       })

@@ -4,17 +4,23 @@ import type {
   OfflineInboundMigrationState,
   OfflineInboundStep,
   ServerDescription,
-} from "./types";
+} from "./types.ts";
 import {
   AtprotoClient,
   base64UrlEncode,
   createLocalClient,
   prepareWebAuthnCreationOptions,
-} from "./atproto-client";
-import { api } from "../api";
-import { type KeypairInfo, plcOps, type PrivateKey } from "./plc-ops";
-import { migrateBlobs as migrateBlobsUtil } from "./blob-migration";
+} from "./atproto-client.ts";
+import { api } from "../api.ts";
+import { type KeypairInfo, plcOps, type PrivateKey } from "./plc-ops.ts";
+import { migrateBlobs as migrateBlobsUtil } from "./blob-migration.ts";
 import { Secp256k1PrivateKeyExportable } from "@atcute/crypto";
+import {
+  unsafeAsAccessToken,
+  unsafeAsDid,
+  unsafeAsEmail,
+  unsafeAsHandle,
+} from "../types/branded.ts";
 
 const OFFLINE_STORAGE_KEY = "tranquil_offline_migration_state";
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -303,9 +309,9 @@ export function createOfflineInboundMigrationFlow() {
     const createResult = await api.createAccountWithServiceAuth(
       serviceAuthToken,
       {
-        did: state.userDid,
-        handle: fullHandle,
-        email: state.targetEmail,
+        did: unsafeAsDid(state.userDid),
+        handle: unsafeAsHandle(fullHandle),
+        email: unsafeAsEmail(state.targetEmail),
         password: state.targetPassword,
         inviteCode: state.inviteCode || undefined,
       },
@@ -326,9 +332,9 @@ export function createOfflineInboundMigrationFlow() {
       : `${state.targetHandle}.${serverInfo.availableUserDomains[0]}`;
 
     const createResult = await api.createPasskeyAccount({
-      did: state.userDid,
-      handle: fullHandle,
-      email: state.targetEmail,
+      did: unsafeAsDid(state.userDid),
+      handle: unsafeAsHandle(fullHandle),
+      email: unsafeAsEmail(state.targetEmail),
       inviteCode: state.inviteCode || undefined,
     }, serviceAuthToken);
 
@@ -349,7 +355,7 @@ export function createOfflineInboundMigrationFlow() {
     const prevCid = base.cid;
 
     const credentials = await api.getRecommendedDidCredentials(
-      state.localAccessToken,
+      unsafeAsAccessToken(state.localAccessToken),
     );
 
     await plcOps.signPlcOperationWithCredentials(
@@ -374,7 +380,10 @@ export function createOfflineInboundMigrationFlow() {
     }
 
     setProgress({ currentOperation: "Importing repository..." });
-    await api.importRepo(state.localAccessToken, state.carFile);
+    await api.importRepo(
+      unsafeAsAccessToken(state.localAccessToken),
+      state.carFile,
+    );
     setProgress({ repoImported: true });
   }
 
@@ -384,7 +393,7 @@ export function createOfflineInboundMigrationFlow() {
     }
 
     const localClient = createLocalClient();
-    localClient.setAccessToken(state.localAccessToken);
+    localClient.setAccessToken(unsafeAsAccessToken(state.localAccessToken));
 
     if (state.oldPdsUrl) {
       setProgress({
@@ -436,7 +445,7 @@ export function createOfflineInboundMigrationFlow() {
     }
 
     setProgress({ currentOperation: "Activating account..." });
-    await api.activateAccount(state.localAccessToken);
+    await api.activateAccount(unsafeAsAccessToken(state.localAccessToken));
     setProgress({ activated: true });
   }
 
@@ -445,7 +454,7 @@ export function createOfflineInboundMigrationFlow() {
     setError(null);
 
     try {
-      await api.verifyMigrationEmail(token, state.targetEmail);
+      await api.verifyMigrationEmail(token, unsafeAsEmail(state.targetEmail));
 
       if (state.authMethod === "passkey") {
         setStep("passkey-setup");
@@ -474,7 +483,7 @@ export function createOfflineInboundMigrationFlow() {
   }
 
   async function resendEmailVerification(): Promise<void> {
-    await api.resendMigrationVerification(state.targetEmail);
+    await api.resendMigrationVerification(unsafeAsEmail(state.targetEmail));
   }
 
   let checkingEmailVerification = false;
@@ -518,7 +527,7 @@ export function createOfflineInboundMigrationFlow() {
     }
 
     return api.startPasskeyRegistrationForSetup(
-      state.userDid,
+      unsafeAsDid(state.userDid),
       state.passkeySetupToken,
     );
   }
@@ -560,7 +569,7 @@ export function createOfflineInboundMigrationFlow() {
     };
 
     const result = await api.completePasskeySetup(
-      state.userDid,
+      unsafeAsDid(state.userDid),
       state.passkeySetupToken,
       credentialData,
       passkeyName,

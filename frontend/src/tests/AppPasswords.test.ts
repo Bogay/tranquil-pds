@@ -10,7 +10,8 @@ import {
   setupAuthenticatedUser,
   setupFetchMock,
   setupUnauthenticatedUser,
-} from "./mocks";
+} from "./mocks.ts";
+import { unsafeAsISODateString } from "../lib/types/branded.ts";
 describe("AppPasswords", () => {
   beforeEach(() => {
     clearMocks();
@@ -81,11 +82,11 @@ describe("AppPasswords", () => {
     const testPasswords = [
       mockData.appPassword({
         name: "Graysky",
-        createdAt: "2024-01-15T10:00:00Z",
+        createdAt: unsafeAsISODateString("2024-01-15T10:00:00Z"),
       }),
       mockData.appPassword({
         name: "Skeets",
-        createdAt: "2024-02-20T15:30:00Z",
+        createdAt: unsafeAsISODateString("2024-02-20T15:30:00Z"),
       }),
     ];
     beforeEach(() => {

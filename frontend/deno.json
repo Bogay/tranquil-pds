@@ -3,6 +3,7 @@
     "dev": "deno run -A npm:vite",
     "build": "deno run -A npm:vite build",
     "preview": "deno run -A npm:vite preview",
+    "check": "deno run -A npm:svelte-check --tsconfig ./tsconfig.json",
     "test": "deno run -A npm:vitest",
     "test:run": "deno run -A npm:vitest run",
     "test:watch": "deno run -A npm:vitest watch",

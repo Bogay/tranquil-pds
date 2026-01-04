@@ -1,12 +1,12 @@
 import {
-  routes,
+  buildUrl,
+  isValidRoute,
+  parseRouteParams,
   type Route,
   type RouteParams,
+  routes,
   type RoutesWithParams,
-  buildUrl,
-  parseRouteParams,
-  isValidRoute,
-} from "./types/routes";
+} from "./types/routes.ts";
 
 const APP_BASE = "/app";
 
@@ -120,7 +120,11 @@ export function getRouteParams<R extends RoutesWithParams>(
 }
 
 export type RouteMatch =
-  | { readonly matched: true; readonly route: Route; readonly params: URLSearchParams }
+  | {
+    readonly matched: true;
+    readonly route: Route;
+    readonly params: URLSearchParams;
+  }
   | { readonly matched: false };
 
 export function match(): RouteMatch {
@@ -135,4 +139,4 @@ export function match(): RouteMatch {
   return { matched: false };
 }
 
-export { routes, type Route, type RouteParams, type RoutesWithParams };
+export { type Route, type RouteParams, routes, type RoutesWithParams };

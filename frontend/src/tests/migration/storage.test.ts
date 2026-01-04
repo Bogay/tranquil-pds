@@ -8,11 +8,42 @@ import {
   setError,
   updateProgress,
   updateStep,
-} from "../../lib/migration/storage";
+} from "../../lib/migration/storage.ts";
 import type {
   InboundMigrationState,
-  OutboundMigrationState,
-} from "../../lib/migration/types";
+  MigrationState,
+} from "../../lib/migration/types.ts";
+
+interface OutboundMigrationState {
+  direction: "outbound";
+  step: string;
+  localDid: string;
+  localHandle: string;
+  targetPdsUrl: string;
+  targetPdsDid: string;
+  targetHandle: string;
+  targetEmail: string;
+  targetPassword: string;
+  inviteCode: string;
+  targetAccessToken: string | null;
+  targetRefreshToken: string | null;
+  serviceAuthToken: string | null;
+  plcToken: string;
+  progress: {
+    repoExported: boolean;
+    repoImported: boolean;
+    blobsTotal: number;
+    blobsMigrated: number;
+    blobsFailed: string[];
+    prefsMigrated: boolean;
+    plcSigned: boolean;
+    activated: boolean;
+    deactivated: boolean;
+    currentOperation: string;
+  };
+  error: string | null;
+  targetServerInfo: unknown;
+}
 
 const STORAGE_KEY = "tranquil_migration_state";
 const DPOP_KEY_STORAGE = "migration_dpop_key";
@@ -140,7 +171,7 @@ describe("migration/storage", () => {
         step: "review",
       });
 
-      saveMigrationState(state);
+      saveMigrationState(state as unknown as MigrationState);
 
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
       expect(stored.version).toBe(1);

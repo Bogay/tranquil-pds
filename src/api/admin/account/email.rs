@@ -74,7 +74,11 @@ pub async fn send_email(
     let result = crate::comms::enqueue_comms(&state.db, item).await;
     match result {
         Ok(_) => {
-            tracing::info!("Admin email queued for {} ({})", handle, input.recipient_did);
+            tracing::info!(
+                "Admin email queued for {} ({})",
+                handle,
+                input.recipient_did
+            );
             (StatusCode::OK, Json(SendEmailOutput { sent: true })).into_response()
         }
         Err(e) => {

@@ -122,6 +122,7 @@ pub struct CommitFrameBuilder {
 }
 
 impl CommitFrameBuilder {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         seq: i64,
         did: String,
@@ -134,10 +135,9 @@ impl CommitFrameBuilder {
     ) -> Result<Self, CommitFrameError> {
         let commit_cid = Cid::from_str(commit_cid_str)
             .map_err(|_| CommitFrameError::InvalidCommitCid(commit_cid_str.to_string()))?;
-        let prev_cid = prev_cid_str
-            .map(|s| Cid::from_str(s))
-            .transpose()
-            .map_err(|_| CommitFrameError::InvalidCommitCid(prev_cid_str.unwrap_or("").to_string()))?;
+        let prev_cid = prev_cid_str.map(Cid::from_str).transpose().map_err(|_| {
+            CommitFrameError::InvalidCommitCid(prev_cid_str.unwrap_or("").to_string())
+        })?;
         let blob_cids: Vec<Cid> = blob_strs
             .iter()
             .filter_map(|s| Cid::from_str(s).ok())

@@ -88,6 +88,8 @@ frontend-dev:
     . ~/.deno/env && cd frontend && deno task dev
 frontend-build:
     . ~/.deno/env && cd frontend && deno task build
+frontend-check:
+    . ~/.deno/env && cd frontend && deno task check
 frontend-clean:
     rm -rf frontend/dist frontend/node_modules
 

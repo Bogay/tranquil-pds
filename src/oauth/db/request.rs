@@ -1,4 +1,6 @@
-use super::super::{AuthFlowState, AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData};
+use super::super::{
+    AuthFlowState, AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData,
+};
 use super::helpers::{from_json, to_json};
 use sqlx::PgPool;
 

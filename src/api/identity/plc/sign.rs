@@ -120,7 +120,8 @@ pub async fn sign_plc_operation(
     {
         Ok(Some(row)) => row,
         _ => {
-            return ApiError::InternalError(Some("User signing key not found".into())).into_response();
+            return ApiError::InternalError(Some("User signing key not found".into()))
+                .into_response();
         }
     };
     let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)

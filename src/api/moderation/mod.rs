@@ -111,8 +111,10 @@ async fn proxy_to_report_service(
                 }
                 Err(e) => {
                     error!(error = ?e, "DB error fetching user key for report");
-                    return ApiError::AuthenticationFailed(Some("Failed to get signing key".into()))
-                        .into_response();
+                    return ApiError::AuthenticationFailed(Some(
+                        "Failed to get signing key".into(),
+                    ))
+                    .into_response();
                 }
             }
         }

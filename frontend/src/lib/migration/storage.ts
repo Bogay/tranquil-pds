@@ -2,8 +2,8 @@ import type {
   MigrationDirection,
   MigrationState,
   StoredMigrationState,
-} from "./types";
-import { clearDPoPKey } from "./atproto-client";
+} from "./types.ts";
+import { clearDPoPKey } from "./atproto-client.ts";
 
 const STORAGE_KEY = "tranquil_migration_state";
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -12,22 +12,16 @@ export function saveMigrationState(state: MigrationState): void {
   const storedState: StoredMigrationState = {
     version: 1,
     direction: state.direction,
-    step: state.direction === "inbound" ? state.step : state.step,
+    step: state.step,
     startedAt: new Date().toISOString(),
-    sourcePdsUrl: state.direction === "inbound"
-      ? state.sourcePdsUrl
-      : globalThis.location.origin,
-    targetPdsUrl: state.direction === "inbound"
-      ? globalThis.location.origin
-      : state.targetPdsUrl,
-    sourceDid: state.direction === "inbound" ? state.sourceDid : "",
-    sourceHandle: state.direction === "inbound" ? state.sourceHandle : "",
+    sourcePdsUrl: state.sourcePdsUrl,
+    targetPdsUrl: globalThis.location.origin,
+    sourceDid: state.sourceDid,
+    sourceHandle: state.sourceHandle,
     targetHandle: state.targetHandle,
     targetEmail: state.targetEmail,
-    authMethod: state.direction === "inbound" ? state.authMethod : undefined,
-    passkeySetupToken: state.direction === "inbound"
-      ? state.passkeySetupToken ?? undefined
-      : undefined,
+    authMethod: state.authMethod,
+    passkeySetupToken: state.passkeySetupToken ?? undefined,
     progress: {
       repoExported: state.progress.repoExported,
       repoImported: state.progress.repoImported,

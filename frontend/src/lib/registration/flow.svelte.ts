@@ -1,10 +1,15 @@
-import { api, ApiError } from "../api";
-import { setSession } from "../auth.svelte";
+import { api, ApiError } from "../api.ts";
+import { setSession } from "../auth.svelte.ts";
 import {
   createServiceJwt,
   generateDidDocument,
   generateKeypair,
-} from "../crypto";
+} from "../crypto.ts";
+import {
+  unsafeAsDid,
+  unsafeAsEmail,
+  unsafeAsHandle,
+} from "../types/branded.ts";
 import type {
   AccountResult,
   ExternalDidWebState,
@@ -12,7 +17,7 @@ import type {
   RegistrationMode,
   RegistrationStep,
   SessionState,
-} from "./types";
+} from "./types.ts";
 
 export interface RegistrationFlowState {
   mode: RegistrationMode;
@@ -100,7 +105,7 @@ export function createRegistrationFlow(
 
       if (keyMode === "reserved") {
         const result = await api.reserveSigningKey(
-          state.info.externalDid!.trim(),
+          unsafeAsDid(state.info.externalDid!.trim()),
         );
         state.externalDidWeb.reservedSigningKey = result.signingKey;
         publicKeyMultibase = result.signingKey.replace("did:key:", "");
@@ -207,12 +212,14 @@ export function createRegistrationFlow(
       }
 
       const result = await api.createPasskeyAccount({
-        handle: state.info.handle.trim(),
-        email: state.info.email?.trim() || undefined,
+        handle: unsafeAsHandle(state.info.handle.trim()),
+        email: state.info.email?.trim()
+          ? unsafeAsEmail(state.info.email.trim())
+          : undefined,
         inviteCode: state.info.inviteCode?.trim() || undefined,
         didType: state.info.didType,
         did: state.info.didType === "web-external"
-          ? state.info.externalDid!.trim()
+          ? unsafeAsDid(state.info.externalDid!.trim())
           : undefined,
         signingKey: state.info.didType === "web-external" &&
             state.externalDidWeb.keyMode === "reserved"

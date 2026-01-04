@@ -11,7 +11,7 @@ export interface Keypair {
 }
 
 export function generateKeypair(): Keypair {
-  const privateKey = secp.utils.randomPrivateKey();
+  const privateKey = secp.utils.randomSecretKey();
   const publicKey = secp.getPublicKey(privateKey, true);
 
   const multicodecKey = new Uint8Array(
@@ -35,7 +35,9 @@ function base64UrlEncode(data: Uint8Array | string): string {
   const bytes = typeof data === "string"
     ? new TextEncoder().encode(data)
     : data;
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join(
+    "",
+  );
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
 
@@ -67,8 +69,9 @@ export async function createServiceJwt(
   const msgBytes = new TextEncoder().encode(message);
   const hashBuffer = await crypto.subtle.digest("SHA-256", msgBytes);
   const msgHash = new Uint8Array(hashBuffer);
-  const signature = await secp.signAsync(msgHash, privateKey);
-  const sigBytes = signature.toCompactRawBytes();
+  const sigBytes = await secp.signAsync(msgHash, privateKey, {
+    prehash: false,
+  });
   const signatureEncoded = base64UrlEncode(sigBytes);
 
   return `${message}.${signatureEncoded}`;

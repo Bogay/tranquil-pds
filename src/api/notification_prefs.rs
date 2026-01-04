@@ -38,9 +38,8 @@ pub async fn get_notification_prefs(State(state): State<AppState>, headers: Head
             return ApiError::AuthenticationFailed(None).into_response();
         }
     };
-    let row =
-        match sqlx::query(
-            r#"
+    let row = match sqlx::query(
+        r#"
         SELECT
             email,
             preferred_comms_channel::text as channel,
@@ -53,16 +52,16 @@ pub async fn get_notification_prefs(State(state): State<AppState>, headers: Head
         FROM users
         WHERE did = $1
         "#,
-        )
-        .bind(&user.did)
-        .fetch_one(&state.db)
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
-            }
-        };
+    )
+    .bind(&user.did)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
+        }
+    };
     let email: String = row.get("email");
     let channel: String = row.get("channel");
     let discord_id: Option<String> = row.get("discord_id");
@@ -125,13 +124,13 @@ pub async fn get_notification_history(
         {
             Ok(id) => id,
             Err(e) => {
-                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
+                return ApiError::InternalError(Some(format!("Database error: {}", e)))
+                    .into_response();
             }
         };
 
-    let rows =
-        match sqlx::query!(
-            r#"
+    let rows = match sqlx::query!(
+        r#"
         SELECT
             created_at,
             channel as "channel: String",
@@ -144,16 +143,16 @@ pub async fn get_notification_history(
         ORDER BY created_at DESC
         LIMIT 50
         "#,
-            user_id
-        )
-        .fetch_all(&state.db)
-        .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
-            }
-        };
+        user_id
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
+        }
+    };
 
     let sensitive_types = [
         "email_verification",
@@ -270,19 +269,18 @@ pub async fn update_notification_prefs(
         }
     };
 
-    let user_row =
-        match sqlx::query!(
-            "SELECT id, handle, email FROM users WHERE did = $1",
-            &user.did
-        )
-        .fetch_one(&state.db)
-        .await
-        {
-            Ok(row) => row,
-            Err(e) => {
-                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
-            }
-        };
+    let user_row = match sqlx::query!(
+        "SELECT id, handle, email FROM users WHERE did = $1",
+        &user.did
+    )
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
+        }
+    };
 
     let user_id = user_row.id;
     let handle = user_row.handle;

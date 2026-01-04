@@ -196,7 +196,7 @@ pub async fn get_repo_status(
         Ok(Some(a)) => a,
         Ok(None) => {
             return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
-                .into_response()
+                .into_response();
         }
         Err(e) => {
             error!("DB error in get_repo_status: {:?}", e);

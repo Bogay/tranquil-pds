@@ -57,10 +57,8 @@ pub async fn get_head(
     };
     match account.repo_root_cid {
         Some(root) => (StatusCode::OK, Json(GetHeadOutput { root })).into_response(),
-        None => {
-            ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did)))
-                .into_response()
-        }
+        None => ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did)))
+            .into_response(),
     }
 }
 

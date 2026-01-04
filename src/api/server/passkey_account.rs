@@ -102,7 +102,9 @@ pub async fn create_passkey_account(
         .await
     {
         warn!(ip = %client_ip, "Account creation rate limit exceeded");
-        return ApiError::RateLimitExceeded(Some("Too many account creation attempts. Please try again later.".into(),))
+        return ApiError::RateLimitExceeded(Some(
+            "Too many account creation attempts. Please try again later.".into(),
+        ))
         .into_response();
     }
 
@@ -352,8 +354,10 @@ pub async fn create_passkey_account(
                     Ok(r) => r,
                     Err(e) => {
                         error!("Error creating PLC genesis operation: {:?}", e);
-                        return ApiError::InternalError(Some("Failed to create PLC operation".into()))
-                            .into_response();
+                        return ApiError::InternalError(Some(
+                            "Failed to create PLC operation".into(),
+                        ))
+                        .into_response();
                     }
                 };
 
@@ -759,18 +763,17 @@ pub async fn complete_passkey_setup(
         }
     };
 
-    let reg_state = match crate::auth::webauthn::load_registration_state(&state.db, &input.did)
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            return ApiError::NoChallengeInProgress.into_response();
-        }
-        Err(e) => {
-            error!("Error loading registration state: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let reg_state =
+        match crate::auth::webauthn::load_registration_state(&state.db, &input.did).await {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return ApiError::NoChallengeInProgress.into_response();
+            }
+            Err(e) => {
+                error!("Error loading registration state: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
 
     let credential: webauthn_rs::prelude::RegisterPublicKeyCredential =
         match serde_json::from_value(input.passkey_credential) {

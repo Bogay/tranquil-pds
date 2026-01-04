@@ -38,7 +38,7 @@ pub async fn resolve_handle(
     }
     let cache_key = format!("handle:{}", handle);
     if let Some(did) = state.cache.get(&cache_key).await {
-        return DidResponse::new(did).into_response();
+        return DidResponse::response(did).into_response();
     }
     let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
         .fetch_optional(&state.db)
@@ -49,7 +49,7 @@ pub async fn resolve_handle(
                 .cache
                 .set(&cache_key, &row.did, std::time::Duration::from_secs(300))
                 .await;
-            DidResponse::new(row.did).into_response()
+            DidResponse::response(row.did).into_response()
         }
         Ok(None) => match crate::handle::resolve_handle(handle).await {
             Ok(did) => {
@@ -57,7 +57,7 @@ pub async fn resolve_handle(
                     .cache
                     .set(&cache_key, &did, std::time::Duration::from_secs(300))
                     .await;
-                DidResponse::new(did).into_response()
+                DidResponse::response(did).into_response()
             }
             Err(_) => ApiError::HandleNotFound.into_response(),
         },
@@ -627,7 +627,9 @@ pub async fn update_handle(
         .check_rate_limit(crate::state::RateLimitKind::HandleUpdate, &did)
         .await
     {
-        return ApiError::RateLimitExceeded(Some("Too many handle updates. Try again later.".into(),))
+        return ApiError::RateLimitExceeded(Some(
+            "Too many handle updates. Try again later.".into(),
+        ))
         .into_response();
     }
     if !state
@@ -663,8 +665,10 @@ pub async fn update_handle(
                 .into_response();
         }
         if segment.starts_with('-') || segment.ends_with('-') {
-            return ApiError::InvalidHandle(Some("Handle segment cannot start or end with hyphen".into(),))
-        .into_response();
+            return ApiError::InvalidHandle(Some(
+                "Handle segment cannot start or end with hyphen".into(),
+            ))
+            .into_response();
         }
     }
     if crate::moderation::has_explicit_slur(&new_handle) {
@@ -695,8 +699,10 @@ pub async fn update_handle(
             return EmptyResponse::ok().into_response();
         }
         if short_part.contains('.') {
-            return ApiError::InvalidHandle(Some("Nested subdomains are not allowed. Use a simple handle without dots.".into(),))
-        .into_response();
+            return ApiError::InvalidHandle(Some(
+                "Nested subdomains are not allowed. Use a simple handle without dots.".into(),
+            ))
+            .into_response();
         }
         if short_part.len() < 3 {
             return ApiError::InvalidHandle(Some("Handle too short".into())).into_response();
@@ -721,9 +727,10 @@ pub async fn update_handle(
                 return ApiError::HandleNotAvailable(None).into_response();
             }
             Err(crate::handle::HandleResolutionError::DidMismatch { expected, actual }) => {
-                return ApiError::HandleNotAvailable(Some(
-                    format!("Handle points to different DID. Expected {}, got {}", expected, actual),
-                ))
+                return ApiError::HandleNotAvailable(Some(format!(
+                    "Handle points to different DID. Expected {}, got {}",
+                    expected, actual
+                )))
                 .into_response();
             }
             Err(e) => {

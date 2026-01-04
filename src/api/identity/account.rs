@@ -12,13 +12,13 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use serde_json::json;
 use bcrypt::{DEFAULT_COST, hash};
 use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::{mst::Mst, storage::BlockStore};
 use k256::{SecretKey, ecdsa::SigningKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
@@ -90,7 +90,9 @@ pub async fn create_account(
         .await
     {
         warn!(ip = %client_ip, "Account creation rate limit exceeded");
-        return ApiError::RateLimitExceeded(Some("Too many account creation attempts. Please try again later.".into(),))
+        return ApiError::RateLimitExceeded(Some(
+            "Too many account creation attempts. Please try again later.".into(),
+        ))
         .into_response();
     }
 

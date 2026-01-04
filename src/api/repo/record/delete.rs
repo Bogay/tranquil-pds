@@ -97,8 +97,10 @@ pub async fn delete_record(
         let expected_cid = Cid::from_str(swap_record_str).ok();
         let actual_cid = mst.get(&key).await.ok().flatten();
         if expected_cid != actual_cid {
-            return ApiError::InvalidSwap(Some("Record has been modified or does not exist".into()))
-                .into_response();
+            return ApiError::InvalidSwap(Some(
+                "Record has been modified or does not exist".into(),
+            ))
+            .into_response();
         }
     }
     let prev_record_cid = mst.get(&key).await.ok().flatten();

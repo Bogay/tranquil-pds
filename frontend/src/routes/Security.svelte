@@ -303,7 +303,7 @@
     addingPasskey = true
     try {
       const { options } = await api.startPasskeyRegistration(session.accessJwt, newPasskeyName || undefined)
-      const publicKeyOptions = prepareCreationOptions(options as WebAuthnCreationOptionsResponse)
+      const publicKeyOptions = prepareCreationOptions(options as unknown as WebAuthnCreationOptionsResponse)
       const credential = await navigator.credentials.create({
         publicKey: publicKeyOptions
       })

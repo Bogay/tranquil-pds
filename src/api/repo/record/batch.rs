@@ -205,13 +205,14 @@ pub async fn apply_writes(
         }
     }
 
-    let user_id: uuid::Uuid = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(id)) => id,
-        _ => return ApiError::InternalError(Some("User not found".into())).into_response(),
-    };
+    let user_id: uuid::Uuid =
+        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(id)) => id,
+            _ => return ApiError::InternalError(Some("User not found".into())).into_response(),
+        };
     let root_cid_str: String = match sqlx::query_scalar!(
         "SELECT repo_root_cid FROM repos WHERE user_id = $1",
         user_id
@@ -225,7 +226,7 @@ pub async fn apply_writes(
     let current_root_cid = match Cid::from_str(&root_cid_str) {
         Ok(c) => c,
         Err(_) => {
-            return ApiError::InternalError(Some("Invalid repo root CID".into())).into_response()
+            return ApiError::InternalError(Some("Invalid repo root CID".into())).into_response();
         }
     };
     if let Some(swap_commit) = &input.swap_commit
@@ -281,7 +282,7 @@ pub async fn apply_writes(
                     Ok(c) => c,
                     Err(_) => {
                         return ApiError::InternalError(Some("Failed to store record".into()))
-                            .into_response()
+                            .into_response();
                     }
                 };
                 let key = format!("{}/{}", collection, rkey);
@@ -290,7 +291,7 @@ pub async fn apply_writes(
                     Ok(m) => m,
                     Err(_) => {
                         return ApiError::InternalError(Some("Failed to add to MST".into()))
-                            .into_response()
+                            .into_response();
                     }
                 };
                 let uri = AtUri::from_parts(&did, collection, &rkey);
@@ -335,7 +336,7 @@ pub async fn apply_writes(
                     Ok(c) => c,
                     Err(_) => {
                         return ApiError::InternalError(Some("Failed to store record".into()))
-                            .into_response()
+                            .into_response();
                     }
                 };
                 let key = format!("{}/{}", collection, rkey);
@@ -345,7 +346,7 @@ pub async fn apply_writes(
                     Ok(m) => m,
                     Err(_) => {
                         return ApiError::InternalError(Some("Failed to update MST".into()))
-                            .into_response()
+                            .into_response();
                     }
                 };
                 let uri = AtUri::from_parts(&did, collection, rkey);
@@ -369,7 +370,7 @@ pub async fn apply_writes(
                     Ok(m) => m,
                     Err(_) => {
                         return ApiError::InternalError(Some("Failed to delete from MST".into()))
-                            .into_response()
+                            .into_response();
                     }
                 };
                 results.push(WriteResult::DeleteResult {});
@@ -383,7 +384,9 @@ pub async fn apply_writes(
     }
     let new_mst_root = match mst.persist().await {
         Ok(c) => c,
-        Err(_) => return ApiError::InternalError(Some("Failed to persist MST".into())).into_response(),
+        Err(_) => {
+            return ApiError::InternalError(Some("Failed to persist MST".into())).into_response();
+        }
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
     for key in &modified_keys {
@@ -432,7 +435,8 @@ pub async fn apply_writes(
         Ok(res) => res,
         Err(e) => {
             error!("Commit failed: {}", e);
-            return ApiError::InternalError(Some("Failed to commit changes".into())).into_response();
+            return ApiError::InternalError(Some("Failed to commit changes".into()))
+                .into_response();
         }
     };
 

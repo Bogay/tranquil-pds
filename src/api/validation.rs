@@ -80,7 +80,11 @@ impl fmt::Display for EmailValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "Email cannot be empty"),
-            Self::TooLong => write!(f, "Email exceeds maximum length of {} characters", MAX_EMAIL_LENGTH),
+            Self::TooLong => write!(
+                f,
+                "Email exceeds maximum length of {} characters",
+                MAX_EMAIL_LENGTH
+            ),
             Self::MissingAtSign => write!(f, "Email must contain @"),
             Self::EmptyLocalPart => write!(f, "Email local part cannot be empty"),
             Self::LocalPartTooLong => write!(f, "Email local part exceeds maximum length"),
@@ -115,11 +119,17 @@ impl ValidatedEmail {
     }
 
     pub fn local_part(&self) -> &str {
-        self.0.rsplitn(2, '@').nth(1).unwrap_or("")
+        self.0
+            .rsplit_once('@')
+            .map(|(local, _)| local)
+            .unwrap_or("")
     }
 
     pub fn domain(&self) -> &str {
-        self.0.rsplitn(2, '@').next().unwrap_or("")
+        self.0
+            .rsplit_once('@')
+            .map(|(_, domain)| domain)
+            .unwrap_or("")
     }
 }
 

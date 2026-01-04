@@ -1,11 +1,11 @@
-import { render, type RenderResult } from "@testing-library/svelte";
+import { render } from "@testing-library/svelte";
 import { tick } from "svelte";
 import type { ComponentType } from "svelte";
 
-export async function renderAndWait<T extends ComponentType>(
-  component: T,
+export async function renderAndWait(
+  component: ComponentType,
   options?: Parameters<typeof render>[1],
-): Promise<RenderResult<T>> {
+) {
   const result = render(component, options);
   await tick();
   await new Promise((resolve) => setTimeout(resolve, 0));

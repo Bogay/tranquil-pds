@@ -101,10 +101,14 @@ impl TokenRequest {
         let grant = match self.grant_type {
             GrantType::AuthorizationCode => {
                 let code = self.code.ok_or_else(|| {
-                    OAuthError::InvalidRequest("code is required for authorization_code grant".to_string())
+                    OAuthError::InvalidRequest(
+                        "code is required for authorization_code grant".to_string(),
+                    )
                 })?;
                 let code_verifier = self.code_verifier.ok_or_else(|| {
-                    OAuthError::InvalidRequest("code_verifier is required for authorization_code grant".to_string())
+                    OAuthError::InvalidRequest(
+                        "code_verifier is required for authorization_code grant".to_string(),
+                    )
                 })?;
                 TokenGrant::AuthorizationCode {
                     code,
@@ -114,7 +118,9 @@ impl TokenRequest {
             }
             GrantType::RefreshToken => {
                 let refresh_token = self.refresh_token.ok_or_else(|| {
-                    OAuthError::InvalidRequest("refresh_token is required for refresh_token grant".to_string())
+                    OAuthError::InvalidRequest(
+                        "refresh_token is required for refresh_token grant".to_string(),
+                    )
                 })?;
                 TokenGrant::RefreshToken { refresh_token }
             }

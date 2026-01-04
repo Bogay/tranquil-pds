@@ -14,7 +14,7 @@ import type {
   ServerDescription,
   Session,
   StartPasskeyRegistrationResponse,
-} from "./types";
+} from "./types.ts";
 
 function apiLog(
   method: string,
@@ -101,7 +101,7 @@ export class AtprotoClient {
       let requestBody: BodyInit | undefined;
       if (rawBody) {
         headers["Content-Type"] = contentType ?? "application/octet-stream";
-        requestBody = rawBody;
+        requestBody = rawBody as BodyInit;
       } else if (body) {
         headers["Content-Type"] = "application/json";
         requestBody = JSON.stringify(body);
@@ -231,7 +231,9 @@ export class AtprotoClient {
     did: string,
     cid: string,
   ): Promise<{ data: Uint8Array; contentType: string }> {
-    const url = `${this.baseUrl}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(did)}&cid=${encodeURIComponent(cid)}`;
+    const url = `${this.baseUrl}/xrpc/com.atproto.sync.getBlob?did=${
+      encodeURIComponent(did)
+    }&cid=${encodeURIComponent(cid)}`;
     const headers: Record<string, string> = {};
     if (this.accessToken) {
       headers["Authorization"] = `Bearer ${this.accessToken}`;
@@ -244,7 +246,8 @@ export class AtprotoClient {
       }));
       throw new Error(err.message || err.error || res.statusText);
     }
-    const contentType = res.headers.get("content-type") || "application/octet-stream";
+    const contentType = res.headers.get("content-type") ||
+      "application/octet-stream";
     const data = new Uint8Array(await res.arrayBuffer());
     return { data, contentType };
   }
@@ -600,7 +603,9 @@ export async function generatePKCE(): Promise<{
 
 export function base64UrlEncode(buffer: Uint8Array | ArrayBuffer): string {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join(
+    "",
+  );
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
     /=+$/,
     "",
@@ -632,7 +637,7 @@ export function prepareWebAuthnCreationOptions(
           id: base64UrlDecode(cred.id as string),
         }),
       ),
-  } as PublicKeyCredentialCreationOptions;
+  } as unknown as PublicKeyCredentialCreationOptions;
 }
 
 async function computeAccessTokenHash(accessToken: string): Promise<string> {

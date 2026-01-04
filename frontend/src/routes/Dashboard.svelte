@@ -80,7 +80,11 @@
   $effect(() => {
     if (dropdownOpen) {
       document.addEventListener('click', closeDropdown)
-      return () => document.removeEventListener('click', closeDropdown)
+    }
+    return () => {
+      if (dropdownOpen) {
+        document.removeEventListener('click', closeDropdown)
+      }
     }
   })
 </script>

@@ -28,9 +28,12 @@ pub struct CreateTotpSecretResponse {
 }
 
 pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let existing = sqlx::query_scalar!("SELECT verified FROM user_totp WHERE did = $1", &*&auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
+    let existing = sqlx::query_scalar!(
+        "SELECT verified FROM user_totp WHERE did = $1",
+        &*&auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
 
     if let Ok(Some(true)) = existing {
         return ApiError::TotpAlreadyEnabled.into_response();
@@ -58,7 +61,8 @@ pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth)
         Ok(qr) => qr,
         Err(e) => {
             error!("Failed to generate QR code: {:?}", e);
-            return ApiError::InternalError(Some("Failed to generate QR code".into())).into_response();
+            return ApiError::InternalError(Some("Failed to generate QR code".into()))
+                .into_response();
         }
     };
 
@@ -247,9 +251,12 @@ pub async fn disable_totp(
         return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", &*&auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
+    let user = sqlx::query!(
+        "SELECT password_hash FROM users WHERE did = $1",
+        &*&auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
 
     let password_hash = match user {
         Ok(Some(row)) => row.password_hash,
@@ -346,9 +353,12 @@ pub struct GetTotpStatusResponse {
 }
 
 pub async fn get_totp_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let totp_row = sqlx::query!("SELECT verified FROM user_totp WHERE did = $1", &*&auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
+    let totp_row = sqlx::query!(
+        "SELECT verified FROM user_totp WHERE did = $1",
+        &*&auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
 
     let enabled = match totp_row {
         Ok(Some(row)) => row.verified,
@@ -401,9 +411,12 @@ pub async fn regenerate_backup_codes(
         return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", &*&auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
+    let user = sqlx::query!(
+        "SELECT password_hash FROM users WHERE did = $1",
+        &*&auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
 
     let password_hash = match user {
         Ok(Some(row)) => row.password_hash,

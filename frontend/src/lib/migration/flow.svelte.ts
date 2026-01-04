@@ -5,7 +5,7 @@ import type {
   PasskeyAccountSetup,
   ServerDescription,
   StoredMigrationState,
-} from "./types";
+} from "./types.ts";
 import {
   AtprotoClient,
   clearDPoPKey,
@@ -21,14 +21,14 @@ import {
   loadDPoPKey,
   resolvePdsUrl,
   saveDPoPKey,
-} from "./atproto-client";
+} from "./atproto-client.ts";
 import {
   clearMigrationState,
   saveMigrationState,
   updateProgress,
   updateStep,
-} from "./storage";
-import { migrateBlobs as migrateBlobsUtil } from "./blob-migration";
+} from "./storage.ts";
+import { migrateBlobs as migrateBlobsUtil } from "./blob-migration.ts";
 
 function migrationLog(stage: string, data?: Record<string, unknown>) {
   const timestamp = new Date().toISOString();
@@ -94,7 +94,7 @@ export function createInboundMigrationFlow() {
     }
   }
 
-  function setError(error: string) {
+  function setError(error: string | null) {
     state.error = error;
     saveMigrationState(state);
   }

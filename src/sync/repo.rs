@@ -48,7 +48,7 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
     {
         Ok(cids) => cids,
         Err(invalid) => {
-            return ApiError::InvalidRequest(format!("Invalid CID: {}", invalid)).into_response()
+            return ApiError::InvalidRequest(format!("Invalid CID: {}", invalid)).into_response();
         }
     };
 
@@ -67,7 +67,8 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
     let missing_cids: Vec<String> = blocks
         .iter()
         .zip(&cids)
-        .filter_map(|(block_opt, cid)| block_opt.is_none().then(|| cid.to_string()))
+        .filter(|(block_opt, _)| block_opt.is_none())
+        .map(|(_, cid)| cid.to_string())
         .collect();
     if !missing_cids.is_empty() {
         return ApiError::InvalidRequest(format!(

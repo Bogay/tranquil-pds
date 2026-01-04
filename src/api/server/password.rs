@@ -340,7 +340,9 @@ pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth
     .await;
 
     match user {
-        Ok(Some(row)) => HasPasswordResponse::new(row.has_password.unwrap_or(false)).into_response(),
+        Ok(Some(row)) => {
+            HasPasswordResponse::response(row.has_password.unwrap_or(false)).into_response()
+        }
         Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);

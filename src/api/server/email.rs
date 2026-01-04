@@ -77,7 +77,7 @@ pub async fn request_email_update(
     }
 
     info!("Email update requested for user {}", user.id);
-    TokenRequiredResponse::new(token_required).into_response()
+    TokenRequiredResponse::response(token_required).into_response()
 }
 
 #[derive(Deserialize)]
@@ -375,7 +375,7 @@ pub async fn check_email_verified(
     .await;
 
     match user {
-        Ok(Some(row)) => VerifiedResponse::new(row.email_verified).into_response(),
+        Ok(Some(row)) => VerifiedResponse::response(row.email_verified).into_response(),
         Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error checking email verified: {:?}", e);

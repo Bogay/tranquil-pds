@@ -102,7 +102,9 @@ async fn test_import_rejects_car_for_different_user() {
     assert_eq!(import_res.status(), StatusCode::FORBIDDEN);
     let body: serde_json::Value = import_res.json().await.unwrap();
     assert!(
-        body["error"] == "InvalidRepo" || body["error"] == "InvalidRequest" || body["error"] == "DidMismatch",
+        body["error"] == "InvalidRepo"
+            || body["error"] == "InvalidRequest"
+            || body["error"] == "DidMismatch",
         "Expected InvalidRepo, DidMismatch, or InvalidRequest error, got: {:?}",
         body
     );

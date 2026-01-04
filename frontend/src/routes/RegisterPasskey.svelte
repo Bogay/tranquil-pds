@@ -12,7 +12,7 @@
   import {
     prepareCreationOptions,
     serializeAttestationResponse,
-    type WebAuthnCreationOptionsResponse,
+    type PublicKeyCredentialCreationOptionsJSON,
   } from '../lib/webauthn'
 
   let serverInfo = $state<{
@@ -126,7 +126,7 @@
         passkeyName || undefined
       )
 
-      const publicKeyOptions = prepareCreationOptions(options as WebAuthnCreationOptionsResponse)
+      const publicKeyOptions = prepareCreationOptions({ publicKey: options as unknown as PublicKeyCredentialCreationOptionsJSON })
       const credential = await navigator.credentials.create({
         publicKey: publicKeyOptions
       })

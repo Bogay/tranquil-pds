@@ -249,8 +249,15 @@ pub struct Jwks {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthFlowState {
     Pending,
-    Authenticated { did: String, device_id: Option<String> },
-    Authorized { did: String, device_id: Option<String>, code: String },
+    Authenticated {
+        did: String,
+        device_id: Option<String>,
+    },
+    Authorized {
+        did: String,
+        device_id: Option<String>,
+        code: String,
+    },
     Expired,
 }
 
@@ -324,7 +331,12 @@ impl std::fmt::Display for AuthFlowState {
             AuthFlowState::Pending => write!(f, "pending"),
             AuthFlowState::Authenticated { did, .. } => write!(f, "authenticated ({})", did),
             AuthFlowState::Authorized { did, code, .. } => {
-                write!(f, "authorized ({}, code={}...)", did, &code[..8.min(code.len())])
+                write!(
+                    f,
+                    "authorized ({}, code={}...)",
+                    did,
+                    &code[..8.min(code.len())]
+                )
             }
             AuthFlowState::Expired => write!(f, "expired"),
         }
@@ -334,8 +346,12 @@ impl std::fmt::Display for AuthFlowState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshTokenState {
     Valid,
-    Used { at: chrono::DateTime<chrono::Utc> },
-    InGracePeriod { rotated_at: chrono::DateTime<chrono::Utc> },
+    Used {
+        at: chrono::DateTime<chrono::Utc>,
+    },
+    InGracePeriod {
+        rotated_at: chrono::DateTime<chrono::Utc>,
+    },
     Expired,
     Revoked,
 }

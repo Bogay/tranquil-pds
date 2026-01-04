@@ -1,90 +1,82 @@
-import { ok, err, type Result } from './types/result'
+import { err, ok, type Result } from "./types/result.ts";
 import type {
-  Did,
-  Handle,
   AccessToken,
-  RefreshToken,
-  Cid,
-  Rkey,
-  AtUri,
-  Nsid,
-  ISODateString,
+  Did,
   EmailAddress,
-  InviteCode as InviteCodeBrand,
-} from './types/branded'
+  Handle,
+  Nsid,
+  RefreshToken,
+  Rkey,
+} from "./types/branded.ts";
 import {
-  unsafeAsDid,
-  unsafeAsHandle,
   unsafeAsAccessToken,
-  unsafeAsRefreshToken,
-  unsafeAsCid,
-  unsafeAsISODate,
+  unsafeAsDid,
   unsafeAsEmail,
-  unsafeAsInviteCode,
-} from './types/branded'
+  unsafeAsHandle,
+  unsafeAsISODate,
+  unsafeAsRefreshToken,
+} from "./types/branded.ts";
 import type {
-  Session,
-  DidDocument,
-  AppPassword,
-  CreatedAppPassword,
-  InviteCodeInfo,
-  ServerDescription,
-  NotificationPrefs,
-  NotificationHistoryResponse,
-  ServerStats,
-  ServerConfig,
-  UploadBlobResponse,
-  ListSessionsResponse,
-  SearchAccountsResponse,
-  GetInviteCodesResponse,
   AccountInfo,
-  RepoDescription,
-  ListRecordsResponse,
-  RecordResponse,
-  CreateRecordResponse,
-  TotpStatus,
-  TotpSecret,
-  EnableTotpResponse,
-  RegenerateBackupCodesResponse,
-  ListPasskeysResponse,
-  StartPasskeyRegistrationResponse,
-  FinishPasskeyRegistrationResponse,
-  ListTrustedDevicesResponse,
-  ReauthStatus,
-  ReauthResponse,
-  ReauthPasskeyStartResponse,
-  ReserveSigningKeyResponse,
-  RecommendedDidCredentials,
-  PasskeyAccountCreateResponse,
-  CompletePasskeySetupResponse,
-  VerifyTokenResponse,
-  ListBackupsResponse,
-  CreateBackupResponse,
-  SetBackupEnabledResponse,
-  EmailUpdateResponse,
-  LegacyLoginPreference,
-  UpdateLegacyLoginResponse,
-  UpdateLocaleResponse,
-  PasswordStatus,
-  SuccessResponse,
-  CheckEmailVerifiedResponse,
-  VerifyMigrationEmailResponse,
-  ResendMigrationVerificationResponse,
-  ListReposResponse,
-  VerificationChannel,
-  DidType,
   ApiErrorCode,
-  VerificationMethod as VerificationMethodType,
+  AppPassword,
+  CompletePasskeySetupResponse,
+  ConfirmSignupResult,
   CreateAccountParams,
   CreateAccountResult,
-  ConfirmSignupResult,
-} from './types/api'
+  CreateBackupResponse,
+  CreatedAppPassword,
+  CreateRecordResponse,
+  DidDocument,
+  DidType,
+  EmailUpdateResponse,
+  EnableTotpResponse,
+  FinishPasskeyRegistrationResponse,
+  GetInviteCodesResponse,
+  InviteCodeInfo,
+  LegacyLoginPreference,
+  ListBackupsResponse,
+  ListPasskeysResponse,
+  ListRecordsResponse,
+  ListReposResponse,
+  ListSessionsResponse,
+  ListTrustedDevicesResponse,
+  NotificationHistoryResponse,
+  NotificationPrefs,
+  PasskeyAccountCreateResponse,
+  PasswordStatus,
+  ReauthPasskeyStartResponse,
+  ReauthResponse,
+  ReauthStatus,
+  RecommendedDidCredentials,
+  RecordResponse,
+  RegenerateBackupCodesResponse,
+  RepoDescription,
+  ResendMigrationVerificationResponse,
+  ReserveSigningKeyResponse,
+  SearchAccountsResponse,
+  ServerConfig,
+  ServerDescription,
+  ServerStats,
+  Session,
+  SetBackupEnabledResponse,
+  StartPasskeyRegistrationResponse,
+  SuccessResponse,
+  TotpSecret,
+  TotpStatus,
+  UpdateLegacyLoginResponse,
+  UpdateLocaleResponse,
+  UploadBlobResponse,
+  VerificationChannel,
+  VerifyMigrationEmailResponse,
+  VerifyTokenResponse,
+} from "./types/api.ts";
 
-const API_BASE = '/xrpc'
+const API_BASE = "/xrpc";
 
 export class ApiError extends Error {
-  public did?: Did
-  public reauthMethods?: string[]
+  public did?: Did;
+  public reauthMethods?: string[];
   constructor(
     public status: number,
     public error: ApiErrorCode,
@@ -92,62 +84,63 @@ export class ApiError extends Error {
     did?: string,
     reauthMethods?: string[],
   ) {
-    super(message)
-    this.name = 'ApiError'
-    this.did = did ? unsafeAsDid(did) : undefined
-    this.reauthMethods = reauthMethods
+    super(message);
+    this.name = "ApiError";
+    this.did = did ? unsafeAsDid(did) : undefined;
+    this.reauthMethods = reauthMethods;
   }
 }
 
-let tokenRefreshCallback: (() => Promise<string | null>) | null = null
+let tokenRefreshCallback: (() => Promise<string | null>) | null = null;
 
 export function setTokenRefreshCallback(
   callback: () => Promise<string | null>,
 ) {
-  tokenRefreshCallback = callback
+  tokenRefreshCallback = callback;
 }
 
 interface XrpcOptions {
-  method?: 'GET' | 'POST'
-  params?: Record<string, string>
-  body?: unknown
-  token?: string
-  skipRetry?: boolean
+  method?: "GET" | "POST";
+  params?: Record<string, string>;
+  body?: unknown;
+  token?: string;
+  skipRetry?: boolean;
 }
 
 async function xrpc<T>(method: string, options?: XrpcOptions): Promise<T> {
-  const { method: httpMethod = 'GET', params, body, token, skipRetry } =
-    options ?? {}
-  let url = `${API_BASE}/${method}`
+  const { method: httpMethod = "GET", params, body, token, skipRetry } =
+    options ?? {};
+  let url = `${API_BASE}/${method}`;
   if (params) {
-    const searchParams = new URLSearchParams(params)
-    url += `?${searchParams}`
+    const searchParams = new URLSearchParams(params);
+    url += `?${searchParams}`;
   }
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = {};
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+    headers["Authorization"] = `Bearer ${token}`;
   }
   if (body) {
-    headers['Content-Type'] = 'application/json'
+    headers["Content-Type"] = "application/json";
   }
   const res = await fetch(url, {
     method: httpMethod,
     headers,
     body: body ? JSON.stringify(body) : undefined,
-  })
+  });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({
-      error: 'Unknown',
+      error: "Unknown",
       message: res.statusText,
-    }))
+    }));
     if (
       res.status === 401 &&
-      (errData.error === 'AuthenticationFailed' || errData.error === 'ExpiredToken') &&
+      (errData.error === "AuthenticationFailed" ||
+        errData.error === "ExpiredToken") &&
       token && tokenRefreshCallback && !skipRetry
     ) {
-      const newToken = await tokenRefreshCallback()
+      const newToken = await tokenRefreshCallback();
       if (newToken && newToken !== token) {
-        return xrpc(method, { ...options, token: newToken, skipRetry: true })
+        return xrpc(method, { ...options, token: newToken, skipRetry: true });
       }
     }
     throw new ApiError(
@@ -156,37 +149,45 @@ async function xrpc<T>(method: string, options?: XrpcOptions): Promise<T> {
       errData.message,
       errData.did,
       errData.reauthMethods,
-    )
+    );
   }
-  return res.json()
+  return res.json();
 }
 
 async function xrpcResult<T>(
   method: string,
-  options?: XrpcOptions
+  options?: XrpcOptions,
 ): Promise<Result<T, ApiError>> {
   try {
-    const value = await xrpc<T>(method, options)
-    return ok(value)
+    const value = await xrpc<T>(method, options);
+    return ok(value);
   } catch (e) {
     if (e instanceof ApiError) {
-      return err(e)
+      return err(e);
     }
-    return err(new ApiError(0, 'Unknown', e instanceof Error ? e.message : String(e)))
+    return err(
+      new ApiError(0, "Unknown", e instanceof Error ? e.message : String(e)),
+    );
   }
 }
 
 export interface VerificationMethod {
-  id: string
-  type: string
-  publicKeyMultibase: string
+  id: string;
+  type: string;
+  publicKeyMultibase: string;
 }
 
-export type { Session, DidDocument, AppPassword, InviteCodeInfo as InviteCode }
-export type { VerificationChannel, DidType, CreateAccountParams, CreateAccountResult, ConfirmSignupResult }
+export type { AppPassword, DidDocument, InviteCodeInfo as InviteCode, Session };
+export type {
+  ConfirmSignupResult,
+  CreateAccountParams,
+  CreateAccountResult,
+  DidType,
+  VerificationChannel,
+};
 
 function castSession(raw: unknown): Session {
-  const s = raw as Record<string, unknown>
+  const s = raw as Record<string, unknown>;
   return {
     did: unsafeAsDid(s.did as string),
     handle: unsafeAsHandle(s.handle as string),
@@ -196,12 +197,14 @@ function castSession(raw: unknown): Session {
     preferredChannelVerified: s.preferredChannelVerified as boolean | undefined,
     isAdmin: s.isAdmin as boolean | undefined,
     active: s.active as boolean | undefined,
-    status: s.status as Session['status'],
+    status: s.status as Session["status"],
     migratedToPds: s.migratedToPds as string | undefined,
-    migratedAt: s.migratedAt ? unsafeAsISODate(s.migratedAt as string) : undefined,
+    migratedAt: s.migratedAt
+      ? unsafeAsISODate(s.migratedAt as string)
+      : undefined,
     accessJwt: unsafeAsAccessToken(s.accessJwt as string),
     refreshJwt: unsafeAsRefreshToken(s.refreshJwt as string),
-  }
+  };
 }
 
 export const api = {
@@ -209,15 +212,15 @@ export const api = {
     params: CreateAccountParams,
     byodToken?: string,
   ): Promise<CreateAccountResult> {
-    const url = `${API_BASE}/com.atproto.server.createAccount`
+    const url = `${API_BASE}/com.atproto.server.createAccount`;
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
+      "Content-Type": "application/json",
+    };
     if (byodToken) {
-      headers['Authorization'] = `Bearer ${byodToken}`
+      headers["Authorization"] = `Bearer ${byodToken}`;
     }
     const response = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers,
       body: JSON.stringify({
         handle: params.handle,
@@ -232,30 +235,30 @@ export const api = {
         telegramUsername: params.telegramUsername,
         signalNumber: params.signalNumber,
       }),
-    })
-    const data = await response.json()
+    });
+    const data = await response.json();
     if (!response.ok) {
-      throw new ApiError(response.status, data.error, data.message)
+      throw new ApiError(response.status, data.error, data.message);
     }
-    return data
+    return data;
   },
 
   async createAccountWithServiceAuth(
     serviceAuthToken: string,
     params: {
-      did: Did
-      handle: Handle
-      email: EmailAddress
-      password: string
-      inviteCode?: string
+      did: Did;
+      handle: Handle;
+      email: EmailAddress;
+      password: string;
+      inviteCode?: string;
     },
   ): Promise<Session> {
-    const url = `${API_BASE}/com.atproto.server.createAccount`
+    const url = `${API_BASE}/com.atproto.server.createAccount`;
     const response = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${serviceAuthToken}`,
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${serviceAuthToken}`,
       },
       body: JSON.stringify({
         did: params.did,
@@ -264,68 +267,68 @@ export const api = {
         password: params.password,
         inviteCode: params.inviteCode,
       }),
-    })
-    const data = await response.json()
+    });
+    const data = await response.json();
     if (!response.ok) {
-      throw new ApiError(response.status, data.error, data.message)
+      throw new ApiError(response.status, data.error, data.message);
     }
-    return castSession(data)
+    return castSession(data);
   },
 
   confirmSignup(
     did: Did,
     verificationCode: string,
   ): Promise<ConfirmSignupResult> {
-    return xrpc('com.atproto.server.confirmSignup', {
-      method: 'POST',
+    return xrpc("com.atproto.server.confirmSignup", {
+      method: "POST",
       body: { did, verificationCode },
-    })
+    });
   },
 
   resendVerification(did: Did): Promise<{ success: boolean }> {
-    return xrpc('com.atproto.server.resendVerification', {
-      method: 'POST',
+    return xrpc("com.atproto.server.resendVerification", {
+      method: "POST",
       body: { did },
-    })
+    });
   },
 
   async createSession(identifier: string, password: string): Promise<Session> {
-    const raw = await xrpc<unknown>('com.atproto.server.createSession', {
-      method: 'POST',
+    const raw = await xrpc<unknown>("com.atproto.server.createSession", {
+      method: "POST",
       body: { identifier, password },
-    })
-    return castSession(raw)
+    });
+    return castSession(raw);
   },
 
   checkEmailVerified(identifier: string): Promise<{ verified: boolean }> {
-    return xrpc('_checkEmailVerified', {
-      method: 'POST',
+    return xrpc("_checkEmailVerified", {
+      method: "POST",
       body: { identifier },
-    })
+    });
   },
 
   async getSession(token: AccessToken): Promise<Session> {
-    const raw = await xrpc<unknown>('com.atproto.server.getSession', { token })
-    return castSession(raw)
+    const raw = await xrpc<unknown>("com.atproto.server.getSession", { token });
+    return castSession(raw);
   },
 
   async refreshSession(refreshJwt: RefreshToken): Promise<Session> {
-    const raw = await xrpc<unknown>('com.atproto.server.refreshSession', {
-      method: 'POST',
+    const raw = await xrpc<unknown>("com.atproto.server.refreshSession", {
+      method: "POST",
       token: refreshJwt,
-    })
-    return castSession(raw)
+    });
+    return castSession(raw);
   },
 
   async deleteSession(token: AccessToken): Promise<void> {
-    await xrpc('com.atproto.server.deleteSession', {
-      method: 'POST',
+    await xrpc("com.atproto.server.deleteSession", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   listAppPasswords(token: AccessToken): Promise<{ passwords: AppPassword[] }> {
-    return xrpc('com.atproto.server.listAppPasswords', { token })
+    return xrpc("com.atproto.server.listAppPasswords", { token });
   },
 
   createAppPassword(
@@ -333,55 +336,57 @@ export const api = {
     name: string,
     scopes?: string,
   ): Promise<CreatedAppPassword> {
-    return xrpc('com.atproto.server.createAppPassword', {
-      method: 'POST',
+    return xrpc("com.atproto.server.createAppPassword", {
+      method: "POST",
       token,
       body: { name, scopes },
-    })
+    });
   },
 
   async revokeAppPassword(token: AccessToken, name: string): Promise<void> {
-    await xrpc('com.atproto.server.revokeAppPassword', {
-      method: 'POST',
+    await xrpc("com.atproto.server.revokeAppPassword", {
+      method: "POST",
       token,
       body: { name },
-    })
+    });
   },
 
-  getAccountInviteCodes(token: AccessToken): Promise<{ codes: InviteCodeInfo[] }> {
-    return xrpc('com.atproto.server.getAccountInviteCodes', { token })
+  getAccountInviteCodes(
+    token: AccessToken,
+  ): Promise<{ codes: InviteCodeInfo[] }> {
+    return xrpc("com.atproto.server.getAccountInviteCodes", { token });
   },
 
   createInviteCode(
     token: AccessToken,
     useCount: number = 1,
   ): Promise<{ code: string }> {
-    return xrpc('com.atproto.server.createInviteCode', {
-      method: 'POST',
+    return xrpc("com.atproto.server.createInviteCode", {
+      method: "POST",
       token,
       body: { useCount },
-    })
+    });
   },
 
   async requestPasswordReset(email: EmailAddress): Promise<void> {
-    await xrpc('com.atproto.server.requestPasswordReset', {
-      method: 'POST',
+    await xrpc("com.atproto.server.requestPasswordReset", {
+      method: "POST",
       body: { email },
-    })
+    });
   },
 
   async resetPassword(token: string, password: string): Promise<void> {
-    await xrpc('com.atproto.server.resetPassword', {
-      method: 'POST',
+    await xrpc("com.atproto.server.resetPassword", {
+      method: "POST",
       body: { token, password },
-    })
+    });
   },
 
   requestEmailUpdate(token: AccessToken): Promise<EmailUpdateResponse> {
-    return xrpc('com.atproto.server.requestEmailUpdate', {
-      method: 'POST',
+    return xrpc("com.atproto.server.requestEmailUpdate", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   async updateEmail(
@@ -389,26 +394,26 @@ export const api = {
     email: string,
     emailToken?: string,
   ): Promise<void> {
-    await xrpc('com.atproto.server.updateEmail', {
-      method: 'POST',
+    await xrpc("com.atproto.server.updateEmail", {
+      method: "POST",
       token,
       body: { email, token: emailToken },
-    })
+    });
   },
 
   async updateHandle(token: AccessToken, handle: Handle): Promise<void> {
-    await xrpc('com.atproto.identity.updateHandle', {
-      method: 'POST',
+    await xrpc("com.atproto.identity.updateHandle", {
+      method: "POST",
       token,
       body: { handle },
-    })
+    });
   },
 
   async requestAccountDelete(token: AccessToken): Promise<void> {
-    await xrpc('com.atproto.server.requestAccountDelete', {
-      method: 'POST',
+    await xrpc("com.atproto.server.requestAccountDelete", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   async deleteAccount(
@@ -416,37 +421,37 @@ export const api = {
     password: string,
     deleteToken: string,
   ): Promise<void> {
-    await xrpc('com.atproto.server.deleteAccount', {
-      method: 'POST',
+    await xrpc("com.atproto.server.deleteAccount", {
+      method: "POST",
       body: { did, password, token: deleteToken },
-    })
+    });
   },
 
   describeServer(): Promise<ServerDescription> {
-    return xrpc('com.atproto.server.describeServer')
+    return xrpc("com.atproto.server.describeServer");
   },
 
   listRepos(limit?: number): Promise<ListReposResponse> {
-    const params: Record<string, string> = {}
-    if (limit) params.limit = String(limit)
-    return xrpc('com.atproto.sync.listRepos', { params })
+    const params: Record<string, string> = {};
+    if (limit) params.limit = String(limit);
+    return xrpc("com.atproto.sync.listRepos", { params });
   },
 
   getNotificationPrefs(token: AccessToken): Promise<NotificationPrefs> {
-    return xrpc('_account.getNotificationPrefs', { token })
+    return xrpc("_account.getNotificationPrefs", { token });
   },
 
   updateNotificationPrefs(token: AccessToken, prefs: {
-    preferredChannel?: string
-    discordId?: string
-    telegramUsername?: string
-    signalNumber?: string
+    preferredChannel?: string;
+    discordId?: string;
+    telegramUsername?: string;
+    signalNumber?: string;
   }): Promise<SuccessResponse> {
-    return xrpc('_account.updateNotificationPrefs', {
-      method: 'POST',
+    return xrpc("_account.updateNotificationPrefs", {
+      method: "POST",
       token,
       body: prefs,
-    })
+    });
   },
 
   confirmChannelVerification(
@@ -455,60 +460,65 @@ export const api = {
     identifier: string,
     code: string,
   ): Promise<SuccessResponse> {
-    return xrpc('_account.confirmChannelVerification', {
-      method: 'POST',
+    return xrpc("_account.confirmChannelVerification", {
+      method: "POST",
       token,
       body: { channel, identifier, code },
-    })
+    });
   },
 
-  getNotificationHistory(token: AccessToken): Promise<NotificationHistoryResponse> {
-    return xrpc('_account.getNotificationHistory', { token })
+  getNotificationHistory(
+    token: AccessToken,
+  ): Promise<NotificationHistoryResponse> {
+    return xrpc("_account.getNotificationHistory", { token });
   },
 
   getServerStats(token: AccessToken): Promise<ServerStats> {
-    return xrpc('_admin.getServerStats', { token })
+    return xrpc("_admin.getServerStats", { token });
   },
 
   getServerConfig(): Promise<ServerConfig> {
-    return xrpc('_server.getConfig')
+    return xrpc("_server.getConfig");
   },
 
   updateServerConfig(
     token: AccessToken,
     config: {
-      serverName?: string
-      primaryColor?: string
-      primaryColorDark?: string
-      secondaryColor?: string
-      secondaryColorDark?: string
-      logoCid?: string
+      serverName?: string;
+      primaryColor?: string;
+      primaryColorDark?: string;
+      secondaryColor?: string;
+      secondaryColorDark?: string;
+      logoCid?: string;
     },
   ): Promise<SuccessResponse> {
-    return xrpc('_admin.updateServerConfig', {
-      method: 'POST',
+    return xrpc("_admin.updateServerConfig", {
+      method: "POST",
       token,
       body: config,
-    })
+    });
   },
 
-  async uploadBlob(token: AccessToken, file: File): Promise<UploadBlobResponse> {
-    const res = await fetch('/xrpc/com.atproto.repo.uploadBlob', {
-      method: 'POST',
+  async uploadBlob(
+    token: AccessToken,
+    file: File,
+  ): Promise<UploadBlobResponse> {
+    const res = await fetch("/xrpc/com.atproto.repo.uploadBlob", {
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': file.type,
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": file.type,
       },
       body: file,
-    })
+    });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
-        error: 'Unknown',
+        error: "Unknown",
         message: res.statusText,
-      }))
-      throw new ApiError(res.status, errData.error, errData.message)
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
     }
-    return res.json()
+    return res.json();
   },
 
   async changePassword(
@@ -516,88 +526,91 @@ export const api = {
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
-    await xrpc('_account.changePassword', {
-      method: 'POST',
+    await xrpc("_account.changePassword", {
+      method: "POST",
       token,
       body: { currentPassword, newPassword },
-    })
+    });
   },
 
   removePassword(token: AccessToken): Promise<SuccessResponse> {
-    return xrpc('_account.removePassword', {
-      method: 'POST',
+    return xrpc("_account.removePassword", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   getPasswordStatus(token: AccessToken): Promise<PasswordStatus> {
-    return xrpc('_account.getPasswordStatus', { token })
+    return xrpc("_account.getPasswordStatus", { token });
   },
 
   getLegacyLoginPreference(token: AccessToken): Promise<LegacyLoginPreference> {
-    return xrpc('_account.getLegacyLoginPreference', { token })
+    return xrpc("_account.getLegacyLoginPreference", { token });
   },
 
   updateLegacyLoginPreference(
     token: AccessToken,
     allowLegacyLogin: boolean,
   ): Promise<UpdateLegacyLoginResponse> {
-    return xrpc('_account.updateLegacyLoginPreference', {
-      method: 'POST',
+    return xrpc("_account.updateLegacyLoginPreference", {
+      method: "POST",
       token,
       body: { allowLegacyLogin },
-    })
+    });
   },
 
-  updateLocale(token: AccessToken, preferredLocale: string): Promise<UpdateLocaleResponse> {
-    return xrpc('_account.updateLocale', {
-      method: 'POST',
+  updateLocale(
+    token: AccessToken,
+    preferredLocale: string,
+  ): Promise<UpdateLocaleResponse> {
+    return xrpc("_account.updateLocale", {
+      method: "POST",
       token,
       body: { preferredLocale },
-    })
+    });
   },
 
   listSessions(token: AccessToken): Promise<ListSessionsResponse> {
-    return xrpc('_account.listSessions', { token })
+    return xrpc("_account.listSessions", { token });
   },
 
   async revokeSession(token: AccessToken, sessionId: string): Promise<void> {
-    await xrpc('_account.revokeSession', {
-      method: 'POST',
+    await xrpc("_account.revokeSession", {
+      method: "POST",
       token,
       body: { sessionId },
-    })
+    });
   },
 
   revokeAllSessions(token: AccessToken): Promise<{ revokedCount: number }> {
-    return xrpc('_account.revokeAllSessions', {
-      method: 'POST',
+    return xrpc("_account.revokeAllSessions", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   searchAccounts(token: AccessToken, options?: {
-    handle?: string
-    cursor?: string
-    limit?: number
+    handle?: string;
+    cursor?: string;
+    limit?: number;
   }): Promise<SearchAccountsResponse> {
-    const params: Record<string, string> = {}
-    if (options?.handle) params.handle = options.handle
-    if (options?.cursor) params.cursor = options.cursor
-    if (options?.limit) params.limit = String(options.limit)
-    return xrpc('com.atproto.admin.searchAccounts', { token, params })
+    const params: Record<string, string> = {};
+    if (options?.handle) params.handle = options.handle;
+    if (options?.cursor) params.cursor = options.cursor;
+    if (options?.limit) params.limit = String(options.limit);
+    return xrpc("com.atproto.admin.searchAccounts", { token, params });
   },
 
   getInviteCodes(token: AccessToken, options?: {
-    sort?: 'recent' | 'usage'
-    cursor?: string
-    limit?: number
+    sort?: "recent" | "usage";
+    cursor?: string;
+    limit?: number;
   }): Promise<GetInviteCodesResponse> {
-    const params: Record<string, string> = {}
-    if (options?.sort) params.sort = options.sort
-    if (options?.cursor) params.cursor = options.cursor
-    if (options?.limit) params.limit = String(options.limit)
-    return xrpc('com.atproto.admin.getInviteCodes', { token, params })
+    const params: Record<string, string> = {};
+    if (options?.sort) params.sort = options.sort;
+    if (options?.cursor) params.cursor = options.cursor;
+    if (options?.limit) params.limit = String(options.limit);
+    return xrpc("com.atproto.admin.getInviteCodes", { token, params });
   },
 
   async disableInviteCodes(
@@ -605,58 +618,58 @@ export const api = {
     codes?: string[],
     accounts?: string[],
   ): Promise<void> {
-    await xrpc('com.atproto.admin.disableInviteCodes', {
-      method: 'POST',
+    await xrpc("com.atproto.admin.disableInviteCodes", {
+      method: "POST",
       token,
       body: { codes, accounts },
-    })
+    });
   },
 
   getAccountInfo(token: AccessToken, did: Did): Promise<AccountInfo> {
-    return xrpc('com.atproto.admin.getAccountInfo', { token, params: { did } })
+    return xrpc("com.atproto.admin.getAccountInfo", { token, params: { did } });
   },
 
   async disableAccountInvites(token: AccessToken, account: Did): Promise<void> {
-    await xrpc('com.atproto.admin.disableAccountInvites', {
-      method: 'POST',
+    await xrpc("com.atproto.admin.disableAccountInvites", {
+      method: "POST",
       token,
       body: { account },
-    })
+    });
   },
 
   async enableAccountInvites(token: AccessToken, account: Did): Promise<void> {
-    await xrpc('com.atproto.admin.enableAccountInvites', {
-      method: 'POST',
+    await xrpc("com.atproto.admin.enableAccountInvites", {
+      method: "POST",
       token,
       body: { account },
-    })
+    });
   },
 
   async adminDeleteAccount(token: AccessToken, did: Did): Promise<void> {
-    await xrpc('com.atproto.admin.deleteAccount', {
-      method: 'POST',
+    await xrpc("com.atproto.admin.deleteAccount", {
+      method: "POST",
       token,
       body: { did },
-    })
+    });
   },
 
   describeRepo(token: AccessToken, repo: Did): Promise<RepoDescription> {
-    return xrpc('com.atproto.repo.describeRepo', {
+    return xrpc("com.atproto.repo.describeRepo", {
       token,
       params: { repo },
-    })
+    });
   },
 
   listRecords(token: AccessToken, repo: Did, collection: Nsid, options?: {
-    limit?: number
-    cursor?: string
-    reverse?: boolean
+    limit?: number;
+    cursor?: string;
+    reverse?: boolean;
   }): Promise<ListRecordsResponse> {
-    const params: Record<string, string> = { repo, collection }
-    if (options?.limit) params.limit = String(options.limit)
-    if (options?.cursor) params.cursor = options.cursor
-    if (options?.reverse) params.reverse = 'true'
-    return xrpc('com.atproto.repo.listRecords', { token, params })
+    const params: Record<string, string> = { repo, collection };
+    if (options?.limit) params.limit = String(options.limit);
+    if (options?.cursor) params.cursor = options.cursor;
+    if (options?.reverse) params.reverse = "true";
+    return xrpc("com.atproto.repo.listRecords", { token, params });
   },
 
   getRecord(
@@ -665,10 +678,10 @@ export const api = {
     collection: Nsid,
     rkey: Rkey,
   ): Promise<RecordResponse> {
-    return xrpc('com.atproto.repo.getRecord', {
+    return xrpc("com.atproto.repo.getRecord", {
       token,
       params: { repo, collection, rkey },
-    })
+    });
   },
 
   createRecord(
@@ -678,11 +691,11 @@ export const api = {
     record: unknown,
     rkey?: Rkey,
   ): Promise<CreateRecordResponse> {
-    return xrpc('com.atproto.repo.createRecord', {
-      method: 'POST',
+    return xrpc("com.atproto.repo.createRecord", {
+      method: "POST",
       token,
       body: { repo, collection, record, rkey },
-    })
+    });
   },
 
   putRecord(
@@ -692,11 +705,11 @@ export const api = {
     rkey: Rkey,
     record: unknown,
   ): Promise<CreateRecordResponse> {
-    return xrpc('com.atproto.repo.putRecord', {
-      method: 'POST',
+    return xrpc("com.atproto.repo.putRecord", {
+      method: "POST",
       token,
       body: { repo, collection, rkey, record },
-    })
+    });
   },
 
   async deleteRecord(
@@ -705,30 +718,30 @@ export const api = {
     collection: Nsid,
     rkey: Rkey,
   ): Promise<void> {
-    await xrpc('com.atproto.repo.deleteRecord', {
-      method: 'POST',
+    await xrpc("com.atproto.repo.deleteRecord", {
+      method: "POST",
       token,
       body: { repo, collection, rkey },
-    })
+    });
   },
 
   getTotpStatus(token: AccessToken): Promise<TotpStatus> {
-    return xrpc('com.atproto.server.getTotpStatus', { token })
+    return xrpc("com.atproto.server.getTotpStatus", { token });
   },
 
   createTotpSecret(token: AccessToken): Promise<TotpSecret> {
-    return xrpc('com.atproto.server.createTotpSecret', {
-      method: 'POST',
+    return xrpc("com.atproto.server.createTotpSecret", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   enableTotp(token: AccessToken, code: string): Promise<EnableTotpResponse> {
-    return xrpc('com.atproto.server.enableTotp', {
-      method: 'POST',
+    return xrpc("com.atproto.server.enableTotp", {
+      method: "POST",
       token,
       body: { code },
-    })
+    });
   },
 
   disableTotp(
@@ -736,11 +749,11 @@ export const api = {
     password: string,
     code: string,
   ): Promise<SuccessResponse> {
-    return xrpc('com.atproto.server.disableTotp', {
-      method: 'POST',
+    return xrpc("com.atproto.server.disableTotp", {
+      method: "POST",
       token,
       body: { password, code },
-    })
+    });
   },
 
   regenerateBackupCodes(
@@ -748,22 +761,22 @@ export const api = {
     password: string,
     code: string,
   ): Promise<RegenerateBackupCodesResponse> {
-    return xrpc('com.atproto.server.regenerateBackupCodes', {
-      method: 'POST',
+    return xrpc("com.atproto.server.regenerateBackupCodes", {
+      method: "POST",
       token,
       body: { password, code },
-    })
+    });
   },
 
   startPasskeyRegistration(
     token: AccessToken,
     friendlyName?: string,
   ): Promise<StartPasskeyRegistrationResponse> {
-    return xrpc('com.atproto.server.startPasskeyRegistration', {
-      method: 'POST',
+    return xrpc("com.atproto.server.startPasskeyRegistration", {
+      method: "POST",
       token,
       body: { friendlyName },
-    })
+    });
   },
 
   finishPasskeyRegistration(
@@ -771,23 +784,23 @@ export const api = {
     credential: unknown,
     friendlyName?: string,
   ): Promise<FinishPasskeyRegistrationResponse> {
-    return xrpc('com.atproto.server.finishPasskeyRegistration', {
-      method: 'POST',
+    return xrpc("com.atproto.server.finishPasskeyRegistration", {
+      method: "POST",
       token,
       body: { credential, friendlyName },
-    })
+    });
   },
 
   listPasskeys(token: AccessToken): Promise<ListPasskeysResponse> {
-    return xrpc('com.atproto.server.listPasskeys', { token })
+    return xrpc("com.atproto.server.listPasskeys", { token });
   },
 
   async deletePasskey(token: AccessToken, id: string): Promise<void> {
-    await xrpc('com.atproto.server.deletePasskey', {
-      method: 'POST',
+    await xrpc("com.atproto.server.deletePasskey", {
+      method: "POST",
       token,
       body: { id },
-    })
+    });
   },
 
   async updatePasskey(
@@ -795,23 +808,26 @@ export const api = {
     id: string,
     friendlyName: string,
   ): Promise<void> {
-    await xrpc('com.atproto.server.updatePasskey', {
-      method: 'POST',
+    await xrpc("com.atproto.server.updatePasskey", {
+      method: "POST",
       token,
       body: { id, friendlyName },
-    })
+    });
   },
 
   listTrustedDevices(token: AccessToken): Promise<ListTrustedDevicesResponse> {
-    return xrpc('_account.listTrustedDevices', { token })
+    return xrpc("_account.listTrustedDevices", { token });
   },
 
-  revokeTrustedDevice(token: AccessToken, deviceId: string): Promise<SuccessResponse> {
-    return xrpc('_account.revokeTrustedDevice', {
-      method: 'POST',
+  revokeTrustedDevice(
+    token: AccessToken,
+    deviceId: string,
+  ): Promise<SuccessResponse> {
+    return xrpc("_account.revokeTrustedDevice", {
+      method: "POST",
       token,
       body: { deviceId },
-    })
+    });
   },
 
   updateTrustedDevice(
@@ -819,98 +835,106 @@ export const api = {
     deviceId: string,
     friendlyName: string,
   ): Promise<SuccessResponse> {
-    return xrpc('_account.updateTrustedDevice', {
-      method: 'POST',
+    return xrpc("_account.updateTrustedDevice", {
+      method: "POST",
       token,
       body: { deviceId, friendlyName },
-    })
+    });
   },
 
   getReauthStatus(token: AccessToken): Promise<ReauthStatus> {
-    return xrpc('_account.getReauthStatus', { token })
+    return xrpc("_account.getReauthStatus", { token });
   },
 
-  reauthPassword(token: AccessToken, password: string): Promise<ReauthResponse> {
-    return xrpc('_account.reauthPassword', {
-      method: 'POST',
+  reauthPassword(
+    token: AccessToken,
+    password: string,
+  ): Promise<ReauthResponse> {
+    return xrpc("_account.reauthPassword", {
+      method: "POST",
       token,
       body: { password },
-    })
+    });
   },
 
   reauthTotp(token: AccessToken, code: string): Promise<ReauthResponse> {
-    return xrpc('_account.reauthTotp', {
-      method: 'POST',
+    return xrpc("_account.reauthTotp", {
+      method: "POST",
       token,
       body: { code },
-    })
+    });
   },
 
   reauthPasskeyStart(token: AccessToken): Promise<ReauthPasskeyStartResponse> {
-    return xrpc('_account.reauthPasskeyStart', {
-      method: 'POST',
+    return xrpc("_account.reauthPasskeyStart", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  reauthPasskeyFinish(token: AccessToken, credential: unknown): Promise<ReauthResponse> {
-    return xrpc('_account.reauthPasskeyFinish', {
-      method: 'POST',
+  reauthPasskeyFinish(
+    token: AccessToken,
+    credential: unknown,
+  ): Promise<ReauthResponse> {
+    return xrpc("_account.reauthPasskeyFinish", {
+      method: "POST",
       token,
       body: { credential },
-    })
+    });
   },
 
   reserveSigningKey(did?: Did): Promise<ReserveSigningKeyResponse> {
-    return xrpc('com.atproto.server.reserveSigningKey', {
-      method: 'POST',
+    return xrpc("com.atproto.server.reserveSigningKey", {
+      method: "POST",
       body: { did },
-    })
+    });
   },
 
-  getRecommendedDidCredentials(token: AccessToken): Promise<RecommendedDidCredentials> {
-    return xrpc('com.atproto.identity.getRecommendedDidCredentials', { token })
+  getRecommendedDidCredentials(
+    token: AccessToken,
+  ): Promise<RecommendedDidCredentials> {
+    return xrpc("com.atproto.identity.getRecommendedDidCredentials", { token });
   },
 
   async activateAccount(token: AccessToken): Promise<void> {
-    await xrpc('com.atproto.server.activateAccount', {
-      method: 'POST',
+    await xrpc("com.atproto.server.activateAccount", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   async createPasskeyAccount(params: {
-    handle: Handle
-    email?: EmailAddress
-    inviteCode?: string
-    didType?: DidType
-    did?: Did
-    signingKey?: string
-    verificationChannel?: VerificationChannel
-    discordId?: string
-    telegramUsername?: string
-    signalNumber?: string
+    handle: Handle;
+    email?: EmailAddress;
+    inviteCode?: string;
+    didType?: DidType;
+    did?: Did;
+    signingKey?: string;
+    verificationChannel?: VerificationChannel;
+    discordId?: string;
+    telegramUsername?: string;
+    signalNumber?: string;
   }, byodToken?: string): Promise<PasskeyAccountCreateResponse> {
-    const url = `${API_BASE}/_account.createPasskeyAccount`
+    const url = `${API_BASE}/_account.createPasskeyAccount`;
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
+      "Content-Type": "application/json",
+    };
     if (byodToken) {
-      headers['Authorization'] = `Bearer ${byodToken}`
+      headers["Authorization"] = `Bearer ${byodToken}`;
     }
     const res = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers,
       body: JSON.stringify(params),
-    })
+    });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
-        error: 'Unknown',
+        error: "Unknown",
         message: res.statusText,
-      }))
-      throw new ApiError(res.status, errData.error, errData.message)
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
     }
-    return res.json()
+    return res.json();
   },
 
   startPasskeyRegistrationForSetup(
@@ -918,10 +942,10 @@ export const api = {
     setupToken: string,
     friendlyName?: string,
   ): Promise<StartPasskeyRegistrationResponse> {
-    return xrpc('_account.startPasskeyRegistrationForSetup', {
-      method: 'POST',
+    return xrpc("_account.startPasskeyRegistrationForSetup", {
+      method: "POST",
       body: { did, setupToken, friendlyName },
-    })
+    });
   },
 
   completePasskeySetup(
@@ -930,17 +954,17 @@ export const api = {
     passkeyCredential: unknown,
     passkeyFriendlyName?: string,
   ): Promise<CompletePasskeySetupResponse> {
-    return xrpc('_account.completePasskeySetup', {
-      method: 'POST',
+    return xrpc("_account.completePasskeySetup", {
+      method: "POST",
       body: { did, setupToken, passkeyCredential, passkeyFriendlyName },
-    })
+    });
   },
 
   requestPasskeyRecovery(email: EmailAddress): Promise<SuccessResponse> {
-    return xrpc('_account.requestPasskeyRecovery', {
-      method: 'POST',
+    return xrpc("_account.requestPasskeyRecovery", {
+      method: "POST",
       body: { email },
-    })
+    });
   },
 
   recoverPasskeyAccount(
@@ -948,24 +972,29 @@ export const api = {
     recoveryToken: string,
     newPassword: string,
   ): Promise<SuccessResponse> {
-    return xrpc('_account.recoverPasskeyAccount', {
-      method: 'POST',
+    return xrpc("_account.recoverPasskeyAccount", {
+      method: "POST",
       body: { did, recoveryToken, newPassword },
-    })
+    });
   },
 
-  verifyMigrationEmail(token: string, email: EmailAddress): Promise<VerifyMigrationEmailResponse> {
-    return xrpc('com.atproto.server.verifyMigrationEmail', {
-      method: 'POST',
+  verifyMigrationEmail(
+    token: string,
+    email: EmailAddress,
+  ): Promise<VerifyMigrationEmailResponse> {
+    return xrpc("com.atproto.server.verifyMigrationEmail", {
+      method: "POST",
       body: { token, email },
-    })
+    });
   },
 
-  resendMigrationVerification(email: EmailAddress): Promise<ResendMigrationVerificationResponse> {
-    return xrpc('com.atproto.server.resendMigrationVerification', {
-      method: 'POST',
+  resendMigrationVerification(
+    email: EmailAddress,
+  ): Promise<ResendMigrationVerificationResponse> {
+    return xrpc("com.atproto.server.resendMigrationVerification", {
+      method: "POST",
       body: { email },
-    })
+    });
   },
 
   verifyToken(
@@ -973,541 +1002,638 @@ export const api = {
     identifier: string,
     accessToken?: AccessToken,
   ): Promise<VerifyTokenResponse> {
-    return xrpc('_account.verifyToken', {
-      method: 'POST',
+    return xrpc("_account.verifyToken", {
+      method: "POST",
       body: { token, identifier },
       token: accessToken,
-    })
+    });
   },
 
   getDidDocument(token: AccessToken): Promise<DidDocument> {
-    return xrpc('_account.getDidDocument', { token })
+    return xrpc("_account.getDidDocument", { token });
   },
 
   updateDidDocument(
     token: AccessToken,
     params: {
-      verificationMethods?: VerificationMethod[]
-      alsoKnownAs?: string[]
-      serviceEndpoint?: string
+      verificationMethods?: VerificationMethod[];
+      alsoKnownAs?: string[];
+      serviceEndpoint?: string;
     },
   ): Promise<SuccessResponse> {
-    return xrpc('_account.updateDidDocument', {
-      method: 'POST',
+    return xrpc("_account.updateDidDocument", {
+      method: "POST",
       token,
       body: params,
-    })
+    });
   },
 
-  async deactivateAccount(token: AccessToken, deleteAfter?: string): Promise<void> {
-    await xrpc('com.atproto.server.deactivateAccount', {
-      method: 'POST',
+  async deactivateAccount(
+    token: AccessToken,
+    deleteAfter?: string,
+  ): Promise<void> {
+    await xrpc("com.atproto.server.deactivateAccount", {
+      method: "POST",
       token,
       body: { deleteAfter },
-    })
+    });
   },
 
   async getRepo(token: AccessToken, did: Did): Promise<ArrayBuffer> {
-    const url = `${API_BASE}/com.atproto.sync.getRepo?did=${encodeURIComponent(did)}`
+    const url = `${API_BASE}/com.atproto.sync.getRepo?did=${
+      encodeURIComponent(did)
+    }`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
-    })
+    });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
-        error: 'Unknown',
+        error: "Unknown",
         message: res.statusText,
-      }))
-      throw new ApiError(res.status, errData.error, errData.message)
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
     }
-    return res.arrayBuffer()
+    return res.arrayBuffer();
   },
 
   listBackups(token: AccessToken): Promise<ListBackupsResponse> {
-    return xrpc('_backup.listBackups', { token })
+    return xrpc("_backup.listBackups", { token });
   },
 
   async getBackup(token: AccessToken, id: string): Promise<Blob> {
-    const url = `${API_BASE}/_backup.getBackup?id=${encodeURIComponent(id)}`
+    const url = `${API_BASE}/_backup.getBackup?id=${encodeURIComponent(id)}`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
-    })
+    });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
-        error: 'Unknown',
+        error: "Unknown",
         message: res.statusText,
-      }))
-      throw new ApiError(res.status, errData.error, errData.message)
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
     }
-    return res.blob()
+    return res.blob();
   },
 
   createBackup(token: AccessToken): Promise<CreateBackupResponse> {
-    return xrpc('_backup.createBackup', {
-      method: 'POST',
+    return xrpc("_backup.createBackup", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   async deleteBackup(token: AccessToken, id: string): Promise<void> {
-    await xrpc('_backup.deleteBackup', {
-      method: 'POST',
+    await xrpc("_backup.deleteBackup", {
+      method: "POST",
       token,
       params: { id },
-    })
+    });
   },
 
-  setBackupEnabled(token: AccessToken, enabled: boolean): Promise<SetBackupEnabledResponse> {
-    return xrpc('_backup.setEnabled', {
-      method: 'POST',
+  setBackupEnabled(
+    token: AccessToken,
+    enabled: boolean,
+  ): Promise<SetBackupEnabledResponse> {
+    return xrpc("_backup.setEnabled", {
+      method: "POST",
       token,
       body: { enabled },
-    })
+    });
   },
 
   async importRepo(token: AccessToken, car: Uint8Array): Promise<void> {
-    const url = `${API_BASE}/com.atproto.repo.importRepo`
+    const url = `${API_BASE}/com.atproto.repo.importRepo`;
     const res = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/vnd.ipld.car',
+        "Content-Type": "application/vnd.ipld.car",
       },
-      body: car,
-    })
+      body: car as unknown as BodyInit,
+    });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
-        error: 'Unknown',
+        error: "Unknown",
         message: res.statusText,
-      }))
-      throw new ApiError(res.status, errData.error, errData.message)
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
     }
   },
-}
+};
 
 export const typedApi = {
   createSession(
     identifier: string,
-    password: string
+    password: string,
   ): Promise<Result<Session, ApiError>> {
-    return xrpcResult<Session>('com.atproto.server.createSession', {
-      method: 'POST',
+    return xrpcResult<Session>("com.atproto.server.createSession", {
+      method: "POST",
       body: { identifier, password },
-    }).then(r => r.ok ? ok(castSession(r.value)) : r)
+    }).then((r) => r.ok ? ok(castSession(r.value)) : r);
   },
 
   getSession(token: AccessToken): Promise<Result<Session, ApiError>> {
-    return xrpcResult<Session>('com.atproto.server.getSession', { token })
-      .then(r => r.ok ? ok(castSession(r.value)) : r)
+    return xrpcResult<Session>("com.atproto.server.getSession", { token })
+      .then((r) => r.ok ? ok(castSession(r.value)) : r);
   },
 
   refreshSession(refreshJwt: RefreshToken): Promise<Result<Session, ApiError>> {
-    return xrpcResult<Session>('com.atproto.server.refreshSession', {
-      method: 'POST',
+    return xrpcResult<Session>("com.atproto.server.refreshSession", {
+      method: "POST",
       token: refreshJwt,
-    }).then(r => r.ok ? ok(castSession(r.value)) : r)
+    }).then((r) => r.ok ? ok(castSession(r.value)) : r);
   },
 
   describeServer(): Promise<Result<ServerDescription, ApiError>> {
-    return xrpcResult('com.atproto.server.describeServer')
+    return xrpcResult("com.atproto.server.describeServer");
   },
 
-  listAppPasswords(token: AccessToken): Promise<Result<{ passwords: AppPassword[] }, ApiError>> {
-    return xrpcResult('com.atproto.server.listAppPasswords', { token })
+  listAppPasswords(
+    token: AccessToken,
+  ): Promise<Result<{ passwords: AppPassword[] }, ApiError>> {
+    return xrpcResult("com.atproto.server.listAppPasswords", { token });
   },
 
   createAppPassword(
     token: AccessToken,
     name: string,
-    scopes?: string
+    scopes?: string,
   ): Promise<Result<CreatedAppPassword, ApiError>> {
-    return xrpcResult('com.atproto.server.createAppPassword', {
-      method: 'POST',
+    return xrpcResult("com.atproto.server.createAppPassword", {
+      method: "POST",
       token,
       body: { name, scopes },
-    })
+    });
   },
 
-  revokeAppPassword(token: AccessToken, name: string): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.revokeAppPassword', {
-      method: 'POST',
+  revokeAppPassword(
+    token: AccessToken,
+    name: string,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.server.revokeAppPassword", {
+      method: "POST",
       token,
       body: { name },
-    })
+    });
   },
 
-  listSessions(token: AccessToken): Promise<Result<ListSessionsResponse, ApiError>> {
-    return xrpcResult('_account.listSessions', { token })
+  listSessions(
+    token: AccessToken,
+  ): Promise<Result<ListSessionsResponse, ApiError>> {
+    return xrpcResult("_account.listSessions", { token });
   },
 
-  revokeSession(token: AccessToken, sessionId: string): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('_account.revokeSession', {
-      method: 'POST',
+  revokeSession(
+    token: AccessToken,
+    sessionId: string,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("_account.revokeSession", {
+      method: "POST",
       token,
       body: { sessionId },
-    })
+    });
   },
 
   getTotpStatus(token: AccessToken): Promise<Result<TotpStatus, ApiError>> {
-    return xrpcResult('com.atproto.server.getTotpStatus', { token })
+    return xrpcResult("com.atproto.server.getTotpStatus", { token });
   },
 
   createTotpSecret(token: AccessToken): Promise<Result<TotpSecret, ApiError>> {
-    return xrpcResult('com.atproto.server.createTotpSecret', {
-      method: 'POST',
+    return xrpcResult("com.atproto.server.createTotpSecret", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  enableTotp(token: AccessToken, code: string): Promise<Result<EnableTotpResponse, ApiError>> {
-    return xrpcResult('com.atproto.server.enableTotp', {
-      method: 'POST',
+  enableTotp(
+    token: AccessToken,
+    code: string,
+  ): Promise<Result<EnableTotpResponse, ApiError>> {
+    return xrpcResult("com.atproto.server.enableTotp", {
+      method: "POST",
       token,
       body: { code },
-    })
+    });
   },
 
   disableTotp(
     token: AccessToken,
     password: string,
-    code: string
+    code: string,
   ): Promise<Result<SuccessResponse, ApiError>> {
-    return xrpcResult('com.atproto.server.disableTotp', {
-      method: 'POST',
+    return xrpcResult("com.atproto.server.disableTotp", {
+      method: "POST",
       token,
       body: { password, code },
-    })
+    });
   },
 
-  listPasskeys(token: AccessToken): Promise<Result<ListPasskeysResponse, ApiError>> {
-    return xrpcResult('com.atproto.server.listPasskeys', { token })
+  listPasskeys(
+    token: AccessToken,
+  ): Promise<Result<ListPasskeysResponse, ApiError>> {
+    return xrpcResult("com.atproto.server.listPasskeys", { token });
   },
 
-  deletePasskey(token: AccessToken, id: string): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.deletePasskey', {
-      method: 'POST',
+  deletePasskey(
+    token: AccessToken,
+    id: string,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.server.deletePasskey", {
+      method: "POST",
       token,
       body: { id },
-    })
+    });
   },
 
-  listTrustedDevices(token: AccessToken): Promise<Result<ListTrustedDevicesResponse, ApiError>> {
-    return xrpcResult('_account.listTrustedDevices', { token })
+  listTrustedDevices(
+    token: AccessToken,
+  ): Promise<Result<ListTrustedDevicesResponse, ApiError>> {
+    return xrpcResult("_account.listTrustedDevices", { token });
   },
 
   getReauthStatus(token: AccessToken): Promise<Result<ReauthStatus, ApiError>> {
-    return xrpcResult('_account.getReauthStatus', { token })
+    return xrpcResult("_account.getReauthStatus", { token });
   },
 
-  getNotificationPrefs(token: AccessToken): Promise<Result<NotificationPrefs, ApiError>> {
-    return xrpcResult('_account.getNotificationPrefs', { token })
+  getNotificationPrefs(
+    token: AccessToken,
+  ): Promise<Result<NotificationPrefs, ApiError>> {
+    return xrpcResult("_account.getNotificationPrefs", { token });
   },
 
-  updateHandle(token: AccessToken, handle: Handle): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.identity.updateHandle', {
-      method: 'POST',
+  updateHandle(
+    token: AccessToken,
+    handle: Handle,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.identity.updateHandle", {
+      method: "POST",
       token,
       body: { handle },
-    })
+    });
   },
 
-  describeRepo(token: AccessToken, repo: Did): Promise<Result<RepoDescription, ApiError>> {
-    return xrpcResult('com.atproto.repo.describeRepo', {
+  describeRepo(
+    token: AccessToken,
+    repo: Did,
+  ): Promise<Result<RepoDescription, ApiError>> {
+    return xrpcResult("com.atproto.repo.describeRepo", {
       token,
       params: { repo },
-    })
+    });
   },
 
   listRecords(
     token: AccessToken,
     repo: Did,
     collection: Nsid,
-    options?: { limit?: number; cursor?: string; reverse?: boolean }
+    options?: { limit?: number; cursor?: string; reverse?: boolean },
   ): Promise<Result<ListRecordsResponse, ApiError>> {
-    const params: Record<string, string> = { repo, collection }
-    if (options?.limit) params.limit = String(options.limit)
-    if (options?.cursor) params.cursor = options.cursor
-    if (options?.reverse) params.reverse = 'true'
-    return xrpcResult('com.atproto.repo.listRecords', { token, params })
+    const params: Record<string, string> = { repo, collection };
+    if (options?.limit) params.limit = String(options.limit);
+    if (options?.cursor) params.cursor = options.cursor;
+    if (options?.reverse) params.reverse = "true";
+    return xrpcResult("com.atproto.repo.listRecords", { token, params });
   },
 
   getRecord(
     token: AccessToken,
     repo: Did,
     collection: Nsid,
-    rkey: Rkey
+    rkey: Rkey,
   ): Promise<Result<RecordResponse, ApiError>> {
-    return xrpcResult('com.atproto.repo.getRecord', {
+    return xrpcResult("com.atproto.repo.getRecord", {
       token,
       params: { repo, collection, rkey },
-    })
+    });
   },
 
   deleteRecord(
     token: AccessToken,
     repo: Did,
     collection: Nsid,
-    rkey: Rkey
+    rkey: Rkey,
   ): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.repo.deleteRecord', {
-      method: 'POST',
+    return xrpcResult<void>("com.atproto.repo.deleteRecord", {
+      method: "POST",
       token,
       body: { repo, collection, rkey },
-    })
+    });
   },
 
   searchAccounts(
     token: AccessToken,
-    options?: { handle?: string; cursor?: string; limit?: number }
+    options?: { handle?: string; cursor?: string; limit?: number },
   ): Promise<Result<SearchAccountsResponse, ApiError>> {
-    const params: Record<string, string> = {}
-    if (options?.handle) params.handle = options.handle
-    if (options?.cursor) params.cursor = options.cursor
-    if (options?.limit) params.limit = String(options.limit)
-    return xrpcResult('com.atproto.admin.searchAccounts', { token, params })
+    const params: Record<string, string> = {};
+    if (options?.handle) params.handle = options.handle;
+    if (options?.cursor) params.cursor = options.cursor;
+    if (options?.limit) params.limit = String(options.limit);
+    return xrpcResult("com.atproto.admin.searchAccounts", { token, params });
   },
 
-  getAccountInfo(token: AccessToken, did: Did): Promise<Result<AccountInfo, ApiError>> {
-    return xrpcResult('com.atproto.admin.getAccountInfo', { token, params: { did } })
+  getAccountInfo(
+    token: AccessToken,
+    did: Did,
+  ): Promise<Result<AccountInfo, ApiError>> {
+    return xrpcResult("com.atproto.admin.getAccountInfo", {
+      token,
+      params: { did },
+    });
   },
 
   getServerStats(token: AccessToken): Promise<Result<ServerStats, ApiError>> {
-    return xrpcResult('_admin.getServerStats', { token })
+    return xrpcResult("_admin.getServerStats", { token });
   },
 
-  listBackups(token: AccessToken): Promise<Result<ListBackupsResponse, ApiError>> {
-    return xrpcResult('_backup.listBackups', { token })
+  listBackups(
+    token: AccessToken,
+  ): Promise<Result<ListBackupsResponse, ApiError>> {
+    return xrpcResult("_backup.listBackups", { token });
   },
 
-  createBackup(token: AccessToken): Promise<Result<CreateBackupResponse, ApiError>> {
-    return xrpcResult('_backup.createBackup', {
-      method: 'POST',
+  createBackup(
+    token: AccessToken,
+  ): Promise<Result<CreateBackupResponse, ApiError>> {
+    return xrpcResult("_backup.createBackup", {
+      method: "POST",
       token,
-    })
+    });
   },
 
   getDidDocument(token: AccessToken): Promise<Result<DidDocument, ApiError>> {
-    return xrpcResult('_account.getDidDocument', { token })
+    return xrpcResult("_account.getDidDocument", { token });
   },
 
   deleteSession(token: AccessToken): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.deleteSession', {
-      method: 'POST',
+    return xrpcResult<void>("com.atproto.server.deleteSession", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  revokeAllSessions(token: AccessToken): Promise<Result<{ revokedCount: number }, ApiError>> {
-    return xrpcResult('_account.revokeAllSessions', {
-      method: 'POST',
+  revokeAllSessions(
+    token: AccessToken,
+  ): Promise<Result<{ revokedCount: number }, ApiError>> {
+    return xrpcResult("_account.revokeAllSessions", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  getAccountInviteCodes(token: AccessToken): Promise<Result<{ codes: InviteCodeInfo[] }, ApiError>> {
-    return xrpcResult('com.atproto.server.getAccountInviteCodes', { token })
+  getAccountInviteCodes(
+    token: AccessToken,
+  ): Promise<Result<{ codes: InviteCodeInfo[] }, ApiError>> {
+    return xrpcResult("com.atproto.server.getAccountInviteCodes", { token });
   },
 
-  createInviteCode(token: AccessToken, useCount: number = 1): Promise<Result<{ code: string }, ApiError>> {
-    return xrpcResult('com.atproto.server.createInviteCode', {
-      method: 'POST',
+  createInviteCode(
+    token: AccessToken,
+    useCount: number = 1,
+  ): Promise<Result<{ code: string }, ApiError>> {
+    return xrpcResult("com.atproto.server.createInviteCode", {
+      method: "POST",
       token,
       body: { useCount },
-    })
+    });
   },
 
   changePassword(
     token: AccessToken,
     currentPassword: string,
-    newPassword: string
+    newPassword: string,
   ): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('_account.changePassword', {
-      method: 'POST',
+    return xrpcResult<void>("_account.changePassword", {
+      method: "POST",
       token,
       body: { currentPassword, newPassword },
-    })
+    });
   },
 
-  getPasswordStatus(token: AccessToken): Promise<Result<PasswordStatus, ApiError>> {
-    return xrpcResult('_account.getPasswordStatus', { token })
+  getPasswordStatus(
+    token: AccessToken,
+  ): Promise<Result<PasswordStatus, ApiError>> {
+    return xrpcResult("_account.getPasswordStatus", { token });
   },
 
   getServerConfig(): Promise<Result<ServerConfig, ApiError>> {
-    return xrpcResult('_server.getConfig')
+    return xrpcResult("_server.getConfig");
   },
 
-  getLegacyLoginPreference(token: AccessToken): Promise<Result<LegacyLoginPreference, ApiError>> {
-    return xrpcResult('_account.getLegacyLoginPreference', { token })
+  getLegacyLoginPreference(
+    token: AccessToken,
+  ): Promise<Result<LegacyLoginPreference, ApiError>> {
+    return xrpcResult("_account.getLegacyLoginPreference", { token });
   },
 
   updateLegacyLoginPreference(
     token: AccessToken,
-    allowLegacyLogin: boolean
+    allowLegacyLogin: boolean,
   ): Promise<Result<UpdateLegacyLoginResponse, ApiError>> {
-    return xrpcResult('_account.updateLegacyLoginPreference', {
-      method: 'POST',
+    return xrpcResult("_account.updateLegacyLoginPreference", {
+      method: "POST",
       token,
       body: { allowLegacyLogin },
-    })
+    });
   },
 
-  getNotificationHistory(token: AccessToken): Promise<Result<NotificationHistoryResponse, ApiError>> {
-    return xrpcResult('_account.getNotificationHistory', { token })
+  getNotificationHistory(
+    token: AccessToken,
+  ): Promise<Result<NotificationHistoryResponse, ApiError>> {
+    return xrpcResult("_account.getNotificationHistory", { token });
   },
 
   updateNotificationPrefs(
     token: AccessToken,
     prefs: {
-      preferredChannel?: string
-      discordId?: string
-      telegramUsername?: string
-      signalNumber?: string
-    }
+      preferredChannel?: string;
+      discordId?: string;
+      telegramUsername?: string;
+      signalNumber?: string;
+    },
   ): Promise<Result<SuccessResponse, ApiError>> {
-    return xrpcResult('_account.updateNotificationPrefs', {
-      method: 'POST',
+    return xrpcResult("_account.updateNotificationPrefs", {
+      method: "POST",
       token,
       body: prefs,
-    })
+    });
   },
 
-  revokeTrustedDevice(token: AccessToken, deviceId: string): Promise<Result<SuccessResponse, ApiError>> {
-    return xrpcResult('_account.revokeTrustedDevice', {
-      method: 'POST',
+  revokeTrustedDevice(
+    token: AccessToken,
+    deviceId: string,
+  ): Promise<Result<SuccessResponse, ApiError>> {
+    return xrpcResult("_account.revokeTrustedDevice", {
+      method: "POST",
       token,
       body: { deviceId },
-    })
+    });
   },
 
   updateTrustedDevice(
     token: AccessToken,
     deviceId: string,
-    friendlyName: string
+    friendlyName: string,
   ): Promise<Result<SuccessResponse, ApiError>> {
-    return xrpcResult('_account.updateTrustedDevice', {
-      method: 'POST',
+    return xrpcResult("_account.updateTrustedDevice", {
+      method: "POST",
       token,
       body: { deviceId, friendlyName },
-    })
+    });
   },
 
-  reauthPassword(token: AccessToken, password: string): Promise<Result<ReauthResponse, ApiError>> {
-    return xrpcResult('_account.reauthPassword', {
-      method: 'POST',
+  reauthPassword(
+    token: AccessToken,
+    password: string,
+  ): Promise<Result<ReauthResponse, ApiError>> {
+    return xrpcResult("_account.reauthPassword", {
+      method: "POST",
       token,
       body: { password },
-    })
+    });
   },
 
-  reauthTotp(token: AccessToken, code: string): Promise<Result<ReauthResponse, ApiError>> {
-    return xrpcResult('_account.reauthTotp', {
-      method: 'POST',
+  reauthTotp(
+    token: AccessToken,
+    code: string,
+  ): Promise<Result<ReauthResponse, ApiError>> {
+    return xrpcResult("_account.reauthTotp", {
+      method: "POST",
       token,
       body: { code },
-    })
+    });
   },
 
-  reauthPasskeyStart(token: AccessToken): Promise<Result<ReauthPasskeyStartResponse, ApiError>> {
-    return xrpcResult('_account.reauthPasskeyStart', {
-      method: 'POST',
+  reauthPasskeyStart(
+    token: AccessToken,
+  ): Promise<Result<ReauthPasskeyStartResponse, ApiError>> {
+    return xrpcResult("_account.reauthPasskeyStart", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  reauthPasskeyFinish(token: AccessToken, credential: unknown): Promise<Result<ReauthResponse, ApiError>> {
-    return xrpcResult('_account.reauthPasskeyFinish', {
-      method: 'POST',
+  reauthPasskeyFinish(
+    token: AccessToken,
+    credential: unknown,
+  ): Promise<Result<ReauthResponse, ApiError>> {
+    return xrpcResult("_account.reauthPasskeyFinish", {
+      method: "POST",
       token,
       body: { credential },
-    })
+    });
   },
 
-  confirmSignup(did: Did, verificationCode: string): Promise<Result<ConfirmSignupResult, ApiError>> {
-    return xrpcResult('com.atproto.server.confirmSignup', {
-      method: 'POST',
+  confirmSignup(
+    did: Did,
+    verificationCode: string,
+  ): Promise<Result<ConfirmSignupResult, ApiError>> {
+    return xrpcResult("com.atproto.server.confirmSignup", {
+      method: "POST",
       body: { did, verificationCode },
-    })
+    });
   },
 
-  resendVerification(did: Did): Promise<Result<{ success: boolean }, ApiError>> {
-    return xrpcResult('com.atproto.server.resendVerification', {
-      method: 'POST',
+  resendVerification(
+    did: Did,
+  ): Promise<Result<{ success: boolean }, ApiError>> {
+    return xrpcResult("com.atproto.server.resendVerification", {
+      method: "POST",
       body: { did },
-    })
+    });
   },
 
-  requestEmailUpdate(token: AccessToken): Promise<Result<EmailUpdateResponse, ApiError>> {
-    return xrpcResult('com.atproto.server.requestEmailUpdate', {
-      method: 'POST',
+  requestEmailUpdate(
+    token: AccessToken,
+  ): Promise<Result<EmailUpdateResponse, ApiError>> {
+    return xrpcResult("com.atproto.server.requestEmailUpdate", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  updateEmail(token: AccessToken, email: string, emailToken?: string): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.updateEmail', {
-      method: 'POST',
+  updateEmail(
+    token: AccessToken,
+    email: string,
+    emailToken?: string,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.server.updateEmail", {
+      method: "POST",
       token,
       body: { email, token: emailToken },
-    })
+    });
   },
 
   requestAccountDelete(token: AccessToken): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.requestAccountDelete', {
-      method: 'POST',
+    return xrpcResult<void>("com.atproto.server.requestAccountDelete", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  deleteAccount(did: Did, password: string, deleteToken: string): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.deleteAccount', {
-      method: 'POST',
+  deleteAccount(
+    did: Did,
+    password: string,
+    deleteToken: string,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.server.deleteAccount", {
+      method: "POST",
       body: { did, password, token: deleteToken },
-    })
+    });
   },
 
   updateDidDocument(
     token: AccessToken,
     params: {
-      verificationMethods?: VerificationMethod[]
-      alsoKnownAs?: string[]
-      serviceEndpoint?: string
-    }
+      verificationMethods?: VerificationMethod[];
+      alsoKnownAs?: string[];
+      serviceEndpoint?: string;
+    },
   ): Promise<Result<SuccessResponse, ApiError>> {
-    return xrpcResult('_account.updateDidDocument', {
-      method: 'POST',
+    return xrpcResult("_account.updateDidDocument", {
+      method: "POST",
       token,
       body: params,
-    })
+    });
   },
 
-  deactivateAccount(token: AccessToken, deleteAfter?: string): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.deactivateAccount', {
-      method: 'POST',
+  deactivateAccount(
+    token: AccessToken,
+    deleteAfter?: string,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.server.deactivateAccount", {
+      method: "POST",
       token,
       body: { deleteAfter },
-    })
+    });
   },
 
   activateAccount(token: AccessToken): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.activateAccount', {
-      method: 'POST',
+    return xrpcResult<void>("com.atproto.server.activateAccount", {
+      method: "POST",
       token,
-    })
+    });
   },
 
-  setBackupEnabled(token: AccessToken, enabled: boolean): Promise<Result<SetBackupEnabledResponse, ApiError>> {
-    return xrpcResult('_backup.setEnabled', {
-      method: 'POST',
+  setBackupEnabled(
+    token: AccessToken,
+    enabled: boolean,
+  ): Promise<Result<SetBackupEnabledResponse, ApiError>> {
+    return xrpcResult("_backup.setEnabled", {
+      method: "POST",
       token,
       body: { enabled },
-    })
+    });
   },
 
-  deleteBackup(token: AccessToken, id: string): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('_backup.deleteBackup', {
-      method: 'POST',
+  deleteBackup(
+    token: AccessToken,
+    id: string,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("_backup.deleteBackup", {
+      method: "POST",
       token,
       params: { id },
-    })
+    });
   },
 
   createRecord(
@@ -1515,13 +1641,13 @@ export const typedApi = {
     repo: Did,
     collection: Nsid,
     record: unknown,
-    rkey?: Rkey
+    rkey?: Rkey,
   ): Promise<Result<CreateRecordResponse, ApiError>> {
-    return xrpcResult('com.atproto.repo.createRecord', {
-      method: 'POST',
+    return xrpcResult("com.atproto.repo.createRecord", {
+      method: "POST",
       token,
       body: { repo, collection, record, rkey },
-    })
+    });
   },
 
   putRecord(
@@ -1529,122 +1655,136 @@ export const typedApi = {
     repo: Did,
     collection: Nsid,
     rkey: Rkey,
-    record: unknown
+    record: unknown,
   ): Promise<Result<CreateRecordResponse, ApiError>> {
-    return xrpcResult('com.atproto.repo.putRecord', {
-      method: 'POST',
+    return xrpcResult("com.atproto.repo.putRecord", {
+      method: "POST",
       token,
       body: { repo, collection, rkey, record },
-    })
+    });
   },
 
   getInviteCodes(
     token: AccessToken,
-    options?: { sort?: 'recent' | 'usage'; cursor?: string; limit?: number }
+    options?: { sort?: "recent" | "usage"; cursor?: string; limit?: number },
   ): Promise<Result<GetInviteCodesResponse, ApiError>> {
-    const params: Record<string, string> = {}
-    if (options?.sort) params.sort = options.sort
-    if (options?.cursor) params.cursor = options.cursor
-    if (options?.limit) params.limit = String(options.limit)
-    return xrpcResult('com.atproto.admin.getInviteCodes', { token, params })
+    const params: Record<string, string> = {};
+    if (options?.sort) params.sort = options.sort;
+    if (options?.cursor) params.cursor = options.cursor;
+    if (options?.limit) params.limit = String(options.limit);
+    return xrpcResult("com.atproto.admin.getInviteCodes", { token, params });
   },
 
-  disableAccountInvites(token: AccessToken, account: Did): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.admin.disableAccountInvites', {
-      method: 'POST',
+  disableAccountInvites(
+    token: AccessToken,
+    account: Did,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.admin.disableAccountInvites", {
+      method: "POST",
       token,
       body: { account },
-    })
+    });
   },
 
-  enableAccountInvites(token: AccessToken, account: Did): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.admin.enableAccountInvites', {
-      method: 'POST',
+  enableAccountInvites(
+    token: AccessToken,
+    account: Did,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.admin.enableAccountInvites", {
+      method: "POST",
       token,
       body: { account },
-    })
+    });
   },
 
-  adminDeleteAccount(token: AccessToken, did: Did): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.admin.deleteAccount', {
-      method: 'POST',
+  adminDeleteAccount(
+    token: AccessToken,
+    did: Did,
+  ): Promise<Result<void, ApiError>> {
+    return xrpcResult<void>("com.atproto.admin.deleteAccount", {
+      method: "POST",
       token,
       body: { did },
-    })
+    });
   },
 
   startPasskeyRegistration(
     token: AccessToken,
-    friendlyName?: string
+    friendlyName?: string,
   ): Promise<Result<StartPasskeyRegistrationResponse, ApiError>> {
-    return xrpcResult('com.atproto.server.startPasskeyRegistration', {
-      method: 'POST',
+    return xrpcResult("com.atproto.server.startPasskeyRegistration", {
+      method: "POST",
       token,
       body: { friendlyName },
-    })
+    });
   },
 
   finishPasskeyRegistration(
     token: AccessToken,
     credential: unknown,
-    friendlyName?: string
+    friendlyName?: string,
   ): Promise<Result<FinishPasskeyRegistrationResponse, ApiError>> {
-    return xrpcResult('com.atproto.server.finishPasskeyRegistration', {
-      method: 'POST',
+    return xrpcResult("com.atproto.server.finishPasskeyRegistration", {
+      method: "POST",
       token,
       body: { credential, friendlyName },
-    })
+    });
   },
 
   updatePasskey(
     token: AccessToken,
     id: string,
-    friendlyName: string
+    friendlyName: string,
   ): Promise<Result<void, ApiError>> {
-    return xrpcResult<void>('com.atproto.server.updatePasskey', {
-      method: 'POST',
+    return xrpcResult<void>("com.atproto.server.updatePasskey", {
+      method: "POST",
       token,
       body: { id, friendlyName },
-    })
+    });
   },
 
   regenerateBackupCodes(
     token: AccessToken,
     password: string,
-    code: string
+    code: string,
   ): Promise<Result<RegenerateBackupCodesResponse, ApiError>> {
-    return xrpcResult('com.atproto.server.regenerateBackupCodes', {
-      method: 'POST',
+    return xrpcResult("com.atproto.server.regenerateBackupCodes", {
+      method: "POST",
       token,
       body: { password, code },
-    })
+    });
   },
 
-  updateLocale(token: AccessToken, preferredLocale: string): Promise<Result<UpdateLocaleResponse, ApiError>> {
-    return xrpcResult('_account.updateLocale', {
-      method: 'POST',
+  updateLocale(
+    token: AccessToken,
+    preferredLocale: string,
+  ): Promise<Result<UpdateLocaleResponse, ApiError>> {
+    return xrpcResult("_account.updateLocale", {
+      method: "POST",
       token,
       body: { preferredLocale },
-    })
+    });
   },
 
   confirmChannelVerification(
     token: AccessToken,
     channel: string,
     identifier: string,
-    code: string
+    code: string,
   ): Promise<Result<SuccessResponse, ApiError>> {
-    return xrpcResult('_account.confirmChannelVerification', {
-      method: 'POST',
+    return xrpcResult("_account.confirmChannelVerification", {
+      method: "POST",
       token,
       body: { channel, identifier, code },
-    })
+    });
   },
 
-  removePassword(token: AccessToken): Promise<Result<SuccessResponse, ApiError>> {
-    return xrpcResult('_account.removePassword', {
-      method: 'POST',
+  removePassword(
+    token: AccessToken,
+  ): Promise<Result<SuccessResponse, ApiError>> {
+    return xrpcResult("_account.removePassword", {
+      method: "POST",
       token,
-    })
+    });
   },
-}
+};

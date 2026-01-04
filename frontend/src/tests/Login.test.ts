@@ -7,8 +7,14 @@ import {
   mockData,
   mockEndpoint,
   setupFetchMock,
-} from "./mocks";
-import { _testSetState, type SavedAccount } from "../lib/auth.svelte";
+} from "./mocks.ts";
+import { _testSetState, type SavedAccount } from "../lib/auth.svelte.ts";
+import {
+  unsafeAsAccessToken,
+  unsafeAsDid,
+  unsafeAsHandle,
+  unsafeAsRefreshToken,
+} from "../lib/types/branded.ts";
 
 describe("Login", () => {
   beforeEach(() => {
@@ -65,16 +71,16 @@ describe("Login", () => {
   describe("with saved accounts", () => {
     const savedAccounts: SavedAccount[] = [
       {
-        did: "did:web:test.tranquil.dev:u:alice",
-        handle: "alice.test.tranquil.dev",
-        accessJwt: "mock-jwt-alice",
-        refreshJwt: "mock-refresh-alice",
+        did: unsafeAsDid("did:web:test.tranquil.dev:u:alice"),
+        handle: unsafeAsHandle("alice.test.tranquil.dev"),
+        accessJwt: unsafeAsAccessToken("mock-jwt-alice"),
+        refreshJwt: unsafeAsRefreshToken("mock-refresh-alice"),
       },
       {
-        did: "did:web:test.tranquil.dev:u:bob",
-        handle: "bob.test.tranquil.dev",
-        accessJwt: "mock-jwt-bob",
-        refreshJwt: "mock-refresh-bob",
+        did: unsafeAsDid("did:web:test.tranquil.dev:u:bob"),
+        handle: unsafeAsHandle("bob.test.tranquil.dev"),
+        accessJwt: unsafeAsAccessToken("mock-jwt-bob"),
+        refreshJwt: unsafeAsRefreshToken("mock-refresh-bob"),
       },
     ];
 
@@ -88,7 +94,11 @@ describe("Login", () => {
       mockEndpoint(
         "com.atproto.server.getSession",
         () =>
-          jsonResponse(mockData.session({ handle: "alice.test.tranquil.dev" })),
+          jsonResponse(
+            mockData.session({
+              handle: unsafeAsHandle("alice.test.tranquil.dev"),
+            }),
+          ),
       );
     });
 
