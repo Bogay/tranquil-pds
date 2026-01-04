@@ -79,7 +79,7 @@ pub async fn verify_oauth_access_token(
                 "DPoP proof has already been used".to_string(),
             ));
         }
-        if &result.jkt != expected_jkt {
+        if result.jkt.as_str() != expected_jkt {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP key binding mismatch".to_string(),
             ));
@@ -374,7 +374,7 @@ struct LegacyAuthResult {
 
 async fn try_legacy_auth(pool: &PgPool, token: &str) -> Result<LegacyAuthResult, ()> {
     match crate::auth::validate_bearer_token(pool, token).await {
-        Ok(user) if !user.is_oauth => Ok(LegacyAuthResult { did: user.did }),
+        Ok(user) if !user.is_oauth => Ok(LegacyAuthResult { did: user.did.to_string() }),
         _ => Err(()),
     }
 }

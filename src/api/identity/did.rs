@@ -1,4 +1,4 @@
-use crate::api::ApiError;
+use crate::api::{ApiError, DidResponse, EmptyResponse};
 use crate::plc::signing_key_to_did_key;
 use crate::state::AppState;
 use axum::{
@@ -34,15 +34,11 @@ pub async fn resolve_handle(
 ) -> Response {
     let handle = params.handle.trim();
     if handle.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "handle is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("handle is required".into()).into_response();
     }
     let cache_key = format!("handle:{}", handle);
     if let Some(did) = state.cache.get(&cache_key).await {
-        return (StatusCode::OK, Json(json!({ "did": did }))).into_response();
+        return DidResponse::new(did).into_response();
     }
     let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
         .fetch_optional(&state.db)
@@ -53,7 +49,7 @@ pub async fn resolve_handle(
                 .cache
                 .set(&cache_key, &row.did, std::time::Duration::from_secs(300))
                 .await;
-            (StatusCode::OK, Json(json!({ "did": row.did }))).into_response()
+            DidResponse::new(row.did).into_response()
         }
         Ok(None) => match crate::handle::resolve_handle(handle).await {
             Ok(did) => {
@@ -61,21 +57,13 @@ pub async fn resolve_handle(
                     .cache
                     .set(&cache_key, &did, std::time::Duration::from_secs(300))
                     .await;
-                (StatusCode::OK, Json(json!({ "did": did }))).into_response()
+                DidResponse::new(did).into_response()
             }
-            Err(_) => (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "HandleNotFound", "message": "Unable to resolve handle"})),
-            )
-                .into_response(),
+            Err(_) => ApiError::HandleNotFound.into_response(),
         },
         Err(e) => {
             error!("DB error resolving handle: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -150,32 +138,21 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
     let (user_id, did, migrated_to_pds) = match user {
         Ok(Some(row)) => (row.id, row.did, row.migrated_to_pds),
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"}))).into_response();
+            return ApiError::NotFoundMsg("User not found".into()).into_response();
         }
         Err(e) => {
             error!("DB Error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if !did.starts_with("did:web:") {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "NotFound", "message": "User is not did:web"})),
-        )
-            .into_response();
+        return ApiError::NotFoundMsg("User is not did:web".into()).into_response();
     }
     let subdomain_host = format!("{}.{}", handle, hostname);
     let encoded_subdomain = subdomain_host.replace(':', "%3A");
     let expected_self_hosted = format!("did:web:{}", encoded_subdomain);
     if did != expected_self_hosted {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "NotFound", "message": "External did:web - DID document hosted by user"})),
-        )
+        return ApiError::NotFoundMsg("External did:web - DID document hosted by user".into())
             .into_response();
     }
 
@@ -235,30 +212,18 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
         Ok(Some(row)) => match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
             Ok(k) => k,
             Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         },
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let public_key_multibase = match get_public_key_multibase(&key_bytes) {
         Ok(pk) => pk,
         Err(e) => {
             tracing::error!("Failed to generate public key multibase: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -307,23 +272,15 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
     let (user_id, did, migrated_to_pds) = match user {
         Ok(Some(row)) => (row.id, row.did, row.migrated_to_pds),
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": "NotFound"}))).into_response();
+            return ApiError::NotFoundMsg("User not found".into()).into_response();
         }
         Err(e) => {
             error!("DB Error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if !did.starts_with("did:web:") {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "NotFound", "message": "User is not did:web"})),
-        )
-            .into_response();
+        return ApiError::NotFoundMsg("User is not did:web".into()).into_response();
     }
     let encoded_hostname = hostname.replace(':', "%3A");
     let old_path_format = format!("did:web:{}:u:{}", encoded_hostname, handle);
@@ -331,10 +288,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
     let encoded_subdomain = subdomain_host.replace(':', "%3A");
     let new_subdomain_format = format!("did:web:{}", encoded_subdomain);
     if did != old_path_format && did != new_subdomain_format {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "NotFound", "message": "External did:web - DID document hosted by user"})),
-        )
+        return ApiError::NotFoundMsg("External did:web - DID document hosted by user".into())
             .into_response();
     }
 
@@ -394,30 +348,18 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         Ok(Some(row)) => match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
             Ok(k) => k,
             Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         },
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let public_key_multibase = match get_public_key_multibase(&key_bytes) {
         Ok(pk) => pk,
         Err(e) => {
             tracing::error!("Failed to generate public key multibase: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -587,11 +529,7 @@ pub async fn get_recommended_did_credentials(
     ) {
         Some(t) => t,
         None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
+            return ApiError::AuthenticationRequired.into_response();
         }
     };
     let auth_user =
@@ -601,20 +539,20 @@ pub async fn get_recommended_did_credentials(
         };
     let user = match sqlx::query!(
         "SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1",
-        auth_user.did
+        &auth_user.did
     )
     .fetch_optional(&state.db)
     .await
     {
         Ok(Some(row)) => row,
-        _ => return ApiError::InternalError.into_response(),
+        _ => return ApiError::InternalError(None).into_response(),
     };
     let key_bytes = match auth_user.key_bytes {
         Some(kb) => kb,
         None => {
-            return ApiError::AuthenticationFailedMsg(
+            return ApiError::AuthenticationFailed(Some(
                 "OAuth tokens cannot get DID credentials".into(),
-            )
+            ))
             .into_response();
         }
     };
@@ -622,7 +560,7 @@ pub async fn get_recommended_did_credentials(
     let pds_endpoint = format!("https://{}", hostname);
     let signing_key = match k256::ecdsa::SigningKey::from_slice(&key_bytes) {
         Ok(k) => k,
-        Err(_) => return ApiError::InternalError.into_response(),
+        Err(_) => return ApiError::InternalError(None).into_response(),
     };
     let did_key = signing_key_to_did_key(&signing_key);
     let rotation_keys = if auth_user.did.starts_with("did:web:") {
@@ -689,28 +627,22 @@ pub async fn update_handle(
         .check_rate_limit(crate::state::RateLimitKind::HandleUpdate, &did)
         .await
     {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error": "RateLimitExceeded", "message": "Too many handle updates. Try again later."})),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(Some("Too many handle updates. Try again later.".into(),))
+        .into_response();
     }
     if !state
         .check_rate_limit(crate::state::RateLimitKind::HandleUpdateDaily, &did)
         .await
     {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error": "RateLimitExceeded", "message": "Daily handle update limit exceeded."})),
-        )
+        return ApiError::RateLimitExceeded(Some("Daily handle update limit exceeded.".into()))
             .into_response();
     }
-    let user_row = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
+    let user_row = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await
     {
         Ok(Some(row)) => row,
-        _ => return ApiError::InternalError.into_response(),
+        _ => return ApiError::InternalError(None).into_response(),
     };
     let user_id = user_row.id;
     let current_handle = user_row.handle;
@@ -722,35 +654,21 @@ pub async fn update_handle(
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(
-                json!({"error": "InvalidHandle", "message": "Handle contains invalid characters"}),
-            ),
-        )
+        return ApiError::InvalidHandle(Some("Handle contains invalid characters".into()))
             .into_response();
     }
     for segment in new_handle.split('.') {
         if segment.is_empty() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidHandle", "message": "Handle contains empty segment"})),
-            )
+            return ApiError::InvalidHandle(Some("Handle contains empty segment".into()))
                 .into_response();
         }
         if segment.starts_with('-') || segment.ends_with('-') {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidHandle", "message": "Handle segment cannot start or end with hyphen"})),
-            )
-                .into_response();
+            return ApiError::InvalidHandle(Some("Handle segment cannot start or end with hyphen".into(),))
+        .into_response();
         }
     }
     if crate::moderation::has_explicit_slur(&new_handle) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidHandle", "message": "Inappropriate language in handle"})),
-        )
+        return ApiError::InvalidHandle(Some("Inappropriate language in handle".into()))
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -774,31 +692,17 @@ pub async fn update_handle(
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            return (StatusCode::OK, Json(json!({}))).into_response();
+            return EmptyResponse::ok().into_response();
         }
         if short_part.contains('.') {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidHandle",
-                    "message": "Nested subdomains are not allowed. Use a simple handle without dots."
-                })),
-            )
-                .into_response();
+            return ApiError::InvalidHandle(Some("Nested subdomains are not allowed. Use a simple handle without dots.".into(),))
+        .into_response();
         }
         if short_part.len() < 3 {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidHandle", "message": "Handle too short"})),
-            )
-                .into_response();
+            return ApiError::InvalidHandle(Some("Handle too short".into())).into_response();
         }
         if short_part.len() > 18 {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidHandle", "message": "Handle too long"})),
-            )
-                .into_response();
+            return ApiError::InvalidHandle(Some("Handle too long".into())).into_response();
         }
         full_handle
     } else {
@@ -809,41 +713,26 @@ pub async fn update_handle(
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            return (StatusCode::OK, Json(json!({}))).into_response();
+            return EmptyResponse::ok().into_response();
         }
         match crate::handle::verify_handle_ownership(&new_handle, &did).await {
             Ok(()) => {}
             Err(crate::handle::HandleResolutionError::NotFound) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "HandleNotAvailable",
-                        "message": "Handle verification failed. Please set up DNS TXT record at _atproto.{} or serve your DID at https://{}/.well-known/atproto-did",
-                        "handle": new_handle
-                    })),
-                )
-                    .into_response();
+                return ApiError::HandleNotAvailable(None).into_response();
             }
             Err(crate::handle::HandleResolutionError::DidMismatch { expected, actual }) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "HandleNotAvailable",
-                        "message": format!("Handle points to different DID. Expected {}, got {}", expected, actual)
-                    })),
-                )
-                    .into_response();
+                return ApiError::HandleNotAvailable(Some(
+                    format!("Handle points to different DID. Expected {}, got {}", expected, actual),
+                ))
+                .into_response();
             }
             Err(e) => {
                 warn!("Handle verification failed: {}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "HandleNotAvailable",
-                        "message": format!("Handle verification failed: {}", e)
-                    })),
-                )
-                    .into_response();
+                return ApiError::HandleNotAvailable(Some(format!(
+                    "Handle verification failed: {}",
+                    e
+                )))
+                .into_response();
             }
         }
         new_handle.clone()
@@ -856,11 +745,7 @@ pub async fn update_handle(
     .fetch_optional(&state.db)
     .await;
     if let Ok(Some(_)) = existing {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "HandleTaken", "message": "Handle is already in use"})),
-        )
-            .into_response();
+        return ApiError::HandleTaken.into_response();
     }
     let result = sqlx::query!(
         "UPDATE users SET handle = $1 WHERE id = $2",
@@ -886,15 +771,11 @@ pub async fn update_handle(
             if let Err(e) = update_plc_handle(&state, &did, &handle).await {
                 warn!("Failed to update PLC handle: {}", e);
             }
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
         Err(e) => {
             error!("DB error updating handle: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -7,7 +8,7 @@ use axum::{
 };
 use chrono::{Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 const APP_BSKY_NAMESPACE: &str = "app.bsky";
 const MAX_PREFERENCES_COUNT: usize = 100;
@@ -39,37 +40,25 @@ pub async fn get_preferences(
     ) {
         Some(t) => t,
         None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
+            return ApiError::AuthenticationRequired.into_response();
         }
     };
     let auth_user =
         match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
             Ok(user) => user,
             Err(_) => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "AuthenticationFailed"})),
-                )
-                    .into_response();
+                return ApiError::AuthenticationFailed(None).into_response();
             }
         };
     let has_full_access = auth_user.permissions().has_full_access();
     let user_id: uuid::Uuid =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
+        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &*auth_user.did)
             .fetch_optional(&state.db)
             .await
         {
             Ok(Some(id)) => id,
             _ => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": "User not found"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some("User not found".into())).into_response();
             }
         };
     let prefs_result = sqlx::query!(
@@ -81,11 +70,7 @@ pub async fn get_preferences(
     let prefs = match prefs_result {
         Ok(rows) => rows,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to fetch preferences"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to fetch preferences".into())).into_response();
         }
     };
     let mut personal_details_pref: Option<Value> = None;
@@ -114,7 +99,7 @@ pub async fn get_preferences(
         .and_then(|v| v.as_str())
         .and_then(get_age_from_datestring)
     {
-        let declared_age_pref = json!({
+        let declared_age_pref = serde_json::json!({
             "$type": DECLARED_AGE_PREF,
             "isOverAge13": age >= 13,
             "isOverAge16": age >= 16,
@@ -139,92 +124,75 @@ pub async fn put_preferences(
     ) {
         Some(t) => t,
         None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
+            return ApiError::AuthenticationRequired.into_response();
         }
     };
     let auth_user =
         match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
             Ok(user) => user,
             Err(_) => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "AuthenticationFailed"})),
-                )
-                    .into_response();
+                return ApiError::AuthenticationFailed(None).into_response();
             }
         };
     let has_full_access = auth_user.permissions().has_full_access();
     let user_id: uuid::Uuid =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
+        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &*auth_user.did)
             .fetch_optional(&state.db)
             .await
         {
             Ok(Some(id)) => id,
             _ => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": "User not found"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some("User not found".into())).into_response();
             }
         };
     if input.preferences.len() > MAX_PREFERENCES_COUNT {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": format!("Too many preferences: {} exceeds limit of {}", input.preferences.len(), MAX_PREFERENCES_COUNT)})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(format!(
+            "Too many preferences: {} exceeds limit of {}",
+            input.preferences.len(),
+            MAX_PREFERENCES_COUNT
+        ))
+        .into_response();
     }
     let mut forbidden_prefs: Vec<String> = Vec::new();
     for pref in &input.preferences {
         let pref_str = serde_json::to_string(pref).unwrap_or_default();
         if pref_str.len() > MAX_PREFERENCE_SIZE {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": format!("Preference too large: {} bytes exceeds limit of {}", pref_str.len(), MAX_PREFERENCE_SIZE)})),
-            )
-                .into_response();
+            return ApiError::InvalidRequest(format!(
+                "Preference too large: {} bytes exceeds limit of {}",
+                pref_str.len(),
+                MAX_PREFERENCE_SIZE
+            ))
+            .into_response();
         }
         let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
             Some(t) => t,
             None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "Preference is missing a $type"})),
-                )
+                return ApiError::InvalidRequest("Preference is missing a $type".into())
                     .into_response();
             }
         };
         if !pref_type.starts_with(APP_BSKY_NAMESPACE) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": format!("Some preferences are not in the {} namespace", APP_BSKY_NAMESPACE)})),
-            )
-                .into_response();
+            return ApiError::InvalidRequest(format!(
+                "Some preferences are not in the {} namespace",
+                APP_BSKY_NAMESPACE
+            ))
+            .into_response();
         }
         if pref_type == PERSONAL_DETAILS_PREF && !has_full_access {
             forbidden_prefs.push(pref_type.to_string());
         }
     }
     if !forbidden_prefs.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": format!("Do not have authorization to set preferences: {}", forbidden_prefs.join(", "))})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(format!(
+            "Do not have authorization to set preferences: {}",
+            forbidden_prefs.join(", ")
+        ))
+        .into_response();
     }
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to start transaction"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to start transaction".into())).into_response();
         }
     };
     let delete_result = sqlx::query!(
@@ -237,11 +205,7 @@ pub async fn put_preferences(
     .await;
     if delete_result.is_err() {
         let _ = tx.rollback().await;
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to clear preferences"})),
-        )
-            .into_response();
+        return ApiError::InternalError(Some("Failed to clear preferences".into())).into_response();
     }
     for pref in input.preferences {
         let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
@@ -261,19 +225,11 @@ pub async fn put_preferences(
         .await;
         if insert_result.is_err() {
             let _ = tx.rollback().await;
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to save preference"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to save preference".into())).into_response();
         }
     }
     if tx.commit().await.is_err() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to commit transaction"})),
-        )
-            .into_response();
+        return ApiError::InternalError(Some("Failed to commit transaction".into())).into_response();
     }
     StatusCode::OK.into_response()
 }

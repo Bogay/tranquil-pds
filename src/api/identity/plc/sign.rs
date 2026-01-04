@@ -1,8 +1,6 @@
 use crate::api::ApiError;
-use crate::circuit_breaker::{CircuitBreakerError, with_circuit_breaker};
-use crate::plc::{
-    PlcClient, PlcError, PlcOpOrTombstone, PlcService, create_update_op, sign_operation,
-};
+use crate::circuit_breaker::with_circuit_breaker;
+use crate::plc::{PlcClient, PlcError, PlcService, create_update_op, sign_operation};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -13,9 +11,9 @@ use axum::{
 use chrono::Utc;
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::HashMap;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,11 +82,7 @@ pub async fn sign_plc_operation(
     {
         Ok(Some(row)) => row,
         _ => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
     };
     let token_row = match sqlx::query!(
@@ -101,22 +95,11 @@ pub async fn sign_plc_operation(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidToken",
-                    "message": "Invalid or expired token"
-                })),
-            )
-                .into_response();
+            return ApiError::InvalidToken(Some("Invalid or expired token".into())).into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if Utc::now() > token_row.expires_at {
@@ -126,14 +109,7 @@ pub async fn sign_plc_operation(
         )
         .execute(&state.db)
         .await;
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "ExpiredToken",
-                "message": "Token has expired"
-            })),
-        )
-            .into_response();
+        return ApiError::ExpiredToken(Some("Token has expired".into())).into_response();
     }
     let key_row = match sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
@@ -144,11 +120,7 @@ pub async fn sign_plc_operation(
     {
         Ok(Some(row)) => row,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "User signing key not found"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("User signing key not found".into())).into_response();
         }
     };
     let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
@@ -156,75 +128,28 @@ pub async fn sign_plc_operation(
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let signing_key = match SigningKey::from_slice(&key_bytes) {
         Ok(k) => k,
         Err(e) => {
             error!("Failed to create signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
     let did_clone = did.clone();
-    let result: Result<PlcOpOrTombstone, CircuitBreakerError<PlcError>> =
-        with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
-            plc_client.get_last_op(&did_clone).await
-        })
-        .await;
-    let last_op = match result {
+    let last_op = match with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
+        plc_client.get_last_op(&did_clone).await
+    })
+    .await
+    {
         Ok(op) => op,
-        Err(CircuitBreakerError::CircuitOpen(e)) => {
-            warn!("PLC directory circuit breaker open: {}", e);
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "error": "ServiceUnavailable",
-                    "message": "PLC directory service temporarily unavailable"
-                })),
-            )
-                .into_response();
-        }
-        Err(CircuitBreakerError::OperationFailed(PlcError::NotFound)) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "error": "NotFound",
-                    "message": "DID not found in PLC directory"
-                })),
-            )
-                .into_response();
-        }
-        Err(CircuitBreakerError::OperationFailed(e)) => {
-            error!("Failed to fetch PLC operation: {:?}", e);
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": "UpstreamError",
-                    "message": "Failed to communicate with PLC directory"
-                })),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::from(e).into_response(),
     };
     if last_op.is_tombstone() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": "DID is tombstoned"
-            })),
-        )
-            .into_response();
+        return ApiError::from(PlcError::Tombstoned).into_response();
     }
     let services = input.services.map(|s| {
         s.into_iter()
@@ -248,33 +173,18 @@ pub async fn sign_plc_operation(
     ) {
         Ok(op) => op,
         Err(PlcError::Tombstoned) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Cannot update tombstoned DID"
-                })),
-            )
-                .into_response();
+            return ApiError::InvalidRequest("Cannot update tombstoned DID".into()).into_response();
         }
         Err(e) => {
             error!("Failed to create PLC operation: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let signed_op = match sign_operation(&unsigned_op, &signing_key) {
         Ok(op) => op,
         Err(e) => {
             error!("Failed to sign PLC operation: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let _ = sqlx::query!(

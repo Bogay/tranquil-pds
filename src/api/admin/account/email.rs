@@ -1,5 +1,7 @@
+use crate::api::error::{ApiError, AtpJson};
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
+use crate::types::Did;
 use axum::{
     Json,
     extract::State,
@@ -7,14 +9,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{error, warn};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendEmailInput {
-    pub recipient_did: String,
-    pub sender_did: String,
+    pub recipient_did: Did,
+    pub sender_did: Did,
     pub content: String,
     pub subject: Option<String>,
     pub comment: Option<String>,
@@ -28,27 +29,15 @@ pub struct SendEmailOutput {
 pub async fn send_email(
     State(state): State<AppState>,
     _auth: BearerAuthAdmin,
-    Json(input): Json<SendEmailInput>,
+    AtpJson(input): AtpJson<SendEmailInput>,
 ) -> Response {
-    let recipient_did = input.recipient_did.trim();
     let content = input.content.trim();
-    if recipient_did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "recipientDid is required"})),
-        )
-            .into_response();
-    }
     if content.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "content is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("content is required".into()).into_response();
     }
     let user = sqlx::query!(
         "SELECT id, email, handle FROM users WHERE did = $1",
-        recipient_did
+        input.recipient_did.as_str()
     )
     .fetch_optional(&state.db)
     .await;
@@ -57,29 +46,17 @@ pub async fn send_email(
             let email = match row.email {
                 Some(e) => e,
                 None => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "NoEmail", "message": "Recipient has no email address"})),
-                    )
-                        .into_response();
+                    return ApiError::NoEmail.into_response();
                 }
             };
             (row.id, email, row.handle)
         }
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Recipient account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error in send_email: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -97,7 +74,7 @@ pub async fn send_email(
     let result = crate::comms::enqueue_comms(&state.db, item).await;
     match result {
         Ok(_) => {
-            tracing::info!("Admin email queued for {} ({})", handle, recipient_did);
+            tracing::info!("Admin email queued for {} ({})", handle, input.recipient_did);
             (StatusCode::OK, Json(SendEmailOutput { sent: true })).into_response()
         }
         Err(e) => {

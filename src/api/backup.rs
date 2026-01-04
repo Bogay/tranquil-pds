@@ -1,3 +1,5 @@
+use crate::api::error::ApiError;
+use crate::api::{EmptyResponse, EnabledResponse};
 use crate::auth::BearerAuth;
 use crate::scheduled::generate_full_backup;
 use crate::state::AppState;
@@ -35,26 +37,18 @@ pub struct ListBackupsOutput {
 pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Response {
     let user = match sqlx::query!(
         "SELECT id, backup_enabled FROM users WHERE did = $1",
-        auth.0.did
+        auth.0.did.as_str()
     )
     .fetch_optional(&state.db)
     .await
     {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -73,11 +67,7 @@ pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Re
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching backups: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -116,11 +106,7 @@ pub async fn get_backup(
     let backup_id = match uuid::Uuid::parse_str(&query.id) {
         Ok(id) => id,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "Invalid backup ID"})),
-            )
-                .into_response();
+            return ApiError::InvalidRequest("Invalid backup ID".into()).into_response();
         }
     };
 
@@ -132,39 +118,25 @@ pub async fn get_backup(
         WHERE ab.id = $1 AND u.did = $2
         "#,
         backup_id,
-        auth.0.did
+        auth.0.did.as_str()
     )
     .fetch_optional(&state.db)
     .await
     {
         Ok(Some(b)) => b,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "BackupNotFound", "message": "Backup not found"})),
-            )
-                .into_response();
+            return ApiError::BackupNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching backup: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     let backup_storage = match state.backup_storage.as_ref() {
         Some(storage) => storage,
         None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(
-                    json!({"error": "BackupsDisabled", "message": "Backup storage not configured"}),
-                ),
-            )
-                .into_response();
+            return ApiError::BackupsDisabled.into_response();
         }
     };
 
@@ -172,11 +144,7 @@ pub async fn get_backup(
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to fetch backup from storage: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to retrieve backup"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to retrieve backup".into())).into_response();
         }
     };
 
@@ -207,13 +175,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
     let backup_storage = match state.backup_storage.as_ref() {
         Some(storage) => storage,
         None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(
-                    json!({"error": "BackupsDisabled", "message": "Backup storage not configured"}),
-                ),
-            )
-                .into_response();
+            return ApiError::BackupsDisabled.into_response();
         }
     };
 
@@ -224,58 +186,36 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         JOIN repos r ON r.user_id = u.id
         WHERE u.did = $1
         "#,
-        auth.0.did
+        auth.0.did.as_str()
     )
     .fetch_optional(&state.db)
     .await
     {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if user.deactivated_at.is_some() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "AccountDeactivated", "message": "Account is deactivated"})),
-        )
-            .into_response();
+        return ApiError::AccountDeactivated.into_response();
     }
 
     let repo_rev = match &user.repo_rev {
         Some(rev) => rev.clone(),
         None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(
-                    json!({"error": "RepoNotReady", "message": "Repository not ready for backup"}),
-                ),
-            )
-                .into_response();
+            return ApiError::RepoNotReady.into_response();
         }
     };
 
     let head_cid = match Cid::from_str(&user.repo_root_cid) {
         Ok(c) => c,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid repo root CID"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Invalid repo root CID".into())).into_response();
         }
     };
 
@@ -283,11 +223,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to generate CAR: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to generate backup"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to generate backup".into())).into_response();
         }
     };
 
@@ -301,11 +237,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         Ok(key) => key,
         Err(e) => {
             error!("Failed to upload backup: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to store backup"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to store backup".into())).into_response();
         }
     };
 
@@ -335,11 +267,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
                     "Failed to rollback orphaned backup from S3"
                 );
             }
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to record backup"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to record backup".into())).into_response();
         }
     };
 
@@ -420,11 +348,7 @@ pub async fn delete_backup(
     let backup_id = match uuid::Uuid::parse_str(&query.id) {
         Ok(id) => id,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "Invalid backup ID"})),
-            )
-                .into_response();
+            return ApiError::InvalidRequest("Invalid backup ID".into()).into_response();
         }
     };
 
@@ -436,35 +360,23 @@ pub async fn delete_backup(
         WHERE ab.id = $1 AND u.did = $2
         "#,
         backup_id,
-        auth.0.did
+        auth.0.did.as_str()
     )
     .fetch_optional(&state.db)
     .await
     {
         Ok(Some(b)) => b,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "BackupNotFound", "message": "Backup not found"})),
-            )
-                .into_response();
+            return ApiError::BackupNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching backup: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if backup.deactivated_at.is_some() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "AccountDeactivated", "message": "Account is deactivated"})),
-        )
-            .into_response();
+        return ApiError::AccountDeactivated.into_response();
     }
 
     if let Some(backup_storage) = state.backup_storage.as_ref()
@@ -482,16 +394,12 @@ pub async fn delete_backup(
         .await
     {
         error!("DB error deleting backup: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to delete backup"})),
-        )
-            .into_response();
+        return ApiError::InternalError(Some("Failed to delete backup".into())).into_response();
     }
 
     info!(did = %auth.0.did, backup_id = %backup_id, "Deleted backup");
 
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
@@ -507,78 +415,54 @@ pub async fn set_backup_enabled(
 ) -> Response {
     let user = match sqlx::query!(
         "SELECT deactivated_at FROM users WHERE did = $1",
-        auth.0.did
+        auth.0.did.as_str()
     )
     .fetch_optional(&state.db)
     .await
     {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if user.deactivated_at.is_some() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "AccountDeactivated", "message": "Account is deactivated"})),
-        )
-            .into_response();
+        return ApiError::AccountDeactivated.into_response();
     }
 
     if let Err(e) = sqlx::query!(
         "UPDATE users SET backup_enabled = $1 WHERE did = $2",
         input.enabled,
-        auth.0.did
+        auth.0.did.as_str()
     )
     .execute(&state.db)
     .await
     {
         error!("DB error updating backup_enabled: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to update setting"})),
-        )
-            .into_response();
+        return ApiError::InternalError(Some("Failed to update setting".into())).into_response();
     }
 
     info!(did = %auth.0.did, enabled = input.enabled, "Updated backup_enabled setting");
 
-    (StatusCode::OK, Json(json!({"enabled": input.enabled}))).into_response()
+    EnabledResponse::new(input.enabled).into_response()
 }
 
 pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", auth.0.did)
+    let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", auth.0.did.as_str())
         .fetch_optional(&state.db)
         .await
     {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -597,11 +481,7 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching blobs: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -695,11 +575,7 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
 
         if let Err(e) = zip.finish() {
             error!("Failed to finish zip: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to create zip file"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to create zip file".into())).into_response();
         }
     }
 

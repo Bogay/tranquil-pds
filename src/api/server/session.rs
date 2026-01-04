@@ -1,6 +1,8 @@
-use crate::api::ApiError;
+use crate::api::error::ApiError;
+use crate::api::{EmptyResponse, SuccessResponse};
 use crate::auth::{BearerAuth, BearerAuthAllowDeactivated};
 use crate::state::{AppState, RateLimitKind};
+use crate::types::{AccountState, Did, Handle, PlainPassword};
 use axum::{
     Json,
     extract::State,
@@ -46,7 +48,7 @@ fn full_handle(stored_handle: &str, _pds_hostname: &str) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionInput {
     pub identifier: String,
-    pub password: String,
+    pub password: PlainPassword,
     #[serde(default)]
     pub allow_takendown: bool,
 }
@@ -56,8 +58,8 @@ pub struct CreateSessionInput {
 pub struct CreateSessionOutput {
     pub access_jwt: String,
     pub refresh_jwt: String,
-    pub handle: String,
-    pub did: String,
+    pub handle: Handle,
+    pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub did_doc: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,14 +87,7 @@ pub async fn create_session(
         .await
     {
         warn!(ip = %client_ip, "Login rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many login attempts. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let normalized_identifier = normalize_handle(&input.identifier, &pds_hostname);
@@ -123,19 +118,19 @@ pub async fn create_session(
                 "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYw1ZzQKZqmK",
             );
             warn!("User not found for login attempt");
-            return ApiError::AuthenticationFailedMsg("Invalid identifier or password".into())
+            return ApiError::AuthenticationFailed(Some("Invalid identifier or password".into()))
                 .into_response();
         }
         Err(e) => {
             error!("Database error fetching user: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let key_bytes = match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let (password_valid, app_password_name, app_password_scopes, app_password_controller) = if row
@@ -168,20 +163,18 @@ pub async fn create_session(
     };
     if !password_valid {
         warn!("Password verification failed for login attempt");
-        return ApiError::AuthenticationFailedMsg("Invalid identifier or password".into())
+        return ApiError::AuthenticationFailed(Some("Invalid identifier or password".into()))
             .into_response();
     }
-    let is_takendown = row.takedown_ref.is_some();
-    if is_takendown && !input.allow_takendown {
+    let account_state = AccountState::from_db_fields(
+        row.deactivated_at,
+        row.takedown_ref.clone(),
+        row.migrated_to_pds.clone(),
+        None,
+    );
+    if account_state.is_takendown() && !input.allow_takendown {
         warn!("Login attempt for takendown account: {}", row.did);
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "AccountTakedown",
-                "message": "Account has been taken down"
-            })),
-        )
-            .into_response();
+        return ApiError::AccountTakedown.into_response();
     }
     let is_verified =
         row.email_verified || row.discord_verified || row.telegram_verified || row.signal_verified;
@@ -223,14 +216,14 @@ pub async fn create_session(
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create access token: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let refresh_meta = match crate::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create refresh token: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let did_for_doc = row.did.clone();
@@ -254,7 +247,7 @@ pub async fn create_session(
     );
     if let Err(e) = insert_result {
         error!("Failed to insert session: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
     if is_legacy_login {
         warn!(
@@ -276,22 +269,13 @@ pub async fn create_session(
         }
     }
     let handle = full_handle(&row.handle, &pds_hostname);
-    let is_migrated = row.deactivated_at.is_some() && row.migrated_to_pds.is_some();
-    let is_active = row.deactivated_at.is_none() && !is_takendown;
-    let status = if is_takendown {
-        Some("takendown".to_string())
-    } else if is_migrated {
-        Some("migrated".to_string())
-    } else if row.deactivated_at.is_some() {
-        Some("deactivated".to_string())
-    } else {
-        None
-    };
+    let is_active = account_state.is_active();
+    let status = account_state.status_for_session().map(String::from);
     Json(CreateSessionOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
-        handle,
-        did: row.did,
+        handle: handle.into(),
+        did: row.did.into(),
         did_doc,
         email: row.email,
         email_confirmed: Some(row.email_verified),
@@ -317,7 +301,7 @@ pub async fn get_session(
                 preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
                 discord_verified, telegram_verified, signal_verified, migrated_to_pds, migrated_at
             FROM users WHERE did = $1"#,
-            auth_user.did
+            &auth_user.did
         )
         .fetch_optional(&state.db),
         did_resolver.resolve_did_document(&did_for_doc)
@@ -333,9 +317,12 @@ pub async fn get_session(
             let pds_hostname =
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&row.handle, &pds_hostname);
-            let is_takendown = row.takedown_ref.is_some();
-            let is_migrated = row.deactivated_at.is_some() && row.migrated_to_pds.is_some();
-            let is_active = row.deactivated_at.is_none() && !is_takendown;
+            let account_state = AccountState::from_db_fields(
+                row.deactivated_at,
+                row.takedown_ref.clone(),
+                row.migrated_to_pds.clone(),
+                row.migrated_at,
+            );
             let email_value = if can_read_email {
                 row.email.clone()
             } else {
@@ -344,8 +331,8 @@ pub async fn get_session(
             let email_confirmed_value = can_read_email && row.email_verified;
             let mut response = json!({
                 "handle": handle,
-                "did": auth_user.did,
-                "active": is_active,
+                "did": &auth_user.did,
+                "active": account_state.is_active(),
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "preferredLocale": row.preferred_locale,
@@ -355,24 +342,22 @@ pub async fn get_session(
                 response["email"] = json!(email_value);
                 response["emailConfirmed"] = json!(email_confirmed_value);
             }
-            if is_takendown {
-                response["status"] = json!("takendown");
-            } else if is_migrated {
-                response["status"] = json!("migrated");
-                response["migratedToPds"] = json!(row.migrated_to_pds);
-                response["migratedAt"] = json!(row.migrated_at);
-            } else if row.deactivated_at.is_some() {
-                response["status"] = json!("deactivated");
+            if let Some(status) = account_state.status_for_session() {
+                response["status"] = json!(status);
+            }
+            if let AccountState::Migrated { to_pds, at } = &account_state {
+                response["migratedToPds"] = json!(to_pds);
+                response["migratedAt"] = json!(at);
             }
             if let Some(doc) = did_doc {
                 response["didDoc"] = doc;
             }
             Json(response).into_response()
         }
-        Ok(None) => ApiError::AuthenticationFailed.into_response(),
+        Ok(None) => ApiError::AuthenticationFailed(None).into_response(),
         Err(e) => {
             error!("Database error in get_session: {:?}", e);
-            ApiError::InternalError.into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -389,7 +374,7 @@ pub async fn delete_session(
     };
     let jti = match crate::auth::get_jti_from_token(&token) {
         Ok(jti) => jti,
-        Err(_) => return ApiError::AuthenticationFailed.into_response(),
+        Err(_) => return ApiError::AuthenticationFailed(None).into_response(),
     };
     let did = crate::auth::get_did_from_token(&token).ok();
     match sqlx::query!("DELETE FROM session_tokens WHERE access_jti = $1", jti)
@@ -401,12 +386,12 @@ pub async fn delete_session(
                 let session_cache_key = format!("auth:session:{}:{}", did, jti);
                 let _ = state.cache.delete(&session_cache_key).await;
             }
-            Json(json!({})).into_response()
+            EmptyResponse::ok().into_response()
         }
-        Ok(_) => ApiError::AuthenticationFailed.into_response(),
+        Ok(_) => ApiError::AuthenticationFailed(None).into_response(),
         Err(e) => {
             error!("Database error in delete_session: {:?}", e);
-            ApiError::AuthenticationFailed.into_response()
+            ApiError::AuthenticationFailed(None).into_response()
         }
     }
 }
@@ -421,14 +406,7 @@ pub async fn refresh_session(
         .await
     {
         tracing::warn!(ip = %client_ip, "Refresh session rate limit exceeded");
-        return (
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            axum::Json(serde_json::json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many requests. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
     let refresh_token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
@@ -439,7 +417,7 @@ pub async fn refresh_session(
     let refresh_jti = match crate::auth::get_jti_from_token(&refresh_token) {
         Ok(jti) => jti,
         Err(_) => {
-            return ApiError::AuthenticationFailedMsg("Invalid token format".into())
+            return ApiError::AuthenticationFailed(Some("Invalid token format".into()))
                 .into_response();
         }
     };
@@ -447,7 +425,7 @@ pub async fn refresh_session(
         Ok(tx) => tx,
         Err(e) => {
             error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if let Ok(Some(session_id)) = sqlx::query_scalar!(
@@ -465,9 +443,9 @@ pub async fn refresh_session(
             .execute(&mut *tx)
             .await;
         let _ = tx.commit().await;
-        return ApiError::ExpiredTokenMsg(
+        return ApiError::AuthenticationFailed(Some(
             "Refresh token has been revoked due to suspected compromise".into(),
-        )
+        ))
         .into_response();
     }
     let session_row = match sqlx::query!(
@@ -484,12 +462,12 @@ pub async fn refresh_session(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return ApiError::AuthenticationFailedMsg("Invalid refresh token".into())
+            return ApiError::AuthenticationFailed(Some("Invalid refresh token".into()))
                 .into_response();
         }
         Err(e) => {
             error!("Database error fetching session: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let key_bytes =
@@ -497,11 +475,11 @@ pub async fn refresh_session(
             Ok(k) => k,
             Err(e) => {
                 error!("Failed to decrypt user key: {:?}", e);
-                return ApiError::InternalError.into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     if crate::auth::verify_refresh_token(&refresh_token, &key_bytes).is_err() {
-        return ApiError::AuthenticationFailedMsg("Invalid refresh token".into()).into_response();
+        return ApiError::AuthenticationFailed(Some("Invalid refresh token".into())).into_response();
     }
     let new_access_meta = match crate::auth::create_access_token_with_delegation(
         &session_row.did,
@@ -512,7 +490,7 @@ pub async fn refresh_session(
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create access token: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let new_refresh_meta =
@@ -520,7 +498,7 @@ pub async fn refresh_session(
             Ok(m) => m,
             Err(e) => {
                 error!("Failed to create refresh token: {:?}", e);
-                return ApiError::InternalError.into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     match sqlx::query!(
@@ -537,11 +515,11 @@ pub async fn refresh_session(
                 .execute(&mut *tx)
                 .await;
             let _ = tx.commit().await;
-            return ApiError::ExpiredTokenMsg("Refresh token has been revoked due to suspected compromise".into()).into_response();
+            return ApiError::AuthenticationFailed(Some("Refresh token has been revoked due to suspected compromise".into())).into_response();
         }
         Err(e) => {
             error!("Failed to record used refresh token: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
         Ok(_) => {}
     }
@@ -557,11 +535,11 @@ pub async fn refresh_session(
     .await
     {
         error!("Database error updating session: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
     if let Err(e) = tx.commit().await {
         error!("Failed to commit transaction: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let did_for_doc = session_row.did.clone();
     let did_resolver = state.did_resolver.clone();
@@ -588,8 +566,12 @@ pub async fn refresh_session(
             let pds_hostname =
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
             let handle = full_handle(&u.handle, &pds_hostname);
-            let is_takendown = u.takedown_ref.is_some();
-            let is_active = u.deactivated_at.is_none() && !is_takendown;
+            let account_state = AccountState::from_db_fields(
+                u.deactivated_at,
+                u.takedown_ref.clone(),
+                None,
+                None,
+            );
             let mut response = json!({
                 "accessJwt": new_access_meta.token,
                 "refreshJwt": new_refresh_meta.token,
@@ -601,25 +583,23 @@ pub async fn refresh_session(
                 "preferredChannelVerified": preferred_channel_verified,
                 "preferredLocale": u.preferred_locale,
                 "isAdmin": u.is_admin,
-                "active": is_active
+                "active": account_state.is_active()
             });
             if let Some(doc) = did_doc {
                 response["didDoc"] = doc;
             }
-            if is_takendown {
-                response["status"] = json!("takendown");
-            } else if u.deactivated_at.is_some() {
-                response["status"] = json!("deactivated");
+            if let Some(status) = account_state.status_for_session() {
+                response["status"] = json!(status);
             }
             Json(response).into_response()
         }
         Ok(None) => {
             error!("User not found for existing session: {}", session_row.did);
-            ApiError::InternalError.into_response()
+            ApiError::InternalError(None).into_response()
         }
         Err(e) => {
             error!("Database error fetching user: {:?}", e);
-            ApiError::InternalError.into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -627,7 +607,7 @@ pub async fn refresh_session(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmSignupInput {
-    pub did: String,
+    pub did: Did,
     pub verification_code: String,
 }
 
@@ -636,8 +616,8 @@ pub struct ConfirmSignupInput {
 pub struct ConfirmSignupOutput {
     pub access_jwt: String,
     pub refresh_jwt: String,
-    pub handle: String,
-    pub did: String,
+    pub handle: Handle,
+    pub did: Did,
     pub email: Option<String>,
     pub email_verified: bool,
     pub preferred_channel: String,
@@ -658,7 +638,7 @@ pub async fn confirm_signup(
         FROM users u
         JOIN user_keys k ON u.id = k.user_id
         WHERE u.did = $1"#,
-        input.did
+        input.did.as_str()
     )
     .fetch_optional(&state.db)
     .await
@@ -671,7 +651,7 @@ pub async fn confirm_signup(
         }
         Err(e) => {
             error!("Database error in confirm_signup: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -697,7 +677,7 @@ pub async fn confirm_signup(
         &identifier,
     ) {
         Ok(token_data) => {
-            if token_data.did != input.did {
+            if token_data.did != input.did.as_str() {
                 warn!(
                     "Token DID mismatch for confirm_signup: expected {}, got {}",
                     input.did, token_data.did
@@ -708,7 +688,7 @@ pub async fn confirm_signup(
         }
         Err(crate::auth::verification_token::VerifyError::Expired) => {
             warn!("Verification code expired for user: {}", input.did);
-            return ApiError::ExpiredTokenMsg("Verification code has expired".into())
+            return ApiError::ExpiredToken(Some("Verification code has expired".into()))
                 .into_response();
         }
         Err(e) => {
@@ -721,7 +701,7 @@ pub async fn confirm_signup(
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let verified_column = match row.channel {
@@ -732,26 +712,26 @@ pub async fn confirm_signup(
     };
     let update_query = format!("UPDATE users SET {} = TRUE WHERE did = $1", verified_column);
     if let Err(e) = sqlx::query(&update_query)
-        .bind(&input.did)
+        .bind(input.did.as_str())
         .execute(&state.db)
         .await
     {
         error!("Failed to update verification status: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create access token: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let refresh_meta = match crate::auth::create_refresh_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to create refresh token: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let no_scope: Option<String> = None;
@@ -770,7 +750,7 @@ pub async fn confirm_signup(
     .await
     {
         error!("Failed to insert session: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) = crate::comms::enqueue_welcome(&state.db, row.id, &hostname).await {
@@ -786,8 +766,8 @@ pub async fn confirm_signup(
     Json(ConfirmSignupOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
-        handle: row.handle,
-        did: row.did,
+        handle: row.handle.into(),
+        did: row.did.into(),
         email: row.email,
         email_verified,
         preferred_channel: preferred_channel.to_string(),
@@ -799,7 +779,7 @@ pub async fn confirm_signup(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResendVerificationInput {
-    pub did: String,
+    pub did: Did,
 }
 
 pub async fn resend_verification(
@@ -815,7 +795,7 @@ pub async fn resend_verification(
             email_verified, discord_verified, telegram_verified, signal_verified
         FROM users
         WHERE did = $1"#,
-        input.did
+        input.did.as_str()
     )
     .fetch_optional(&state.db)
     .await
@@ -826,7 +806,7 @@ pub async fn resend_verification(
         }
         Err(e) => {
             error!("Database error in resend_verification: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let is_verified =
@@ -866,7 +846,7 @@ pub async fn resend_verification(
     {
         warn!("Failed to enqueue verification notification: {:?}", e);
     }
-    Json(json!({"success": true})).into_response()
+    SuccessResponse::ok().into_response()
 }
 
 #[derive(Serialize)]
@@ -934,11 +914,7 @@ pub async fn list_sessions(
         }
         Err(e) => {
             error!("DB error fetching JWT sessions: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
 
@@ -980,11 +956,7 @@ pub async fn list_sessions(
         }
         Err(e) => {
             error!("DB error fetching OAuth sessions: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
 
@@ -1015,15 +987,8 @@ pub async fn revoke_session(
     Json(input): Json<RevokeSessionInput>,
 ) -> Response {
     if let Some(jwt_id) = input.session_id.strip_prefix("jwt:") {
-        let session_id: i32 = match jwt_id.parse() {
-            Ok(id) => id,
-            Err(_) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "Invalid session ID"})),
-                )
-                    .into_response();
-            }
+        let Ok(session_id) = jwt_id.parse::<i32>() else {
+            return ApiError::InvalidRequest("Invalid session ID".into()).into_response();
         };
         let session = sqlx::query_as::<_, (String,)>(
             "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
@@ -1035,19 +1000,11 @@ pub async fn revoke_session(
         let access_jti = match session {
             Ok(Some((jti,))) => jti,
             Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "SessionNotFound", "message": "Session not found"})),
-                )
-                    .into_response();
+                return ApiError::SessionNotFound.into_response();
             }
             Err(e) => {
                 error!("DB error in revoke_session: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
         if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE id = $1")
@@ -1056,27 +1013,16 @@ pub async fn revoke_session(
             .await
         {
             error!("DB error deleting session: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
-        let cache_key = format!("auth:session:{}:{}", auth.0.did, access_jti);
+        let cache_key = format!("auth:session:{}:{}", &auth.0.did, access_jti);
         if let Err(e) = state.cache.delete(&cache_key).await {
             warn!("Failed to invalidate session cache: {:?}", e);
         }
-        info!(did = %auth.0.did, session_id = %session_id, "JWT session revoked");
+        info!(did = %&auth.0.did, session_id = %session_id, "JWT session revoked");
     } else if let Some(oauth_id) = input.session_id.strip_prefix("oauth:") {
-        let session_id: i32 = match oauth_id.parse() {
-            Ok(id) => id,
-            Err(_) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "Invalid session ID"})),
-                )
-                    .into_response();
-            }
+        let Ok(session_id) = oauth_id.parse::<i32>() else {
+            return ApiError::InvalidRequest("Invalid session ID".into()).into_response();
         };
         let result = sqlx::query("DELETE FROM oauth_token WHERE id = $1 AND did = $2")
             .bind(session_id)
@@ -1085,31 +1031,19 @@ pub async fn revoke_session(
             .await;
         match result {
             Ok(r) if r.rows_affected() == 0 => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "SessionNotFound", "message": "Session not found"})),
-                )
-                    .into_response();
+                return ApiError::SessionNotFound.into_response();
             }
             Err(e) => {
                 error!("DB error deleting OAuth session: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
             _ => {}
         }
-        info!(did = %auth.0.did, session_id = %session_id, "OAuth session revoked");
+        info!(did = %&auth.0.did, session_id = %session_id, "OAuth session revoked");
     } else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Invalid session ID format"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("Invalid session ID format".into()).into_response();
     }
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 pub async fn revoke_all_sessions(
@@ -1123,71 +1057,51 @@ pub async fn revoke_all_sessions(
         .and_then(|v| v.strip_prefix("Bearer "))
         .and_then(|token| crate::auth::get_jti_from_token(token).ok());
 
-    if let Some(ref jti) = current_jti {
-        if auth.0.is_oauth {
-            if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE did = $1")
-                .bind(&auth.0.did)
-                .execute(&state.db)
-                .await
-            {
-                error!("DB error revoking JWT sessions: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
-            if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1 AND token_id != $2")
+    let Some(ref jti) = current_jti else {
+        return ApiError::InvalidToken(None).into_response();
+    };
+
+    if auth.0.is_oauth {
+        if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE did = $1")
+            .bind(&auth.0.did)
+            .execute(&state.db)
+            .await
+        {
+            error!("DB error revoking JWT sessions: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+        if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1 AND token_id != $2")
+            .bind(&auth.0.did)
+            .bind(jti)
+            .execute(&state.db)
+            .await
+        {
+            error!("DB error revoking OAuth sessions: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    } else {
+        if let Err(e) =
+            sqlx::query("DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2")
                 .bind(&auth.0.did)
                 .bind(jti)
                 .execute(&state.db)
                 .await
-            {
-                error!("DB error revoking OAuth sessions: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
-        } else {
-            if let Err(e) =
-                sqlx::query("DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2")
-                    .bind(&auth.0.did)
-                    .bind(jti)
-                    .execute(&state.db)
-                    .await
-            {
-                error!("DB error revoking JWT sessions: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
-            if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1")
-                .bind(&auth.0.did)
-                .execute(&state.db)
-                .await
-            {
-                error!("DB error revoking OAuth sessions: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
-            }
+        {
+            error!("DB error revoking JWT sessions: {:?}", e);
+            return ApiError::InternalError(None).into_response();
         }
-    } else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidToken", "message": "Could not identify current session"})),
-        )
-            .into_response();
+        if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1")
+            .bind(&auth.0.did)
+            .execute(&state.db)
+            .await
+        {
+            error!("DB error revoking OAuth sessions: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
     }
 
-    info!(did = %auth.0.did, "All other sessions revoked");
-    (StatusCode::OK, Json(json!({"success": true}))).into_response()
+    info!(did = %&auth.0.did, "All other sessions revoked");
+    SuccessResponse::ok().into_response()
 }
 
 #[derive(Serialize)]
@@ -1207,7 +1121,7 @@ pub async fn get_legacy_login_preference(
             (EXISTS(SELECT 1 FROM user_totp t WHERE t.did = u.did AND t.verified = TRUE) OR
              EXISTS(SELECT 1 FROM passkeys p WHERE p.did = u.did)) as "has_mfa!"
         FROM users u WHERE u.did = $1"#,
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
@@ -1218,18 +1132,10 @@ pub async fn get_legacy_login_preference(
             has_mfa: row.has_mfa,
         })
         .into_response(),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "AccountNotFound"})),
-        )
-            .into_response(),
+        Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -1257,7 +1163,7 @@ pub async fn update_legacy_login_preference(
     let result = sqlx::query!(
         "UPDATE users SET allow_legacy_login = $1 WHERE did = $2 RETURNING did",
         input.allow_legacy_login,
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
@@ -1265,7 +1171,7 @@ pub async fn update_legacy_login_preference(
     match result {
         Ok(Some(_)) => {
             info!(
-                did = %auth.0.did,
+                did = %&auth.0.did,
                 allow_legacy_login = input.allow_legacy_login,
                 "Legacy login preference updated"
             );
@@ -1274,18 +1180,10 @@ pub async fn update_legacy_login_preference(
             }))
             .into_response()
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "AccountNotFound"})),
-        )
-            .into_response(),
+        Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -1304,20 +1202,17 @@ pub async fn update_locale(
     Json(input): Json<UpdateLocaleInput>,
 ) -> Response {
     if !VALID_LOCALES.contains(&input.preferred_locale.as_str()) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Invalid locale. Valid options: {}", VALID_LOCALES.join(", "))
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(format!(
+            "Invalid locale. Valid options: {}",
+            VALID_LOCALES.join(", ")
+        ))
+        .into_response();
     }
 
     let result = sqlx::query!(
         "UPDATE users SET preferred_locale = $1 WHERE did = $2 RETURNING did",
         input.preferred_locale,
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
@@ -1325,7 +1220,7 @@ pub async fn update_locale(
     match result {
         Ok(Some(_)) => {
             info!(
-                did = %auth.0.did,
+                did = %&auth.0.did,
                 locale = %input.preferred_locale,
                 "User locale preference updated"
             );
@@ -1334,18 +1229,10 @@ pub async fn update_locale(
             }))
             .into_response()
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "AccountNotFound"})),
-        )
-            .into_response(),
+        Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error updating locale: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

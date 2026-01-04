@@ -1,6 +1,19 @@
-use super::super::{AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData};
+use super::super::{AuthFlowState, AuthorizationRequestParameters, ClientAuth, OAuthError, RequestData};
 use super::helpers::{from_json, to_json};
 use sqlx::PgPool;
+
+pub async fn get_authorization_request_with_state(
+    pool: &PgPool,
+    request_id: &str,
+) -> Result<Option<(RequestData, AuthFlowState)>, OAuthError> {
+    match get_authorization_request(pool, request_id).await? {
+        Some(data) => {
+            let state = AuthFlowState::from_request_data(&data);
+            Ok(Some((data, state)))
+        }
+        None => Ok(None),
+    }
+}
 
 pub async fn create_authorization_request(
     pool: &PgPool,

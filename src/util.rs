@@ -9,6 +9,8 @@ use std::str::FromStr;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
+use crate::types::{Did, Handle};
+
 const BASE32_ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz234567";
 const DEFAULT_MAX_BLOB_SIZE: usize = 10 * 1024 * 1024 * 1024;
 
@@ -62,8 +64,8 @@ pub async fn get_user_id_by_did(db: &PgPool, did: &str) -> Result<Uuid, DbLookup
 
 pub struct UserInfo {
     pub id: Uuid,
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
 }
 
 pub async fn get_user_by_did(db: &PgPool, did: &str) -> Result<UserInfo, DbLookupError> {

@@ -13,7 +13,7 @@ pub use helpers::{TokenClaims, create_access_token, extract_token_claims, verify
 pub use introspect::{
     IntrospectRequest, IntrospectResponse, RevokeRequest, introspect_token, revoke_token,
 };
-pub use types::{TokenRequest, TokenResponse};
+pub use types::{ClientAuthParams, GrantType, TokenGrant, TokenRequest, TokenResponse, ValidatedTokenRequest};
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
@@ -65,14 +65,13 @@ pub async fn token_endpoint(
         .get("DPoP")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    match request.grant_type.as_str() {
-        "authorization_code" => {
-            handle_authorization_code_grant(state, headers, request, dpop_proof).await
+    let validated = request.validate()?;
+    match validated.grant {
+        TokenGrant::AuthorizationCode { .. } => {
+            handle_authorization_code_grant(state, headers, validated, dpop_proof).await
         }
-        "refresh_token" => handle_refresh_token_grant(state, headers, request, dpop_proof).await,
-        _ => Err(OAuthError::UnsupportedGrantType(format!(
-            "Unsupported grant_type: {}",
-            request.grant_type
-        ))),
+        TokenGrant::RefreshToken { .. } => {
+            handle_refresh_token_grant(state, headers, validated, dpop_proof).await
+        }
     }
 }

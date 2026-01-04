@@ -1,11 +1,10 @@
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::sync::firehose::SequencedEvent;
 use crate::sync::frame::{
     AccountFrame, CommitFrame, ErrorFrameBody, ErrorFrameHeader, FrameHeader, IdentityFrame,
     InfoFrame, SyncFrame,
 };
-use axum::Json;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use cid::Cid;
@@ -13,14 +12,13 @@ use iroh_car::{CarHeader, CarWriter};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use serde::Serialize;
-use serde_json::json;
 use sqlx::PgPool;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AccountStatus {
     Active,
@@ -33,16 +31,72 @@ pub enum AccountStatus {
 impl AccountStatus {
     pub fn as_str(&self) -> Option<&'static str> {
         match self {
-            AccountStatus::Active => None,
-            AccountStatus::Takendown => Some("takendown"),
-            AccountStatus::Suspended => Some("suspended"),
-            AccountStatus::Deactivated => Some("deactivated"),
-            AccountStatus::Deleted => Some("deleted"),
+            Self::Active => None,
+            Self::Takendown => Some("takendown"),
+            Self::Suspended => Some("suspended"),
+            Self::Deactivated => Some("deactivated"),
+            Self::Deleted => Some("deleted"),
         }
     }
 
     pub fn is_active(&self) -> bool {
-        matches!(self, AccountStatus::Active)
+        matches!(self, Self::Active)
+    }
+
+    pub fn is_takendown(&self) -> bool {
+        matches!(self, Self::Takendown)
+    }
+
+    pub fn is_suspended(&self) -> bool {
+        matches!(self, Self::Suspended)
+    }
+
+    pub fn is_deactivated(&self) -> bool {
+        matches!(self, Self::Deactivated)
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        matches!(self, Self::Deleted)
+    }
+
+    pub fn allows_read(&self) -> bool {
+        matches!(self, Self::Active | Self::Deactivated)
+    }
+
+    pub fn allows_write(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn from_db_fields(takedown_ref: Option<&str>, deactivated_at: Option<chrono::DateTime<chrono::Utc>>) -> Self {
+        if takedown_ref.is_some() {
+            Self::Takendown
+        } else if deactivated_at.is_some() {
+            Self::Deactivated
+        } else {
+            Self::Active
+        }
+    }
+}
+
+impl From<crate::types::AccountState> for AccountStatus {
+    fn from(state: crate::types::AccountState) -> Self {
+        match state {
+            crate::types::AccountState::Active => AccountStatus::Active,
+            crate::types::AccountState::Deactivated { .. } => AccountStatus::Deactivated,
+            crate::types::AccountState::TakenDown { .. } => AccountStatus::Takendown,
+            crate::types::AccountState::Migrated { .. } => AccountStatus::Deactivated,
+        }
+    }
+}
+
+impl From<&crate::types::AccountState> for AccountStatus {
+    fn from(state: &crate::types::AccountState) -> Self {
+        match state {
+            crate::types::AccountState::Active => AccountStatus::Active,
+            crate::types::AccountState::Deactivated { .. } => AccountStatus::Deactivated,
+            crate::types::AccountState::TakenDown { .. } => AccountStatus::Takendown,
+            crate::types::AccountState::Migrated { .. } => AccountStatus::Deactivated,
+        }
     }
 }
 
@@ -63,38 +117,15 @@ pub enum RepoAvailabilityError {
 impl IntoResponse for RepoAvailabilityError {
     fn into_response(self) -> Response {
         match self {
-            RepoAvailabilityError::NotFound(did) => (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "RepoNotFound",
-                    "message": format!("Could not find repo for DID: {}", did)
-                })),
-            )
-                .into_response(),
-            RepoAvailabilityError::Takendown(did) => (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "RepoTakendown",
-                    "message": format!("Repo has been takendown: {}", did)
-                })),
-            )
-                .into_response(),
-            RepoAvailabilityError::Deactivated(did) => (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "RepoDeactivated",
-                    "message": format!("Repo has been deactivated: {}", did)
-                })),
-            )
-                .into_response(),
-            RepoAvailabilityError::Internal(msg) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "InternalError",
-                    "message": msg
-                })),
-            )
-                .into_response(),
+            RepoAvailabilityError::NotFound(did) => {
+                ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
+                    .into_response()
+            }
+            RepoAvailabilityError::Takendown(_) => ApiError::RepoTakendown.into_response(),
+            RepoAvailabilityError::Deactivated(_) => ApiError::RepoDeactivated.into_response(),
+            RepoAvailabilityError::Internal(msg) => {
+                ApiError::InternalError(Some(msg)).into_response()
+            }
         }
     }
 }

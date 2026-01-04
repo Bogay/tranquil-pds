@@ -1,9 +1,9 @@
 use std::convert::Infallible;
 
+use crate::api::error::ApiError;
 use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
 use axum::{
-    Json,
     body::Bytes,
     extract::{RawQuery, Request, State},
     handler::Handler,
@@ -11,7 +11,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::future::Either;
-use serde_json::json;
 use tower::{Service, util::BoxCloneSyncService};
 use tracing::{error, info, warn};
 
@@ -120,44 +119,23 @@ async fn proxy_handler(
     let method = uri.path().trim_start_matches("/");
     if is_protected_method(&method) {
         warn!(method = %method, "Attempted to proxy protected method");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Cannot proxy protected method: {}", method)
-            })),
-        )
+        return ApiError::InvalidRequest(format!("Cannot proxy protected method: {}", method))
             .into_response();
     }
 
-    let proxy_header = match headers.get("atproto-proxy").and_then(|h| h.to_str().ok()) {
-        Some(h) => h.to_string(),
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Missing required atproto-proxy header"
-                })),
-            )
-                .into_response();
-        }
+    let Some(proxy_header) = headers
+        .get("atproto-proxy")
+        .and_then(|h| h.to_str().ok())
+        .map(String::from)
+    else {
+        return ApiError::InvalidRequest("Missing required atproto-proxy header".into())
+            .into_response();
     };
 
     let did = proxy_header.split('#').next().unwrap_or(&proxy_header);
-    let resolved = match state.did_resolver.resolve_did(did).await {
-        Some(r) => r,
-        None => {
-            error!(did = %did, "Could not resolve service DID");
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": "UpstreamFailure",
-                    "message": "Could not resolve service DID"
-                })),
-            )
-                .into_response();
-        }
+    let Some(resolved) = state.did_resolver.resolve_did(did).await else {
+        error!(did = %did, "Could not resolve service DID");
+        return ApiError::UpstreamFailure.into_response();
     };
 
     let target_url = match &query {
@@ -220,14 +198,8 @@ async fn proxy_handler(
                         "{} error=\"invalid_token\", error_description=\"Token has expired\"",
                         scheme
                     );
-                    let mut response = (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({
-                            "error": "ExpiredToken",
-                            "message": "Token has expired"
-                        })),
-                    )
-                        .into_response();
+                    let mut response =
+                        ApiError::ExpiredToken(Some("Token has expired".into())).into_response();
                     response
                         .headers_mut()
                         .insert("WWW-Authenticate", www_auth.parse().unwrap());

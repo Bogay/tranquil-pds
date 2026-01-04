@@ -53,7 +53,7 @@ pub async fn create_invite_code(
         return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
 
-    let for_account = input.for_account.unwrap_or_else(|| auth_user.did.clone());
+    let for_account = input.for_account.unwrap_or_else(|| auth_user.did.to_string());
     let code = gen_invite_code();
 
     match sqlx::query!(
@@ -69,13 +69,13 @@ pub async fn create_invite_code(
         Ok(result) => {
             if result.rows_affected() == 0 {
                 error!("No admin user found to create invite code");
-                return ApiError::InternalError.into_response();
+                return ApiError::InternalError(None).into_response();
             }
             Json(CreateInviteCodeOutput { code }).into_response()
         }
         Err(e) => {
             error!("DB error creating invite code: {:?}", e);
-            ApiError::InternalError.into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -112,7 +112,7 @@ pub async fn create_invite_codes(
     let for_accounts = input
         .for_accounts
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| vec![auth_user.did.clone()]);
+        .unwrap_or_else(|| vec![auth_user.did.to_string()]);
 
     let admin_user_id =
         match sqlx::query_scalar!("SELECT id FROM users WHERE is_admin = true LIMIT 1")
@@ -122,11 +122,11 @@ pub async fn create_invite_codes(
             Ok(Some(id)) => id,
             Ok(None) => {
                 error!("No admin user found to create invite codes");
-                return ApiError::InternalError.into_response();
+                return ApiError::InternalError(None).into_response();
             }
             Err(e) => {
                 error!("DB error looking up admin user: {:?}", e);
-                return ApiError::InternalError.into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
 
@@ -147,7 +147,7 @@ pub async fn create_invite_codes(
             .await
             {
                 error!("DB error creating invite code: {:?}", e);
-                return ApiError::InternalError.into_response();
+                return ApiError::InternalError(None).into_response();
             }
             codes.push(code);
         }
@@ -213,7 +213,7 @@ pub async fn get_account_invite_codes(
         WHERE ic.for_account = $1
         ORDER BY ic.created_at DESC
         "#,
-        auth_user.did
+        &auth_user.did
     )
     .fetch_all(&state.db)
     .await
@@ -221,7 +221,7 @@ pub async fn get_account_invite_codes(
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching invite codes: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 

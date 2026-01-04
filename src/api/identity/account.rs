@@ -1,8 +1,10 @@
 use super::did::verify_did_web;
+use crate::api::error::ApiError;
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{ServiceTokenVerifier, extract_bearer_token_from_header, is_service_token};
 use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::state::{AppState, RateLimitKind};
+use crate::types::{Did, Handle, PlainPassword};
 use crate::validation::validate_password;
 use axum::{
     Json,
@@ -10,13 +12,13 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use serde_json::json;
 use bcrypt::{DEFAULT_COST, hash};
 use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::{mst::Mst, storage::BlockStore};
 use k256::{SecretKey, ecdsa::SigningKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
@@ -40,7 +42,7 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
 pub struct CreateAccountInput {
     pub handle: String,
     pub email: Option<String>,
-    pub password: String,
+    pub password: PlainPassword,
     pub invite_code: Option<String>,
     pub did: Option<String>,
     pub did_type: Option<String>,
@@ -54,8 +56,8 @@ pub struct CreateAccountInput {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountOutput {
-    pub handle: String,
-    pub did: String,
+    pub handle: Handle,
+    pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub did_doc: Option<serde_json::Value>,
     pub access_jwt: String,
@@ -88,14 +90,8 @@ pub async fn create_account(
         .await
     {
         warn!(ip = %client_ip, "Account creation rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many account creation attempts. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(Some("Too many account creation attempts. Please try again later.".into(),))
+        .into_response();
     }
 
     let migration_auth = if let Some(token) =
@@ -113,14 +109,11 @@ pub async fn create_account(
                 }
                 Err(e) => {
                     error!("Service token verification failed: {:?}", e);
-                    return (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({
-                            "error": "AuthenticationFailed",
-                            "message": format!("Service token verification failed: {}", e)
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::AuthenticationFailed(Some(format!(
+                        "Service token verification failed: {}",
+                        e
+                    )))
+                    .into_response();
                 }
             }
         } else {
@@ -152,14 +145,11 @@ pub async fn create_account(
                 "[MIGRATION] createAccount: Service token mismatch - token_did={} provided_did={}",
                 auth_did, provided_did
             );
-            return (
-                    StatusCode::FORBIDDEN,
-                    Json(json!({
-                        "error": "AuthorizationError",
-                        "message": format!("Service token issuer {} does not match DID {}", auth_did, provided_did)
-                    })),
-                )
-                    .into_response();
+            return ApiError::AuthorizationError(format!(
+                "Service token issuer {} does not match DID {}",
+                auth_did, provided_did
+            ))
+            .into_response();
         }
         if is_did_web_byod {
             info!(did = %provided_did, "Processing did:web BYOD account creation");
@@ -188,44 +178,26 @@ pub async fn create_account(
         };
         match crate::api::validation::validate_short_handle(handle_to_validate) {
             Ok(h) => h,
-            Err(crate::api::validation::HandleValidationError::Reserved) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "HandleNotAvailable", "message": "Reserved handle"})),
-                )
-                    .into_response();
-            }
             Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidHandle", "message": e.to_string()})),
-                )
-                    .into_response();
+                return ApiError::from(e).into_response();
             }
         }
     } else {
         if input.handle.contains(' ') || input.handle.contains('\t') {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidHandle", "message": "Handle cannot contain spaces"})),
-            )
-                .into_response();
+            return ApiError::InvalidRequest("Handle cannot contain spaces".into()).into_response();
         }
         for c in input.handle.chars() {
             if !c.is_ascii_alphanumeric() && c != '.' && c != '-' {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidHandle", "message": format!("Handle contains invalid character: {}", c)})),
-                )
-                    .into_response();
+                return ApiError::InvalidRequest(format!(
+                    "Handle contains invalid character: {}",
+                    c
+                ))
+                .into_response();
             }
         }
         let handle_lower = input.handle.to_lowercase();
         if crate::moderation::has_explicit_slur(&handle_lower) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidHandle", "message": "Inappropriate language in handle"})),
-            )
+            return ApiError::InvalidRequest("Inappropriate language in handle".into())
                 .into_response();
         }
         handle_lower
@@ -238,20 +210,12 @@ pub async fn create_account(
     if let Some(ref email) = email
         && !crate::api::validation::is_valid_email(email)
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
-        )
-            .into_response();
+        return ApiError::InvalidEmail.into_response();
     }
     let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
     let valid_channels = ["email", "discord", "telegram", "signal"];
     if !valid_channels.contains(&verification_channel) && !is_migration {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel. Must be one of: email, discord, telegram, signal"})),
-        )
-            .into_response();
+        return ApiError::InvalidVerificationChannel.into_response();
     }
     let verification_recipient = if is_migration {
         None
@@ -259,36 +223,21 @@ pub async fn create_account(
         Some(match verification_channel {
             "email" => match &input.email {
                 Some(email) if !email.trim().is_empty() => email.trim().to_string(),
-                _ => return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "MissingEmail", "message": "Email is required when using email verification"})),
-                ).into_response(),
+                _ => return ApiError::MissingEmail.into_response(),
             },
             "discord" => match &input.discord_id {
                 Some(id) if !id.trim().is_empty() => id.trim().to_string(),
-                _ => return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "MissingDiscordId", "message": "Discord ID is required when using Discord verification"})),
-                ).into_response(),
+                _ => return ApiError::MissingDiscordId.into_response(),
             },
             "telegram" => match &input.telegram_username {
                 Some(username) if !username.trim().is_empty() => username.trim().to_string(),
-                _ => return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "MissingTelegramUsername", "message": "Telegram username is required when using Telegram verification"})),
-                ).into_response(),
+                _ => return ApiError::MissingTelegramUsername.into_response(),
             },
             "signal" => match &input.signal_number {
                 Some(number) if !number.trim().is_empty() => number.trim().to_string(),
-                _ => return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "MissingSignalNumber", "message": "Signal phone number is required when using Signal verification"})),
-                ).into_response(),
+                _ => return ApiError::MissingSignalNumber.into_response(),
             },
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
-            ).into_response(),
+            _ => return ApiError::InvalidVerificationChannel.into_response(),
         })
     };
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -319,22 +268,11 @@ pub async fn create_account(
             match reserved {
                 Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
                 Ok(None) => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "InvalidSigningKey",
-                            "message": "Signing key not found, already used, or expired"
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::InvalidSigningKey.into_response();
                 }
                 Err(e) => {
                     error!("Error looking up reserved signing key: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             }
         } else {
@@ -345,25 +283,14 @@ pub async fn create_account(
         Ok(k) => k,
         Err(e) => {
             error!("Error creating signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let did_type = input.did_type.as_deref().unwrap_or("plc");
     let did = match did_type {
         "web" => {
             if !crate::api::server::meta::is_self_hosted_did_web_enabled() {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "SelfHostedDidWebDisabled",
-                        "message": "This PDS does not offer self-hosted did:web identities. Please use did:plc or bring your own did:web."
-                    })),
-                )
-                    .into_response();
+                return ApiError::SelfHostedDidWebDisabled.into_response();
             }
             let subdomain_host = format!("{}.{}", input.handle, hostname);
             let encoded_subdomain = subdomain_host.replace(':', "%3A");
@@ -375,31 +302,21 @@ pub async fn create_account(
             let d = match &input.did {
                 Some(d) if !d.trim().is_empty() => d,
                 _ => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "InvalidRequest", "message": "External did:web requires the 'did' field to be provided"})),
+                    return ApiError::InvalidRequest(
+                        "External did:web requires the 'did' field to be provided".into(),
                     )
-                        .into_response();
+                    .into_response();
                 }
             };
             if !d.starts_with("did:web:") {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(
-                        json!({"error": "InvalidDid", "message": "External DID must be a did:web"}),
-                    ),
-                )
+                return ApiError::InvalidDid("External DID must be a did:web".into())
                     .into_response();
             }
             if !is_did_web_byod
                 && let Err(e) =
                     verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await
             {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidDid", "message": e})),
-                )
-                    .into_response();
+                return ApiError::InvalidDid(e).into_response();
             }
             info!(did = %d, "Creating external did:web account");
             d.clone()
@@ -419,19 +336,14 @@ pub async fn create_account(
                         )
                         .await
                     {
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({"error": "InvalidDid", "message": e})),
-                        )
-                            .into_response();
+                        return ApiError::InvalidDid(e).into_response();
                     }
                     d.clone()
                 } else if !d.trim().is_empty() {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "InvalidDid", "message": "Only did:web DIDs can be provided; leave empty for did:plc. For migration with existing did:plc, provide service auth."})),
+                    return ApiError::InvalidDid(
+                        "Only did:web DIDs can be provided; leave empty for did:plc. For migration with existing did:plc, provide service auth.".into()
                     )
-                        .into_response();
+                    .into_response();
                 } else {
                     let rotation_key = std::env::var("PLC_ROTATION_KEY")
                         .unwrap_or_else(|_| signing_key_to_did_key(&signing_key));
@@ -444,11 +356,10 @@ pub async fn create_account(
                         Ok(r) => r,
                         Err(e) => {
                             error!("Error creating PLC genesis operation: {:?}", e);
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
-                            )
-                                .into_response();
+                            return ApiError::InternalError(Some(
+                                "Failed to create PLC operation".into(),
+                            ))
+                            .into_response();
                         }
                     };
                     let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
@@ -457,14 +368,11 @@ pub async fn create_account(
                         .await
                     {
                         error!("Failed to submit PLC genesis operation: {:?}", e);
-                        return (
-                            StatusCode::BAD_GATEWAY,
-                            Json(json!({
-                                "error": "UpstreamError",
-                                "message": format!("Failed to register DID with PLC directory: {}", e)
-                            })),
-                        )
-                            .into_response();
+                        return ApiError::UpstreamErrorMsg(format!(
+                            "Failed to register DID with PLC directory: {}",
+                            e
+                        ))
+                        .into_response();
                     }
                     info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
                     genesis_result.did
@@ -481,11 +389,10 @@ pub async fn create_account(
                     Ok(r) => r,
                     Err(e) => {
                         error!("Error creating PLC genesis operation: {:?}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(Some(
+                            "Failed to create PLC operation".into(),
+                        ))
+                        .into_response();
                     }
                 };
                 let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
@@ -494,14 +401,11 @@ pub async fn create_account(
                     .await
                 {
                     error!("Failed to submit PLC genesis operation: {:?}", e);
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({
-                            "error": "UpstreamError",
-                            "message": format!("Failed to register DID with PLC directory: {}", e)
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::UpstreamErrorMsg(format!(
+                        "Failed to register DID with PLC directory: {}",
+                        e
+                    ))
+                    .into_response();
                 }
                 info!(did = %genesis_result.did, "Successfully registered DID with PLC directory");
                 genesis_result.did
@@ -512,11 +416,7 @@ pub async fn create_account(
         Ok(tx) => tx,
         Err(e) => {
             error!("Error starting transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if is_migration {
@@ -542,26 +442,14 @@ pub async fn create_account(
                             .map(|c| c.contains("handle"))
                             .unwrap_or(false)
                     {
-                        return (
-                                StatusCode::BAD_REQUEST,
-                                Json(json!({"error": "HandleTaken", "message": "Handle already taken by another account"})),
-                            )
-                                .into_response();
+                        return ApiError::HandleTaken.into_response();
                     }
                     error!("Error reactivating account: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
                 if let Err(e) = tx.commit().await {
                     error!("Error committing reactivation: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
                 let key_row: Option<(Vec<u8>, i32)> = sqlx::query_as(
                     "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
@@ -576,21 +464,16 @@ pub async fn create_account(
                             Ok(k) => k,
                             Err(e) => {
                                 error!("Error decrypting key for reactivated account: {:?}", e);
-                                return (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    Json(json!({"error": "InternalError"})),
-                                )
-                                    .into_response();
+                                return ApiError::InternalError(None).into_response();
                             }
                         }
                     }
                     None => {
                         error!("No signing key found for reactivated account");
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError", "message": "Account signing key not found"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(Some(
+                            "Account signing key not found".into(),
+                        ))
+                        .into_response();
                     }
                 };
                 let access_meta =
@@ -598,11 +481,7 @@ pub async fn create_account(
                         Ok(m) => m,
                         Err(e) => {
                             error!("Error creating access token: {:?}", e);
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": "InternalError"})),
-                            )
-                                .into_response();
+                            return ApiError::InternalError(None).into_response();
                         }
                     };
                 let refresh_meta = match crate::auth::create_refresh_token_with_metadata(
@@ -612,11 +491,7 @@ pub async fn create_account(
                     Ok(m) => m,
                     Err(e) => {
                         error!("Error creating refresh token: {:?}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(None).into_response();
                     }
                 };
                 let session_result: Result<_, sqlx::Error> = sqlx::query(
@@ -631,17 +506,13 @@ pub async fn create_account(
                 .await;
                 if let Err(e) = session_result {
                     error!("Error creating session: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
                 return (
-                    StatusCode::OK,
+                    axum::http::StatusCode::OK,
                     Json(CreateAccountOutput {
-                        handle: handle.clone(),
-                        did: did.clone(),
+                        handle: handle.clone().into(),
+                        did: did.clone().into(),
                         did_doc: state.did_resolver.resolve_did_document(&did).await,
                         access_jwt: access_meta.token,
                         refresh_jwt: refresh_meta.token,
@@ -651,11 +522,7 @@ pub async fn create_account(
                 )
                     .into_response();
             } else {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "AccountAlreadyExists", "message": "An active account with this DID already exists"})),
-                )
-                    .into_response();
+                return ApiError::AccountAlreadyExists.into_response();
             }
         }
     }
@@ -666,11 +533,7 @@ pub async fn create_account(
             .await
             .unwrap_or(None);
     if exists_result.is_some() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "HandleTaken", "message": "Handle already taken"})),
-        )
-            .into_response();
+        return ApiError::HandleTaken.into_response();
     }
     let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
         .map(|v| v == "true" || v == "1")
@@ -682,11 +545,7 @@ pub async fn create_account(
             .map(|c| c.trim().is_empty())
             .unwrap_or(true)
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidInviteCode", "message": "Invite code is required"})),
-        )
-            .into_response();
+        return ApiError::InviteCodeRequired.into_response();
     }
     if let Some(code) = &input.invite_code
         && !code.trim().is_empty()
@@ -700,7 +559,7 @@ pub async fn create_account(
         match invite_query {
             Ok(Some(row)) => {
                 if row.available_uses <= 0 {
-                    return (StatusCode::BAD_REQUEST, Json(json!({"error": "InvalidInviteCode", "message": "Invite code exhausted"}))).into_response();
+                    return ApiError::InvalidInviteCode.into_response();
                 }
                 let update_invite = sqlx::query!(
                     "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
@@ -710,39 +569,20 @@ pub async fn create_account(
                 .await;
                 if let Err(e) = update_invite {
                     error!("Error updating invite code: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             }
             Ok(None) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidInviteCode", "message": "Invite code not found"})),
-                )
-                    .into_response();
+                return ApiError::InvalidInviteCode.into_response();
             }
             Err(e) => {
                 error!("Error checking invite code: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         }
     }
     if let Err(e) = validate_password(&input.password) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidPassword",
-                "message": e.to_string()
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(e.to_string()).into_response();
     }
 
     let password_clone = input.password.clone();
@@ -751,19 +591,11 @@ pub async fn create_account(
             Ok(Ok(h)) => h,
             Ok(Err(e)) => {
                 error!("Error hashing password: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
             Err(e) => {
                 error!("Failed to spawn blocking task: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     let is_first_user = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
@@ -823,40 +655,15 @@ pub async fn create_account(
             {
                 let constraint = db_err.constraint().unwrap_or("");
                 if constraint.contains("handle") || constraint.contains("users_handle") {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "HandleNotAvailable",
-                            "message": "Handle already taken"
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::HandleNotAvailable(None).into_response();
                 } else if constraint.contains("email") || constraint.contains("users_email") {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "InvalidEmail",
-                            "message": "Email already registered"
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::EmailTaken.into_response();
                 } else if constraint.contains("did") || constraint.contains("users_did") {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "AccountAlreadyExists",
-                            "message": "An account with this DID already exists"
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::AccountAlreadyExists.into_response();
                 }
             }
             error!("Error inserting user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -864,11 +671,7 @@ pub async fn create_account(
         Ok(enc) => enc,
         Err(e) => {
             error!("Error encrypting user key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let key_insert = sqlx::query!(
@@ -881,11 +684,7 @@ pub async fn create_account(
     .await;
     if let Err(e) = key_insert {
         error!("Error inserting user key: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     if let Some(key_id) = reserved_key_id {
         let mark_used = sqlx::query!(
@@ -896,11 +695,7 @@ pub async fn create_account(
         .await;
         if let Err(e) = mark_used {
             error!("Error marking reserved key as used: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
     let mst = Mst::new(Arc::new(state.block_store.clone()));
@@ -908,11 +703,7 @@ pub async fn create_account(
         Ok(c) => c,
         Err(e) => {
             error!("Error persisting MST: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
@@ -921,22 +712,14 @@ pub async fn create_account(
             Ok(result) => result,
             Err(e) => {
                 error!("Error creating genesis commit: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     let commit_cid = match state.block_store.put(&commit_bytes).await {
         Ok(c) => c,
         Err(e) => {
             error!("Error saving genesis commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let commit_cid_str = commit_cid.to_string();
@@ -951,11 +734,7 @@ pub async fn create_account(
     .await;
     if let Err(e) = repo_insert {
         error!("Error initializing repo: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
     if let Err(e) = sqlx::query!(
@@ -971,11 +750,7 @@ pub async fn create_account(
     .await
     {
         error!("Error inserting user_blocks: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     if let Some(code) = &input.invite_code
         && !code.trim().is_empty()
@@ -989,11 +764,7 @@ pub async fn create_account(
         .await;
         if let Err(e) = use_insert {
             error!("Error recording invite usage: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
     if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok() {
@@ -1016,11 +787,7 @@ pub async fn create_account(
     }
     if let Err(e) = tx.commit().await {
         error!("Error committing transaction: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     if !is_migration && !is_did_web_byod {
         if let Err(e) =
@@ -1117,11 +884,7 @@ pub async fn create_account(
         Ok(m) => m,
         Err(e) => {
             error!("createAccount: Error creating access token: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let refresh_meta =
@@ -1129,11 +892,7 @@ pub async fn create_account(
             Ok(m) => m,
             Err(e) => {
                 error!("createAccount: Error creating refresh token: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     if let Err(e) = sqlx::query!(
@@ -1148,11 +907,7 @@ pub async fn create_account(
     .await
     {
         error!("createAccount: Error creating session: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let did_doc = state.did_resolver.resolve_did_document(&did).await;
@@ -1167,8 +922,8 @@ pub async fn create_account(
     (
         StatusCode::OK,
         Json(CreateAccountOutput {
-            handle: handle.clone(),
-            did,
+            handle: handle.clone().into(),
+            did: did.into(),
             did_doc,
             access_jwt: access_meta.token,
             refresh_jwt: refresh_meta.token,

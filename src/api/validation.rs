@@ -1,3 +1,7 @@
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::ops::Deref;
+
 pub const MAX_EMAIL_LENGTH: usize = 254;
 pub const MAX_LOCAL_PART_LENGTH: usize = 64;
 pub const MAX_DOMAIN_LENGTH: usize = 253;
@@ -7,6 +11,195 @@ const EMAIL_LOCAL_SPECIAL_CHARS: &str = ".!#$%&'*+/=?^_`{|}~-";
 pub const MIN_HANDLE_LENGTH: usize = 3;
 pub const MAX_HANDLE_LENGTH: usize = 253;
 pub const MAX_SERVICE_HANDLE_LOCAL_PART: usize = 18;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ValidatedLocalHandle(String);
+
+impl ValidatedLocalHandle {
+    pub fn new(handle: impl AsRef<str>) -> Result<Self, HandleValidationError> {
+        let validated = validate_short_handle(handle.as_ref())?;
+        Ok(Self(validated))
+    }
+
+    pub fn new_allow_reserved(handle: impl AsRef<str>) -> Result<Self, HandleValidationError> {
+        let validated = validate_service_handle(handle.as_ref(), true)?;
+        Ok(Self(validated))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl Deref for ValidatedLocalHandle {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for ValidatedLocalHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<String> for ValidatedLocalHandle {
+    type Error = HandleValidationError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<ValidatedLocalHandle> for String {
+    fn from(handle: ValidatedLocalHandle) -> Self {
+        handle.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EmailValidationError {
+    Empty,
+    TooLong,
+    MissingAtSign,
+    EmptyLocalPart,
+    LocalPartTooLong,
+    InvalidLocalPart,
+    EmptyDomain,
+    DomainTooLong,
+    MissingDomainDot,
+    InvalidDomainLabel,
+}
+
+impl fmt::Display for EmailValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "Email cannot be empty"),
+            Self::TooLong => write!(f, "Email exceeds maximum length of {} characters", MAX_EMAIL_LENGTH),
+            Self::MissingAtSign => write!(f, "Email must contain @"),
+            Self::EmptyLocalPart => write!(f, "Email local part cannot be empty"),
+            Self::LocalPartTooLong => write!(f, "Email local part exceeds maximum length"),
+            Self::InvalidLocalPart => write!(f, "Email local part contains invalid characters"),
+            Self::EmptyDomain => write!(f, "Email domain cannot be empty"),
+            Self::DomainTooLong => write!(f, "Email domain exceeds maximum length"),
+            Self::MissingDomainDot => write!(f, "Email domain must contain a dot"),
+            Self::InvalidDomainLabel => write!(f, "Email domain contains invalid label"),
+        }
+    }
+}
+
+impl std::error::Error for EmailValidationError {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ValidatedEmail(String);
+
+impl ValidatedEmail {
+    pub fn new(email: impl AsRef<str>) -> Result<Self, EmailValidationError> {
+        let email = email.as_ref().trim();
+        validate_email_detailed(email)?;
+        Ok(Self(email.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
+    pub fn local_part(&self) -> &str {
+        self.0.rsplitn(2, '@').nth(1).unwrap_or("")
+    }
+
+    pub fn domain(&self) -> &str {
+        self.0.rsplitn(2, '@').next().unwrap_or("")
+    }
+}
+
+impl Deref for ValidatedEmail {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for ValidatedEmail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl TryFrom<String> for ValidatedEmail {
+    type Error = EmailValidationError;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<ValidatedEmail> for String {
+    fn from(email: ValidatedEmail) -> Self {
+        email.0
+    }
+}
+
+fn validate_email_detailed(email: &str) -> Result<(), EmailValidationError> {
+    if email.is_empty() {
+        return Err(EmailValidationError::Empty);
+    }
+    if email.len() > MAX_EMAIL_LENGTH {
+        return Err(EmailValidationError::TooLong);
+    }
+    let parts: Vec<&str> = email.rsplitn(2, '@').collect();
+    if parts.len() != 2 {
+        return Err(EmailValidationError::MissingAtSign);
+    }
+    let domain = parts[0];
+    let local = parts[1];
+    if local.is_empty() {
+        return Err(EmailValidationError::EmptyLocalPart);
+    }
+    if local.len() > MAX_LOCAL_PART_LENGTH {
+        return Err(EmailValidationError::LocalPartTooLong);
+    }
+    if local.starts_with('.') || local.ends_with('.') || local.contains("..") {
+        return Err(EmailValidationError::InvalidLocalPart);
+    }
+    for c in local.chars() {
+        if !c.is_ascii_alphanumeric() && !EMAIL_LOCAL_SPECIAL_CHARS.contains(c) {
+            return Err(EmailValidationError::InvalidLocalPart);
+        }
+    }
+    if domain.is_empty() {
+        return Err(EmailValidationError::EmptyDomain);
+    }
+    if domain.len() > MAX_DOMAIN_LENGTH {
+        return Err(EmailValidationError::DomainTooLong);
+    }
+    if !domain.contains('.') {
+        return Err(EmailValidationError::MissingDomainDot);
+    }
+    for label in domain.split('.') {
+        if label.is_empty() || label.len() > MAX_DOMAIN_LABEL_LENGTH {
+            return Err(EmailValidationError::InvalidDomainLabel);
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return Err(EmailValidationError::InvalidDomainLabel);
+        }
+        for c in label.chars() {
+            if !c.is_ascii_alphanumeric() && c != '-' {
+                return Err(EmailValidationError::InvalidDomainLabel);
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, PartialEq)]
 pub enum HandleValidationError {
@@ -49,6 +242,8 @@ impl std::fmt::Display for HandleValidationError {
         }
     }
 }
+
+impl std::error::Error for HandleValidationError {}
 
 pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationError> {
     validate_service_handle(handle, false)

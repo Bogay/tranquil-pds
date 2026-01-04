@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::sync::util::assert_repo_availability;
 use axum::{
@@ -9,7 +10,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::error;
 
 #[derive(Deserialize)]
@@ -25,18 +25,10 @@ pub async fn get_blob(
     let did = params.did.trim();
     let cid = params.cid.trim();
     if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("did is required".into()).into_response();
     }
     if cid.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "cid is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("cid is required".into()).into_response();
     }
 
     let _account = match assert_repo_availability(&state.db, did, false).await {
@@ -66,26 +58,14 @@ pub async fn get_blob(
                     .unwrap(),
                 Err(e) => {
                     error!("Failed to fetch blob from storage: {:?}", e);
-                    (
-                        StatusCode::NOT_FOUND,
-                        Json(json!({"error": "BlobNotFound", "message": "Blob not found in storage"})),
-                    )
-                        .into_response()
+                    ApiError::BlobNotFound(Some("Blob not found in storage".into())).into_response()
                 }
             }
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "BlobNotFound", "message": "Blob not found"})),
-        )
-            .into_response(),
+        Ok(None) => ApiError::BlobNotFound(Some("Blob not found".into())).into_response(),
         Err(e) => {
             error!("DB error in get_blob: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(Some("Database error".into())).into_response()
         }
     }
 }
@@ -111,11 +91,7 @@ pub async fn list_blobs(
 ) -> Response {
     let did = params.did.trim();
     if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("did is required".into()).into_response();
     }
 
     let account = match assert_repo_availability(&state.db, did, false).await {
@@ -178,11 +154,7 @@ pub async fn list_blobs(
         }
         Err(e) => {
             error!("DB error in list_blobs: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(Some("Database error".into())).into_response()
         }
     }
 }

@@ -28,6 +28,16 @@ pub enum ValidationStatus {
     Invalid,
 }
 
+impl std::fmt::Display for ValidationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Valid => write!(f, "valid"),
+            Self::Unknown => write!(f, "unknown"),
+            Self::Invalid => write!(f, "invalid"),
+        }
+    }
+}
+
 pub struct RecordValidator {
     require_lexicon: bool,
 }
@@ -553,36 +563,28 @@ impl std::fmt::Display for PasswordValidationError {
 impl std::error::Error for PasswordValidationError {}
 
 pub fn validate_password(password: &str) -> Result<(), PasswordValidationError> {
-    let mut errors = Vec::new();
-
-    if password.len() < 8 {
-        errors.push("Password must be at least 8 characters".to_string());
-    }
-
-    if password.len() > 256 {
-        errors.push("Password must be at most 256 characters".to_string());
-    }
-
-    if !password.chars().any(|c| c.is_ascii_lowercase()) {
-        errors.push("Password must contain at least one lowercase letter".to_string());
-    }
-
-    if !password.chars().any(|c| c.is_ascii_uppercase()) {
-        errors.push("Password must contain at least one uppercase letter".to_string());
-    }
-
-    if !password.chars().any(|c| c.is_ascii_digit()) {
-        errors.push("Password must contain at least one number".to_string());
-    }
-
-    if is_common_password(password) {
-        errors.push("Password is too common, please choose a different one".to_string());
-    }
+    let errors: Vec<&'static str> = [
+        (password.len() < 8).then_some("Password must be at least 8 characters"),
+        (password.len() > 256).then_some("Password must be at most 256 characters"),
+        (!password.chars().any(|c| c.is_ascii_lowercase()))
+            .then_some("Password must contain at least one lowercase letter"),
+        (!password.chars().any(|c| c.is_ascii_uppercase()))
+            .then_some("Password must contain at least one uppercase letter"),
+        (!password.chars().any(|c| c.is_ascii_digit()))
+            .then_some("Password must contain at least one number"),
+        is_common_password(password)
+            .then_some("Password is too common, please choose a different one"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
     if errors.is_empty() {
         Ok(())
     } else {
-        Err(PasswordValidationError { errors })
+        Err(PasswordValidationError {
+            errors: errors.iter().map(|s| (*s).to_string()).collect(),
+        })
     }
 }
 

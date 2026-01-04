@@ -1,7 +1,9 @@
-use crate::api::ApiError;
+use crate::api::error::ApiError;
+use crate::api::EmptyResponse;
 use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
+use crate::types::PlainPassword;
 use axum::{
     Json,
     extract::State,
@@ -15,7 +17,6 @@ use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -64,20 +65,16 @@ pub async fn check_account_status(
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await
     {
         Ok(Some(id)) => id,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
-    let user_status = sqlx::query!("SELECT deactivated_at FROM users WHERE did = $1", did)
+    let user_status = sqlx::query!("SELECT deactivated_at FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await;
     let deactivated_at = match user_status {
@@ -142,7 +139,7 @@ pub async fn check_account_status(
     .await
     .unwrap_or(Some(0))
     .unwrap_or(0);
-    let valid_did = is_valid_did_for_service(&state.db, &state.cache, &did).await;
+    let valid_did = is_valid_did_for_service(&state.db, state.cache.clone(), did.as_str()).await;
     (
         StatusCode::OK,
         Json(CheckAccountStatusOutput {
@@ -160,7 +157,7 @@ pub async fn check_account_status(
         .into_response()
 }
 
-async fn is_valid_did_for_service(db: &sqlx::PgPool, cache: &Arc<dyn Cache>, did: &str) -> bool {
+async fn is_valid_did_for_service(db: &sqlx::PgPool, cache: Arc<dyn Cache>, did: &str) -> bool {
     assert_valid_did_document_for_service(db, cache, did, false)
         .await
         .is_ok()
@@ -168,10 +165,10 @@ async fn is_valid_did_for_service(db: &sqlx::PgPool, cache: &Arc<dyn Cache>, did
 
 async fn assert_valid_did_document_for_service(
     db: &sqlx::PgPool,
-    cache: &Arc<dyn Cache>,
+    cache: Arc<dyn Cache>,
     did: &str,
     with_retry: bool,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+) -> Result<(), ApiError> {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let expected_endpoint = format!("https://{}", hostname);
 
@@ -228,17 +225,10 @@ async fn assert_valid_did_document_for_service(
             }
         }
 
-        let doc_data = match doc_data {
-            Some(d) => d,
-            None => {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": last_error.unwrap_or_else(|| "DID document validation failed".to_string())
-                    })),
-                ));
-            }
+        let Some(doc_data) = doc_data else {
+            return Err(ApiError::InvalidRequest(
+                last_error.unwrap_or_else(|| "DID document validation failed".to_string()),
+            ));
         };
 
         let server_rotation_key = std::env::var("PLC_ROTATION_KEY").ok();
@@ -249,12 +239,8 @@ async fn assert_valid_did_document_for_service(
                 .map(|arr| arr.iter().filter_map(|k| k.as_str()).collect::<Vec<_>>())
                 .unwrap_or_default();
             if !rotation_keys.contains(&expected_rotation_key.as_str()) {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": "Server rotation key not included in PLC DID data"
-                    })),
+                return Err(ApiError::InvalidRequest(
+                    "Server rotation key not included in PLC DID data".into(),
                 ));
             }
         }
@@ -272,27 +258,18 @@ async fn assert_valid_did_document_for_service(
         .await
         .map_err(|e| {
             error!("Failed to fetch user key: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
+            ApiError::InternalError(None)
         })?;
 
         if let Some(row) = user_row {
             let key_bytes = crate::config::decrypt_key(&row.key_bytes, row.encryption_version)
                 .map_err(|e| {
                     error!("Failed to decrypt user key: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
+                    ApiError::InternalError(None)
                 })?;
             let signing_key = SigningKey::from_slice(&key_bytes).map_err(|e| {
                 error!("Failed to create signing key: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
+                ApiError::InternalError(None)
             })?;
             let expected_did_key = crate::plc::signing_key_to_did_key(&signing_key);
 
@@ -301,12 +278,8 @@ async fn assert_valid_did_document_for_service(
                     "DID {} has signing key {:?}, expected {}",
                     did, doc_signing_key, expected_did_key
                 );
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": "DID document verification method does not match expected signing key"
-                    })),
+                return Err(ApiError::InvalidRequest(
+                    "DID document verification method does not match expected signing key".into(),
                 ));
             }
         }
@@ -333,23 +306,11 @@ async fn assert_valid_did_document_for_service(
         };
         let resp = client.get(&url).send().await.map_err(|e| {
             warn!("Failed to fetch did:web document for {}: {:?}", did, e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": format!("Could not resolve DID document: {}", e)
-                })),
-            )
+            ApiError::InvalidRequest(format!("Could not resolve DID document: {}", e))
         })?;
         let doc: serde_json::Value = resp.json().await.map_err(|e| {
             warn!("Failed to parse did:web document for {}: {:?}", did, e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": format!("Could not parse DID document: {}", e)
-                })),
-            )
+            ApiError::InvalidRequest(format!("Could not parse DID document: {}", e))
         })?;
 
         let pds_endpoint = doc
@@ -370,12 +331,8 @@ async fn assert_valid_did_document_for_service(
                 "DID {} has endpoint {:?}, expected {}",
                 did, pds_endpoint, expected_endpoint
             );
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "DID document atproto_pds service endpoint does not match PDS public url"
-                })),
+            return Err(ApiError::InvalidRequest(
+                "DID document atproto_pds service endpoint does not match PDS public url".into(),
             ));
         }
     }
@@ -441,15 +398,15 @@ pub async fn activate_account(
         did
     );
     let did_validation_start = std::time::Instant::now();
-    if let Err((status, json)) =
-        assert_valid_did_document_for_service(&state.db, &state.cache, &did, true).await
+    if let Err(e) =
+        assert_valid_did_document_for_service(&state.db, state.cache.clone(), did.as_str(), true).await
     {
         info!(
             "[MIGRATION] activateAccount: DID document validation FAILED for {} (took {:?})",
             did,
             did_validation_start.elapsed()
         );
-        return (status, json).into_response();
+        return e.into_response();
     }
     info!(
         "[MIGRATION] activateAccount: DID document validation SUCCESS for {} (took {:?})",
@@ -457,7 +414,7 @@ pub async fn activate_account(
         did_validation_start.elapsed()
     );
 
-    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await
         .ok()
@@ -466,7 +423,7 @@ pub async fn activate_account(
         "[MIGRATION] activateAccount: Activating account did={} handle={:?}",
         did, handle
     );
-    let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
+    let result = sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did.as_str())
         .execute(&state.db)
         .await;
     match result {
@@ -483,7 +440,7 @@ pub async fn activate_account(
                 did
             );
             if let Err(e) =
-                crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+                crate::api::repo::record::sequence_account_event(&state, did.as_str(), true, None).await
             {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to sequence account activation event: {}",
@@ -497,7 +454,7 @@ pub async fn activate_account(
                 did, handle
             );
             if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, &did, handle.as_deref())
+                crate::api::repo::record::sequence_identity_event(&state, did.as_str(), handle.as_deref())
                     .await
             {
                 warn!(
@@ -509,7 +466,7 @@ pub async fn activate_account(
             }
             let repo_root = sqlx::query_scalar!(
                 "SELECT r.repo_root_cid FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
-                did
+                did.as_str()
             )
             .fetch_optional(&state.db)
             .await
@@ -531,7 +488,7 @@ pub async fn activate_account(
                 };
                 if let Err(e) = crate::api::repo::record::sequence_sync_event(
                     &state,
-                    &did,
+                    did.as_str(),
                     &root_cid,
                     rev.as_deref(),
                 )
@@ -551,18 +508,14 @@ pub async fn activate_account(
                 );
             }
             info!("[MIGRATION] activateAccount: SUCCESS for did={}", did);
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
         Err(e) => {
             error!(
                 "[MIGRATION] activateAccount: DB error activating account: {:?}",
                 e
             );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -621,7 +574,7 @@ pub async fn deactivate_account(
 
     let did = auth_user.did;
 
-    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await
         .ok()
@@ -629,7 +582,7 @@ pub async fn deactivate_account(
 
     let result = sqlx::query!(
         "UPDATE users SET deactivated_at = NOW(), delete_after = $2 WHERE did = $1",
-        did,
+        did.as_str(),
         delete_after
     )
     .execute(&state.db)
@@ -642,7 +595,7 @@ pub async fn deactivate_account(
             }
             if let Err(e) = crate::api::repo::record::sequence_account_event(
                 &state,
-                &did,
+                did.as_str(),
                 false,
                 Some("deactivated"),
             )
@@ -650,15 +603,11 @@ pub async fn deactivate_account(
             {
                 warn!("Failed to sequence account deactivated event: {}", e);
             }
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
         Err(e) => {
             error!("DB error deactivating account: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -694,21 +643,17 @@ pub async fn request_account_delete(
     };
     let did = validated.did.clone();
 
-    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &did).await;
+    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, did.as_str()).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, did.as_str()).await;
     }
 
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await
     {
         Ok(Some(id)) => id,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let confirmation_token = Uuid::new_v4().to_string();
@@ -716,18 +661,14 @@ pub async fn request_account_delete(
     let insert = sqlx::query!(
         "INSERT INTO account_deletion_requests (token, did, expires_at) VALUES ($1, $2, $3)",
         confirmation_token,
-        did,
+        did.as_str(),
         expires_at
     )
     .execute(&state.db)
     .await;
     if let Err(e) = insert {
         error!("DB error creating deletion token: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) =
@@ -737,13 +678,13 @@ pub async fn request_account_delete(
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }
     info!("Account deletion requested for user {}", did);
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
 pub struct DeleteAccountInput {
-    pub did: String,
-    pub password: String,
+    pub did: crate::types::Did,
+    pub password: PlainPassword,
     pub token: String,
 }
 
@@ -751,60 +692,33 @@ pub async fn delete_account(
     State(state): State<AppState>,
     Json(input): Json<DeleteAccountInput>,
 ) -> Response {
-    let did = input.did.trim();
+    let did = &input.did;
     let password = &input.password;
     let token = input.token.trim();
-    if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
-    }
     if password.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "password is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("password is required".into()).into_response();
     }
     const OLD_PASSWORD_MAX_LENGTH: usize = 512;
     if password.len() > OLD_PASSWORD_MAX_LENGTH {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Invalid password length."})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("Invalid password length".into()).into_response();
     }
     if token.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidToken", "message": "token is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidToken(Some("token is required".into())).into_response();
     }
     let user = sqlx::query!(
         "SELECT id, password_hash, handle FROM users WHERE did = $1",
-        did
+        did.as_str()
     )
     .fetch_optional(&state.db)
     .await;
     let (user_id, password_hash, handle) = match user {
         Ok(Some(row)) => (row.id, row.password_hash, row.handle),
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::InvalidRequest("account not found".into()).into_response();
         }
         Err(e) => {
             error!("DB error in delete_account: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let password_valid = if password_hash
@@ -826,11 +740,7 @@ pub async fn delete_account(
             .any(|row| verify(password, &row.password_hash).unwrap_or(false))
     };
     if !password_valid {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed", "message": "Invalid password"})),
-        )
-            .into_response();
+        return ApiError::AuthenticationFailed(Some("Invalid password".into())).into_response();
     }
     let deletion_request = sqlx::query!(
         "SELECT did, expires_at FROM account_deletion_requests WHERE token = $1",
@@ -841,27 +751,15 @@ pub async fn delete_account(
     let (token_did, expires_at) = match deletion_request {
         Ok(Some(row)) => (row.did, row.expires_at),
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidToken", "message": "Invalid or expired token"})),
-            )
-                .into_response();
+            return ApiError::InvalidToken(Some("Invalid or expired token".into())).into_response();
         }
         Err(e) => {
             error!("DB error fetching deletion token: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
-    if token_did != did {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidToken", "message": "Token does not match account"})),
-        )
-            .into_response();
+    if token_did != did.as_str() {
+        return ApiError::InvalidToken(Some("Token does not match account".into())).into_response();
     }
     if Utc::now() > expires_at {
         let _ = sqlx::query!(
@@ -870,21 +768,13 @@ pub async fn delete_account(
         )
         .execute(&state.db)
         .await;
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
-        )
-            .into_response();
+        return ApiError::ExpiredToken(None).into_response();
     }
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             error!("Failed to begin transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let deletion_result: Result<(), sqlx::Error> = async {
@@ -919,11 +809,7 @@ pub async fn delete_account(
         Ok(()) => {
             if let Err(e) = tx.commit().await {
                 error!("Failed to commit account deletion transaction: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
             let account_seq = crate::api::repo::record::sequence_account_event(
                 &state,
@@ -957,15 +843,11 @@ pub async fn delete_account(
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
             info!("Account {} deleted successfully", did);
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
         Err(e) => {
             error!("DB error deleting account, rolling back: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

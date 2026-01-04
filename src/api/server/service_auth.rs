@@ -1,4 +1,6 @@
-use crate::api::ApiError;
+use crate::types::Did;
+use crate::AccountStatus;
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -92,10 +94,10 @@ pub async fn get_service_auth(
         .await
         {
             Ok(result) => crate::auth::AuthenticatedUser {
-                did: result.did,
+                did: Did::new_unchecked(result.did),
                 is_oauth: true,
                 is_admin: false,
-                is_takendown: false,
+                status: AccountStatus::Active,
                 scope: result.scope,
                 key_bytes: None,
                 controller_did: None,
@@ -113,14 +115,7 @@ pub async fn get_service_auth(
             }
             Err(e) => {
                 warn!(error = ?e, "getServiceAuth DPoP auth validation failed");
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({
-                        "error": "AuthenticationFailed",
-                        "message": format!("{:?}", e)
-                    })),
-                )
-                    .into_response();
+                return ApiError::AuthenticationFailed(Some(format!("{:?}", e))).into_response();
             }
         }
     } else {
@@ -133,7 +128,7 @@ pub async fn get_service_auth(
         }
     };
     info!(
-        did = %auth_user.did,
+        did = %&auth_user.did,
         is_oauth = auth_user.is_oauth,
         has_key = auth_user.key_bytes.is_some(),
         "getServiceAuth auth validated"
@@ -141,7 +136,7 @@ pub async fn get_service_auth(
     let key_bytes = match &auth_user.key_bytes {
         Some(kb) => kb.clone(),
         None => {
-            warn!(did = %auth_user.did, "getServiceAuth: OAuth token has no key_bytes, fetching from DB");
+            warn!(did = %&auth_user.did, "getServiceAuth: OAuth token has no key_bytes, fetching from DB");
             match sqlx::query_as::<_, (Vec<u8>, Option<i32>)>(
                 "SELECT k.key_bytes, k.encryption_version
                  FROM users u
@@ -157,20 +152,20 @@ pub async fn get_service_auth(
                         Ok(key) => key,
                         Err(e) => {
                             error!(error = ?e, "Failed to decrypt user key for service auth");
-                            return ApiError::AuthenticationFailedMsg(
+                            return ApiError::AuthenticationFailed(Some(
                                 "Failed to get signing key".into(),
-                            )
+                            ))
                             .into_response();
                         }
                     }
                 }
                 Ok(None) => {
-                    return ApiError::AuthenticationFailedMsg("User has no signing key".into())
+                    return ApiError::AuthenticationFailed(Some("User has no signing key".into()))
                         .into_response();
                 }
                 Err(e) => {
                     error!(error = ?e, "DB error fetching user key");
-                    return ApiError::AuthenticationFailedMsg("Failed to get signing key".into())
+                    return ApiError::AuthenticationFailed(Some("Failed to get signing key".into()))
                         .into_response();
                 }
             }
@@ -192,20 +187,16 @@ pub async fn get_service_auth(
     } else if auth_user.is_oauth {
         let permissions = auth_user.permissions();
         if !permissions.has_full_access() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "OAuth tokens with granular scopes must specify an lxm parameter"
-                })),
+            return ApiError::InvalidRequest(
+                "OAuth tokens with granular scopes must specify an lxm parameter".into(),
             )
-                .into_response();
+            .into_response();
         }
     }
 
     let user_status = sqlx::query!(
         "SELECT takedown_ref FROM users WHERE did = $1",
-        auth_user.did
+        &auth_user.did
     )
     .fetch_optional(&state.db)
     .await;
@@ -216,27 +207,17 @@ pub async fn get_service_auth(
     };
 
     if is_takendown && lxm != Some("com.atproto.server.createAccount") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidToken",
-                "message": "Bad token scope"
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidToken(Some("Bad token scope".into())).into_response();
     }
 
     if let Some(method) = lxm
         && PROTECTED_METHODS.contains(&method)
     {
-        return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": format!("cannot request a service auth token for the following protected method: {}", method)
-                })),
-            )
-                .into_response();
+        return ApiError::InvalidRequest(format!(
+            "cannot request a service auth token for the following protected method: {}",
+            method
+        ))
+        .into_response();
     }
 
     if let Some(exp) = params.exp {
@@ -244,36 +225,21 @@ pub async fn get_service_auth(
         let diff = exp - now;
 
         if diff < 0 {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "BadExpiration",
-                    "message": "expiration is in past"
-                })),
-            )
-                .into_response();
+            return ApiError::InvalidRequest("expiration is in past".into()).into_response();
         }
 
         if diff > HOUR_SECS {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "BadExpiration",
-                    "message": "cannot request a token with an expiration more than an hour in the future"
-                })),
+            return ApiError::InvalidRequest(
+                "cannot request a token with an expiration more than an hour in the future".into(),
             )
-                .into_response();
+            .into_response();
         }
 
         if lxm.is_none() && diff > MINUTE_SECS {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "BadExpiration",
-                    "message": "cannot request a method-less token with an expiration more than a minute in the future"
-                })),
+            return ApiError::InvalidRequest(
+                "cannot request a method-less token with an expiration more than a minute in the future".into(),
             )
-                .into_response();
+            .into_response();
         }
     }
 
@@ -286,11 +252,7 @@ pub async fn get_service_auth(
         Ok(t) => t,
         Err(e) => {
             error!("Failed to create service token: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     (

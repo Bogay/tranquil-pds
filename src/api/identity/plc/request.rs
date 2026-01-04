@@ -1,13 +1,11 @@
-use crate::api::ApiError;
+use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use axum::{
-    Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::{Duration, Utc};
-use serde_json::json;
 use tracing::{error, info, warn};
 
 fn generate_plc_token() -> String {
@@ -36,7 +34,7 @@ pub async fn request_plc_operation_signature(
     ) {
         return e;
     }
-    let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", auth_user.did)
+    let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", &auth_user.did)
         .fetch_optional(&state.db)
         .await
     {
@@ -44,7 +42,7 @@ pub async fn request_plc_operation_signature(
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let _ = sqlx::query!(
@@ -68,11 +66,7 @@ pub async fn request_plc_operation_signature(
     .await
     {
         error!("Failed to create PLC token: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) =
@@ -84,5 +78,5 @@ pub async fn request_plc_operation_signature(
         "PLC operation signature requested for user {}",
         auth_user.did
     );
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }

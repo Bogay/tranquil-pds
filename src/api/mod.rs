@@ -10,10 +10,15 @@ pub mod notification_prefs;
 pub mod proxy;
 pub mod proxy_client;
 pub mod repo;
+pub mod responses;
 pub mod server;
 pub mod temp;
 pub mod validation;
 pub mod verification;
 
 pub use error::ApiError;
+pub use responses::{
+    DidResponse, EmptyResponse, EnabledResponse, HasPasswordResponse, OptionsResponse,
+    StatusResponse, SuccessResponse, TokenRequiredResponse, VerifiedResponse,
+};
 pub use proxy_client::{AtUriParts, proxy_client, validate_at_uri, validate_did, validate_limit};

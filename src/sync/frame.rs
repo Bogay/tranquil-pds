@@ -93,20 +93,68 @@ pub struct ErrorFrameBody {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub enum CommitFrameError {
+    InvalidCommitCid(String),
+    InvalidBlobCid(String),
+}
+
+impl std::fmt::Display for CommitFrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidCommitCid(s) => write!(f, "Invalid commit CID: {}", s),
+            Self::InvalidBlobCid(s) => write!(f, "Invalid blob CID: {}", s),
+        }
+    }
+}
+
+impl std::error::Error for CommitFrameError {}
+
 pub struct CommitFrameBuilder {
-    pub seq: i64,
-    pub did: String,
-    pub commit_cid_str: String,
-    pub prev_cid_str: Option<String>,
-    pub ops_json: serde_json::Value,
-    pub blobs: Vec<String>,
-    pub time: chrono::DateTime<chrono::Utc>,
-    pub rev: Option<String>,
+    seq: i64,
+    did: String,
+    commit_cid: Cid,
+    prev_cid: Option<Cid>,
+    ops_json: serde_json::Value,
+    blob_cids: Vec<Cid>,
+    time: chrono::DateTime<chrono::Utc>,
+    rev: Option<String>,
 }
 
 impl CommitFrameBuilder {
-    pub fn build(self) -> Result<CommitFrame, &'static str> {
-        let commit_cid = Cid::from_str(&self.commit_cid_str).map_err(|_| "Invalid commit CID")?;
+    pub fn new(
+        seq: i64,
+        did: String,
+        commit_cid_str: &str,
+        prev_cid_str: Option<&str>,
+        ops_json: serde_json::Value,
+        blob_strs: Vec<String>,
+        time: chrono::DateTime<chrono::Utc>,
+        rev: Option<String>,
+    ) -> Result<Self, CommitFrameError> {
+        let commit_cid = Cid::from_str(commit_cid_str)
+            .map_err(|_| CommitFrameError::InvalidCommitCid(commit_cid_str.to_string()))?;
+        let prev_cid = prev_cid_str
+            .map(|s| Cid::from_str(s))
+            .transpose()
+            .map_err(|_| CommitFrameError::InvalidCommitCid(prev_cid_str.unwrap_or("").to_string()))?;
+        let blob_cids: Vec<Cid> = blob_strs
+            .iter()
+            .filter_map(|s| Cid::from_str(s).ok())
+            .collect();
+        Ok(Self {
+            seq,
+            did,
+            commit_cid,
+            prev_cid,
+            ops_json,
+            blob_cids,
+            time,
+            rev,
+        })
+    }
+
+    pub fn build(self) -> CommitFrame {
         let json_ops: Vec<JsonRepoOp> =
             serde_json::from_value(self.ops_json).unwrap_or_else(|_| vec![]);
         let ops: Vec<RepoOp> = json_ops
@@ -118,27 +166,22 @@ impl CommitFrameBuilder {
                 prev: op.prev.and_then(|s| Cid::from_str(&s).ok()),
             })
             .collect();
-        let blobs: Vec<Cid> = self
-            .blobs
-            .iter()
-            .filter_map(|s| Cid::from_str(s).ok())
-            .collect();
         let rev = self.rev.unwrap_or_else(placeholder_rev);
-        let since = self.prev_cid_str.as_ref().map(|_| rev.clone());
-        Ok(CommitFrame {
+        let since = self.prev_cid.as_ref().map(|_| rev.clone());
+        CommitFrame {
             seq: self.seq,
             rebase: false,
             too_big: false,
             repo: self.did,
-            commit: commit_cid,
+            commit: self.commit_cid,
             rev,
             since,
             blocks: Vec::new(),
             ops,
-            blobs,
+            blobs: self.blob_cids,
             time: format_atproto_time(self.time),
             prev_data: None,
-        })
+        }
     }
 }
 
@@ -152,19 +195,22 @@ fn format_atproto_time(dt: chrono::DateTime<chrono::Utc>) -> String {
 }
 
 impl TryFrom<SequencedEvent> for CommitFrame {
-    type Error = &'static str;
+    type Error = CommitFrameError;
 
     fn try_from(event: SequencedEvent) -> Result<Self, Self::Error> {
-        let builder = CommitFrameBuilder {
-            seq: event.seq,
-            did: event.did,
-            commit_cid_str: event.commit_cid.ok_or("Missing commit_cid in event")?,
-            prev_cid_str: event.prev_cid,
-            ops_json: event.ops.unwrap_or_default(),
-            blobs: event.blobs.unwrap_or_default(),
-            time: event.created_at,
-            rev: event.rev,
-        };
-        builder.build()
+        let commit_cid_str = event.commit_cid.ok_or_else(|| {
+            CommitFrameError::InvalidCommitCid("Missing commit_cid in event".to_string())
+        })?;
+        let builder = CommitFrameBuilder::new(
+            event.seq,
+            event.did,
+            &commit_cid_str,
+            event.prev_cid.as_deref(),
+            event.ops.unwrap_or_default(),
+            event.blobs.unwrap_or_default(),
+            event.created_at,
+            event.rev,
+        )?;
+        Ok(builder.build())
     }
 }

@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::sync::util::{AccountStatus, assert_repo_availability, get_account_with_status};
 use axum::{
@@ -10,7 +11,6 @@ use cid::Cid;
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::str::FromStr;
 use tracing::error;
 
@@ -38,11 +38,7 @@ pub async fn get_latest_commit(
 ) -> Response {
     let did = params.did.trim();
     if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("did is required".into()).into_response();
     }
 
     let account = match assert_repo_availability(&state.db, did, false).await {
@@ -50,30 +46,16 @@ pub async fn get_latest_commit(
         Err(e) => return e.into_response(),
     };
 
-    let repo_root_cid = match account.repo_root_cid {
-        Some(cid) => cid,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
-            )
-                .into_response();
-        }
+    let Some(repo_root_cid) = account.repo_root_cid else {
+        return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
     };
 
-    let rev = match get_rev_from_commit(&state, &repo_root_cid).await {
-        Some(r) => r,
-        None => {
-            error!(
-                "Failed to parse commit for DID {}: CID {}",
-                did, repo_root_cid
-            );
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to read repo commit"})),
-            )
-                .into_response();
-        }
+    let Some(rev) = get_rev_from_commit(&state, &repo_root_cid).await else {
+        error!(
+            "Failed to parse commit for DID {}: CID {}",
+            did, repo_root_cid
+        );
+        return ApiError::InternalError(Some("Failed to read repo commit".into())).into_response();
     };
 
     (
@@ -181,11 +163,7 @@ pub async fn list_repos(
         }
         Err(e) => {
             error!("DB error in list_repos: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(Some("Database error".into())).into_response()
         }
     }
 }
@@ -211,29 +189,18 @@ pub async fn get_repo_status(
 ) -> Response {
     let did = params.did.trim();
     if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("did is required".into()).into_response();
     }
 
     let account = match get_account_with_status(&state.db, did).await {
         Ok(Some(a)) => a,
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "RepoNotFound", "message": format!("Could not find repo for DID: {}", did)})),
-            )
+            return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
                 .into_response()
         }
         Err(e) => {
             error!("DB error in get_repo_status: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Database error".into())).into_response();
         }
     };
 

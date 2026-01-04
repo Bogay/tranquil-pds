@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
@@ -37,11 +38,7 @@ pub async fn get_subject_status(
     Query(params): Query<GetSubjectStatusParams>,
 ) -> Response {
     if params.did.is_none() && params.uri.is_none() && params.blob.is_none() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Must provide did, uri, or blob"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("Must provide did, uri, or blob".into()).into_response();
     }
     if let Some(did) = &params.did {
         let user = sqlx::query!(
@@ -74,19 +71,11 @@ pub async fn get_subject_status(
                     .into_response();
             }
             Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "SubjectNotFound", "message": "Subject not found"})),
-                )
-                    .into_response();
+                return ApiError::SubjectNotFound.into_response();
             }
             Err(e) => {
                 error!("DB error in get_subject_status: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         }
     }
@@ -118,19 +107,11 @@ pub async fn get_subject_status(
                     .into_response();
             }
             Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "SubjectNotFound", "message": "Subject not found"})),
-                )
-                    .into_response();
+                return ApiError::RecordNotFound.into_response();
             }
             Err(e) => {
                 error!("DB error in get_subject_status: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         }
     }
@@ -138,11 +119,10 @@ pub async fn get_subject_status(
         let did = match &params.did {
             Some(d) => d,
             None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidRequest", "message": "Must provide a did to request blob state"})),
+                return ApiError::InvalidRequest(
+                    "Must provide a did to request blob state".into(),
                 )
-                    .into_response();
+                .into_response();
             }
         };
         let blob = sqlx::query!(
@@ -172,27 +152,15 @@ pub async fn get_subject_status(
                     .into_response();
             }
             Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "SubjectNotFound", "message": "Subject not found"})),
-                )
-                    .into_response();
+                return ApiError::BlobNotFound(None).into_response();
             }
             Err(e) => {
                 error!("DB error in get_subject_status: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         }
     }
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"error": "InvalidRequest", "message": "Invalid subject type"})),
-    )
-        .into_response()
+    ApiError::InvalidRequest("Invalid subject type".into()).into_response()
 }
 
 #[derive(Deserialize)]
@@ -223,11 +191,7 @@ pub async fn update_subject_status(
                     Ok(tx) => tx,
                     Err(e) => {
                         error!("Failed to begin transaction: {:?}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(None).into_response();
                     }
                 };
                 if let Some(takedown) = &input.takedown {
@@ -245,11 +209,10 @@ pub async fn update_subject_status(
                     .await
                     {
                         error!("Failed to update user takedown status for {}: {:?}", did, e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError", "message": "Failed to update takedown status"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(Some(
+                            "Failed to update takedown status".into(),
+                        ))
+                        .into_response();
                     }
                 }
                 if let Some(deactivated) = &input.deactivated {
@@ -270,20 +233,15 @@ pub async fn update_subject_status(
                             "Failed to update user deactivation status for {}: {:?}",
                             did, e
                         );
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError", "message": "Failed to update deactivation status"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(Some(
+                            "Failed to update deactivation status".into(),
+                        ))
+                        .into_response();
                     }
                 }
                 if let Err(e) = tx.commit().await {
                     error!("Failed to commit transaction: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
                 if let Some(takedown) = &input.takedown {
                     let status = if takedown.applied {
@@ -363,11 +321,10 @@ pub async fn update_subject_status(
                             "Failed to update record takedown status for {}: {:?}",
                             uri, e
                         );
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError", "message": "Failed to update takedown status"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(Some(
+                            "Failed to update takedown status".into(),
+                        ))
+                        .into_response();
                     }
                 }
                 return (
@@ -401,11 +358,10 @@ pub async fn update_subject_status(
                     .await
                     {
                         error!("Failed to update blob takedown status for {}: {:?}", cid, e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError", "message": "Failed to update takedown status"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(Some(
+                            "Failed to update takedown status".into(),
+                        ))
+                        .into_response();
                     }
                 }
                 return (
@@ -423,9 +379,5 @@ pub async fn update_subject_status(
         }
         _ => {}
     }
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"error": "InvalidRequest", "message": "Invalid subject type"})),
-    )
-        .into_response()
+    ApiError::InvalidRequest("Invalid subject type".into()).into_response()
 }

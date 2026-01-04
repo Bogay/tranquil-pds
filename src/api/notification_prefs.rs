@@ -1,9 +1,10 @@
+use crate::api::error::ApiError;
 use crate::auth::validate_bearer_token;
 use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -29,20 +30,12 @@ pub async fn get_notification_prefs(State(state): State<AppState>, headers: Head
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired", "message": "Authentication required"})),
-        )
-            .into_response(),
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
     let user = match validate_bearer_token(&state.db, &token).await {
         Ok(u) => u,
         Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed", "message": "Invalid token"})),
-            )
-                .into_response();
+            return ApiError::AuthenticationFailed(None).into_response();
         }
     };
     let row =
@@ -66,13 +59,9 @@ pub async fn get_notification_prefs(State(state): State<AppState>, headers: Head
         .await
         {
             Ok(r) => r,
-            Err(e) => return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
-                ),
-            )
-                .into_response(),
+            Err(e) => {
+                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
+            }
         };
     let email: String = row.get("email");
     let channel: String = row.get("channel");
@@ -120,36 +109,24 @@ pub async fn get_notification_history(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired", "message": "Authentication required"})),
-        )
-            .into_response(),
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
     let user = match validate_bearer_token(&state.db, &token).await {
         Ok(u) => u,
         Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed", "message": "Invalid token"})),
-            )
-                .into_response();
+            return ApiError::AuthenticationFailed(None).into_response();
         }
     };
 
     let user_id: uuid::Uuid =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", user.did)
+        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &user.did)
             .fetch_one(&state.db)
             .await
         {
             Ok(id) => id,
-            Err(e) => return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
-                ),
-            )
-                .into_response(),
+            Err(e) => {
+                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
+            }
         };
 
     let rows =
@@ -173,13 +150,9 @@ pub async fn get_notification_history(
         .await
         {
             Ok(r) => r,
-            Err(e) => return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
-                ),
-            )
-                .into_response(),
+            Err(e) => {
+                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
+            }
         };
 
     let sensitive_types = [
@@ -288,39 +261,27 @@ pub async fn update_notification_prefs(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
-        None => return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired", "message": "Authentication required"})),
-        )
-            .into_response(),
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
     let user = match validate_bearer_token(&state.db, &token).await {
         Ok(u) => u,
         Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationFailed", "message": "Invalid token"})),
-            )
-                .into_response();
+            return ApiError::AuthenticationFailed(None).into_response();
         }
     };
 
     let user_row =
         match sqlx::query!(
             "SELECT id, handle, email FROM users WHERE did = $1",
-            user.did
+            &user.did
         )
         .fetch_one(&state.db)
         .await
         {
             Ok(row) => row,
-            Err(e) => return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": "InternalError", "message": format!("Database error: {}", e)}),
-                ),
-            )
-                .into_response(),
+            Err(e) => {
+                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
+            }
         };
 
     let user_id = user_row.id;
@@ -332,14 +293,10 @@ pub async fn update_notification_prefs(
     if let Some(ref channel) = input.preferred_channel {
         let valid_channels = ["email", "discord", "telegram", "signal"];
         if !valid_channels.contains(&channel.as_str()) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Invalid channel. Must be one of: email, discord, telegram, signal"
-                })),
+            return ApiError::InvalidRequest(
+                "Invalid channel. Must be one of: email, discord, telegram, signal".into(),
             )
-                .into_response();
+            .into_response();
         }
         if let Err(e) = sqlx::query(
             r#"UPDATE users SET preferred_comms_channel = $1::comms_channel, updated_at = NOW() WHERE did = $2"#
@@ -349,11 +306,7 @@ pub async fn update_notification_prefs(
         .execute(&state.db)
         .await
         {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
         }
         info!(did = %user.did, channel = %channel, "Updated preferred notification channel");
     }
@@ -361,19 +314,11 @@ pub async fn update_notification_prefs(
     if let Some(ref new_email) = input.email {
         let email_clean = new_email.trim().to_lowercase();
         if email_clean.is_empty() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "Email cannot be empty"})),
-            )
-                .into_response();
+            return ApiError::InvalidRequest("Email cannot be empty".into()).into_response();
         }
 
         if !crate::api::validation::is_valid_email(&email_clean) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
-            )
-                .into_response();
+            return ApiError::InvalidEmail.into_response();
         }
 
         if current_email.as_ref().map(|e| e.to_lowercase()) == Some(email_clean.clone()) {
@@ -388,11 +333,7 @@ pub async fn update_notification_prefs(
             .await;
 
             if let Ok(Some(_)) = exists {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "EmailTaken", "message": "Email already in use"})),
-                )
-                    .into_response();
+                return ApiError::EmailTaken.into_response();
             }
 
             if let Err(e) = request_channel_verification(
@@ -405,11 +346,7 @@ pub async fn update_notification_prefs(
             )
             .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": e})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some(e)).into_response();
             }
             verification_required.push("email".to_string());
             info!(did = %user.did, "Requested email verification");
@@ -425,11 +362,7 @@ pub async fn update_notification_prefs(
             .execute(&state.db)
             .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
             }
             info!(did = %user.did, "Cleared Discord ID");
         } else {
@@ -438,11 +371,7 @@ pub async fn update_notification_prefs(
             )
             .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": e})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some(e)).into_response();
             }
             verification_required.push("discord".to_string());
             info!(did = %user.did, "Requested Discord verification");
@@ -459,11 +388,7 @@ pub async fn update_notification_prefs(
             .execute(&state.db)
             .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
             }
             info!(did = %user.did, "Cleared Telegram username");
         } else {
@@ -477,11 +402,7 @@ pub async fn update_notification_prefs(
             )
             .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": e})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some(e)).into_response();
             }
             verification_required.push("telegram".to_string());
             info!(did = %user.did, "Requested Telegram verification");
@@ -497,11 +418,7 @@ pub async fn update_notification_prefs(
             .execute(&state.db)
             .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": format!("Database error: {}", e)})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
             }
             info!(did = %user.did, "Cleared Signal number");
         } else {
@@ -509,11 +426,7 @@ pub async fn update_notification_prefs(
                 request_channel_verification(&state.db, user_id, &user.did, "signal", signal, None)
                     .await
             {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": e})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some(e)).into_response();
             }
             verification_required.push("signal".to_string());
             info!(did = %user.did, "Requested Signal verification");

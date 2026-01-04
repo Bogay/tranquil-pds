@@ -1,10 +1,11 @@
+use crate::api::error::ApiError;
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::BearerAuth;
 use crate::delegation::{self, DelegationActionType};
 use crate::oauth::db as oauth_db;
 use crate::state::{AppState, RateLimitKind};
+use crate::types::{Did, Handle};
 use crate::util::extract_client_ip;
-use crate::validation::is_valid_did;
 use axum::{
     Json,
     extract::{Query, State},
@@ -21,8 +22,8 @@ use tracing::{error, info, warn};
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ControllerInfo {
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
     pub granted_scopes: String,
     pub granted_at: chrono::DateTime<chrono::Utc>,
     pub is_active: bool,
@@ -38,14 +39,7 @@ pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to list controllers: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "ServerError",
-                    "message": "Failed to list controllers"
-                })),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to list controllers".into())).into_response();
         }
     };
 
@@ -53,7 +47,7 @@ pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -
         controllers: controllers
             .into_iter()
             .map(|c| ControllerInfo {
-                did: c.did,
+                did: c.did.into(),
                 handle: c.handle,
                 granted_scopes: c.granted_scopes,
                 granted_at: c.granted_at,
@@ -66,7 +60,7 @@ pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -
 
 #[derive(Debug, Deserialize)]
 pub struct AddControllerInput {
-    pub controller_did: String,
+    pub controller_did: Did,
     pub granted_scopes: String,
 }
 
@@ -75,67 +69,32 @@ pub async fn add_controller(
     auth: BearerAuth,
     Json(input): Json<AddControllerInput>,
 ) -> Response {
-    if !is_valid_did(&input.controller_did) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "InvalidRequest",
-                "message": "Invalid DID format"
-            })),
-        )
-            .into_response();
-    }
-
     if let Err(e) = delegation::scopes::validate_delegation_scopes(&input.granted_scopes) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "InvalidScopes",
-                "message": e
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidScopes(e).into_response();
     }
 
     let controller_exists: bool = sqlx::query_scalar!(
         r#"SELECT EXISTS(SELECT 1 FROM users WHERE did = $1) as "exists!""#,
-        input.controller_did
+        input.controller_did.as_str()
     )
     .fetch_one(&state.db)
     .await
     .unwrap_or(false);
 
     if !controller_exists {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": "ControllerNotFound",
-                "message": "Controller account not found"
-            })),
-        )
-            .into_response();
+        return ApiError::ControllerNotFound.into_response();
     }
 
     match delegation::controls_any_accounts(&state.db, &auth.0.did).await {
         Ok(true) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "InvalidDelegation",
-                    "message": "Cannot add controllers to an account that controls other accounts"
-                })),
+            return ApiError::InvalidDelegation(
+                "Cannot add controllers to an account that controls other accounts".into(),
             )
-                .into_response();
+            .into_response();
         }
         Err(e) => {
             tracing::error!("Failed to check delegation status: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "ServerError",
-                    "message": "Failed to verify delegation status"
-                })),
-            )
+            return ApiError::InternalError(Some("Failed to verify delegation status".into()))
                 .into_response();
         }
         Ok(false) => {}
@@ -143,24 +102,14 @@ pub async fn add_controller(
 
     match delegation::has_any_controllers(&state.db, &input.controller_did).await {
         Ok(true) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "InvalidDelegation",
-                    "message": "Cannot add a controlled account as a controller"
-                })),
+            return ApiError::InvalidDelegation(
+                "Cannot add a controlled account as a controller".into(),
             )
-                .into_response();
+            .into_response();
         }
         Err(e) => {
             tracing::error!("Failed to check controller status: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "ServerError",
-                    "message": "Failed to verify controller status"
-                })),
-            )
+            return ApiError::InternalError(Some("Failed to verify controller status".into()))
                 .into_response();
         }
         Ok(false) => {}
@@ -200,21 +149,14 @@ pub async fn add_controller(
         }
         Err(e) => {
             tracing::error!("Failed to add controller: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "ServerError",
-                    "message": "Failed to add controller"
-                })),
-            )
-                .into_response()
+            ApiError::InternalError(Some("Failed to add controller".into())).into_response()
         }
     }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RemoveControllerInput {
-    pub controller_did: String,
+    pub controller_did: Did,
 }
 
 pub async fn remove_controller(
@@ -222,17 +164,6 @@ pub async fn remove_controller(
     auth: BearerAuth,
     Json(input): Json<RemoveControllerInput>,
 ) -> Response {
-    if !is_valid_did(&input.controller_did) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "InvalidRequest",
-                "message": "Invalid DID format"
-            })),
-        )
-            .into_response();
-    }
-
     match delegation::revoke_delegation(&state.db, &auth.0.did, &input.controller_did, &auth.0.did)
         .await
     {
@@ -242,8 +173,8 @@ pub async fn remove_controller(
                    WHERE user_id = (SELECT id FROM users WHERE did = $1)
                    AND created_by_controller_did = $2
                    RETURNING id"#,
-                auth.0.did,
-                input.controller_did
+                &auth.0.did,
+                input.controller_did.as_str()
             )
             .fetch_all(&state.db)
             .await
@@ -281,31 +212,17 @@ pub async fn remove_controller(
             )
                 .into_response()
         }
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": "DelegationNotFound",
-                "message": "No active delegation found for this controller"
-            })),
-        )
-            .into_response(),
+        Ok(false) => ApiError::DelegationNotFound.into_response(),
         Err(e) => {
             tracing::error!("Failed to remove controller: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "ServerError",
-                    "message": "Failed to remove controller"
-                })),
-            )
-                .into_response()
+            ApiError::InternalError(Some("Failed to remove controller".into())).into_response()
         }
     }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateControllerScopesInput {
-    pub controller_did: String,
+    pub controller_did: Did,
     pub granted_scopes: String,
 }
 
@@ -314,26 +231,8 @@ pub async fn update_controller_scopes(
     auth: BearerAuth,
     Json(input): Json<UpdateControllerScopesInput>,
 ) -> Response {
-    if !is_valid_did(&input.controller_did) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "InvalidRequest",
-                "message": "Invalid DID format"
-            })),
-        )
-            .into_response();
-    }
-
     if let Err(e) = delegation::scopes::validate_delegation_scopes(&input.granted_scopes) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "InvalidScopes",
-                "message": e
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidScopes(e).into_response();
     }
 
     match delegation::update_delegation_scopes(
@@ -367,24 +266,10 @@ pub async fn update_controller_scopes(
             )
                 .into_response()
         }
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": "DelegationNotFound",
-                "message": "No active delegation found for this controller"
-            })),
-        )
-            .into_response(),
+        Ok(false) => ApiError::DelegationNotFound.into_response(),
         Err(e) => {
             tracing::error!("Failed to update controller scopes: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "ServerError",
-                    "message": "Failed to update controller scopes"
-                })),
-            )
-                .into_response()
+            ApiError::InternalError(Some("Failed to update controller scopes".into())).into_response()
         }
     }
 }
@@ -392,8 +277,8 @@ pub async fn update_controller_scopes(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DelegatedAccountInfo {
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
     pub granted_scopes: String,
     pub granted_at: chrono::DateTime<chrono::Utc>,
 }
@@ -408,13 +293,7 @@ pub async fn list_controlled_accounts(State(state): State<AppState>, auth: Beare
         Ok(a) => a,
         Err(e) => {
             tracing::error!("Failed to list controlled accounts: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "ServerError",
-                    "message": "Failed to list controlled accounts"
-                })),
-            )
+            return ApiError::InternalError(Some("Failed to list controlled accounts".into()))
                 .into_response();
         }
     };
@@ -423,7 +302,7 @@ pub async fn list_controlled_accounts(State(state): State<AppState>, auth: Beare
         accounts: accounts
             .into_iter()
             .map(|a| DelegatedAccountInfo {
-                did: a.did,
+                did: a.did.into(),
                 handle: a.handle,
                 granted_scopes: a.granted_scopes,
                 granted_at: a.granted_at,
@@ -449,9 +328,9 @@ fn default_limit() -> i64 {
 #[serde(rename_all = "camelCase")]
 pub struct AuditLogEntry {
     pub id: String,
-    pub delegated_did: String,
-    pub actor_did: String,
-    pub controller_did: Option<String>,
+    pub delegated_did: Did,
+    pub actor_did: Did,
+    pub controller_did: Option<Did>,
     pub action_type: String,
     pub action_details: Option<serde_json::Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -478,14 +357,7 @@ pub async fn get_audit_log(
             Ok(e) => e,
             Err(e) => {
                 tracing::error!("Failed to get audit log: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": "ServerError",
-                        "message": "Failed to get audit log"
-                    })),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some("Failed to get audit log".into())).into_response();
             }
         };
 
@@ -498,9 +370,9 @@ pub async fn get_audit_log(
             .into_iter()
             .map(|e| AuditLogEntry {
                 id: e.id.to_string(),
-                delegated_did: e.delegated_did,
-                actor_did: e.actor_did,
-                controller_did: e.controller_did,
+                delegated_did: e.delegated_did.into(),
+                actor_did: e.actor_did.into(),
+                controller_did: e.controller_did.map(Into::into),
                 action_type: format!("{:?}", e.action_type),
                 action_details: e.action_details,
                 created_at: e.created_at,
@@ -551,8 +423,8 @@ pub struct CreateDelegatedAccountInput {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDelegatedAccountResponse {
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
 }
 
 pub async fn create_delegated_account(
@@ -567,47 +439,26 @@ pub async fn create_delegated_account(
         .await
     {
         warn!(ip = %client_ip, "Delegated account creation rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many account creation attempts. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(Some(
+            "Too many account creation attempts. Please try again later.".into(),
+        ))
+        .into_response();
     }
 
     if let Err(e) = delegation::scopes::validate_delegation_scopes(&input.controller_scopes) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidScopes",
-                "message": e
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidScopes(e).into_response();
     }
 
     match delegation::has_any_controllers(&state.db, &auth.0.did).await {
         Ok(true) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidDelegation",
-                    "message": "Cannot create delegated accounts from a controlled account"
-                })),
+            return ApiError::InvalidDelegation(
+                "Cannot create delegated accounts from a controlled account".into(),
             )
-                .into_response();
+            .into_response();
         }
         Err(e) => {
             tracing::error!("Failed to check controller status: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "ServerError",
-                    "message": "Failed to verify controller status"
-                })),
-            )
+            return ApiError::InternalError(Some("Failed to verify controller status".into()))
                 .into_response();
         }
         Ok(false) => {}
@@ -628,11 +479,7 @@ pub async fn create_delegated_account(
         match crate::api::validation::validate_short_handle(handle_to_validate) {
             Ok(h) => format!("{}.{}", h, hostname),
             Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidHandle", "message": e.to_string()})),
-                )
-                    .into_response();
+                return ApiError::InvalidRequest(e.to_string()).into_response();
             }
         }
     } else {
@@ -647,11 +494,7 @@ pub async fn create_delegated_account(
     if let Some(ref email) = email
         && !crate::api::validation::is_valid_email(email)
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
-        )
-            .into_response();
+        return ApiError::InvalidEmail.into_response();
     }
 
     if let Some(ref code) = input.invite_code {
@@ -666,22 +509,14 @@ pub async fn create_delegated_account(
         .unwrap_or(Some(false));
 
         if valid != Some(true) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidInviteCode", "message": "Invalid or expired invite code"})),
-            )
-                .into_response();
+            return ApiError::InvalidInviteCode.into_response();
         }
     } else {
         let invite_required = std::env::var("INVITE_CODE_REQUIRED")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
         if invite_required {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InviteCodeRequired", "message": "An invite code is required to create an account"})),
-            )
-                .into_response();
+            return ApiError::InviteCodeRequired.into_response();
         }
     }
 
@@ -696,11 +531,7 @@ pub async fn create_delegated_account(
         Ok(k) => k,
         Err(e) => {
             error!("Error creating signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -716,12 +547,7 @@ pub async fn create_delegated_account(
         Ok(r) => r,
         Err(e) => {
             error!("Error creating PLC genesis operation: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(
-                    json!({"error": "InternalError", "message": "Failed to create PLC operation"}),
-                ),
-            )
+            return ApiError::InternalError(Some("Failed to create PLC operation".into()))
                 .into_response();
         }
     };
@@ -732,28 +558,21 @@ pub async fn create_delegated_account(
         .await
     {
         error!("Failed to submit PLC genesis operation: {:?}", e);
-        return (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({
-                "error": "UpstreamError",
-                "message": format!("Failed to register DID with PLC directory: {}", e)
-            })),
-        )
-            .into_response();
+        return ApiError::UpstreamErrorMsg(format!(
+            "Failed to register DID with PLC directory: {}",
+            e
+        ))
+        .into_response();
     }
 
     let did = genesis_result.did;
-    info!(did = %did, handle = %handle, controller = %auth.0.did, "Created DID for delegated account");
+    info!(did = %did, handle = %handle, controller = %&auth.0.did, "Created DID for delegated account");
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             error!("Error starting transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -777,27 +596,13 @@ pub async fn create_delegated_account(
             {
                 let constraint = db_err.constraint().unwrap_or("");
                 if constraint.contains("handle") {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "HandleNotAvailable", "message": "Handle already taken"})),
-                    )
-                        .into_response();
+                    return ApiError::HandleNotAvailable(None).into_response();
                 } else if constraint.contains("email") {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(
-                            json!({"error": "InvalidEmail", "message": "Email already registered"}),
-                        ),
-                    )
-                        .into_response();
+                    return ApiError::EmailTaken.into_response();
                 }
             }
             error!("Error inserting user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -805,11 +610,7 @@ pub async fn create_delegated_account(
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Error encrypting signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -823,30 +624,22 @@ pub async fn create_delegated_account(
     .await
     {
         error!("Error inserting user key: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Err(e) = sqlx::query!(
         r#"INSERT INTO account_delegations (delegated_did, controller_did, granted_scopes, granted_by)
            VALUES ($1, $2, $3, $4)"#,
         did,
-        auth.0.did,
+        &auth.0.did,
         input.controller_scopes,
-        auth.0.did
+        &auth.0.did
     )
     .execute(&mut *tx)
     .await
     {
         error!("Error creating initial delegation: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let mst = Mst::new(Arc::new(state.block_store.clone()));
@@ -854,11 +647,7 @@ pub async fn create_delegated_account(
         Ok(c) => c,
         Err(e) => {
             error!("Error persisting MST: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
@@ -867,22 +656,14 @@ pub async fn create_delegated_account(
             Ok(result) => result,
             Err(e) => {
                 error!("Error creating genesis commit: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     let commit_cid: cid::Cid = match state.block_store.put(&commit_bytes).await {
         Ok(c) => c,
         Err(e) => {
             error!("Error saving genesis commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let commit_cid_str = commit_cid.to_string();
@@ -897,11 +678,7 @@ pub async fn create_delegated_account(
     .await
     {
         error!("Error inserting repo: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
     if let Err(e) = sqlx::query!(
@@ -917,11 +694,7 @@ pub async fn create_delegated_account(
     .await
     {
         error!("Error inserting user_blocks: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Some(ref code) = input.invite_code {
@@ -943,11 +716,7 @@ pub async fn create_delegated_account(
 
     if let Err(e) = tx.commit().await {
         error!("Error committing transaction: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Err(e) =
@@ -991,7 +760,7 @@ pub async fn create_delegated_account(
     )
     .await;
 
-    info!(did = %did, handle = %handle, controller = %auth.0.did, "Delegated account created");
+    info!(did = %did, handle = %handle, controller = %&auth.0.did, "Delegated account created");
 
-    Json(CreateDelegatedAccountResponse { did, handle }).into_response()
+    Json(CreateDelegatedAccountResponse { did: did.into(), handle: handle.into() }).into_response()
 }

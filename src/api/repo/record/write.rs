@@ -1,9 +1,10 @@
 use super::validation::validate_record_with_status;
+use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
-use crate::validation::ValidationStatus;
+use crate::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
 use axum::{
     Json,
     extract::State,
@@ -11,10 +12,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cid::Cid;
-use jacquard::types::{
-    integer::LimitedU32,
-    string::{Nsid, Tid},
-};
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -52,12 +49,12 @@ pub async fn has_verified_comms_channel(db: &PgPool, did: &str) -> Result<bool, 
 }
 
 pub struct RepoWriteAuth {
-    pub did: String,
+    pub did: Did,
     pub user_id: Uuid,
     pub current_root_cid: Cid,
     pub is_oauth: bool,
     pub scope: Option<String>,
-    pub controller_did: Option<String>,
+    pub controller_did: Option<Did>,
 }
 
 pub async fn prepare_repo_write(
@@ -70,13 +67,7 @@ pub async fn prepare_repo_write(
     let extracted = crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     )
-    .ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationRequired"})),
-        )
-            .into_response()
-    })?;
+    .ok_or_else(|| ApiError::AuthenticationRequired.into_response())?;
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
     let auth_user = crate::auth::validate_token_with_dpop(
         &state.db,
@@ -90,11 +81,7 @@ pub async fn prepare_repo_write(
     .await
     .map_err(|e| {
         tracing::warn!(error = ?e, is_dpop = extracted.is_dpop, "Token validation failed in prepare_repo_write");
-        let mut response = (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response();
+        let mut response = ApiError::from(e).into_response();
         if matches!(e, crate::auth::TokenValidationError::TokenExpired) {
             let scheme = if extracted.is_dpop { "DPoP" } else { "Bearer" };
             let www_auth = format!(
@@ -113,24 +100,15 @@ pub async fn prepare_repo_write(
         response
     })?;
     if repo_did != auth_user.did {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "InvalidRepo", "message": "Repo does not match authenticated user"})),
-        )
-            .into_response());
+        return Err(
+            ApiError::InvalidRepo("Repo does not match authenticated user".into()).into_response(),
+        );
     }
     if crate::util::is_account_migrated(&state.db, &auth_user.did)
         .await
         .unwrap_or(false)
     {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "AccountMigrated",
-                "message": "Account has been migrated to another PDS. Repo operations are not allowed."
-            })),
-        )
-            .into_response());
+        return Err(ApiError::AccountMigrated.into_response());
     }
     let is_verified = has_verified_comms_channel(&state.db, &auth_user.did)
         .await
@@ -139,33 +117,16 @@ pub async fn prepare_repo_write(
         .await
         .unwrap_or(false);
     if !is_verified && !is_delegated {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "AccountNotVerified",
-                "message": "You must verify at least one notification channel (email, Discord, Telegram, or Signal) before creating records"
-            })),
-        )
-            .into_response());
+        return Err(ApiError::AccountNotVerified.into_response());
     }
-    let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", auth_user.did)
+    let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &auth_user.did)
         .fetch_optional(&state.db)
         .await
         .map_err(|e| {
             error!("DB error fetching user: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         })?
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "User not found"})),
-            )
-                .into_response()
-        })?;
+        .ok_or_else(|| ApiError::InternalError(Some("User not found".into())).into_response())?;
     let root_cid_str: String = sqlx::query_scalar!(
         "SELECT repo_root_cid FROM repos WHERE user_id = $1",
         user_id
@@ -174,41 +135,26 @@ pub async fn prepare_repo_write(
     .await
     .map_err(|e| {
         error!("DB error fetching repo root: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response()
+        ApiError::InternalError(None).into_response()
     })?
-    .ok_or_else(|| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Repo root not found"})),
-        )
-            .into_response()
-    })?;
-    let current_root_cid = Cid::from_str(&root_cid_str).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Invalid repo root CID"})),
-        )
-            .into_response()
-    })?;
+    .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())).into_response())?;
+    let current_root_cid = Cid::from_str(&root_cid_str)
+        .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())).into_response())?;
     Ok(RepoWriteAuth {
-        did: auth_user.did,
+        did: auth_user.did.clone(),
         user_id,
         current_root_cid,
         is_oauth: auth_user.is_oauth,
         scope: auth_user.scope,
-        controller_did: auth_user.controller_did,
+        controller_did: auth_user.controller_did.clone(),
     })
 }
 #[derive(Deserialize)]
 #[allow(dead_code)]
 pub struct CreateRecordInput {
-    pub repo: String,
-    pub collection: String,
-    pub rkey: Option<String>,
+    pub repo: AtIdentifier,
+    pub collection: Nsid,
+    pub rkey: Option<Rkey>,
     pub validate: Option<bool>,
     pub record: serde_json::Value,
     #[serde(rename = "swapCommit")]
@@ -224,7 +170,7 @@ pub struct CommitInfo {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRecordOutput {
-    pub uri: String,
+    pub uri: AtUri,
     pub cid: String,
     pub commit: CommitInfo,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,44 +212,18 @@ pub async fn create_record(
     if let Some(swap_commit) = &input.swap_commit
         && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
     {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
-        )
-            .into_response();
+        return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
     }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Commit block not found"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError(Some("Commit block not found".into())).into_response(),
     };
     let commit = match Commit::from_cbor(&commit_bytes) {
         Ok(c) => c,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to parse commit"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
     };
     let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
-    let collection_nsid = match input.collection.parse::<Nsid>() {
-        Ok(n) => n,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidCollection"})),
-            )
-                .into_response();
-        }
-    };
     let validation_status = if input.validate == Some(false) {
         None
     } else {
@@ -311,59 +231,37 @@ pub async fn create_record(
         match validate_record_with_status(
             &input.record,
             &input.collection,
-            input.rkey.as_deref(),
+            input.rkey.as_ref().map(|r| r.as_str()),
             require_lexicon,
         ) {
             Ok(status) => Some(status),
             Err(err_response) => return *err_response,
         }
     };
-    let rkey = input
-        .rkey
-        .unwrap_or_else(|| Tid::now(LimitedU32::MIN).to_string());
+    let rkey = input.rkey.unwrap_or_else(Rkey::generate);
     let record_ipld = crate::util::json_to_ipld(&input.record);
     let mut record_bytes = Vec::new();
     if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"})),
-        )
-            .into_response();
+        return ApiError::InvalidRecord("Failed to serialize record".into()).into_response();
     }
     let record_cid = match tracking_store.put(&record_bytes).await {
         Ok(c) => c,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to save record block"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to save record block".into())).into_response()
         }
     };
-    let key = format!("{}/{}", collection_nsid, rkey);
+    let key = format!("{}/{}", input.collection, rkey);
     let new_mst = match mst.add(&key, record_cid).await {
         Ok(m) => m,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to add to MST"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError(Some("Failed to add to MST".into())).into_response(),
     };
     let new_mst_root = match new_mst.persist().await {
         Ok(c) => c,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to persist MST"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError(Some("Failed to persist MST".into())).into_response(),
     };
     let op = RecordOp::Create {
-        collection: input.collection.clone(),
-        rkey: rkey.clone(),
+        collection: input.collection.to_string(),
+        rkey: rkey.to_string(),
         cid: record_cid,
     };
     let mut relevant_blocks = std::collections::BTreeMap::new();
@@ -372,14 +270,16 @@ pub async fn create_record(
         .await
         .is_err()
     {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
+        return ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
+            .into_response();
     }
     if mst
         .blocks_for_path(&key, &mut relevant_blocks)
         .await
         .is_err()
     {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get old MST blocks for path"}))).into_response();
+        return ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
+            .into_response();
     }
     relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));
     let mut written_cids = tracking_store.get_all_relevant_cids();
@@ -409,13 +309,7 @@ pub async fn create_record(
     .await
     {
         Ok(res) => res,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::InternalError(Some(e)).into_response(),
     };
 
     if let Some(ref controller) = controller_did {
@@ -439,17 +333,13 @@ pub async fn create_record(
     (
         StatusCode::OK,
         Json(CreateRecordOutput {
-            uri: format!("at://{}/{}/{}", did, input.collection, rkey),
+            uri: AtUri::from_parts(&did, &input.collection, &rkey),
             cid: record_cid.to_string(),
             commit: CommitInfo {
                 cid: commit_result.commit_cid.to_string(),
                 rev: commit_result.rev,
             },
-            validation_status: validation_status.map(|s| match s {
-                ValidationStatus::Valid => "valid".to_string(),
-                ValidationStatus::Unknown => "unknown".to_string(),
-                ValidationStatus::Invalid => "invalid".to_string(),
-            }),
+            validation_status: validation_status.map(|s| s.to_string()),
         }),
     )
         .into_response()
@@ -457,9 +347,9 @@ pub async fn create_record(
 #[derive(Deserialize)]
 #[allow(dead_code)]
 pub struct PutRecordInput {
-    pub repo: String,
-    pub collection: String,
-    pub rkey: String,
+    pub repo: AtIdentifier,
+    pub collection: Nsid,
+    pub rkey: Rkey,
     pub validate: Option<bool>,
     pub record: serde_json::Value,
     #[serde(rename = "swapCommit")]
@@ -470,7 +360,7 @@ pub struct PutRecordInput {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PutRecordOutput {
-    pub uri: String,
+    pub uri: AtUri,
     pub cid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit: Option<CommitInfo>,
@@ -521,45 +411,19 @@ pub async fn put_record(
     if let Some(swap_commit) = &input.swap_commit
         && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
     {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({"error": "InvalidSwap", "message": "Repo has been modified"})),
-        )
-            .into_response();
+        return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
     }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Commit block not found"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError(Some("Commit block not found".into())).into_response(),
     };
     let commit = match Commit::from_cbor(&commit_bytes) {
         Ok(c) => c,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to parse commit"})),
-            )
-                .into_response();
-        }
+        _ => return ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
     };
     let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
-    let collection_nsid = match input.collection.parse::<Nsid>() {
-        Ok(n) => n,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidCollection"})),
-            )
-                .into_response();
-        }
-    };
-    let key = format!("{}/{}", collection_nsid, input.rkey);
+    let key = format!("{}/{}", input.collection, input.rkey);
     let validation_status = if input.validate == Some(false) {
         None
     } else {
@@ -567,7 +431,7 @@ pub async fn put_record(
         match validate_record_with_status(
             &input.record,
             &input.collection,
-            Some(&input.rkey),
+            Some(input.rkey.as_str()),
             require_lexicon,
         ) {
             Ok(status) => Some(status),
@@ -578,41 +442,30 @@ pub async fn put_record(
         let expected_cid = Cid::from_str(swap_record_str).ok();
         let actual_cid = mst.get(&key).await.ok().flatten();
         if expected_cid != actual_cid {
-            return (StatusCode::CONFLICT, Json(json!({"error": "InvalidSwap", "message": "Record has been modified or does not exist"}))).into_response();
+            return ApiError::InvalidSwap(Some("Record has been modified or does not exist".into()))
+                .into_response();
         }
     }
     let existing_cid = mst.get(&key).await.ok().flatten();
     let record_ipld = crate::util::json_to_ipld(&input.record);
     let mut record_bytes = Vec::new();
     if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRecord", "message": "Failed to serialize record"})),
-        )
-            .into_response();
+        return ApiError::InvalidRecord("Failed to serialize record".into()).into_response();
     }
     let record_cid = match tracking_store.put(&record_bytes).await {
         Ok(c) => c,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to save record block"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to save record block".into())).into_response()
         }
     };
     if existing_cid == Some(record_cid) {
         return (
             StatusCode::OK,
             Json(PutRecordOutput {
-                uri: format!("at://{}/{}/{}", did, input.collection, input.rkey),
+                uri: AtUri::from_parts(&did, &input.collection, &input.rkey),
                 cid: record_cid.to_string(),
                 commit: None,
-                validation_status: validation_status.map(|s| match s {
-                    ValidationStatus::Valid => "valid".to_string(),
-                    ValidationStatus::Unknown => "unknown".to_string(),
-                    ValidationStatus::Invalid => "invalid".to_string(),
-                }),
+                validation_status: validation_status.map(|s| s.to_string()),
             }),
         )
             .into_response();
@@ -621,46 +474,34 @@ pub async fn put_record(
         match mst.update(&key, record_cid).await {
             Ok(m) => m,
             Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": "Failed to update MST"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some("Failed to update MST".into())).into_response()
             }
         }
     } else {
         match mst.add(&key, record_cid).await {
             Ok(m) => m,
             Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError", "message": "Failed to add to MST"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(Some("Failed to add to MST".into())).into_response()
             }
         }
     };
     let new_mst_root = match new_mst.persist().await {
         Ok(c) => c,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to persist MST"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to persist MST".into())).into_response()
         }
     };
     let op = if existing_cid.is_some() {
         RecordOp::Update {
-            collection: input.collection.clone(),
-            rkey: input.rkey.clone(),
+            collection: input.collection.to_string(),
+            rkey: input.rkey.to_string(),
             cid: record_cid,
             prev: existing_cid,
         }
     } else {
         RecordOp::Create {
-            collection: input.collection.clone(),
-            rkey: input.rkey.clone(),
+            collection: input.collection.to_string(),
+            rkey: input.rkey.to_string(),
             cid: record_cid,
         }
     };
@@ -670,14 +511,16 @@ pub async fn put_record(
         .await
         .is_err()
     {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get new MST blocks for path"}))).into_response();
+        return ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
+            .into_response();
     }
     if mst
         .blocks_for_path(&key, &mut relevant_blocks)
         .await
         .is_err()
     {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "InternalError", "message": "Failed to get old MST blocks for path"}))).into_response();
+        return ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
+            .into_response();
     }
     relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));
     let mut written_cids = tracking_store.get_all_relevant_cids();
@@ -708,13 +551,7 @@ pub async fn put_record(
     .await
     {
         Ok(res) => res,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": e})),
-            )
-                .into_response();
-        }
+        Err(e) => return ApiError::InternalError(Some(e)).into_response(),
     };
 
     if let Some(ref controller) = controller_did {
@@ -738,17 +575,13 @@ pub async fn put_record(
     (
         StatusCode::OK,
         Json(PutRecordOutput {
-            uri: format!("at://{}/{}/{}", did, input.collection, input.rkey),
+            uri: AtUri::from_parts(&did, &input.collection, &input.rkey),
             cid: record_cid.to_string(),
             commit: Some(CommitInfo {
                 cid: commit_result.commit_cid.to_string(),
                 rev: commit_result.rev,
             }),
-            validation_status: validation_status.map(|s| match s {
-                ValidationStatus::Valid => "valid".to_string(),
-                ValidationStatus::Unknown => "unknown".to_string(),
-                ValidationStatus::Invalid => "invalid".to_string(),
-            }),
+            validation_status: validation_status.map(|s| s.to_string()),
         }),
     )
         .into_response()

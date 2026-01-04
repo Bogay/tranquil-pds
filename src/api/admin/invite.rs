@@ -1,3 +1,5 @@
+use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
 use axum::{
@@ -7,7 +9,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::error;
 
 #[derive(Deserialize)]
@@ -47,7 +48,7 @@ pub async fn disable_invite_codes(
             }
         }
     }
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
@@ -145,11 +146,7 @@ pub async fn get_invite_codes(
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching invite codes: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let mut codes = Vec::new();
@@ -220,11 +217,7 @@ pub async fn disable_account_invites(
 ) -> Response {
     let account = input.account.trim();
     if account.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "account is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("account is required".into()).into_response();
     }
     let result = sqlx::query!(
         "UPDATE users SET invites_disabled = TRUE WHERE did = $1",
@@ -235,21 +228,13 @@ pub async fn disable_account_invites(
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-                )
-                    .into_response();
+                return ApiError::AccountNotFound.into_response();
             }
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
         Err(e) => {
             error!("DB error disabling account invites: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -266,11 +251,7 @@ pub async fn enable_account_invites(
 ) -> Response {
     let account = input.account.trim();
     if account.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "account is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("account is required".into()).into_response();
     }
     let result = sqlx::query!(
         "UPDATE users SET invites_disabled = FALSE WHERE did = $1",
@@ -281,21 +262,13 @@ pub async fn enable_account_invites(
     match result {
         Ok(r) => {
             if r.rows_affected() == 0 {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-                )
-                    .into_response();
+                return ApiError::AccountNotFound.into_response();
             }
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
         Err(e) => {
             error!("DB error enabling account invites: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

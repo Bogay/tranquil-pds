@@ -1,10 +1,6 @@
+use crate::api::error::ApiError;
 use crate::validation::{RecordValidator, ValidationError, ValidationStatus};
-use axum::{
-    Json,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
-use serde_json::json;
+use axum::response::Response;
 
 pub fn validate_record(record: &serde_json::Value, collection: &str) -> Result<(), Box<Response>> {
     validate_record_with_rkey(record, collection, None)
@@ -42,62 +38,27 @@ fn validation_error_to_response(
 }
 
 fn validation_error_to_box_response(e: ValidationError) -> Box<Response> {
-    match e {
-        ValidationError::MissingType => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": "Record must have a $type field"})),
+    use axum::response::IntoResponse;
+    let msg = match e {
+        ValidationError::MissingType => "Record must have a $type field".to_string(),
+        ValidationError::TypeMismatch { expected, actual } => {
+            format!(
+                "Record $type '{}' does not match collection '{}'",
+                actual, expected
             )
-                .into_response(),
-        ),
-        ValidationError::TypeMismatch { expected, actual } => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": format!("Record $type '{}' does not match collection '{}'", actual, expected)})),
-            )
-                .into_response(),
-        ),
-        ValidationError::MissingField(field) => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": format!("Missing required field: {}", field)})),
-            )
-                .into_response(),
-        ),
-        ValidationError::InvalidField { path, message } => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": format!("Invalid field '{}': {}", path, message)})),
-            )
-                .into_response(),
-        ),
-        ValidationError::InvalidDatetime { path } => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": format!("Invalid datetime format at '{}'", path)})),
-            )
-                .into_response(),
-        ),
-        ValidationError::BannedContent { path } => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": format!("Unacceptable slur in record at '{}'", path)})),
-            )
-                .into_response(),
-        ),
-        ValidationError::UnknownType(type_name) => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": format!("Lexicon not found: lex:{}", type_name)})),
-            )
-                .into_response(),
-        ),
-        e => Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecord", "message": e.to_string()})),
-            )
-                .into_response(),
-        ),
-    }
+        }
+        ValidationError::MissingField(field) => format!("Missing required field: {}", field),
+        ValidationError::InvalidField { path, message } => {
+            format!("Invalid field '{}': {}", path, message)
+        }
+        ValidationError::InvalidDatetime { path } => {
+            format!("Invalid datetime format at '{}'", path)
+        }
+        ValidationError::BannedContent { path } => {
+            format!("Unacceptable slur in record at '{}'", path)
+        }
+        ValidationError::UnknownType(type_name) => format!("Lexicon not found: lex:{}", type_name),
+        e => e.to_string(),
+    };
+    Box::new(ApiError::InvalidRecord(msg).into_response())
 }

@@ -140,16 +140,13 @@ impl AccountAction {
 }
 
 fn parse_query_params(query: &str) -> HashMap<String, Vec<String>> {
-    let mut params: HashMap<String, Vec<String>> = HashMap::new();
-    for part in query.split('&') {
-        if let Some((key, value)) = part.split_once('=') {
-            params
-                .entry(key.to_string())
-                .or_default()
-                .push(value.to_string());
-        }
-    }
-    params
+    query
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .fold(HashMap::new(), |mut acc, (key, value)| {
+            acc.entry(key.to_string()).or_default().push(value.to_string());
+            acc
+        })
 }
 
 pub fn parse_scope(scope: &str) -> ParsedScope {

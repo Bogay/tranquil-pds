@@ -1,15 +1,14 @@
 use axum::{
-    Json,
     extract::FromRequestParts,
-    http::{StatusCode, header::AUTHORIZATION, request::Parts},
+    http::{header::AUTHORIZATION, request::Parts},
     response::{IntoResponse, Response},
 };
-use serde_json::json;
 
 use super::{
     AuthenticatedUser, TokenValidationError, validate_bearer_token_cached,
     validate_bearer_token_cached_allow_deactivated, validate_token_with_dpop,
 };
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::util::build_full_url;
 
@@ -28,45 +27,7 @@ pub enum AuthError {
 
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
-        let (status, error, message) = match self {
-            AuthError::MissingToken => (
-                StatusCode::UNAUTHORIZED,
-                "AuthenticationRequired",
-                "Authorization header is required",
-            ),
-            AuthError::InvalidFormat => (
-                StatusCode::UNAUTHORIZED,
-                "InvalidToken",
-                "Invalid authorization header format",
-            ),
-            AuthError::AuthenticationFailed => (
-                StatusCode::UNAUTHORIZED,
-                "InvalidToken",
-                "Token could not be verified",
-            ),
-            AuthError::TokenExpired => (
-                StatusCode::UNAUTHORIZED,
-                "ExpiredToken",
-                "Token has expired",
-            ),
-            AuthError::AccountDeactivated => (
-                StatusCode::UNAUTHORIZED,
-                "AccountDeactivated",
-                "Account is deactivated",
-            ),
-            AuthError::AccountTakedown => (
-                StatusCode::UNAUTHORIZED,
-                "AccountTakedown",
-                "Account has been taken down",
-            ),
-            AuthError::AdminRequired => (
-                StatusCode::FORBIDDEN,
-                "AdminRequired",
-                "This action requires admin privileges",
-            ),
-        };
-
-        (status, Json(json!({ "error": error, "message": message }))).into_response()
+        ApiError::from(self).into_response()
     }
 }
 
@@ -185,7 +146,7 @@ impl FromRequestParts<AppState> for BearerAuth {
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         } else {
-            match validate_bearer_token_cached(&state.db, &state.cache, &extracted.token).await {
+            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token).await {
                 Ok(user) => Ok(BearerAuth(user)),
                 Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
                 Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
@@ -239,7 +200,7 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
         } else {
             match validate_bearer_token_cached_allow_deactivated(
                 &state.db,
-                &state.cache,
+                state.cache.as_ref(),
                 &extracted.token,
             )
             .await
@@ -301,7 +262,7 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
                 Err(_) => return Err(AuthError::AuthenticationFailed),
             }
         } else {
-            match validate_bearer_token_cached(&state.db, &state.cache, &extracted.token).await {
+            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token).await {
                 Ok(user) => user,
                 Err(TokenValidationError::AccountDeactivated) => {
                     return Err(AuthError::AccountDeactivated);

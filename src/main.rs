@@ -35,10 +35,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let backfill_db = state.db.clone();
     let backfill_block_store = state.block_store.clone();
     tokio::spawn(async move {
-        backfill_genesis_commit_blocks(&backfill_db, backfill_block_store.clone()).await;
-        backfill_repo_rev(&backfill_db, backfill_block_store.clone()).await;
-        backfill_user_blocks(&backfill_db, backfill_block_store.clone()).await;
-        backfill_record_blobs(&backfill_db, backfill_block_store).await;
+        tokio::join!(
+            backfill_genesis_commit_blocks(&backfill_db, backfill_block_store.clone()),
+            backfill_repo_rev(&backfill_db, backfill_block_store.clone()),
+            backfill_user_blocks(&backfill_db, backfill_block_store.clone()),
+            backfill_record_blobs(&backfill_db, backfill_block_store),
+        );
     });
 
     let mut comms_service = CommsService::new(state.db.clone());

@@ -16,18 +16,19 @@ pub use dpop::{check_and_record_dpop_jti, cleanup_expired_dpop_jtis};
 pub use request::{
     consume_authorization_request_by_code, create_authorization_request,
     delete_authorization_request, delete_expired_authorization_requests, get_authorization_request,
-    mark_request_authenticated, set_authorization_did, set_controller_did, set_request_did,
-    update_authorization_request, update_request_scope,
+    get_authorization_request_with_state, mark_request_authenticated, set_authorization_did,
+    set_controller_did, set_request_did, update_authorization_request, update_request_scope,
 };
 pub use scope_preference::{
     ScopePreference, delete_scope_preferences, get_scope_preferences, should_show_consent,
     upsert_scope_preferences,
 };
 pub use token::{
-    check_refresh_token_used, count_tokens_for_user, create_token, delete_oldest_tokens_for_user,
-    delete_token, delete_token_family, enforce_token_limit_for_user, get_token_by_id,
-    get_token_by_previous_refresh_token, get_token_by_refresh_token, list_tokens_for_user,
-    revoke_tokens_for_client, revoke_tokens_for_controller, rotate_token,
+    RefreshTokenLookup, check_refresh_token_used, count_tokens_for_user, create_token,
+    delete_oldest_tokens_for_user, delete_token, delete_token_family, enforce_token_limit_for_user,
+    get_token_by_id, get_token_by_previous_refresh_token, get_token_by_refresh_token,
+    list_tokens_for_user, lookup_refresh_token, revoke_tokens_for_client,
+    revoke_tokens_for_controller, rotate_token,
 };
 pub use two_factor::{
     TwoFactorChallenge, check_user_2fa_enabled, cleanup_expired_2fa_challenges,

@@ -1,6 +1,7 @@
-use axum::{Json, extract::State, http::StatusCode};
+use crate::api::error::ApiError;
+use crate::types::Did;
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{info, warn};
 
 use crate::state::AppState;
@@ -16,13 +17,13 @@ pub struct VerifyMigrationEmailInput {
 #[serde(rename_all = "camelCase")]
 pub struct VerifyMigrationEmailOutput {
     pub success: bool,
-    pub did: String,
+    pub did: Did,
 }
 
 pub async fn verify_migration_email(
     State(state): State<AppState>,
     Json(input): Json<VerifyMigrationEmailInput>,
-) -> Result<Json<VerifyMigrationEmailOutput>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<VerifyMigrationEmailOutput>, ApiError> {
     let token_input = super::verify_token::VerifyTokenInput {
         token: input.token,
         identifier: input.email,
@@ -32,7 +33,7 @@ pub async fn verify_migration_email(
 
     Ok(Json(VerifyMigrationEmailOutput {
         success: result.success,
-        did: result.did.clone(),
+        did: result.did.clone().into(),
     }))
 }
 
@@ -51,7 +52,7 @@ pub struct ResendMigrationVerificationOutput {
 pub async fn resend_migration_verification(
     State(state): State<AppState>,
     Json(input): Json<ResendMigrationVerificationInput>,
-) -> Result<Json<ResendMigrationVerificationOutput>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<ResendMigrationVerificationOutput>, ApiError> {
     let email = input.email.trim().to_lowercase();
 
     let user = sqlx::query!(
@@ -62,10 +63,7 @@ pub async fn resend_migration_verification(
     .await
     .map_err(|e| {
         warn!(error = %e, "Database error during resend verification");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "InternalError", "message": "Database error" })),
-        )
+        ApiError::InternalError(None)
     })?;
 
     let user = match user {

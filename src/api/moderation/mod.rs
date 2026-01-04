@@ -64,7 +64,7 @@ pub async fn create_report(
             .await;
     }
 
-    create_report_locally(&state, did, auth_user.is_takendown, input).await
+    create_report_locally(&state, did, auth_user.is_takendown(), input).await
 }
 
 async fn proxy_to_report_service(
@@ -76,10 +76,7 @@ async fn proxy_to_report_service(
 ) -> Response {
     if let Err(e) = is_ssrf_safe(service_url) {
         error!("Report service URL failed SSRF check: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Invalid report service configuration"})),
-        )
+        return ApiError::InternalError(Some("Invalid report service configuration".into()))
             .into_response();
     }
 
@@ -101,20 +98,20 @@ async fn proxy_to_report_service(
                         Ok(key) => key,
                         Err(e) => {
                             error!(error = ?e, "Failed to decrypt user key for report service auth");
-                            return ApiError::AuthenticationFailedMsg(
+                            return ApiError::AuthenticationFailed(Some(
                                 "Failed to get signing key".into(),
-                            )
+                            ))
                             .into_response();
                         }
                     }
                 }
                 Ok(None) => {
-                    return ApiError::AuthenticationFailedMsg("User has no signing key".into())
+                    return ApiError::AuthenticationFailed(Some("User has no signing key".into()))
                         .into_response();
                 }
                 Err(e) => {
                     error!(error = ?e, "DB error fetching user key for report");
-                    return ApiError::AuthenticationFailedMsg("Failed to get signing key".into())
+                    return ApiError::AuthenticationFailed(Some("Failed to get signing key".into()))
                         .into_response();
                 }
             }
@@ -130,11 +127,7 @@ async fn proxy_to_report_service(
         Ok(t) => t,
         Err(e) => {
             error!("Failed to create service token for report: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -208,10 +201,7 @@ async fn create_report_locally(
     const REASON_APPEAL: &str = "com.atproto.moderation.defs#reasonAppeal";
 
     if is_takendown && input.reason_type != REASON_APPEAL {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Report not accepted from takendown account"})),
-        )
+        return ApiError::InvalidRequest("Report not accepted from takendown account".into())
             .into_response();
     }
 
@@ -226,11 +216,7 @@ async fn create_report_locally(
     ];
 
     if !valid_reason_types.contains(&input.reason_type.as_str()) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "Invalid reasonType"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("Invalid reasonType".into()).into_response();
     }
 
     let created_at = chrono::Utc::now();
@@ -251,11 +237,7 @@ async fn create_report_locally(
 
     if let Err(e) = insert {
         error!("Failed to insert report: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     info!(

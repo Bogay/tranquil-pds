@@ -1,8 +1,10 @@
+use crate::api::error::ApiError;
 use crate::state::AppState;
+use crate::types::{AtIdentifier, Nsid, Rkey};
 use axum::{
     Json,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use base64::Engine;
@@ -46,28 +48,29 @@ fn ipld_to_json(ipld: Ipld) -> Value {
 
 #[derive(Deserialize)]
 pub struct GetRecordInput {
-    pub repo: String,
-    pub collection: String,
-    pub rkey: String,
+    pub repo: AtIdentifier,
+    pub collection: Nsid,
+    pub rkey: Rkey,
     pub cid: Option<String>,
 }
 
 pub async fn get_record(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _headers: HeaderMap,
     Query(input): Query<GetRecordInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let user_id_opt = if input.repo.starts_with("did:") {
-        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo)
+    let user_id_opt = if input.repo.is_did() {
+        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo.as_str())
             .fetch_optional(&state.db)
             .await
             .map(|opt| opt.map(|r| r.id))
     } else {
-        let handle = if !input.repo.contains('.') {
-            format!("{}.{}", input.repo, hostname)
+        let repo_str = input.repo.as_str();
+        let handle = if !repo_str.contains('.') {
+            format!("{}.{}", repo_str, hostname)
         } else {
-            input.repo.clone()
+            repo_str.to_string()
         };
         sqlx::query!("SELECT id FROM users WHERE handle = $1", handle)
             .fetch_optional(&state.db)
@@ -77,76 +80,45 @@ pub async fn get_record(
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
-            )
-                .into_response();
+            return ApiError::RepoNotFound(Some("Repo not found".into())).into_response();
         }
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let record_row = sqlx::query!(
         "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
         user_id,
-        input.collection,
-        input.rkey
+        input.collection.as_str(),
+        input.rkey.as_str()
     )
     .fetch_optional(&state.db)
     .await;
     let record_cid_str: String = match record_row {
         Ok(Some(row)) => row.record_cid,
         _ => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RecordNotFound", "message": "Record not found"})),
-            )
-                .into_response();
+            return ApiError::RecordNotFound.into_response();
         }
     };
     if let Some(expected_cid) = &input.cid
         && &record_cid_str != expected_cid
     {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "RecordNotFound", "message": "Record CID mismatch"})),
-        )
-            .into_response();
+        return ApiError::RecordNotFound.into_response();
     }
-    let cid = match Cid::from_str(&record_cid_str) {
-        Ok(c) => c,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid CID in DB"})),
-            )
-                .into_response();
-        }
+    let Ok(cid) = Cid::from_str(&record_cid_str) else {
+        return ApiError::InternalError(Some("Invalid CID in DB".into())).into_response();
     };
     let block = match state.block_store.get(&cid).await {
         Ok(Some(b)) => b,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Record block not found"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Record block not found".into())).into_response();
         }
     };
     let ipld: Ipld = match serde_ipld_dagcbor::from_slice(&block) {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to deserialize record: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let value = ipld_to_json(ipld);
@@ -159,14 +131,14 @@ pub async fn get_record(
 }
 #[derive(Deserialize)]
 pub struct ListRecordsInput {
-    pub repo: String,
-    pub collection: String,
+    pub repo: AtIdentifier,
+    pub collection: Nsid,
     pub limit: Option<i32>,
     pub cursor: Option<String>,
     #[serde(rename = "rkeyStart")]
-    pub rkey_start: Option<String>,
+    pub rkey_start: Option<Rkey>,
     #[serde(rename = "rkeyEnd")]
-    pub rkey_end: Option<String>,
+    pub rkey_end: Option<Rkey>,
     pub reverse: Option<bool>,
 }
 #[derive(Serialize)]
@@ -181,16 +153,17 @@ pub async fn list_records(
     Query(input): Query<ListRecordsInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let user_id_opt = if input.repo.starts_with("did:") {
-        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo)
+    let user_id_opt = if input.repo.is_did() {
+        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo.as_str())
             .fetch_optional(&state.db)
             .await
             .map(|opt| opt.map(|r| r.id))
     } else {
-        let handle = if !input.repo.contains('.') {
-            format!("{}.{}", input.repo, hostname)
+        let repo_str = input.repo.as_str();
+        let handle = if !repo_str.contains('.') {
+            format!("{}.{}", repo_str, hostname)
         } else {
-            input.repo.clone()
+            repo_str.to_string()
         };
         sqlx::query!("SELECT id FROM users WHERE handle = $1", handle)
             .fetch_optional(&state.db)
@@ -200,18 +173,10 @@ pub async fn list_records(
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RepoNotFound", "message": "Repo not found"})),
-            )
-                .into_response();
+            return ApiError::RepoNotFound(Some("Repo not found".into())).into_response();
         }
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
@@ -226,7 +191,7 @@ pub async fn list_records(
         );
         sqlx::query_as(&query)
             .bind(user_id)
-            .bind(&input.collection)
+            .bind(input.collection.as_str())
             .bind(cursor)
             .bind(limit_i64)
             .fetch_all(&state.db)
@@ -255,12 +220,12 @@ pub async fn list_records(
         );
         let mut query_builder = sqlx::query_as::<_, (String, String)>(&query)
             .bind(user_id)
-            .bind(&input.collection);
+            .bind(input.collection.as_str());
         if let Some(start) = &input.rkey_start {
-            query_builder = query_builder.bind(start);
+            query_builder = query_builder.bind(start.as_str());
         }
         if let Some(end) = &input.rkey_end {
-            query_builder = query_builder.bind(end);
+            query_builder = query_builder.bind(end.as_str());
         }
         query_builder.bind(limit_i64).fetch_all(&state.db).await
     };
@@ -268,11 +233,7 @@ pub async fn list_records(
         Ok(r) => r,
         Err(e) => {
             error!("Error listing records: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let last_rkey = rows.last().map(|(rkey, _)| rkey.clone());
@@ -288,11 +249,7 @@ pub async fn list_records(
         Ok(b) => b,
         Err(e) => {
             error!("Error fetching blocks: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let mut records = Vec::new();

@@ -1,12 +1,12 @@
+use crate::api::error::ApiError;
+use crate::api::SuccessResponse;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::PgPool;
 use tracing::{error, info};
 
@@ -14,6 +14,43 @@ use crate::auth::BearerAuth;
 use crate::state::AppState;
 
 const TRUST_DURATION_DAYS: i64 = 30;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceTrustState {
+    Untrusted,
+    Trusted,
+    Expired,
+}
+
+impl DeviceTrustState {
+    pub fn from_timestamps(
+        trusted_at: Option<DateTime<Utc>>,
+        trusted_until: Option<DateTime<Utc>>,
+    ) -> Self {
+        match (trusted_at, trusted_until) {
+            (Some(_), Some(until)) if until > Utc::now() => Self::Trusted,
+            (Some(_), Some(_)) => Self::Expired,
+            _ => Self::Untrusted,
+        }
+    }
+
+    pub fn is_trusted(&self) -> bool {
+        matches!(self, Self::Trusted)
+    }
+
+    pub fn is_expired(&self) -> bool {
+        matches!(self, Self::Expired)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Untrusted => "untrusted",
+            Self::Trusted => "trusted",
+            Self::Expired => "expired",
+        }
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +61,7 @@ pub struct TrustedDevice {
     pub trusted_at: Option<DateTime<Utc>>,
     pub trusted_until: Option<DateTime<Utc>>,
     pub last_seen_at: DateTime<Utc>,
+    pub trust_state: DeviceTrustState,
 }
 
 #[derive(Serialize)]
@@ -39,7 +77,7 @@ pub async fn list_trusted_devices(State(state): State<AppState>, auth: BearerAut
            JOIN oauth_account_device oad ON od.id = oad.device_id
            WHERE oad.did = $1 AND od.trusted_until IS NOT NULL AND od.trusted_until > NOW()
            ORDER BY od.last_seen_at DESC"#,
-        auth.0.did
+        &auth.0.did
     )
     .fetch_all(&state.db)
     .await;
@@ -48,24 +86,24 @@ pub async fn list_trusted_devices(State(state): State<AppState>, auth: BearerAut
         Ok(rows) => {
             let devices = rows
                 .into_iter()
-                .map(|row| TrustedDevice {
-                    id: row.id,
-                    user_agent: row.user_agent,
-                    friendly_name: row.friendly_name,
-                    trusted_at: row.trusted_at,
-                    trusted_until: row.trusted_until,
-                    last_seen_at: row.last_seen_at,
+                .map(|row| {
+                    let trust_state = DeviceTrustState::from_timestamps(row.trusted_at, row.trusted_until);
+                    TrustedDevice {
+                        id: row.id,
+                        user_agent: row.user_agent,
+                        friendly_name: row.friendly_name,
+                        trusted_at: row.trusted_at,
+                        trusted_until: row.trusted_until,
+                        last_seen_at: row.last_seen_at,
+                        trust_state,
+                    }
                 })
                 .collect();
             Json(ListTrustedDevicesResponse { devices }).into_response()
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -85,7 +123,7 @@ pub async fn revoke_trusted_device(
         r#"SELECT 1 as one FROM oauth_device od
            JOIN oauth_account_device oad ON od.id = oad.device_id
            WHERE oad.did = $1 AND od.id = $2"#,
-        auth.0.did,
+        &auth.0.did,
         input.device_id
     )
     .fetch_optional(&state.db)
@@ -94,19 +132,11 @@ pub async fn revoke_trusted_device(
     match device_exists {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "DeviceNotFound", "message": "Device not found or not owned by this account"})),
-            )
-                .into_response();
+            return ApiError::DeviceNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
 
@@ -119,16 +149,12 @@ pub async fn revoke_trusted_device(
 
     match result {
         Ok(_) => {
-            info!(did = %auth.0.did, device_id = %input.device_id, "Trusted device revoked");
-            Json(json!({"success": true})).into_response()
+            info!(did = %&auth.0.did, device_id = %input.device_id, "Trusted device revoked");
+            SuccessResponse::ok().into_response()
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -149,7 +175,7 @@ pub async fn update_trusted_device(
         r#"SELECT 1 as one FROM oauth_device od
            JOIN oauth_account_device oad ON od.id = oad.device_id
            WHERE oad.did = $1 AND od.id = $2"#,
-        auth.0.did,
+        &auth.0.did,
         input.device_id
     )
     .fetch_optional(&state.db)
@@ -158,19 +184,11 @@ pub async fn update_trusted_device(
     match device_exists {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "DeviceNotFound", "message": "Device not found or not owned by this account"})),
-            )
-                .into_response();
+            return ApiError::DeviceNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
 
@@ -185,22 +203,18 @@ pub async fn update_trusted_device(
     match result {
         Ok(_) => {
             info!(did = %auth.0.did, device_id = %input.device_id, "Trusted device updated");
-            Json(json!({"success": true})).into_response()
+            SuccessResponse::ok().into_response()
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
 
-pub async fn is_device_trusted(db: &PgPool, device_id: &str, did: &str) -> bool {
-    let result = sqlx::query_scalar!(
-        r#"SELECT trusted_until FROM oauth_device od
+pub async fn get_device_trust_state(db: &PgPool, device_id: &str, did: &str) -> DeviceTrustState {
+    let result = sqlx::query!(
+        r#"SELECT trusted_at, trusted_until FROM oauth_device od
            JOIN oauth_account_device oad ON od.id = oad.device_id
            WHERE od.id = $1 AND oad.did = $2"#,
         device_id,
@@ -210,9 +224,13 @@ pub async fn is_device_trusted(db: &PgPool, device_id: &str, did: &str) -> bool 
     .await;
 
     match result {
-        Ok(Some(Some(trusted_until))) => trusted_until > Utc::now(),
-        _ => false,
+        Ok(Some(row)) => DeviceTrustState::from_timestamps(row.trusted_at, row.trusted_until),
+        _ => DeviceTrustState::Untrusted,
     }
+}
+
+pub async fn is_device_trusted(db: &PgPool, device_id: &str, did: &str) -> bool {
+    get_device_trust_state(db, device_id, did).await.is_trusted()
 }
 
 pub async fn trust_device(db: &PgPool, device_id: &str) -> Result<(), sqlx::Error> {

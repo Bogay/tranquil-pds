@@ -1,16 +1,15 @@
-use crate::api::ApiError;
-use crate::circuit_breaker::{CircuitBreakerError, with_circuit_breaker};
-use crate::plc::{PlcClient, PlcError, signing_key_to_did_key, validate_plc_operation};
+use crate::api::{ApiError, EmptyResponse};
+use crate::circuit_breaker::with_circuit_breaker;
+use crate::plc::{PlcClient, signing_key_to_did_key, validate_plc_operation};
 use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use k256::ecdsa::SigningKey;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Deserialize)]
@@ -64,11 +63,7 @@ pub async fn submit_plc_operation(
     {
         Ok(Some(row)) => row,
         _ => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
     };
     let key_row = match sqlx::query!(
@@ -80,11 +75,7 @@ pub async fn submit_plc_operation(
     {
         Ok(Some(row)) => row,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "User signing key not found"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("User signing key not found".into())).into_response();
         }
     };
     let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
@@ -92,22 +83,14 @@ pub async fn submit_plc_operation(
         Ok(k) => k,
         Err(e) => {
             error!("Failed to decrypt user key: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let signing_key = match SigningKey::from_slice(&key_bytes) {
         Ok(k) => k,
         Err(e) => {
             error!("Failed to create signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let user_did_key = signing_key_to_did_key(&signing_key);
@@ -118,14 +101,10 @@ pub async fn submit_plc_operation(
             .iter()
             .any(|k| k.as_str() == Some(&server_rotation_key));
         if !has_server_key {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Rotation keys do not include server's rotation key"
-                })),
+            return ApiError::InvalidRequest(
+                "Rotation keys do not include server's rotation key".into(),
             )
-                .into_response();
+            .into_response();
         }
     }
     if let Some(services) = op.get("services").and_then(|v| v.as_object())
@@ -134,23 +113,11 @@ pub async fn submit_plc_operation(
         let service_type = pds.get("type").and_then(|v| v.as_str());
         let endpoint = pds.get("endpoint").and_then(|v| v.as_str());
         if service_type != Some("AtprotoPersonalDataServer") {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Incorrect type on atproto_pds service"
-                })),
-            )
+            return ApiError::InvalidRequest("Incorrect type on atproto_pds service".into())
                 .into_response();
         }
         if endpoint != Some(&public_url) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Incorrect endpoint on atproto_pds service"
-                })),
-            )
+            return ApiError::InvalidRequest("Incorrect endpoint on atproto_pds service".into())
                 .into_response();
         }
     }
@@ -158,13 +125,7 @@ pub async fn submit_plc_operation(
         && let Some(atproto_key) = verification_methods.get("atproto").and_then(|v| v.as_str())
         && atproto_key != user_did_key
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": "Incorrect signing key in verificationMethods"
-            })),
-        )
+        return ApiError::InvalidRequest("Incorrect signing key in verificationMethods".into())
             .into_response();
     }
     if let Some(also_known_as) = (!user.handle.is_empty())
@@ -174,50 +135,21 @@ pub async fn submit_plc_operation(
         let expected_handle = format!("at://{}", user.handle);
         let first_aka = also_known_as.first().and_then(|v| v.as_str());
         if first_aka != Some(&expected_handle) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Incorrect handle in alsoKnownAs"
-                })),
-            )
+            return ApiError::InvalidRequest("Incorrect handle in alsoKnownAs".into())
                 .into_response();
         }
     }
     let plc_client = PlcClient::with_cache(None, Some(state.cache.clone()));
     let operation_clone = input.operation.clone();
     let did_clone = did.clone();
-    let result: Result<(), CircuitBreakerError<PlcError>> =
-        with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
-            plc_client
-                .send_operation(&did_clone, &operation_clone)
-                .await
-        })
-        .await;
-    match result {
-        Ok(()) => {}
-        Err(CircuitBreakerError::CircuitOpen(e)) => {
-            warn!("PLC directory circuit breaker open: {}", e);
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "error": "ServiceUnavailable",
-                    "message": "PLC directory service temporarily unavailable"
-                })),
-            )
-                .into_response();
-        }
-        Err(CircuitBreakerError::OperationFailed(e)) => {
-            error!("PLC operation failed: {:?}", e);
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": "UpstreamError",
-                    "message": format!("Failed to submit to PLC directory: {}", e)
-                })),
-            )
-                .into_response();
-        }
+    if let Err(e) = with_circuit_breaker(&state.circuit_breakers.plc_directory, || async {
+        plc_client
+            .send_operation(&did_clone, &operation_clone)
+            .await
+    })
+    .await
+    {
+        return ApiError::from(e).into_response();
     }
     match sqlx::query!(
         "INSERT INTO repo_seq (did, event_type, handle) VALUES ($1, 'identity', $2) RETURNING seq",
@@ -244,5 +176,5 @@ pub async fn submit_plc_operation(
         warn!(did = %did, "Failed to refresh DID cache after PLC update");
     }
     info!(did = %did, "PLC operation submitted successfully");
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }

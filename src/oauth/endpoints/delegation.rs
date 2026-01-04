@@ -1,6 +1,7 @@
 use crate::delegation;
 use crate::oauth::db;
 use crate::state::{AppState, RateLimitKind};
+use crate::types::PlainPassword;
 use crate::util::extract_client_ip;
 use axum::{
     Json,
@@ -15,7 +16,7 @@ pub struct DelegationAuthSubmit {
     pub request_uri: String,
     pub delegated_did: Option<String>,
     pub controller_did: String,
-    pub password: String,
+    pub password: PlainPassword,
     #[serde(default)]
     pub remember_device: bool,
 }

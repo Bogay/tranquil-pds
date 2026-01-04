@@ -1,11 +1,11 @@
 use super::helpers::{create_access_token_with_delegation, verify_pkce};
-use super::types::{TokenRequest, TokenResponse};
+use super::types::{TokenGrant, TokenResponse, ValidatedTokenRequest};
 use crate::config::AuthConfig;
 use crate::delegation;
 use crate::oauth::{
-    ClientAuth, OAuthError, RefreshToken, TokenData, TokenId,
+    AuthFlowState, ClientAuth, OAuthError, RefreshToken, TokenData, TokenId,
     client::{ClientMetadataCache, verify_client_auth},
-    db,
+    db::{self, RefreshTokenLookup},
     dpop::DPoPVerifier,
 };
 use crate::state::AppState;
@@ -20,35 +20,41 @@ const REFRESH_TOKEN_EXPIRY_DAYS_PUBLIC: i64 = 14;
 pub async fn handle_authorization_code_grant(
     state: AppState,
     _headers: HeaderMap,
-    request: TokenRequest,
+    request: ValidatedTokenRequest,
     dpop_proof: Option<String>,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
-    let code = request
-        .code
-        .ok_or_else(|| OAuthError::InvalidRequest("code is required".to_string()))?;
-    let code_verifier = request
-        .code_verifier
-        .ok_or_else(|| OAuthError::InvalidRequest("code_verifier is required".to_string()))?;
+    let (code, code_verifier, redirect_uri) = match request.grant {
+        TokenGrant::AuthorizationCode { code, code_verifier, redirect_uri } => {
+            (code, code_verifier, redirect_uri)
+        }
+        _ => return Err(OAuthError::InvalidRequest("Expected authorization_code grant".to_string())),
+    };
     let auth_request = db::consume_authorization_request_by_code(&state.db, &code)
         .await?
         .ok_or_else(|| OAuthError::InvalidGrant("Invalid or expired code".to_string()))?;
-    if auth_request.expires_at < Utc::now() {
+
+    let flow_state = AuthFlowState::from_request_data(&auth_request);
+    if flow_state.is_expired() {
         return Err(OAuthError::InvalidGrant(
             "Authorization code has expired".to_string(),
         ));
     }
-    if let Some(request_client_id) = &request.client_id
+    if !flow_state.can_exchange() {
+        return Err(OAuthError::InvalidGrant(
+            "Authorization not completed".to_string(),
+        ));
+    }
+
+    if let Some(request_client_id) = &request.client_auth.client_id
         && request_client_id != &auth_request.client_id
     {
         return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
     }
-    let did = auth_request
-        .did
-        .ok_or_else(|| OAuthError::InvalidGrant("Authorization not completed".to_string()))?;
+    let did = flow_state.did().unwrap().to_string();
     let client_metadata_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_metadata_cache.get(&auth_request.client_id).await?;
     let client_auth = if let (Some(assertion), Some(assertion_type)) =
-        (&request.client_assertion, &request.client_assertion_type)
+        (&request.client_auth.client_assertion, &request.client_auth.client_assertion_type)
     {
         if assertion_type != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
             return Err(OAuthError::InvalidClient(
@@ -58,7 +64,7 @@ pub async fn handle_authorization_code_grant(
         ClientAuth::PrivateKeyJwt {
             client_assertion: assertion.clone(),
         }
-    } else if let Some(secret) = &request.client_secret {
+    } else if let Some(secret) = &request.client_auth.client_secret {
         ClientAuth::SecretPost {
             client_secret: secret.clone(),
         }
@@ -67,8 +73,8 @@ pub async fn handle_authorization_code_grant(
     };
     verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
     verify_pkce(&auth_request.parameters.code_challenge, &code_verifier)?;
-    if let Some(redirect_uri) = &request.redirect_uri
-        && redirect_uri != &auth_request.parameters.redirect_uri
+    if let Some(req_redirect_uri) = &redirect_uri
+        && req_redirect_uri != &auth_request.parameters.redirect_uri
     {
         return Err(OAuthError::InvalidGrant(
             "redirect_uri mismatch".to_string(),
@@ -87,13 +93,13 @@ pub async fn handle_authorization_code_grant(
             ));
         }
         if let Some(expected_jkt) = &auth_request.parameters.dpop_jkt
-            && &result.jkt != expected_jkt
+            && result.jkt.as_str() != expected_jkt
         {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP key binding mismatch".to_string(),
             ));
         }
-        Some(result.jkt)
+        Some(result.jkt.as_str().to_string())
     } else if auth_request.parameters.dpop_jkt.is_some() || client_metadata.requires_dpop() {
         return Err(OAuthError::UseDpopNonce(
             crate::oauth::dpop::DPoPVerifier::new(AuthConfig::get().dpop_secret().as_bytes())
@@ -187,23 +193,30 @@ pub async fn handle_authorization_code_grant(
 pub async fn handle_refresh_token_grant(
     state: AppState,
     _headers: HeaderMap,
-    request: TokenRequest,
+    request: ValidatedTokenRequest,
     dpop_proof: Option<String>,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
-    let refresh_token_str = request
-        .refresh_token
-        .ok_or_else(|| OAuthError::InvalidRequest("refresh_token is required".to_string()))?;
+    let refresh_token_str = match request.grant {
+        TokenGrant::RefreshToken { refresh_token } => refresh_token,
+        _ => return Err(OAuthError::InvalidRequest("Expected refresh_token grant".to_string())),
+    };
+    let token_prefix = &refresh_token_str[..std::cmp::min(16, refresh_token_str.len())];
     tracing::info!(
-        refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
+        refresh_token_prefix = %token_prefix,
         has_dpop = dpop_proof.is_some(),
         "Refresh token grant requested"
     );
-    if let Some(token_id) = db::check_refresh_token_used(&state.db, &refresh_token_str).await? {
-        if let Some((_db_id, token_data)) =
-            db::get_token_by_previous_refresh_token(&state.db, &refresh_token_str).await?
-        {
+
+    let lookup = db::lookup_refresh_token(&state.db, &refresh_token_str).await?;
+    let token_state = lookup.state();
+    tracing::debug!(state = %token_state, "Refresh token state");
+
+    let (db_id, token_data) = match lookup {
+        RefreshTokenLookup::Valid { db_id, token_data } => (db_id, token_data),
+        RefreshTokenLookup::InGracePeriod { db_id: _, token_data, rotated_at } => {
             tracing::info!(
-                refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
+                refresh_token_prefix = %token_prefix,
+                rotated_at = %rotated_at,
                 "Refresh token reuse within grace period, returning existing tokens"
             );
             let dpop_jkt = token_data.parameters.dpop_jkt.as_deref();
@@ -230,35 +243,28 @@ pub async fn handle_refresh_token_grant(
                 }),
             ));
         }
-        tracing::warn!(
-            refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
-            "Refresh token reuse detected, revoking token family"
-        );
-        db::delete_token_family(&state.db, token_id).await?;
-        return Err(OAuthError::InvalidGrant(
-            "Refresh token reuse detected, token family revoked".to_string(),
-        ));
-    }
-    let (db_id, token_data) = db::get_token_by_refresh_token(&state.db, &refresh_token_str)
-        .await?
-        .ok_or_else(|| {
+        RefreshTokenLookup::Used { original_token_id } => {
             tracing::warn!(
-                refresh_token_prefix = %&refresh_token_str[..std::cmp::min(16, refresh_token_str.len())],
-                "Refresh token not found in database"
+                refresh_token_prefix = %token_prefix,
+                "Refresh token reuse detected, revoking token family"
             );
-            OAuthError::InvalidGrant("Invalid refresh token".to_string())
-        })?;
-    if token_data.expires_at < Utc::now() {
-        tracing::warn!(
-            did = %token_data.did,
-            expired_at = %token_data.expires_at,
-            "Refresh token has expired"
-        );
-        db::delete_token_family(&state.db, db_id).await?;
-        return Err(OAuthError::InvalidGrant(
-            "Refresh token has expired".to_string(),
-        ));
-    }
+            db::delete_token_family(&state.db, original_token_id).await?;
+            return Err(OAuthError::InvalidGrant(
+                "Refresh token reuse detected, token family revoked".to_string(),
+            ));
+        }
+        RefreshTokenLookup::Expired { db_id } => {
+            tracing::warn!(refresh_token_prefix = %token_prefix, "Refresh token has expired");
+            db::delete_token_family(&state.db, db_id).await?;
+            return Err(OAuthError::InvalidGrant(
+                "Refresh token has expired".to_string(),
+            ));
+        }
+        RefreshTokenLookup::NotFound => {
+            tracing::warn!(refresh_token_prefix = %token_prefix, "Refresh token not found");
+            return Err(OAuthError::InvalidGrant("Invalid refresh token".to_string()));
+        }
+    };
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
@@ -272,13 +278,13 @@ pub async fn handle_refresh_token_grant(
             ));
         }
         if let Some(expected_jkt) = &token_data.parameters.dpop_jkt
-            && &result.jkt != expected_jkt
+            && result.jkt.as_str() != expected_jkt
         {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP key binding mismatch".to_string(),
             ));
         }
-        Some(result.jkt)
+        Some(result.jkt.as_str().to_string())
     } else if token_data.parameters.dpop_jkt.is_some() {
         return Err(OAuthError::InvalidRequest(
             "DPoP proof required".to_string(),

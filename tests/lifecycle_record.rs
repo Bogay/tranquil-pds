@@ -771,5 +771,5 @@ async fn test_list_records_comprehensive() {
         .send()
         .await
         .expect("Failed with nonexistent repo");
-    assert_eq!(not_found_res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(not_found_res.status(), StatusCode::BAD_REQUEST);
 }

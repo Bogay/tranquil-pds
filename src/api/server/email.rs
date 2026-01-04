@@ -1,10 +1,10 @@
-use crate::api::ApiError;
+use crate::api::error::ApiError;
+use crate::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
 use crate::auth::BearerAuth;
 use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -22,14 +22,7 @@ pub async fn request_email_update(
         .await
     {
         warn!(ip = %client_ip, "Email update rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many requests. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
@@ -41,7 +34,7 @@ pub async fn request_email_update(
         return e;
     }
 
-    let did = auth.0.did.clone();
+    let did = auth.0.did.to_string();
     let user = match sqlx::query!(
         "SELECT id, handle, email, email_verified FROM users WHERE did = $1",
         did
@@ -51,31 +44,17 @@ pub async fn request_email_update(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
-    let current_email: String = match user.email {
-        Some(e) => e,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "account does not have an email address"})),
-            )
-                .into_response();
-        }
+    let Some(current_email) = user.email else {
+        return ApiError::InvalidRequest("account does not have an email address".into())
+            .into_response();
     };
 
     let token_required = user.email_verified;
@@ -98,11 +77,7 @@ pub async fn request_email_update(
     }
 
     info!("Email update requested for user {}", user.id);
-    (
-        StatusCode::OK,
-        Json(json!({ "tokenRequired": token_required })),
-    )
-        .into_response()
+    TokenRequiredResponse::new(token_required).into_response()
 }
 
 #[derive(Deserialize)]
@@ -124,14 +99,7 @@ pub async fn confirm_email(
         .await
     {
         warn!(ip = %client_ip, "Confirm email rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many requests. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
@@ -143,7 +111,7 @@ pub async fn confirm_email(
         return e;
     }
 
-    let did = auth.0.did;
+    let did = auth.0.did.to_string();
     let user = match sqlx::query!(
         "SELECT id, email, email_verified FROM users WHERE did = $1",
         did
@@ -153,44 +121,26 @@ pub async fn confirm_email(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "AccountNotFound", "message": "user not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
-    let current_email = match &user.email {
-        Some(e) => e.to_lowercase(),
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidEmail", "message": "account does not have an email address"})),
-            )
-                .into_response();
-        }
+    let Some(ref email) = user.email else {
+        return ApiError::InvalidEmail.into_response();
     };
+    let current_email = email.to_lowercase();
 
     let provided_email = input.email.trim().to_lowercase();
     if provided_email != current_email {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidEmail", "message": "invalid email"})),
-        )
-            .into_response();
+        return ApiError::InvalidEmail.into_response();
     }
 
     if user.email_verified {
-        return (StatusCode::OK, Json(json!({}))).into_response();
+        return EmptyResponse::ok().into_response();
     }
 
     let confirmation_code =
@@ -205,28 +155,14 @@ pub async fn confirm_email(
     match verified {
         Ok(token_data) => {
             if token_data.did != did {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(
-                        json!({"error": "InvalidToken", "message": "Token does not match account"}),
-                    ),
-                )
-                    .into_response();
+                return ApiError::InvalidToken(None).into_response();
             }
         }
         Err(crate::auth::verification_token::VerifyError::Expired) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
-            )
-                .into_response();
+            return ApiError::ExpiredToken(None).into_response();
         }
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidToken", "message": "Invalid token"})),
-            )
-                .into_response();
+            return ApiError::InvalidToken(None).into_response();
         }
     }
 
@@ -239,15 +175,11 @@ pub async fn confirm_email(
 
     if let Err(e) = update {
         error!("DB error confirming email: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     info!("Email confirmed for user {}", user.id);
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
@@ -264,17 +196,10 @@ pub async fn update_email(
     headers: axum::http::HeaderMap,
     Json(input): Json<UpdateEmailInput>,
 ) -> Response {
-    let bearer_token = match crate::auth::extract_bearer_token_from_header(
+    let Some(bearer_token) = crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+    ) else {
+        return ApiError::AuthenticationRequired.into_response();
     };
 
     let auth_result = crate::auth::validate_bearer_token(&state.db, &bearer_token).await;
@@ -292,7 +217,7 @@ pub async fn update_email(
         return e;
     }
 
-    let did = auth_user.did;
+    let did = auth_user.did.to_string();
     let user = match sqlx::query!(
         "SELECT id, email, email_verified FROM users WHERE did = $1",
         did
@@ -302,19 +227,11 @@ pub async fn update_email(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -324,36 +241,23 @@ pub async fn update_email(
     let new_email = input.email.trim().to_lowercase();
 
     if !crate::api::validation::is_valid_email(&new_email) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": "This email address is not supported, please use a different email."
-            })),
+        return ApiError::InvalidRequest(
+            "This email address is not supported, please use a different email.".into(),
         )
-            .into_response();
+        .into_response();
     }
 
     if let Some(ref current) = current_email
         && new_email == current.to_lowercase()
     {
-        return (StatusCode::OK, Json(json!({}))).into_response();
+        return EmptyResponse::ok().into_response();
     }
 
     if email_verified {
-        let confirmation_token = match &input.token {
-            Some(t) => crate::auth::verification_token::normalize_token_input(t.trim()),
-            None => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "TokenRequired",
-                        "message": "confirmation token required"
-                    })),
-                )
-                    .into_response();
-            }
+        let Some(ref t) = input.token else {
+            return ApiError::TokenRequired.into_response();
         };
+        let confirmation_token = crate::auth::verification_token::normalize_token_input(t.trim());
 
         let current_email_lower = current_email
             .as_ref()
@@ -369,28 +273,14 @@ pub async fn update_email(
         match verified {
             Ok(token_data) => {
                 if token_data.did != did {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(
-                            json!({"error": "InvalidToken", "message": "Token does not match account"}),
-                        ),
-                    )
-                        .into_response();
+                    return ApiError::InvalidToken(None).into_response();
                 }
             }
             Err(crate::auth::verification_token::VerifyError::Expired) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
-                )
-                    .into_response();
+                return ApiError::ExpiredToken(None).into_response();
             }
             Err(_) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidToken", "message": "Invalid token"})),
-                )
-                    .into_response();
+                return ApiError::InvalidToken(None).into_response();
             }
         }
     }
@@ -404,14 +294,7 @@ pub async fn update_email(
     .await;
 
     if let Ok(Some(_)) = exists {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": "This email address is already in use, please use a different email."
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("Email is already in use".into()).into_response();
     }
 
     let update: Result<sqlx::postgres::PgQueryResult, sqlx::Error> = sqlx::query!(
@@ -428,20 +311,9 @@ pub async fn update_email(
             .map(|db_err: &dyn sqlx::error::DatabaseError| db_err.is_unique_violation())
             .unwrap_or(false)
         {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "This email address is already in use, please use a different email."
-                })),
-            )
-                .into_response();
+            return ApiError::EmailTaken.into_response();
         }
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let verification_token =
@@ -474,7 +346,7 @@ pub async fn update_email(
     }
 
     info!("Email updated for user {}", user_id);
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
@@ -492,14 +364,7 @@ pub async fn check_email_verified(
         .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
         .await
     {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many requests. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
 
     let user = sqlx::query!(
@@ -510,23 +375,11 @@ pub async fn check_email_verified(
     .await;
 
     match user {
-        Ok(Some(row)) => (
-            StatusCode::OK,
-            Json(json!({ "verified": row.email_verified })),
-        )
-            .into_response(),
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "AccountNotFound", "message": "Account not found" })),
-        )
-            .into_response(),
+        Ok(Some(row)) => VerifiedResponse::new(row.email_verified).into_response(),
+        Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error checking email verified: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "InternalError" })),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

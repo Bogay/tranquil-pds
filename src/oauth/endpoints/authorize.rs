@@ -1,8 +1,10 @@
 use crate::comms::{CommsChannel, channel_display_name, enqueue_2fa_code};
 use crate::oauth::{
-    Code, DeviceData, DeviceId, OAuthError, SessionId, client::ClientMetadataCache, db,
+    AuthFlowState, Code, DeviceData, DeviceId, OAuthError, SessionId, client::ClientMetadataCache,
+    db,
 };
 use crate::state::{AppState, RateLimitKind};
+use crate::types::{Handle, PlainPassword};
 use axum::{
     Json,
     extract::{Query, State},
@@ -29,6 +31,38 @@ fn redirect_to_frontend_error(error: &str, description: &str) -> Response {
         url_encode(error),
         url_encode(description)
     ))
+}
+
+fn json_error(status: StatusCode, error: &str, description: &str) -> Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": error,
+            "error_description": description
+        })),
+    )
+        .into_response()
+}
+
+fn validate_auth_flow_state(
+    flow_state: &AuthFlowState,
+    require_authenticated: bool,
+) -> Option<Response> {
+    if flow_state.is_expired() {
+        return Some(json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Authorization request has expired",
+        ));
+    }
+    if require_authenticated && flow_state.is_pending() {
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "access_denied",
+            "Not authenticated",
+        ));
+    }
+    None
 }
 
 fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
@@ -97,7 +131,7 @@ pub struct AuthorizeResponse {
 pub struct AuthorizeSubmit {
     pub request_uri: String,
     pub username: String,
-    pub password: String,
+    pub password: PlainPassword,
     #[serde(default)]
     pub remember_device: bool,
 }
@@ -298,7 +332,7 @@ pub async fn authorize_get_json(
 #[derive(Debug, Serialize)]
 pub struct AccountInfo {
     pub did: String,
-    pub handle: String,
+    pub handle: Handle,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
 }
@@ -1155,53 +1189,33 @@ pub async fn consent_get(
     State(state): State<AppState>,
     Query(query): Query<ConsentQuery>,
 ) -> Response {
-    let request_data = match db::get_authorization_request(&state.db, &query.request_uri).await {
-        Ok(Some(data)) => data,
-        Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "invalid_request",
-                    "error_description": "Invalid or expired request_uri"
-                })),
-            )
-                .into_response();
+    let (request_data, flow_state) =
+        match db::get_authorization_request_with_state(&state.db, &query.request_uri).await {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "Invalid or expired request_uri",
+                );
+            }
+            Err(e) => {
+                return json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    &format!("Database error: {:?}", e),
+                );
+            }
+        };
+
+    if let Some(err_response) = validate_auth_flow_state(&flow_state, true) {
+        if flow_state.is_expired() {
+            let _ = db::delete_authorization_request(&state.db, &query.request_uri).await;
         }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "server_error",
-                    "error_description": format!("Database error: {:?}", e)
-                })),
-            )
-                .into_response();
-        }
-    };
-    if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &query.request_uri).await;
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "invalid_request",
-                "error_description": "Authorization request has expired"
-            })),
-        )
-            .into_response();
+        return err_response;
     }
-    let did = match &request_data.did {
-        Some(d) => d.clone(),
-        None => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": "access_denied",
-                    "error_description": "Not authenticated"
-                })),
-            )
-                .into_response();
-        }
-    };
+
+    let did = flow_state.did().unwrap().to_string();
     let client_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_cache
         .get(&request_data.parameters.client_id)
@@ -1334,53 +1348,33 @@ pub async fn consent_post(
         form.approved_scopes,
         form.remember
     );
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
-        Ok(Some(data)) => data,
-        Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "invalid_request",
-                    "error_description": "Invalid or expired request_uri"
-                })),
-            )
-                .into_response();
+    let (request_data, flow_state) =
+        match db::get_authorization_request_with_state(&state.db, &form.request_uri).await {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "Invalid or expired request_uri",
+                );
+            }
+            Err(e) => {
+                return json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    &format!("Database error: {:?}", e),
+                );
+            }
+        };
+
+    if let Some(err_response) = validate_auth_flow_state(&flow_state, true) {
+        if flow_state.is_expired() {
+            let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
         }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "server_error",
-                    "error_description": format!("Database error: {:?}", e)
-                })),
-            )
-                .into_response();
-        }
-    };
-    if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "invalid_request",
-                "error_description": "Authorization request has expired"
-            })),
-        )
-            .into_response();
+        return err_response;
     }
-    let did = match &request_data.did {
-        Some(d) => d.clone(),
-        None => {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "error": "access_denied",
-                    "error_description": "Not authenticated"
-                })),
-            )
-                .into_response();
-        }
-    };
+
+    let did = flow_state.did().unwrap().to_string();
     let original_scope_str = request_data
         .parameters
         .scope

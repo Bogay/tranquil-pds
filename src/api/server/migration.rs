@@ -66,19 +66,15 @@ pub async fn update_did_document(
     };
 
     if !auth_user.did.starts_with("did:web:") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": "DID document updates are only available for did:web accounts"
-            })),
+        return ApiError::InvalidRequest(
+            "DID document updates are only available for did:web accounts".into(),
         )
-            .into_response();
+        .into_response();
     }
 
     let user = match sqlx::query!(
         "SELECT id, handle, deactivated_at FROM users WHERE did = $1",
-        auth_user.did
+        &auth_user.did
     )
     .fetch_optional(&state.db)
     .await
@@ -87,7 +83,7 @@ pub async fn update_did_document(
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             tracing::error!("DB error getting user: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -171,7 +167,7 @@ pub async fn update_did_document(
 
     if let Err(e) = upsert_result {
         tracing::error!("DB error upserting did_web_overrides: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Some(ref endpoint) = input.service_endpoint {
@@ -180,20 +176,20 @@ pub async fn update_did_document(
             "UPDATE users SET migrated_to_pds = $1, migrated_at = $2 WHERE did = $3",
             endpoint_clean,
             now,
-            auth_user.did
+            &auth_user.did
         )
         .execute(&state.db)
         .await;
 
         if let Err(e) = update_result {
             tracing::error!("DB error updating service endpoint: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
 
     let did_doc = build_did_document(&state.db, &auth_user.did).await;
 
-    tracing::info!("Updated DID document for {}", auth_user.did);
+    tracing::info!("Updated DID document for {}", &auth_user.did);
 
     (
         StatusCode::OK,
@@ -236,14 +232,10 @@ pub async fn get_did_document(
     };
 
     if !auth_user.did.starts_with("did:web:") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": "This endpoint is only available for did:web accounts"
-            })),
+        return ApiError::InvalidRequest(
+            "This endpoint is only available for did:web accounts".into(),
         )
-            .into_response();
+        .into_response();
     }
 
     let did_doc = build_did_document(&state.db, &auth_user.did).await;

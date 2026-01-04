@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use axum::{
     Json,
     extract::State,
@@ -6,12 +7,12 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::PgPool;
 use tracing::{error, info, warn};
 
 use crate::auth::BearerAuth;
 use crate::state::{AppState, RateLimitKind};
+use crate::types::PlainPassword;
 
 const REAUTH_WINDOW_SECONDS: i64 = 300;
 
@@ -26,7 +27,7 @@ pub struct ReauthStatusResponse {
 pub async fn get_reauth_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
     let session = sqlx::query!(
         "SELECT last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
@@ -36,11 +37,7 @@ pub async fn get_reauth_status(State(state): State<AppState>, auth: BearerAuth) 
         Ok(None) => None,
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -58,7 +55,7 @@ pub async fn get_reauth_status(State(state): State<AppState>, auth: BearerAuth) 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PasswordReauthInput {
-    pub password: String,
+    pub password: PlainPassword,
 }
 
 #[derive(Serialize)]
@@ -72,26 +69,18 @@ pub async fn reauth_password(
     auth: BearerAuth,
     Json(input): Json<PasswordReauthInput>,
 ) -> Response {
-    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", auth.0.did)
+    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", &*&auth.0.did)
         .fetch_optional(&state.db)
         .await;
 
     let password_hash = match user {
         Ok(Some(row)) => row.password_hash,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -105,7 +94,7 @@ pub async fn reauth_password(
             "SELECT ap.password_hash FROM app_passwords ap
              JOIN users u ON ap.user_id = u.id
              WHERE u.did = $1",
-            auth.0.did
+            &auth.0.did
         )
         .fetch_all(&state.db)
         .await
@@ -116,30 +105,19 @@ pub async fn reauth_password(
             .any(|ap| bcrypt::verify(&input.password, &ap.password_hash).unwrap_or(false));
 
         if !app_password_valid {
-            warn!(did = %auth.0.did, "Re-auth failed: invalid password");
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "error": "InvalidPassword",
-                    "message": "Password is incorrect"
-                })),
-            )
-                .into_response();
+            warn!(did = %&auth.0.did, "Re-auth failed: invalid password");
+            return ApiError::InvalidPassword("Password is incorrect".into()).into_response();
         }
     }
 
     match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
-            info!(did = %auth.0.did, "Re-auth successful via password");
+            info!(did = %&auth.0.did, "Re-auth successful via password");
             Json(ReauthResponse { reauthed_at }).into_response()
         }
         Err(e) => {
             error!("DB error updating reauth: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -159,15 +137,9 @@ pub async fn reauth_totp(
         .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
         .await
     {
-        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many verification attempts. Please try again in a few minutes."
-            })),
-        )
-            .into_response();
+        warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
+        return ApiError::RateLimitExceeded(Some("Too many verification attempts. Please try again in a few minutes.".into(),))
+        .into_response();
     }
 
     let valid =
@@ -175,29 +147,18 @@ pub async fn reauth_totp(
             .await;
 
     if !valid {
-        warn!(did = %auth.0.did, "Re-auth failed: invalid TOTP code");
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "InvalidCode",
-                "message": "Invalid TOTP or backup code"
-            })),
-        )
-            .into_response();
+        warn!(did = %&auth.0.did, "Re-auth failed: invalid TOTP code");
+        return ApiError::InvalidCode(Some("Invalid TOTP or backup code".into())).into_response();
     }
 
     match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
-            info!(did = %auth.0.did, "Re-auth successful via TOTP");
+            info!(did = %&auth.0.did, "Re-auth successful via TOTP");
             Json(ReauthResponse { reauthed_at }).into_response()
         }
         Err(e) => {
             error!("DB error updating reauth: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -216,23 +177,12 @@ pub async fn reauth_passkey_start(State(state): State<AppState>, auth: BearerAut
             Ok(pks) => pks,
             Err(e) => {
                 error!("Failed to get passkeys: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
 
     if stored_passkeys.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "NoPasskeys",
-                "message": "No passkeys registered for this account"
-            })),
-        )
-            .into_response();
+        return ApiError::NoPasskeys.into_response();
     }
 
     let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
@@ -241,22 +191,14 @@ pub async fn reauth_passkey_start(State(state): State<AppState>, auth: BearerAut
         .collect();
 
     if passkeys.is_empty() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to load passkeys"})),
-        )
-            .into_response();
+        return ApiError::InternalError(Some("Failed to load passkeys".into())).into_response();
     }
 
     let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
         Ok(w) => w,
         Err(e) => {
             error!("Failed to create WebAuthn config: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -264,11 +206,7 @@ pub async fn reauth_passkey_start(State(state): State<AppState>, auth: BearerAut
         Ok(result) => result,
         Err(e) => {
             error!("Failed to start passkey authentication: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -276,14 +214,10 @@ pub async fn reauth_passkey_start(State(state): State<AppState>, auth: BearerAut
         crate::auth::webauthn::save_authentication_state(&state.db, &auth.0.did, &auth_state).await
     {
         error!("Failed to save authentication state: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    let options = serde_json::to_value(&rcr).unwrap_or(json!({}));
+    let options = serde_json::to_value(&rcr).unwrap_or(serde_json::json!({}));
     Json(PasskeyReauthStartResponse { options }).into_response()
 }
 
@@ -304,22 +238,11 @@ pub async fn reauth_passkey_finish(
         match crate::auth::webauthn::load_authentication_state(&state.db, &auth.0.did).await {
             Ok(Some(s)) => s,
             Ok(None) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "NoChallengeInProgress",
-                        "message": "No passkey authentication in progress or challenge expired"
-                    })),
-                )
-                    .into_response();
+                return ApiError::NoChallengeInProgress.into_response();
             }
             Err(e) => {
                 error!("Failed to load authentication state: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
 
@@ -328,14 +251,7 @@ pub async fn reauth_passkey_finish(
             Ok(c) => c,
             Err(e) => {
                 warn!("Failed to parse credential: {:?}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidCredential",
-                        "message": "Failed to parse credential response"
-                    })),
-                )
-                    .into_response();
+                return ApiError::InvalidCredential.into_response();
             }
         };
 
@@ -343,25 +259,15 @@ pub async fn reauth_passkey_finish(
         Ok(w) => w,
         Err(e) => {
             error!("Failed to create WebAuthn config: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     let auth_result = match webauthn.finish_authentication(&credential, &auth_state) {
         Ok(r) => r,
         Err(e) => {
-            warn!(did = %auth.0.did, "Passkey re-auth failed: {:?}", e);
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "error": "AuthenticationFailed",
-                    "message": "Passkey authentication failed"
-                })),
-            )
+            warn!(did = %&auth.0.did, "Passkey re-auth failed: {:?}", e);
+            return ApiError::AuthenticationFailed(Some("Passkey authentication failed".into()))
                 .into_response();
         }
     };
@@ -375,17 +281,10 @@ pub async fn reauth_passkey_finish(
     .await
     {
         Ok(false) => {
-            warn!(did = %auth.0.did, "Passkey counter anomaly detected - possible cloned key");
+            warn!(did = %&auth.0.did, "Passkey counter anomaly detected - possible cloned key");
             let _ =
                 crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "error": "PasskeyCounterAnomaly",
-                    "message": "Authentication failed: security key counter anomaly detected. This may indicate a cloned key."
-                })),
-            )
-                .into_response();
+            return ApiError::PasskeyCounterAnomaly.into_response();
         }
         Err(e) => {
             error!("Failed to update passkey counter: {:?}", e);
@@ -397,16 +296,12 @@ pub async fn reauth_passkey_finish(
 
     match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
-            info!(did = %auth.0.did, "Re-auth successful via passkey");
+            info!(did = %&auth.0.did, "Re-auth successful via passkey");
             Json(ReauthResponse { reauthed_at }).into_response()
         }
         Err(e) => {
             error!("DB error updating reauth: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -582,11 +477,19 @@ pub async fn legacy_mfa_required_response(db: &PgPool, did: &str) -> Response {
     let methods = get_available_reauth_methods(db, did).await;
     (
         StatusCode::FORBIDDEN,
-        Json(serde_json::json!({
-            "error": "MfaVerificationRequired",
-            "message": "This sensitive operation requires MFA verification. Your session was created via a legacy app that doesn't support MFA during login.",
-            "reauthMethods": methods
-        })),
+        Json(MfaVerificationRequiredError {
+            error: "MfaVerificationRequired".to_string(),
+            message: "This sensitive operation requires MFA verification. Your session was created via a legacy app that doesn't support MFA during login.".to_string(),
+            reauth_methods: methods,
+        }),
     )
         .into_response()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MfaVerificationRequiredError {
+    pub error: String,
+    pub message: String,
+    pub reauth_methods: Vec<String>,
 }

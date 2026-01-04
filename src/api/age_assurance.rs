@@ -50,7 +50,7 @@ async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option
         }
     };
 
-    let row = match sqlx::query!("SELECT created_at FROM users WHERE did = $1", auth_user.did)
+    let row = match sqlx::query!("SELECT created_at FROM users WHERE did = $1", &auth_user.did)
         .fetch_optional(&state.db)
         .await
     {

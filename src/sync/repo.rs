@@ -1,8 +1,8 @@
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
 use crate::sync::util::assert_repo_availability;
 use axum::{
-    Json,
     extract::{Query, RawQuery, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -11,7 +11,6 @@ use cid::Cid;
 use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::Deserialize;
-use serde_json::json;
 use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
@@ -28,26 +27,13 @@ fn parse_get_blocks_query(query_string: &str) -> Result<(String, Vec<String>), S
 }
 
 pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery) -> Response {
-    let query_string = match query {
-        Some(q) => q,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": "Missing query parameters"})),
-            )
-                .into_response();
-        }
+    let Some(query_string) = query else {
+        return ApiError::InvalidRequest("Missing query parameters".into()).into_response();
     };
 
     let (did, cid_strings) = match parse_get_blocks_query(&query_string) {
         Ok(parsed) => parsed,
-        Err(msg) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": msg})),
-            )
-                .into_response();
-        }
+        Err(msg) => return ApiError::InvalidRequest(msg).into_response(),
     };
 
     let _account = match assert_repo_availability(&state.db, &did, false).await {
@@ -55,65 +41,47 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
         Err(e) => return e.into_response(),
     };
 
-    let mut cids = Vec::new();
-    for s in &cid_strings {
-        match Cid::from_str(s) {
-            Ok(cid) => cids.push(cid),
-            Err(_) => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRequest", "message": format!("Invalid CID: {}", s)})),
-            )
-                .into_response(),
-        }
-    }
-
-    if cids.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "No CIDs provided"})),
-        )
-            .into_response();
-    }
-
-    let blocks_res = state.block_store.get_many(&cids).await;
-    let blocks = match blocks_res {
-        Ok(blocks) => blocks,
-        Err(e) => {
-            error!("Failed to get blocks: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to get blocks"})),
-            )
-                .into_response();
+    let cids: Vec<Cid> = match cid_strings
+        .iter()
+        .map(|s| Cid::from_str(s).map_err(|_| s.clone()))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(cids) => cids,
+        Err(invalid) => {
+            return ApiError::InvalidRequest(format!("Invalid CID: {}", invalid)).into_response()
         }
     };
 
-    let mut missing_cids: Vec<String> = Vec::new();
-    for (i, block_opt) in blocks.iter().enumerate() {
-        if block_opt.is_none() {
-            missing_cids.push(cids[i].to_string());
-        }
+    if cids.is_empty() {
+        return ApiError::InvalidRequest("No CIDs provided".into()).into_response();
     }
+
+    let blocks = match state.block_store.get_many(&cids).await {
+        Ok(blocks) => blocks,
+        Err(e) => {
+            error!("Failed to get blocks: {}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    let missing_cids: Vec<String> = blocks
+        .iter()
+        .zip(&cids)
+        .filter_map(|(block_opt, cid)| block_opt.is_none().then(|| cid.to_string()))
+        .collect();
     if !missing_cids.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Could not find blocks: {}", missing_cids.join(", "))
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(format!(
+            "Could not find blocks: {}",
+            missing_cids.join(", ")
+        ))
+        .into_response();
     }
 
     let header = match crate::sync::car::encode_car_header_null_root() {
         Ok(h) => h,
         Err(e) => {
             error!("Failed to encode CAR header: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to encode CAR"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let mut car_bytes = header;
@@ -157,26 +125,12 @@ pub async fn get_repo(
         Err(e) => return e.into_response(),
     };
 
-    let head_str = match account.repo_root_cid {
-        Some(cid) => cid,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
-            )
-                .into_response();
-        }
+    let Some(head_str) = account.repo_root_cid else {
+        return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
     };
 
-    let head_cid = match Cid::from_str(&head_str) {
-        Ok(c) => c,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid head CID"})),
-            )
-                .into_response();
-        }
+    let Ok(head_cid) = Cid::from_str(&head_str) else {
+        return ApiError::InternalError(None).into_response();
     };
 
     if let Some(since) = &query.since {
@@ -186,11 +140,8 @@ pub async fn get_repo(
     let mut car_bytes = match encode_car_header(&head_cid) {
         Ok(h) => h,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": format!("Failed to encode CAR header: {}", e)})),
-            )
-                .into_response();
+            error!("Failed to encode CAR header: {}", e);
+            return ApiError::InternalError(None).into_response();
         }
     };
     let mut stack = vec![head_cid];
@@ -249,11 +200,7 @@ async fn get_repo_since(state: &AppState, did: &str, head_cid: &Cid, since: &str
         Ok(e) => e,
         Err(e) => {
             error!("DB error in get_repo_since: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Database error"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Database error".into())).into_response();
         }
     };
 
@@ -279,10 +226,7 @@ async fn get_repo_since(state: &AppState, did: &str, head_cid: &Cid, since: &str
     let mut car_bytes = match encode_car_header(head_cid) {
         Ok(h) => h,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": format!("Failed to encode CAR header: {}", e)})),
-            )
+            return ApiError::InternalError(Some(format!("Failed to encode CAR header: {}", e)))
                 .into_response();
         }
     };
@@ -300,11 +244,7 @@ async fn get_repo_since(state: &AppState, did: &str, head_cid: &Cid, since: &str
         Ok(b) => b,
         Err(e) => {
             error!("Block store error in get_repo_since: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to get blocks"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to get blocks".into())).into_response();
         }
     };
 
@@ -377,89 +317,47 @@ pub async fn get_record(
     let commit_cid_str = match account.repo_root_cid {
         Some(cid) => cid,
         None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
-            )
-                .into_response();
+            return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
         }
     };
-    let commit_cid = match Cid::from_str(&commit_cid_str) {
-        Ok(c) => c,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid commit CID"})),
-            )
-                .into_response();
-        }
+    let Ok(commit_cid) = Cid::from_str(&commit_cid_str) else {
+        return ApiError::InternalError(Some("Invalid commit CID".into())).into_response();
     };
     let commit_bytes = match state.block_store.get(&commit_cid).await {
         Ok(Some(b)) => b,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Commit block not found"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Commit block not found".into())).into_response();
         }
     };
-    let commit = match Commit::from_cbor(&commit_bytes) {
-        Ok(c) => c,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to parse commit"})),
-            )
-                .into_response();
-        }
+    let Ok(commit) = Commit::from_cbor(&commit_bytes) else {
+        return ApiError::InternalError(Some("Failed to parse commit".into())).into_response();
     };
     let mst = Mst::load(Arc::new(state.block_store.clone()), commit.data, None);
     let key = format!("{}/{}", query.collection, query.rkey);
     let record_cid = match mst.get(&key).await {
         Ok(Some(cid)) => cid,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RecordNotFound", "message": "Record not found"})),
-            )
-                .into_response();
+            return ApiError::RecordNotFound.into_response();
         }
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to lookup record"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to lookup record".into())).into_response();
         }
     };
     let record_block = match state.block_store.get(&record_cid).await {
         Ok(Some(b)) => b,
         _ => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "RecordNotFound", "message": "Record block not found"})),
-            )
-                .into_response();
+            return ApiError::RecordNotFound.into_response();
         }
     };
     let mut proof_blocks: BTreeMap<Cid, bytes::Bytes> = BTreeMap::new();
     if mst.blocks_for_path(&key, &mut proof_blocks).await.is_err() {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to build proof path"})),
-        )
-            .into_response();
+        return ApiError::InternalError(Some("Failed to build proof path".into())).into_response();
     }
     let header = match encode_car_header(&commit_cid) {
         Ok(h) => h,
         Err(e) => {
             error!("Failed to encode CAR header: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let mut car_bytes = header;

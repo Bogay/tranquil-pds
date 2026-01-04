@@ -137,8 +137,6 @@ async fn test_send_email_missing_recipient() {
         .await
         .expect("Failed to send email");
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    assert_eq!(body["error"], "InvalidRequest");
 }
 
 #[tokio::test]

@@ -1,3 +1,4 @@
+use crate::types::Handle;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -18,7 +19,7 @@ pub struct DelegationGrant {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegatedAccountInfo {
     pub did: String,
-    pub handle: String,
+    pub handle: Handle,
     pub granted_scopes: String,
     pub granted_at: DateTime<Utc>,
 }
@@ -26,7 +27,7 @@ pub struct DelegatedAccountInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControllerInfo {
     pub did: String,
-    pub handle: String,
+    pub handle: Handle,
     pub granted_scopes: String,
     pub granted_at: DateTime<Utc>,
     pub is_active: bool,

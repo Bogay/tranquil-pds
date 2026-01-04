@@ -5,14 +5,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::OAuthError;
+use crate::types::{DPoPProofId, JwkThumbprint};
 
 const DPOP_NONCE_VALIDITY_SECS: i64 = 300;
 const DPOP_MAX_AGE_SECS: i64 = 300;
 
 #[derive(Debug, Clone)]
 pub struct DPoPVerifyResult {
-    pub jkt: String,
-    pub jti: String,
+    pub jkt: JwkThumbprint,
+    pub jti: DPoPProofId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,8 +180,8 @@ impl DPoPVerifier {
         )?;
         let jkt = compute_jwk_thumbprint(&header.jwk)?;
         Ok(DPoPVerifyResult {
-            jkt,
-            jti: payload.jti.clone(),
+            jkt: jkt.into(),
+            jti: payload.jti.clone().into(),
         })
     }
 }

@@ -1,10 +1,11 @@
-use axum::{Json, extract::State, http::StatusCode};
+use crate::api::error::ApiError;
+use crate::types::Did;
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{error, info, warn};
 
 use crate::auth::verification_token::{
-    VerificationPurpose, VerifyError, normalize_token_input, verify_token_signature,
+    VerificationPurpose, normalize_token_input, verify_token_signature,
 };
 use crate::state::AppState;
 
@@ -19,7 +20,7 @@ pub struct VerifyTokenInput {
 #[serde(rename_all = "camelCase")]
 pub struct VerifyTokenOutput {
     pub success: bool,
-    pub did: String,
+    pub did: Did,
     pub purpose: String,
     pub channel: String,
 }
@@ -27,60 +28,25 @@ pub struct VerifyTokenOutput {
 pub async fn verify_token(
     State(state): State<AppState>,
     Json(input): Json<VerifyTokenInput>,
-) -> Result<Json<VerifyTokenOutput>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<VerifyTokenOutput>, ApiError> {
     verify_token_internal(&state, input).await
 }
 
 pub async fn verify_token_internal(
     state: &AppState,
     input: VerifyTokenInput,
-) -> Result<Json<VerifyTokenOutput>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let normalized_token = normalize_token_input(&input.token);
     let identifier = input.identifier.trim().to_lowercase();
 
-    let token_data = match verify_token_signature(&normalized_token) {
-        Ok(data) => data,
-        Err(e) => {
-            let (status, error, message) = match e {
-                VerifyError::InvalidFormat => (
-                    StatusCode::BAD_REQUEST,
-                    "InvalidToken",
-                    "The verification token is invalid or malformed",
-                ),
-                VerifyError::UnsupportedVersion => (
-                    StatusCode::BAD_REQUEST,
-                    "InvalidToken",
-                    "This verification token version is not supported",
-                ),
-                VerifyError::Expired => (
-                    StatusCode::BAD_REQUEST,
-                    "ExpiredToken",
-                    "The verification token has expired. Please request a new one.",
-                ),
-                VerifyError::InvalidSignature => (
-                    StatusCode::BAD_REQUEST,
-                    "InvalidToken",
-                    "The verification token signature is invalid",
-                ),
-                _ => (
-                    StatusCode::BAD_REQUEST,
-                    "InvalidToken",
-                    "The verification token is not valid",
-                ),
-            };
-            warn!(error = ?e, "Token verification failed");
-            return Err((status, Json(json!({ "error": error, "message": message }))));
-        }
-    };
+    let token_data = verify_token_signature(&normalized_token).map_err(|e| {
+        warn!(error = ?e, "Token verification failed");
+        ApiError::from(e)
+    })?;
 
     let expected_hash = crate::auth::verification_token::hash_identifier(&identifier);
     if token_data.identifier_hash != expected_hash {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(
-                json!({ "error": "IdentifierMismatch", "message": "The identifier does not match the verification token" }),
-            ),
-        ));
+        return Err(ApiError::IdentifierMismatch);
     }
 
     match token_data.purpose {
@@ -103,14 +69,9 @@ async fn handle_migration_verification(
     did: &str,
     channel: &str,
     identifier: &str,
-) -> Result<Json<VerifyTokenOutput>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<VerifyTokenOutput>, ApiError> {
     if channel != "email" {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(
-                json!({ "error": "InvalidChannel", "message": "Migration verification is only supported for email" }),
-            ),
-        ));
+        return Err(ApiError::InvalidChannel);
     }
 
     let user = sqlx::query!(
@@ -121,26 +82,13 @@ async fn handle_migration_verification(
     .await
     .map_err(|e| {
         warn!(error = %e, "Database error during migration verification");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "InternalError", "message": "Database error" })),
-        )
+        ApiError::InternalError(None)
     })?;
 
-    let user = user.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "AccountNotFound", "message": "No account found for this verification token" })),
-        )
-    })?;
+    let user = user.ok_or(ApiError::AccountNotFound)?;
 
     if user.email.as_ref().map(|e| e.to_lowercase()) != Some(identifier.to_string()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(
-                json!({ "error": "IdentifierMismatch", "message": "The email address does not match the account" }),
-            ),
-        ));
+        return Err(ApiError::IdentifierMismatch);
     }
 
     if !user.email_verified {
@@ -152,10 +100,7 @@ async fn handle_migration_verification(
         .await
         .map_err(|e| {
             warn!(error = %e, "Failed to update email_verified status");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "InternalError", "message": "Failed to verify email" })),
-            )
+            ApiError::InternalError(None)
         })?;
     }
 
@@ -163,7 +108,7 @@ async fn handle_migration_verification(
 
     Ok(Json(VerifyTokenOutput {
         success: true,
-        did: did.to_string(),
+        did: did.to_string().into(),
         purpose: "migration".to_string(),
         channel: channel.to_string(),
     }))
@@ -174,16 +119,11 @@ async fn handle_channel_update(
     did: &str,
     channel: &str,
     identifier: &str,
-) -> Result<Json<VerifyTokenOutput>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
         .fetch_one(&state.db)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "InternalError", "message": "User not found" })),
-            )
-        })?;
+        .map_err(|_| ApiError::InternalError(None))?;
 
     let update_result = match channel {
         "email" => sqlx::query!(
@@ -207,10 +147,7 @@ async fn handle_channel_update(
             user_id
         ).execute(&state.db).await,
         _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "InvalidChannel", "message": "Invalid channel" })),
-            ));
+            return Err(ApiError::InvalidChannel);
         }
     };
 
@@ -221,22 +158,16 @@ async fn handle_channel_update(
                 .map(|db| db.is_unique_violation())
                 .unwrap_or(false)
         {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "EmailTaken", "message": "Email already in use" })),
-            ));
+            return Err(ApiError::EmailTaken);
         }
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "InternalError", "message": "Failed to update channel" })),
-        ));
+        return Err(ApiError::InternalError(None));
     }
 
     info!(did = %did, channel = %channel, "Channel verified successfully");
 
     Ok(Json(VerifyTokenOutput {
         success: true,
-        did: did.to_string(),
+        did: did.to_string().into(),
         purpose: "channel_update".to_string(),
         channel: channel.to_string(),
     }))
@@ -247,7 +178,7 @@ async fn handle_signup_verification(
     did: &str,
     channel: &str,
     _identifier: &str,
-) -> Result<Json<VerifyTokenOutput>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let user = sqlx::query!(
         "SELECT id, handle, email, email_verified, discord_verified, telegram_verified, signal_verified FROM users WHERE did = $1",
         did
@@ -256,18 +187,10 @@ async fn handle_signup_verification(
     .await
     .map_err(|e| {
         warn!(error = %e, "Database error during signup verification");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "InternalError", "message": "Database error" })),
-        )
+        ApiError::InternalError(None)
     })?;
 
-    let user = user.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "AccountNotFound", "message": "No account found for this verification token" })),
-        )
-    })?;
+    let user = user.ok_or(ApiError::AccountNotFound)?;
 
     let is_verified = user.email_verified
         || user.discord_verified
@@ -277,7 +200,7 @@ async fn handle_signup_verification(
         info!(did = %did, "Account already verified");
         return Ok(Json(VerifyTokenOutput {
             success: true,
-            did: did.to_string(),
+            did: did.to_string().into(),
             purpose: "signup".to_string(),
             channel: channel.to_string(),
         }));
@@ -317,26 +240,20 @@ async fn handle_signup_verification(
             .await
         }
         _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "InvalidChannel", "message": "Invalid channel" })),
-            ));
+            return Err(ApiError::InvalidChannel);
         }
     };
 
     update_result.map_err(|e| {
         warn!(error = %e, "Failed to update channel verified status");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "InternalError", "message": "Failed to verify channel" })),
-        )
+        ApiError::InternalError(None)
     })?;
 
     info!(did = %did, channel = %channel, "Signup verified successfully");
 
     Ok(Json(VerifyTokenOutput {
         success: true,
-        did: did.to_string(),
+        did: did.to_string().into(),
         purpose: "signup".to_string(),
         channel: channel.to_string(),
     }))

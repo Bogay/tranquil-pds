@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::fmt;
-use std::sync::Arc;
 use std::time::Duration;
 
+use crate::types::Did;
+use crate::AccountStatus;
 use crate::cache::Cache;
 use crate::oauth::scopes::ScopePermissions;
 
@@ -66,13 +67,13 @@ impl fmt::Display for TokenValidationError {
 }
 
 pub struct AuthenticatedUser {
-    pub did: String,
+    pub did: Did,
     pub key_bytes: Option<Vec<u8>>,
     pub is_oauth: bool,
     pub is_admin: bool,
-    pub is_takendown: bool,
+    pub status: AccountStatus,
     pub scope: Option<String>,
-    pub controller_did: Option<String>,
+    pub controller_did: Option<Did>,
 }
 
 impl AuthenticatedUser {
@@ -86,6 +87,10 @@ impl AuthenticatedUser {
             return ScopePermissions::from_scope_string(Some("atproto"));
         }
         ScopePermissions::from_scope_string(self.scope.as_deref())
+    }
+
+    pub fn is_takendown(&self) -> bool {
+        self.status.is_takendown()
     }
 }
 
@@ -105,7 +110,7 @@ pub async fn validate_bearer_token_allow_deactivated(
 
 pub async fn validate_bearer_token_cached(
     db: &PgPool,
-    cache: &Arc<dyn Cache>,
+    cache: &dyn Cache,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
     validate_bearer_token_with_options_internal(db, Some(cache), token, false, false).await
@@ -113,7 +118,7 @@ pub async fn validate_bearer_token_cached(
 
 pub async fn validate_bearer_token_cached_allow_deactivated(
     db: &PgPool,
-    cache: &Arc<dyn Cache>,
+    cache: &dyn Cache,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
     validate_bearer_token_with_options_internal(db, Some(cache), token, true, false).await
@@ -135,7 +140,7 @@ pub async fn validate_bearer_token_allow_takendown(
 
 async fn validate_bearer_token_with_options_internal(
     db: &PgPool,
-    cache: Option<&Arc<dyn Cache>>,
+    cache: Option<&dyn Cache>,
     token: &str,
     allow_deactivated: bool,
     allow_takendown: bool,
@@ -324,13 +329,21 @@ async fn validate_bearer_token_with_options_internal(
                     }
 
                     if session_valid {
-                        let controller_did = token_data.claims.act.as_ref().map(|a| a.sub.clone());
+                        let controller_did = token_data
+                            .claims
+                            .act
+                            .as_ref()
+                            .map(|a| Did::new_unchecked(a.sub.clone()));
+                        let status = AccountStatus::from_db_fields(
+                            takedown_ref.as_deref(),
+                            deactivated_at,
+                        );
                         return Ok(AuthenticatedUser {
-                            did: did.clone(),
+                            did: Did::new_unchecked(did.clone()),
                             key_bytes: Some(decrypted_key),
                             is_oauth: false,
                             is_admin,
-                            is_takendown: takedown_ref.is_some(),
+                            status,
                             scope: token_data.claims.scope.clone(),
                             controller_did,
                         });
@@ -359,12 +372,16 @@ async fn validate_bearer_token_with_options_internal(
         .ok()
         .flatten()
     {
-        if !allow_deactivated && oauth_token.deactivated_at.is_some() {
+        let status = AccountStatus::from_db_fields(
+            oauth_token.takedown_ref.as_deref(),
+            oauth_token.deactivated_at,
+        );
+
+        if !allow_deactivated && status.is_deactivated() {
             return Err(TokenValidationError::AccountDeactivated);
         }
 
-        let is_takendown = oauth_token.takedown_ref.is_some();
-        if !allow_takendown && is_takendown {
+        if !allow_takendown && status.is_takendown() {
             return Err(TokenValidationError::AccountTakedown);
         }
 
@@ -378,13 +395,13 @@ async fn validate_bearer_token_with_options_internal(
                 None
             };
             return Ok(AuthenticatedUser {
-                did: oauth_token.did,
+                did: Did::new_unchecked(oauth_token.did),
                 key_bytes,
                 is_oauth: true,
                 is_admin: oauth_token.is_admin,
-                is_takendown,
+                status,
                 scope: oauth_info.scope,
-                controller_did: oauth_info.controller_did,
+                controller_did: oauth_info.controller_did.map(Did::new_unchecked),
             });
         } else {
             return Err(TokenValidationError::TokenExpired);
@@ -394,7 +411,7 @@ async fn validate_bearer_token_with_options_internal(
     Err(TokenValidationError::AuthenticationFailed)
 }
 
-pub async fn invalidate_auth_cache(cache: &Arc<dyn Cache>, did: &str) {
+pub async fn invalidate_auth_cache(cache: &dyn Cache, did: &str) {
     let key_cache_key = format!("auth:key:{}", did);
     let status_cache_key = format!("auth:status:{}", did);
     let _ = cache.delete(&key_cache_key).await;
@@ -442,11 +459,14 @@ pub async fn validate_token_with_dpop(
             let Some(user_info) = user_info else {
                 return Err(TokenValidationError::AuthenticationFailed);
             };
-            if !allow_deactivated && user_info.deactivated_at.is_some() {
+            let status = AccountStatus::from_db_fields(
+                user_info.takedown_ref.as_deref(),
+                user_info.deactivated_at,
+            );
+            if !allow_deactivated && status.is_deactivated() {
                 return Err(TokenValidationError::AccountDeactivated);
             }
-            let is_takendown = user_info.takedown_ref.is_some();
-            if is_takendown {
+            if status.is_takendown() {
                 return Err(TokenValidationError::AccountTakedown);
             }
             let key_bytes = if let (Some(kb), Some(ev)) =
@@ -457,11 +477,11 @@ pub async fn validate_token_with_dpop(
                 None
             };
             Ok(AuthenticatedUser {
-                did: result.did,
+                did: Did::new_unchecked(result.did),
                 key_bytes,
                 is_oauth: true,
                 is_admin: user_info.is_admin,
-                is_takendown,
+                status,
                 scope: result.scope,
                 controller_did: None,
             })

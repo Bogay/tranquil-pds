@@ -1,13 +1,12 @@
-use crate::api::ApiError;
+use crate::api::error::ApiError;
 use crate::api::repo::record::create_signed_commit;
+use crate::api::EmptyResponse;
 use crate::state::AppState;
 use crate::sync::import::{ImportError, apply_import, parse_car};
 use crate::sync::verify::CarVerifier;
 use axum::{
-    Json,
     body::Bytes,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use jacquard::types::{integer::LimitedU32, string::Tid};
@@ -28,13 +27,7 @@ pub async fn import_repo(
         .map(|v| v != "false" && v != "0")
         .unwrap_or(true);
     if !accepting_imports {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": "Service is not accepting repo imports"
-            })),
-        )
+        return ApiError::InvalidRequest("Service is not accepting repo imports".into())
             .into_response();
     }
     let max_size: usize = std::env::var("MAX_IMPORT_SIZE")
@@ -42,14 +35,11 @@ pub async fn import_repo(
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_IMPORT_SIZE);
     if body.len() > max_size {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Import size exceeds limit of {} bytes", max_size)
-            })),
-        )
-            .into_response();
+        return ApiError::PayloadTooLarge(format!(
+            "Import size exceeds limit of {} bytes",
+            max_size
+        ))
+        .into_response();
     }
     let token = match crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
@@ -72,64 +62,30 @@ pub async fn import_repo(
     {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if user.takedown_ref.is_some() {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "AccountTakenDown",
-                "message": "Account has been taken down"
-            })),
-        )
-            .into_response();
+        return ApiError::AccountTakedown.into_response();
     }
     let user_id = user.id;
     let (root, blocks) = match parse_car(&body).await {
         Ok((r, b)) => (r, b),
         Err(ImportError::InvalidRootCount) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Expected exactly one root in CAR file"
-                })),
-            )
+            return ApiError::InvalidRequest("Expected exactly one root in CAR file".into())
                 .into_response();
         }
         Err(ImportError::CarParse(msg)) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": format!("Failed to parse CAR file: {}", msg)
-                })),
-            )
+            return ApiError::InvalidRequest(format!("Failed to parse CAR file: {}", msg))
                 .into_response();
         }
         Err(e) => {
             error!("CAR parsing error: {:?}", e);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": format!("Invalid CAR file: {}", e)
-                })),
-            )
-                .into_response();
+            return ApiError::InvalidRequest(format!("Invalid CAR file: {}", e)).into_response();
         }
     };
     info!(
@@ -138,44 +94,21 @@ pub async fn import_repo(
         blocks.len(),
         root
     );
-    let root_block = match blocks.get(&root) {
-        Some(b) => b,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": "Root block not found in CAR file"
-                })),
-            )
-                .into_response();
-        }
+    let Some(root_block) = blocks.get(&root) else {
+        return ApiError::InvalidRequest("Root block not found in CAR file".into()).into_response();
     };
     let commit_did = match jacquard_repo::commit::Commit::from_cbor(root_block) {
         Ok(commit) => commit.did().to_string(),
         Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidRequest",
-                    "message": format!("Invalid commit: {}", e)
-                })),
-            )
-                .into_response();
+            return ApiError::InvalidRequest(format!("Invalid commit: {}", e)).into_response();
         }
     };
     if commit_did != *did {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!(
-                    "CAR file is for DID {} but you are authenticated as {}",
-                    commit_did, did
-                )
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRepo(format!(
+            "CAR file is for DID {} but you are authenticated as {}",
+            commit_did, did
+        ))
+        .into_response();
     }
     let skip_verification = std::env::var("SKIP_IMPORT_VERIFICATION")
         .map(|v| v == "true" || v == "1")
@@ -197,37 +130,19 @@ pub async fn import_repo(
                 commit_did,
                 expected_did,
             }) => {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": format!(
-                            "CAR file is for DID {} but you are authenticated as {}",
-                            commit_did, expected_did
-                        )
-                    })),
-                )
-                    .into_response();
+                return ApiError::InvalidRepo(format!(
+                    "CAR file is for DID {} but you are authenticated as {}",
+                    commit_did, expected_did
+                ))
+                .into_response();
             }
             Err(crate::sync::verify::VerifyError::MstValidationFailed(msg)) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": format!("MST validation failed: {}", msg)
-                    })),
-                )
+                return ApiError::InvalidRequest(format!("MST validation failed: {}", msg))
                     .into_response();
             }
             Err(e) => {
                 error!("CAR structure verification error: {:?}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": format!("CAR verification failed: {}", e)
-                    })),
-                )
+                return ApiError::InvalidRequest(format!("CAR verification failed: {}", e))
                     .into_response();
             }
         }
@@ -245,68 +160,36 @@ pub async fn import_repo(
                 commit_did,
                 expected_did,
             }) => {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": format!(
-                            "CAR file is for DID {} but you are authenticated as {}",
-                            commit_did, expected_did
-                        )
-                    })),
-                )
-                    .into_response();
+                return ApiError::InvalidRepo(format!(
+                    "CAR file is for DID {} but you are authenticated as {}",
+                    commit_did, expected_did
+                ))
+                .into_response();
             }
             Err(crate::sync::verify::VerifyError::InvalidSignature) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidSignature",
-                        "message": "CAR file commit signature verification failed"
-                    })),
+                return ApiError::InvalidRequest(
+                    "CAR file commit signature verification failed".into(),
                 )
-                    .into_response();
+                .into_response();
             }
             Err(crate::sync::verify::VerifyError::DidResolutionFailed(msg)) => {
                 warn!("DID resolution failed during import verification: {}", msg);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": format!("Failed to verify DID: {}", msg)
-                    })),
-                )
+                return ApiError::InvalidRequest(format!("Failed to verify DID: {}", msg))
                     .into_response();
             }
             Err(crate::sync::verify::VerifyError::NoSigningKey) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": "DID document does not contain a signing key"
-                    })),
+                return ApiError::InvalidRequest(
+                    "DID document does not contain a signing key".into(),
                 )
-                    .into_response();
+                .into_response();
             }
             Err(crate::sync::verify::VerifyError::MstValidationFailed(msg)) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": format!("MST validation failed: {}", msg)
-                    })),
-                )
+                return ApiError::InvalidRequest(format!("MST validation failed: {}", msg))
                     .into_response();
             }
             Err(e) => {
                 error!("CAR verification error: {:?}", e);
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "InvalidRequest",
-                        "message": format!("CAR verification failed: {}", e)
-                    })),
-                )
+                return ApiError::InvalidRequest(format!("CAR verification failed: {}", e))
                     .into_response();
             }
         }
@@ -364,19 +247,12 @@ pub async fn import_repo(
                 Ok(Some(row)) => row,
                 Ok(None) => {
                     error!("No signing key found for user {}", did);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError", "message": "Signing key not found"})),
-                    )
+                    return ApiError::InternalError(Some("Signing key not found".into()))
                         .into_response();
                 }
                 Err(e) => {
                     error!("DB error fetching signing key: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             };
             let key_bytes =
@@ -384,22 +260,14 @@ pub async fn import_repo(
                     Ok(k) => k,
                     Err(e) => {
                         error!("Failed to decrypt signing key: {}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError"})),
-                        )
-                            .into_response();
+                        return ApiError::InternalError(None).into_response();
                     }
                 };
             let signing_key = match SigningKey::from_slice(&key_bytes) {
                 Ok(k) => k,
                 Err(e) => {
                     error!("Invalid signing key: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             };
             let new_rev = Tid::now(LimitedU32::MIN);
@@ -414,22 +282,14 @@ pub async fn import_repo(
                 Ok(result) => result,
                 Err(e) => {
                     error!("Failed to create new commit: {}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             };
             let new_root_cid: cid::Cid = match state.block_store.put(&commit_bytes).await {
                 Ok(cid) => cid,
                 Err(e) => {
                     error!("Failed to store new commit block: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             };
             let new_root_str = new_root_cid.to_string();
@@ -443,11 +303,7 @@ pub async fn import_repo(
             .await
             {
                 error!("Failed to update repo root: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
             let mut all_block_cids: Vec<Vec<u8>> = blocks.keys().map(|c| c.to_bytes()).collect();
             all_block_cids.push(new_root_cid.to_bytes());
@@ -464,11 +320,7 @@ pub async fn import_repo(
             .await
             {
                 error!("Failed to insert user_blocks: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
             info!(
                 "Created new commit for imported repo: cid={}, rev={}",
@@ -499,79 +351,41 @@ pub async fn import_repo(
                     );
                 }
             }
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
-        Err(ImportError::SizeLimitExceeded) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Import exceeds block limit of {}", max_blocks)
-            })),
-        )
-            .into_response(),
-        Err(ImportError::RepoNotFound) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({
-                "error": "RepoNotFound",
-                "message": "Repository not initialized for this account"
-            })),
-        )
-            .into_response(),
-        Err(ImportError::InvalidCbor(msg)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Invalid CBOR data: {}", msg)
-            })),
-        )
-            .into_response(),
-        Err(ImportError::InvalidCommit(msg)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Invalid commit structure: {}", msg)
-            })),
-        )
-            .into_response(),
-        Err(ImportError::BlockNotFound(cid)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidRequest",
-                "message": format!("Referenced block not found in CAR: {}", cid)
-            })),
-        )
-            .into_response(),
-        Err(ImportError::ConcurrentModification) => (
-            StatusCode::CONFLICT,
-            Json(json!({
-                "error": "ConcurrentModification",
-                "message": "Repository is being modified by another operation, please retry"
-            })),
-        )
-            .into_response(),
-        Err(ImportError::VerificationFailed(ve)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "VerificationFailed",
-                "message": format!("CAR verification failed: {}", ve)
-            })),
-        )
-            .into_response(),
-        Err(ImportError::DidMismatch { car_did, auth_did }) => (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "DidMismatch",
-                "message": format!("CAR is for {} but authenticated as {}", car_did, auth_did)
-            })),
-        )
-            .into_response(),
+        Err(ImportError::SizeLimitExceeded) => {
+            ApiError::PayloadTooLarge(format!("Import exceeds block limit of {}", max_blocks))
+                .into_response()
+        }
+        Err(ImportError::RepoNotFound) => {
+            ApiError::RepoNotFound(Some("Repository not initialized for this account".into()))
+                .into_response()
+        }
+        Err(ImportError::InvalidCbor(msg)) => {
+            ApiError::InvalidRequest(format!("Invalid CBOR data: {}", msg)).into_response()
+        }
+        Err(ImportError::InvalidCommit(msg)) => {
+            ApiError::InvalidRequest(format!("Invalid commit structure: {}", msg)).into_response()
+        }
+        Err(ImportError::BlockNotFound(cid)) => {
+            ApiError::InvalidRequest(format!("Referenced block not found in CAR: {}", cid))
+                .into_response()
+        }
+        Err(ImportError::ConcurrentModification) => ApiError::InvalidSwap(Some("Repository is being modified by another operation, please retry".into(),))
+        .into_response(),
+        Err(ImportError::VerificationFailed(ve)) => {
+            ApiError::InvalidRequest(format!("CAR verification failed: {}", ve)).into_response()
+        }
+        Err(ImportError::DidMismatch { car_did, auth_did }) => {
+            ApiError::InvalidRequest(format!(
+                "CAR is for {} but authenticated as {}",
+                car_did, auth_did
+            ))
+            .into_response()
+        }
         Err(e) => {
             error!("Import error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

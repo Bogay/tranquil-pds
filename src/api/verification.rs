@@ -1,3 +1,4 @@
+use crate::api::SuccessResponse;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -5,7 +6,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
-use serde_json::json;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,7 +25,7 @@ pub async fn confirm_channel_verification(
     };
 
     match crate::api::server::verify_token_internal(&state, token_input).await {
-        Ok(output) => Json(json!({"success": output.success})).into_response(),
-        Err((status, err_json)) => (status, err_json).into_response(),
+        Ok(_output) => SuccessResponse::ok().into_response(),
+        Err(e) => e.into_response(),
     }
 }

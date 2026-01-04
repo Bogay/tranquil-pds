@@ -1,3 +1,5 @@
+use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::auth::BearerAuth;
 use crate::auth::totp::{
     decrypt_totp_secret, encrypt_totp_secret, generate_backup_codes, generate_qr_png_base64,
@@ -5,15 +7,14 @@ use crate::auth::totp::{
     verify_backup_code, verify_totp_code,
 };
 use crate::state::{AppState, RateLimitKind};
+use crate::types::PlainPassword;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{error, info, warn};
 
 const ENCRYPTION_VERSION: i32 = 1;
@@ -27,43 +28,26 @@ pub struct CreateTotpSecretResponse {
 }
 
 pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let existing = sqlx::query_scalar!("SELECT verified FROM user_totp WHERE did = $1", auth.0.did)
+    let existing = sqlx::query_scalar!("SELECT verified FROM user_totp WHERE did = $1", &*&auth.0.did)
         .fetch_optional(&state.db)
         .await;
 
     if let Ok(Some(true)) = existing {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({
-                "error": "TotpAlreadyEnabled",
-                "message": "TOTP is already enabled for this account"
-            })),
-        )
-            .into_response();
+        return ApiError::TotpAlreadyEnabled.into_response();
     }
 
     let secret = generate_totp_secret();
 
-    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", auth.0.did)
+    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", &*&auth.0.did)
         .fetch_optional(&state.db)
         .await;
 
     let handle = match handle {
         Ok(Some(h)) => h,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
-        }
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error fetching handle: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -74,11 +58,7 @@ pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth)
         Ok(qr) => qr,
         Err(e) => {
             error!("Failed to generate QR code: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to generate QR code"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to generate QR code".into())).into_response();
         }
     };
 
@@ -86,11 +66,7 @@ pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth)
         Ok(enc) => enc,
         Err(e) => {
             error!("Failed to encrypt TOTP secret: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -105,7 +81,7 @@ pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth)
             created_at = NOW(),
             last_used = NULL
         "#,
-        auth.0.did,
+        &auth.0.did,
         encrypted_secret,
         ENCRYPTION_VERSION
     )
@@ -114,16 +90,12 @@ pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth)
 
     if let Err(e) = result {
         error!("Failed to store TOTP secret: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let secret_base32 = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &secret);
 
-    info!(did = %auth.0.did, "TOTP secret created (pending verification)");
+    info!(did = %&auth.0.did, "TOTP secret created (pending verification)");
 
     Json(CreateTotpSecretResponse {
         secret: secret_base32,
@@ -153,55 +125,28 @@ pub async fn enable_totp(
         .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
         .await
     {
-        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many verification attempts. Please try again in a few minutes."
-            })),
-        )
-            .into_response();
+        warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
+        return ApiError::RateLimitExceeded(None).into_response();
     }
 
     let totp_row = sqlx::query!(
         "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
 
     let totp_row = match totp_row {
         Ok(Some(row)) => row,
-        Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "TotpNotSetup",
-                    "message": "Please call createTotpSecret first"
-                })),
-            )
-                .into_response();
-        }
+        Ok(None) => return ApiError::TotpNotEnabled.into_response(),
         Err(e) => {
             error!("DB error fetching TOTP: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if totp_row.verified {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({
-                "error": "TotpAlreadyEnabled",
-                "message": "TOTP is already enabled"
-            })),
-        )
-            .into_response();
+        return ApiError::TotpAlreadyEnabled.into_response();
     }
 
     let secret = match decrypt_totp_secret(&totp_row.secret_encrypted, totp_row.encryption_version)
@@ -209,24 +154,13 @@ pub async fn enable_totp(
         Ok(s) => s,
         Err(e) => {
             error!("Failed to decrypt TOTP secret: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "InvalidCode",
-                "message": "Invalid verification code"
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidCode(Some("Invalid verification code".into())).into_response();
     }
 
     let backup_codes = generate_backup_codes();
@@ -234,39 +168,27 @@ pub async fn enable_totp(
         Ok(tx) => tx,
         Err(e) => {
             error!("Failed to begin transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if let Err(e) = sqlx::query!(
         "UPDATE user_totp SET verified = true, last_used = NOW() WHERE did = $1",
-        auth.0.did
+        &auth.0.did
     )
     .execute(&mut *tx)
     .await
     {
         error!("Failed to enable TOTP: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", auth.0.did)
+    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", &*&auth.0.did)
         .execute(&mut *tx)
         .await
     {
         error!("Failed to clear old backup codes: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     for code in &backup_codes {
@@ -274,48 +196,36 @@ pub async fn enable_totp(
             Ok(h) => h,
             Err(e) => {
                 error!("Failed to hash backup code: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
 
         if let Err(e) = sqlx::query!(
             "INSERT INTO backup_codes (did, code_hash, created_at) VALUES ($1, $2, NOW())",
-            auth.0.did,
+            &auth.0.did,
             hash
         )
         .execute(&mut *tx)
         .await
         {
             error!("Failed to store backup code: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
 
     if let Err(e) = tx.commit().await {
         error!("Failed to commit transaction: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    info!(did = %auth.0.did, "TOTP enabled with {} backup codes", backup_codes.len());
+    info!(did = %&auth.0.did, "TOTP enabled with {} backup codes", backup_codes.len());
 
     Json(EnableTotpResponse { backup_codes }).into_response()
 }
 
 #[derive(Deserialize)]
 pub struct DisableTotpInput {
-    pub password: String,
+    pub password: PlainPassword,
     pub code: String,
 }
 
@@ -333,37 +243,20 @@ pub async fn disable_totp(
         .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
         .await
     {
-        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many verification attempts. Please try again in a few minutes."
-            })),
-        )
-            .into_response();
+        warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
+        return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", auth.0.did)
+    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", &*&auth.0.did)
         .fetch_optional(&state.db)
         .await;
 
     let password_hash = match user {
         Ok(Some(row)) => row.password_hash,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
-        }
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -372,42 +265,22 @@ pub async fn disable_totp(
         .map(|h| bcrypt::verify(&input.password, h).unwrap_or(false))
         .unwrap_or(false);
     if !password_valid {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "InvalidPassword",
-                "message": "Password is incorrect"
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidPassword("Password is incorrect".into()).into_response();
     }
 
     let totp_row = sqlx::query!(
         "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
 
     let totp_row = match totp_row {
         Ok(Some(row)) if row.verified => row,
-        Ok(Some(_)) | Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "TotpNotEnabled",
-                    "message": "TOTP is not enabled for this account"
-                })),
-            )
-                .into_response();
-        }
+        Ok(Some(_)) | Ok(None) => return ApiError::TotpNotEnabled.into_response(),
         Err(e) => {
             error!("DB error fetching TOTP: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -420,75 +293,48 @@ pub async fn disable_totp(
                 Ok(s) => s,
                 Err(e) => {
                     error!("Failed to decrypt TOTP secret: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             };
         verify_totp_code(&secret, code)
     };
 
     if !code_valid {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "InvalidCode",
-                "message": "Invalid verification code"
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidCode(Some("Invalid verification code".into())).into_response();
     }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             error!("Failed to begin transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
-    if let Err(e) = sqlx::query!("DELETE FROM user_totp WHERE did = $1", auth.0.did)
+    if let Err(e) = sqlx::query!("DELETE FROM user_totp WHERE did = $1", &*&auth.0.did)
         .execute(&mut *tx)
         .await
     {
         error!("Failed to delete TOTP: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", auth.0.did)
+    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", &*&auth.0.did)
         .execute(&mut *tx)
         .await
     {
         error!("Failed to delete backup codes: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Err(e) = tx.commit().await {
         error!("Failed to commit transaction: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    info!(did = %auth.0.did, "TOTP disabled");
+    info!(did = %&auth.0.did, "TOTP disabled");
 
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Serialize)]
@@ -500,7 +346,7 @@ pub struct GetTotpStatusResponse {
 }
 
 pub async fn get_totp_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let totp_row = sqlx::query!("SELECT verified FROM user_totp WHERE did = $1", auth.0.did)
+    let totp_row = sqlx::query!("SELECT verified FROM user_totp WHERE did = $1", &*&auth.0.did)
         .fetch_optional(&state.db)
         .await;
 
@@ -509,17 +355,13 @@ pub async fn get_totp_status(State(state): State<AppState>, auth: BearerAuth) ->
         Ok(None) => false,
         Err(e) => {
             error!("DB error fetching TOTP status: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     let backup_count_row = sqlx::query!(
         "SELECT COUNT(*) as count FROM backup_codes WHERE did = $1 AND used_at IS NULL",
-        auth.0.did
+        &auth.0.did
     )
     .fetch_one(&state.db)
     .await;
@@ -536,7 +378,7 @@ pub async fn get_totp_status(State(state): State<AppState>, auth: BearerAuth) ->
 
 #[derive(Deserialize)]
 pub struct RegenerateBackupCodesInput {
-    pub password: String,
+    pub password: PlainPassword,
     pub code: String,
 }
 
@@ -555,37 +397,20 @@ pub async fn regenerate_backup_codes(
         .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
         .await
     {
-        warn!(did = %auth.0.did, "TOTP verification rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many verification attempts. Please try again in a few minutes."
-            })),
-        )
-            .into_response();
+        warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
+        return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", auth.0.did)
+    let user = sqlx::query!("SELECT password_hash FROM users WHERE did = $1", &*&auth.0.did)
         .fetch_optional(&state.db)
         .await;
 
     let password_hash = match user {
         Ok(Some(row)) => row.password_hash,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
-        }
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -594,42 +419,22 @@ pub async fn regenerate_backup_codes(
         .map(|h| bcrypt::verify(&input.password, h).unwrap_or(false))
         .unwrap_or(false);
     if !password_valid {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "InvalidPassword",
-                "message": "Password is incorrect"
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidPassword("Password is incorrect".into()).into_response();
     }
 
     let totp_row = sqlx::query!(
         "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
 
     let totp_row = match totp_row {
         Ok(Some(row)) if row.verified => row,
-        Ok(Some(_)) | Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "TotpNotEnabled",
-                    "message": "TOTP must be enabled to regenerate backup codes"
-                })),
-            )
-                .into_response();
-        }
+        Ok(Some(_)) | Ok(None) => return ApiError::TotpNotEnabled.into_response(),
         Err(e) => {
             error!("DB error fetching TOTP: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -638,24 +443,13 @@ pub async fn regenerate_backup_codes(
         Ok(s) => s,
         Err(e) => {
             error!("Failed to decrypt TOTP secret: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "InvalidCode",
-                "message": "Invalid verification code"
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidCode(Some("Invalid verification code".into())).into_response();
     }
 
     let backup_codes = generate_backup_codes();
@@ -663,24 +457,16 @@ pub async fn regenerate_backup_codes(
         Ok(tx) => tx,
         Err(e) => {
             error!("Failed to begin transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
-    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", auth.0.did)
+    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", &*&auth.0.did)
         .execute(&mut *tx)
         .await
     {
         error!("Failed to clear old backup codes: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     for code in &backup_codes {
@@ -688,41 +474,29 @@ pub async fn regenerate_backup_codes(
             Ok(h) => h,
             Err(e) => {
                 error!("Failed to hash backup code: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
 
         if let Err(e) = sqlx::query!(
             "INSERT INTO backup_codes (did, code_hash, created_at) VALUES ($1, $2, NOW())",
-            auth.0.did,
+            &auth.0.did,
             hash
         )
         .execute(&mut *tx)
         .await
         {
             error!("Failed to store backup code: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     }
 
     if let Err(e) = tx.commit().await {
         error!("Failed to commit transaction: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    info!(did = %auth.0.did, "Backup codes regenerated");
+    info!(did = %&auth.0.did, "Backup codes regenerated");
 
     Json(RegenerateBackupCodesResponse { backup_codes }).into_response()
 }

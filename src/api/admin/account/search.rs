@@ -1,5 +1,7 @@
+use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
+use crate::types::{Did, Handle};
 use axum::{
     Json,
     extract::{Query, State},
@@ -7,7 +9,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::error;
 
 #[derive(Deserialize)]
@@ -26,8 +27,8 @@ fn default_limit() -> i64 {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountView {
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
     pub indexed_at: String,
@@ -101,8 +102,8 @@ pub async fn search_accounts(
                         invites_disabled,
                     )| {
                         AccountView {
-                            did: did.clone(),
-                            handle,
+                            did: did.clone().into(),
+                            handle: handle.into(),
                             email,
                             indexed_at: created_at.to_rfc3339(),
                             email_confirmed_at: if email_verified {
@@ -117,7 +118,7 @@ pub async fn search_accounts(
                 )
                 .collect();
             let next_cursor = if has_more {
-                accounts.last().map(|a| a.did.clone())
+                accounts.last().map(|a| a.did.to_string())
             } else {
                 None
             };
@@ -132,11 +133,7 @@ pub async fn search_accounts(
         }
         Err(e) => {
             error!("DB error in search_accounts: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

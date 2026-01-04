@@ -41,24 +41,13 @@ pub struct ResolvedService {
     pub did: String,
 }
 
+#[derive(Clone)]
 pub struct DidResolver {
-    did_cache: RwLock<HashMap<String, CachedDid>>,
-    did_doc_cache: RwLock<HashMap<String, CachedDidDocument>>,
+    did_cache: Arc<RwLock<HashMap<String, CachedDid>>>,
+    did_doc_cache: Arc<RwLock<HashMap<String, CachedDidDocument>>>,
     client: Client,
     cache_ttl: Duration,
     plc_directory_url: String,
-}
-
-impl Clone for DidResolver {
-    fn clone(&self) -> Self {
-        Self {
-            did_cache: RwLock::new(HashMap::new()),
-            did_doc_cache: RwLock::new(HashMap::new()),
-            client: self.client.clone(),
-            cache_ttl: self.cache_ttl,
-            plc_directory_url: self.plc_directory_url.clone(),
-        }
-    }
 }
 
 impl DidResolver {
@@ -81,8 +70,8 @@ impl DidResolver {
         info!("DID resolver initialized");
 
         Self {
-            did_cache: RwLock::new(HashMap::new()),
-            did_doc_cache: RwLock::new(HashMap::new()),
+            did_cache: Arc::new(RwLock::new(HashMap::new())),
+            did_doc_cache: Arc::new(RwLock::new(HashMap::new())),
             client,
             cache_ttl: Duration::from_secs(cache_ttl_secs),
             plc_directory_url,

@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use crate::auth::{extract_bearer_token_from_header, validate_bearer_token_allow_takendown};
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
@@ -12,7 +13,6 @@ use cid::Cid;
 use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::io::Write;
 use std::str::FromStr;
 
@@ -48,11 +48,7 @@ pub async fn get_head(
 ) -> Response {
     let did = params.did.trim();
     if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("did is required".into()).into_response();
     }
     let is_admin_or_self = check_admin_or_self(&state, &headers, did).await;
     let account = match assert_repo_availability(&state.db, did, is_admin_or_self).await {
@@ -61,11 +57,10 @@ pub async fn get_head(
     };
     match account.repo_root_cid {
         Some(root) => (StatusCode::OK, Json(GetHeadOutput { root })).into_response(),
-        None => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "HeadNotFound", "message": format!("Could not find root for DID: {}", did)})),
-        )
-            .into_response(),
+        None => {
+            ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did)))
+                .into_response()
+        }
     }
 }
 
@@ -81,46 +76,21 @@ pub async fn get_checkout(
 ) -> Response {
     let did = params.did.trim();
     if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("did is required".into()).into_response();
     }
     let is_admin_or_self = check_admin_or_self(&state, &headers, did).await;
     let account = match assert_repo_availability(&state.db, did, is_admin_or_self).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };
-    let head_str = match account.repo_root_cid {
-        Some(r) => r,
-        None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "RepoNotFound", "message": "Repo not initialized"})),
-            )
-                .into_response();
-        }
+    let Some(head_str) = account.repo_root_cid else {
+        return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
     };
-    let head_cid = match Cid::from_str(&head_str) {
-        Ok(c) => c,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Invalid head CID"})),
-            )
-                .into_response();
-        }
+    let Ok(head_cid) = Cid::from_str(&head_str) else {
+        return ApiError::InternalError(Some("Invalid head CID".into())).into_response();
     };
-    let mut car_bytes = match encode_car_header(&head_cid) {
-        Ok(h) => h,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": format!("Failed to encode CAR header: {}", e)})),
-            )
-                .into_response();
-        }
+    let Ok(mut car_bytes) = encode_car_header(&head_cid) else {
+        return ApiError::InternalError(Some("Failed to encode CAR header".into())).into_response();
     };
     let mut stack = vec![head_cid];
     let mut visited = std::collections::HashSet::new();

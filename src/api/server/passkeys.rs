@@ -1,3 +1,5 @@
+use crate::api::EmptyResponse;
+use crate::api::error::ApiError;
 use crate::auth::BearerAuth;
 use crate::auth::webauthn::{
     self, WebAuthnConfig, delete_passkey as db_delete_passkey, delete_registration_state,
@@ -8,22 +10,17 @@ use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{error, info, warn};
 use webauthn_rs::prelude::*;
 
-fn get_webauthn() -> Result<WebAuthnConfig, (StatusCode, Json<serde_json::Value>)> {
+fn get_webauthn() -> Result<WebAuthnConfig, ApiError> {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     WebAuthnConfig::new(&hostname).map_err(|e| {
         error!("Failed to create WebAuthn config: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "WebAuthn configuration failed"})),
-        )
+        ApiError::InternalError(Some("WebAuthn configuration failed".into()))
     })
 }
 
@@ -49,26 +46,18 @@ pub async fn start_passkey_registration(
         Err(e) => return e.into_response(),
     };
 
-    let user = sqlx::query!("SELECT handle FROM users WHERE did = $1", auth.0.did)
+    let user = sqlx::query!("SELECT handle FROM users WHERE did = $1", &*auth.0.did)
         .fetch_optional(&state.db)
         .await;
 
     let handle = match user {
         Ok(Some(row)) => row.handle,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -76,11 +65,7 @@ pub async fn start_passkey_registration(
         Ok(passkeys) => passkeys,
         Err(e) => {
             error!("DB error fetching existing passkeys: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -100,24 +85,17 @@ pub async fn start_passkey_registration(
         Ok(result) => result,
         Err(e) => {
             error!("Failed to start passkey registration: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to start registration"})),
-            )
+            return ApiError::InternalError(Some("Failed to start registration".into()))
                 .into_response();
         }
     };
 
     if let Err(e) = save_registration_state(&state.db, &auth.0.did, &reg_state).await {
         error!("Failed to save registration state: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    let options = serde_json::to_value(&ccr).unwrap_or(json!({}));
+    let options = serde_json::to_value(&ccr).unwrap_or(serde_json::json!({}));
 
     info!(did = %auth.0.did, "Passkey registration started");
 
@@ -151,22 +129,11 @@ pub async fn finish_passkey_registration(
     let reg_state = match load_registration_state(&state.db, &auth.0.did).await {
         Ok(Some(state)) => state,
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "NoRegistrationInProgress",
-                    "message": "No registration in progress. Call startPasskeyRegistration first."
-                })),
-            )
-                .into_response();
+            return ApiError::NoRegistrationInProgress.into_response();
         }
         Err(e) => {
             error!("DB error loading registration state: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -174,14 +141,7 @@ pub async fn finish_passkey_registration(
         Ok(c) => c,
         Err(e) => {
             warn!("Failed to parse credential: {:?}", e);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "InvalidCredential",
-                    "message": "Failed to parse credential response"
-                })),
-            )
-                .into_response();
+            return ApiError::InvalidCredential.into_response();
         }
     };
 
@@ -189,14 +149,7 @@ pub async fn finish_passkey_registration(
         Ok(pk) => pk,
         Err(e) => {
             warn!("Failed to finish passkey registration: {}", e);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "RegistrationFailed",
-                    "message": "Failed to verify passkey registration"
-                })),
-            )
-                .into_response();
+            return ApiError::RegistrationFailed.into_response();
         }
     };
 
@@ -211,11 +164,7 @@ pub async fn finish_passkey_registration(
         Ok(id) => id,
         Err(e) => {
             error!("Failed to save passkey: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -258,11 +207,7 @@ pub async fn list_passkeys(State(state): State<AppState>, auth: BearerAuth) -> R
         Ok(pks) => pks,
         Err(e) => {
             error!("DB error fetching passkeys: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -306,31 +251,19 @@ pub async fn delete_passkey(
     let id: uuid::Uuid = match input.id.parse() {
         Ok(id) => id,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidId", "message": "Invalid passkey ID"})),
-            )
-                .into_response();
+            return ApiError::InvalidId.into_response();
         }
     };
 
     match db_delete_passkey(&state.db, id, &auth.0.did).await {
         Ok(true) => {
             info!(did = %auth.0.did, passkey_id = %id, "Passkey deleted");
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "PasskeyNotFound", "message": "Passkey not found"})),
-        )
-            .into_response(),
+        Ok(false) => ApiError::PasskeyNotFound.into_response(),
         Err(e) => {
             error!("DB error deleting passkey: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -350,31 +283,19 @@ pub async fn update_passkey(
     let id: uuid::Uuid = match input.id.parse() {
         Ok(id) => id,
         Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidId", "message": "Invalid passkey ID"})),
-            )
-                .into_response();
+            return ApiError::InvalidId.into_response();
         }
     };
 
     match db_update_passkey_name(&state.db, id, &auth.0.did, &input.friendly_name).await {
         Ok(true) => {
             info!(did = %auth.0.did, passkey_id = %id, "Passkey renamed");
-            (StatusCode::OK, Json(json!({}))).into_response()
+            EmptyResponse::ok().into_response()
         }
-        Ok(false) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "PasskeyNotFound", "message": "Passkey not found"})),
-        )
-            .into_response(),
+        Ok(false) => ApiError::PasskeyNotFound.into_response(),
         Err(e) => {
             error!("DB error updating passkey: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

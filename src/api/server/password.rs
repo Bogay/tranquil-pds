@@ -1,16 +1,18 @@
+use crate::api::error::ApiError;
+use crate::api::{EmptyResponse, HasPasswordResponse, SuccessResponse};
 use crate::auth::BearerAuth;
 use crate::state::{AppState, RateLimitKind};
+use crate::types::PlainPassword;
 use crate::validation::validate_password;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use serde_json::json;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -49,22 +51,11 @@ pub async fn request_password_reset(
         .await
     {
         warn!(ip = %client_ip, "Password reset rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many password reset requests. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
     let identifier = input.email.trim();
     if identifier.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "email or handle is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("email or handle is required".into()).into_response();
     }
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let normalized = identifier.to_lowercase();
@@ -85,15 +76,11 @@ pub async fn request_password_reset(
         Ok(Some(row)) => row.id,
         Ok(None) => {
             info!("Password reset requested for unknown identifier");
-            return (StatusCode::OK, Json(json!({}))).into_response();
+            return EmptyResponse::ok().into_response();
         }
         Err(e) => {
             error!("DB error in request_password_reset: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let code = generate_reset_code();
@@ -108,11 +95,7 @@ pub async fn request_password_reset(
     .await;
     if let Err(e) = update {
         error!("DB error setting reset code: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) = crate::comms::enqueue_password_reset(&state.db, user_id, &code, &hostname).await
@@ -120,13 +103,13 @@ pub async fn request_password_reset(
         warn!("Failed to enqueue password reset notification: {:?}", e);
     }
     info!("Password reset requested for user {}", user_id);
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
 pub struct ResetPasswordInput {
     pub token: String,
-    pub password: String,
+    pub password: PlainPassword,
 }
 
 pub async fn reset_password(
@@ -140,40 +123,18 @@ pub async fn reset_password(
         .await
     {
         warn!(ip = %client_ip, "Reset password rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many requests. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
     let token = input.token.trim();
     let password = &input.password;
     if token.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidToken", "message": "token is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidToken(None).into_response();
     }
     if password.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "password is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("password is required".into()).into_response();
     }
     if let Err(e) = validate_password(password) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidPassword",
-                "message": e.to_string()
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(e.to_string()).into_response();
     }
     let user = sqlx::query!(
         "SELECT id, password_reset_code, password_reset_code_expires_at FROM users WHERE password_reset_code = $1",
@@ -187,19 +148,11 @@ pub async fn reset_password(
             (row.id, expires)
         }
         Ok(None) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidToken", "message": "Invalid or expired token"})),
-            )
-                .into_response();
+            return ApiError::InvalidToken(None).into_response();
         }
         Err(e) => {
             error!("DB error in reset_password: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if let Some(exp) = expires_at {
@@ -213,18 +166,10 @@ pub async fn reset_password(
             {
                 error!("Failed to clear expired reset code: {:?}", e);
             }
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "ExpiredToken", "message": "Token has expired"})),
-            )
-                .into_response();
+            return ApiError::ExpiredToken(None).into_response();
         }
     } else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidToken", "message": "Invalid or expired token"})),
-        )
-            .into_response();
+        return ApiError::InvalidToken(None).into_response();
     }
     let password_clone = password.to_string();
     let password_hash =
@@ -232,30 +177,18 @@ pub async fn reset_password(
             Ok(Ok(h)) => h,
             Ok(Err(e)) => {
                 error!("Failed to hash password: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
             Err(e) => {
                 error!("Failed to spawn blocking task: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             error!("Failed to begin transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if let Err(e) = sqlx::query!(
@@ -267,11 +200,7 @@ pub async fn reset_password(
     .await
     {
         error!("DB error updating password: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let user_did = match sqlx::query_scalar!("SELECT did FROM users WHERE id = $1", user_id)
         .fetch_one(&mut *tx)
@@ -280,11 +209,7 @@ pub async fn reset_password(
         Ok(did) => did,
         Err(e) => {
             error!("Failed to get DID for user {}: {:?}", user_id, e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let session_jtis: Vec<String> = match sqlx::query_scalar!(
@@ -308,19 +233,11 @@ pub async fn reset_password(
             "Failed to invalidate sessions after password reset: {:?}",
             e
         );
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     if let Err(e) = tx.commit().await {
         error!("Failed to commit password reset transaction: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     for jti in session_jtis {
         let cache_key = format!("auth:session:{}:{}", user_did, jti);
@@ -332,14 +249,14 @@ pub async fn reset_password(
         }
     }
     info!("Password reset completed for user {}", user_id);
-    (StatusCode::OK, Json(json!({}))).into_response()
+    EmptyResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangePasswordInput {
-    pub current_password: String,
-    pub new_password: String,
+    pub current_password: PlainPassword,
+    pub new_password: PlainPassword,
 }
 
 pub async fn change_password(
@@ -355,28 +272,13 @@ pub async fn change_password(
     let current_password = &input.current_password;
     let new_password = &input.new_password;
     if current_password.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "currentPassword is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("currentPassword is required".into()).into_response();
     }
     if new_password.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "newPassword is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("newPassword is required".into()).into_response();
     }
     if let Err(e) = validate_password(new_password) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidPassword",
-                "message": e.to_string()
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(e.to_string()).into_response();
     }
     let user =
         sqlx::query_as::<_, (Uuid, String)>("SELECT id, password_hash FROM users WHERE did = $1")
@@ -386,38 +288,22 @@ pub async fn change_password(
     let (user_id, password_hash) = match user {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error in change_password: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let valid = match verify(current_password, &password_hash) {
         Ok(v) => v,
         Err(e) => {
             error!("Password verification error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     if !valid {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "InvalidPassword", "message": "Current password is incorrect"})),
-        )
-            .into_response();
+        return ApiError::InvalidPassword("Current password is incorrect".into()).into_response();
     }
     let new_password_clone = new_password.to_string();
     let new_hash =
@@ -425,19 +311,11 @@ pub async fn change_password(
             Ok(Ok(h)) => h,
             Ok(Err(e)) => {
                 error!("Failed to hash password: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
             Err(e) => {
                 error!("Failed to spawn blocking task: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     if let Err(e) = sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
@@ -447,40 +325,26 @@ pub async fn change_password(
         .await
     {
         error!("DB error updating password: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
-    info!(did = %auth.0.did, "Password changed successfully");
-    (StatusCode::OK, Json(json!({}))).into_response()
+    info!(did = %&auth.0.did, "Password changed successfully");
+    EmptyResponse::ok().into_response()
 }
 
 pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
     let user = sqlx::query!(
         "SELECT password_hash IS NOT NULL as has_password FROM users WHERE did = $1",
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
 
     match user {
-        Ok(Some(row)) => {
-            Json(json!({"hasPassword": row.has_password.unwrap_or(false)})).into_response()
-        }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "AccountNotFound"})),
-        )
-            .into_response(),
+        Ok(Some(row)) => HasPasswordResponse::new(row.has_password.unwrap_or(false)).into_response(),
+        Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -504,19 +368,15 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
     let has_passkeys =
         crate::api::server::passkeys::has_passkeys_for_user_db(&state.db, &auth.0.did).await;
     if !has_passkeys {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "NoPasskeys",
-                "message": "You must have at least one passkey registered before removing your password"
-            })),
+        return ApiError::InvalidRequest(
+            "You must have at least one passkey registered before removing your password".into(),
         )
-            .into_response();
+        .into_response();
     }
 
     let user = sqlx::query!(
         "SELECT id, password_hash FROM users WHERE did = $1",
-        auth.0.did
+        &auth.0.did
     )
     .fetch_optional(&state.db)
     .await;
@@ -524,31 +384,16 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
     let user = match user {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if user.password_hash.is_none() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "NoPassword",
-                "message": "Account already has no password"
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("Account already has no password".into()).into_response();
     }
 
     if let Err(e) = sqlx::query!(
@@ -559,13 +404,9 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
     .await
     {
         error!("DB error removing password: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    info!(did = %auth.0.did, "Password removed - account is now passkey-only");
-    (StatusCode::OK, Json(json!({"success": true}))).into_response()
+    info!(did = %&auth.0.did, "Password removed - account is now passkey-only");
+    SuccessResponse::ok().into_response()
 }

@@ -431,7 +431,7 @@ pub async fn start_scheduled_tasks(
                 }
             }
             _ = ticker.tick() => {
-                if let Err(e) = process_scheduled_deletions(&db, &blob_store).await {
+                if let Err(e) = process_scheduled_deletions(&db, blob_store.as_ref()).await {
                     error!("Error processing scheduled deletions: {}", e);
                 }
             }
@@ -441,7 +441,7 @@ pub async fn start_scheduled_tasks(
 
 async fn process_scheduled_deletions(
     db: &PgPool,
-    blob_store: &Arc<dyn BlobStorage>,
+    blob_store: &dyn BlobStorage,
 ) -> Result<(), String> {
     let accounts_to_delete = sqlx::query!(
         r#"
@@ -489,7 +489,7 @@ async fn process_scheduled_deletions(
 
 async fn delete_account_data(
     db: &PgPool,
-    blob_store: &Arc<dyn BlobStorage>,
+    blob_store: &dyn BlobStorage,
     did: &str,
     _handle: &str,
 ) -> Result<(), String> {

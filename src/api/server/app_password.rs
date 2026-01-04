@@ -1,4 +1,5 @@
-use crate::api::ApiError;
+use crate::api::error::ApiError;
+use crate::api::EmptyResponse;
 use crate::auth::BearerAuth;
 use crate::delegation::{self, DelegationActionType};
 use crate::state::{AppState, RateLimitKind};
@@ -60,7 +61,7 @@ pub async fn list_app_passwords(
         }
         Err(e) => {
             error!("DB error listing app passwords: {:?}", e);
-            ApiError::InternalError.into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -95,14 +96,7 @@ pub async fn create_app_password(
         .await
     {
         warn!(ip = %client_ip, "App password creation rate limit exceeded");
-        return (
-            axum::http::StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many requests. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
     let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
         Ok(id) => id,
@@ -134,7 +128,7 @@ pub async fn create_app_password(
         let intersected = delegation::intersect_scopes(requested, &granted_scopes);
 
         if intersected.is_empty() && !granted_scopes.is_empty() {
-            return ApiError::InsufficientScope.into_response();
+            return ApiError::InsufficientScope(None).into_response();
         }
 
         let scope_result = if intersected.is_empty() {
@@ -167,11 +161,11 @@ pub async fn create_app_password(
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
             error!("Failed to hash password: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
         Err(e) => {
             error!("Failed to spawn blocking task: {:?}", e);
-            return ApiError::InternalError.into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let privileged = input.privileged.unwrap_or(false);
@@ -184,7 +178,7 @@ pub async fn create_app_password(
         created_at,
         privileged,
         final_scopes,
-        controller_did
+        controller_did.as_deref()
     )
     .execute(&state.db)
     .await
@@ -218,7 +212,7 @@ pub async fn create_app_password(
         }
         Err(e) => {
             error!("DB error creating app password: {:?}", e);
-            ApiError::InternalError.into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -243,7 +237,7 @@ pub async fn revoke_app_password(
     }
     let sessions_to_invalidate = sqlx::query_scalar!(
         "SELECT access_jti FROM session_tokens WHERE did = $1 AND app_password_name = $2",
-        auth_user.did,
+        &auth_user.did,
         name
     )
     .fetch_all(&state.db)
@@ -251,17 +245,17 @@ pub async fn revoke_app_password(
     .unwrap_or_default();
     if let Err(e) = sqlx::query!(
         "DELETE FROM session_tokens WHERE did = $1 AND app_password_name = $2",
-        auth_user.did,
+        &auth_user.did,
         name
     )
     .execute(&state.db)
     .await
     {
         error!("DB error revoking sessions for app password: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
     for jti in &sessions_to_invalidate {
-        let cache_key = format!("auth:session:{}:{}", auth_user.did, jti);
+        let cache_key = format!("auth:session:{}:{}", &auth_user.did, jti);
         let _ = state.cache.delete(&cache_key).await;
     }
     if let Err(e) = sqlx::query!(
@@ -273,7 +267,7 @@ pub async fn revoke_app_password(
     .await
     {
         error!("DB error revoking app password: {:?}", e);
-        return ApiError::InternalError.into_response();
+        return ApiError::InternalError(None).into_response();
     }
-    Json(json!({})).into_response()
+    EmptyResponse::ok().into_response()
 }

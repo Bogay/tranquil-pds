@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -8,7 +9,6 @@ use axum::{
 use chrono::{Duration, Utc};
 use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::{error, info};
 
 const SECP256K1_MULTICODEC_PREFIX: [u8; 2] = [0xe7, 0x01];
@@ -69,11 +69,7 @@ pub async fn reserve_signing_key(
         }
         Err(e) => {
             error!("DB error in reserve_signing_key: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }

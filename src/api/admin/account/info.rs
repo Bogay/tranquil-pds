@@ -1,5 +1,7 @@
+use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
+use crate::types::{Did, Handle};
 use axum::{
     Json,
     extract::{Query, RawQuery, State},
@@ -7,19 +9,18 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tracing::error;
 
 #[derive(Deserialize)]
 pub struct GetAccountInfoParams {
-    pub did: String,
+    pub did: Did,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountInfo {
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
     pub indexed_at: String,
@@ -42,8 +43,8 @@ pub struct InviteCodeInfo {
     pub code: String,
     pub available: i32,
     pub disabled: bool,
-    pub for_account: String,
-    pub created_by: String,
+    pub for_account: Did,
+    pub created_by: Did,
     pub created_at: String,
     pub uses: Vec<InviteCodeUseInfo>,
 }
@@ -51,7 +52,7 @@ pub struct InviteCodeInfo {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeUseInfo {
-    pub used_by: String,
+    pub used_by: Did,
     pub used_at: String,
 }
 
@@ -66,21 +67,13 @@ pub async fn get_account_info(
     _auth: BearerAuthAdmin,
     Query(params): Query<GetAccountInfoParams>,
 ) -> Response {
-    let did = params.did.trim();
-    if did.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "did is required"})),
-        )
-            .into_response();
-    }
     let result = sqlx::query!(
         r#"
         SELECT id, did, handle, email, created_at, invites_disabled, email_verified, deactivated_at
         FROM users
         WHERE did = $1
         "#,
-        did
+        params.did.as_str()
     )
     .fetch_optional(&state.db)
     .await;
@@ -91,8 +84,8 @@ pub async fn get_account_info(
             (
                 StatusCode::OK,
                 Json(AccountInfo {
-                    did: row.did,
-                    handle: row.handle,
+                    did: row.did.into(),
+                    handle: row.handle.into(),
                     email: row.email,
                     indexed_at: row.created_at.to_rfc3339(),
                     invite_note: None,
@@ -109,18 +102,10 @@ pub async fn get_account_info(
             )
                 .into_response()
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-        )
-            .into_response(),
+        Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error in get_account_info: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response()
+            ApiError::InternalError(None).into_response()
         }
     }
 }
@@ -199,13 +184,13 @@ async fn get_invite_code_info(db: &sqlx::PgPool, code: &str) -> Option<InviteCod
         code: row.code,
         available: row.available_uses,
         disabled: row.disabled.unwrap_or(false),
-        for_account: row.for_account,
-        created_by: row.created_by,
+        for_account: row.for_account.into(),
+        created_by: row.created_by.into(),
         created_at: row.created_at.to_rfc3339(),
         uses: uses
             .into_iter()
             .map(|u| InviteCodeUseInfo {
-                used_by: u.used_by,
+                used_by: u.used_by.into(),
                 used_at: u.used_at.to_rfc3339(),
             })
             .collect(),
@@ -222,11 +207,7 @@ pub async fn get_account_infos(
         .filter(|d| !d.is_empty())
         .collect();
     if dids.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidRequest", "message": "dids is required"})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest("dids is required".into()).into_response();
     }
     let users = match sqlx::query!(
         r#"
@@ -242,11 +223,7 @@ pub async fn get_account_infos(
         Ok(rows) => rows,
         Err(e) => {
             error!("Failed to fetch account infos: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -306,7 +283,7 @@ pub async fn get_account_infos(
             .entry(u.code.clone())
             .or_default()
             .push(InviteCodeUseInfo {
-                used_by: u.used_by,
+                used_by: u.used_by.into(),
                 used_at: u.used_at.to_rfc3339(),
             });
     }
@@ -320,8 +297,8 @@ pub async fn get_account_infos(
             code: ic.code.clone(),
             available: ic.available_uses,
             disabled: ic.disabled.unwrap_or(false),
-            for_account: ic.for_account,
-            created_by: ic.created_by,
+            for_account: ic.for_account.into(),
+            created_by: ic.created_by.into(),
             created_at: ic.created_at.to_rfc3339(),
             uses: uses_by_code.get(&ic.code).cloned().unwrap_or_default(),
         };
@@ -339,8 +316,8 @@ pub async fn get_account_infos(
             .and_then(|code| code_info_map.get(code).cloned());
         let invites = codes_by_user.get(&row.id).cloned();
         infos.push(AccountInfo {
-            did: row.did,
-            handle: row.handle,
+            did: row.did.into(),
+            handle: row.handle.into(),
             email: row.email,
             indexed_at: row.created_at.to_rfc3339(),
             invite_note: None,

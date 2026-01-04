@@ -1,10 +1,11 @@
 use super::super::{DeviceData, OAuthError};
+use crate::types::Handle;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 pub struct DeviceAccountRow {
     pub did: String,
-    pub handle: String,
+    pub handle: Handle,
     pub email: Option<String>,
     pub last_used_at: DateTime<Utc>,
 }
@@ -116,7 +117,7 @@ pub async fn get_device_accounts(
         .into_iter()
         .map(|r| DeviceAccountRow {
             did: r.did,
-            handle: r.handle,
+            handle: r.handle.into(),
             email: r.email,
             last_used_at: r.last_used_at,
         })

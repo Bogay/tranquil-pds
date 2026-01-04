@@ -1,9 +1,8 @@
 #![allow(clippy::result_large_err)]
 
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
 
+use crate::api::error::ApiError;
 use crate::oauth::scopes::{
     AccountAction, AccountAttr, IdentityAttr, RepoAction, ScopePermissions,
 };
@@ -28,16 +27,9 @@ pub fn check_repo_scope(
     }
 
     let permissions = ScopePermissions::from_scope_string(scope);
-    permissions.assert_repo(action, collection).map_err(|e| {
-        (
-            StatusCode::FORBIDDEN,
-            axum::Json(json!({
-                "error": "InsufficientScope",
-                "message": e.to_string()
-            })),
-        )
-            .into_response()
-    })
+    permissions
+        .assert_repo(action, collection)
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
 }
 
 pub fn check_blob_scope(is_oauth: bool, scope: Option<&str>, mime: &str) -> Result<(), Response> {
@@ -46,16 +38,9 @@ pub fn check_blob_scope(is_oauth: bool, scope: Option<&str>, mime: &str) -> Resu
     }
 
     let permissions = ScopePermissions::from_scope_string(scope);
-    permissions.assert_blob(mime).map_err(|e| {
-        (
-            StatusCode::FORBIDDEN,
-            axum::Json(json!({
-                "error": "InsufficientScope",
-                "message": e.to_string()
-            })),
-        )
-            .into_response()
-    })
+    permissions
+        .assert_blob(mime)
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
 }
 
 pub fn check_rpc_scope(
@@ -69,16 +54,9 @@ pub fn check_rpc_scope(
     }
 
     let permissions = ScopePermissions::from_scope_string(scope);
-    permissions.assert_rpc(aud, lxm).map_err(|e| {
-        (
-            StatusCode::FORBIDDEN,
-            axum::Json(json!({
-                "error": "InsufficientScope",
-                "message": e.to_string()
-            })),
-        )
-            .into_response()
-    })
+    permissions
+        .assert_rpc(aud, lxm)
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
 }
 
 pub fn check_account_scope(
@@ -92,16 +70,9 @@ pub fn check_account_scope(
     }
 
     let permissions = ScopePermissions::from_scope_string(scope);
-    permissions.assert_account(attr, action).map_err(|e| {
-        (
-            StatusCode::FORBIDDEN,
-            axum::Json(json!({
-                "error": "InsufficientScope",
-                "message": e.to_string()
-            })),
-        )
-            .into_response()
-    })
+    permissions
+        .assert_account(attr, action)
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
 }
 
 pub fn check_identity_scope(
@@ -114,14 +85,7 @@ pub fn check_identity_scope(
     }
 
     let permissions = ScopePermissions::from_scope_string(scope);
-    permissions.assert_identity(attr).map_err(|e| {
-        (
-            StatusCode::FORBIDDEN,
-            axum::Json(json!({
-                "error": "InsufficientScope",
-                "message": e.to_string()
-            })),
-        )
-            .into_response()
-    })
+    permissions
+        .assert_identity(attr)
+        .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
 }

@@ -257,7 +257,7 @@ pub async fn enqueue_comms(db: &PgPool, item: NewComms) -> Result<Uuid, sqlx::Er
 pub struct UserCommsPrefs {
     pub channel: CommsChannel,
     pub email: Option<String>,
-    pub handle: String,
+    pub handle: crate::types::Handle,
     pub locale: String,
 }
 
@@ -282,7 +282,7 @@ pub async fn get_user_comms_prefs(
     Ok(UserCommsPrefs {
         channel: row.channel,
         email: row.email,
-        handle: row.handle,
+        handle: row.handle.into(),
         locale: row.preferred_locale.unwrap_or_else(|| "en".to_string()),
     })
 }
@@ -305,7 +305,7 @@ pub async fn enqueue_welcome(
             user_id,
             prefs.channel,
             super::types::CommsType::Welcome,
-            prefs.email.clone().unwrap_or_default(),
+            prefs.email.unwrap_or_default(),
             Some(subject),
             body,
         ),
@@ -332,7 +332,7 @@ pub async fn enqueue_password_reset(
             user_id,
             prefs.channel,
             super::types::CommsType::PasswordReset,
-            prefs.email.clone().unwrap_or_default(),
+            prefs.email.unwrap_or_default(),
             Some(subject),
             body,
         ),
@@ -388,7 +388,7 @@ pub async fn enqueue_email_update_token(
 ) -> Result<Uuid, sqlx::Error> {
     let prefs = get_user_comms_prefs(db, user_id).await?;
     let strings = get_strings(&prefs.locale);
-    let current_email = prefs.email.clone().unwrap_or_default();
+    let current_email = prefs.email.unwrap_or_default();
     let verify_page = format!("https://{}/app/verify?type=email-update", hostname);
     let verify_link = format!(
         "https://{}/app/verify?type=email-update&token={}",
@@ -437,7 +437,7 @@ pub async fn enqueue_account_deletion(
             user_id,
             prefs.channel,
             super::types::CommsType::AccountDeletion,
-            prefs.email.clone().unwrap_or_default(),
+            prefs.email.unwrap_or_default(),
             Some(subject),
             body,
         ),
@@ -464,7 +464,7 @@ pub async fn enqueue_plc_operation(
             user_id,
             prefs.channel,
             super::types::CommsType::PlcOperation,
-            prefs.email.clone().unwrap_or_default(),
+            prefs.email.unwrap_or_default(),
             Some(subject),
             body,
         ),
@@ -491,7 +491,7 @@ pub async fn enqueue_2fa_code(
             user_id,
             prefs.channel,
             super::types::CommsType::TwoFactorCode,
-            prefs.email.clone().unwrap_or_default(),
+            prefs.email.unwrap_or_default(),
             Some(subject),
             body,
         ),
@@ -518,7 +518,7 @@ pub async fn enqueue_passkey_recovery(
             user_id,
             prefs.channel,
             super::types::CommsType::PasskeyRecovery,
-            prefs.email.clone().unwrap_or_default(),
+            prefs.email.unwrap_or_default(),
             Some(subject),
             body,
         ),
@@ -665,7 +665,7 @@ pub async fn queue_legacy_login_notification(
             user_id,
             channel,
             super::types::CommsType::LegacyLoginAlert,
-            prefs.email.clone().unwrap_or_default(),
+            prefs.email.unwrap_or_default(),
             Some(subject),
             body,
         ),

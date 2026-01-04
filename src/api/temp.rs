@@ -1,15 +1,15 @@
+use crate::api::error::ApiError;
 use crate::auth::{extract_bearer_token_from_header, validate_bearer_token};
 use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use cid::Cid;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::str::FromStr;
 
 #[derive(Serialize)]
@@ -28,14 +28,7 @@ pub async fn check_signup_queue(State(state): State<AppState>, headers: HeaderMa
         && let Ok(user) = validate_bearer_token(&state.db, &token).await
         && user.is_oauth
     {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "Forbidden",
-                "message": "OAuth credentials are not supported for this endpoint"
-            })),
-        )
-            .into_response();
+        return ApiError::Forbidden.into_response();
     }
     Json(CheckSignupQueueOutput {
         activated: true,
@@ -62,25 +55,14 @@ pub async fn dereference_scope(
     headers: HeaderMap,
     Json(input): Json<DereferenceScopeInput>,
 ) -> Response {
-    let token = match extract_bearer_token_from_header(
+    let Some(token) = extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+    ) else {
+        return ApiError::AuthenticationRequired.into_response();
     };
 
     if validate_bearer_token(&state.db, &token).await.is_err() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "AuthenticationFailed"})),
-        )
-            .into_response();
+        return ApiError::AuthenticationFailed(None).into_response();
     }
 
     let scope_parts: Vec<&str> = input.scope.split_whitespace().collect();

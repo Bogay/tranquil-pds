@@ -245,3 +245,282 @@ pub struct JwkPublicKey {
 pub struct Jwks {
     pub keys: Vec<JwkPublicKey>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthFlowState {
+    Pending,
+    Authenticated { did: String, device_id: Option<String> },
+    Authorized { did: String, device_id: Option<String>, code: String },
+    Expired,
+}
+
+impl AuthFlowState {
+    pub fn from_request_data(data: &RequestData) -> Self {
+        if data.expires_at < chrono::Utc::now() {
+            return AuthFlowState::Expired;
+        }
+        match (&data.did, &data.code) {
+            (Some(did), Some(code)) => AuthFlowState::Authorized {
+                did: did.clone(),
+                device_id: data.device_id.clone(),
+                code: code.clone(),
+            },
+            (Some(did), None) => AuthFlowState::Authenticated {
+                did: did.clone(),
+                device_id: data.device_id.clone(),
+            },
+            (None, _) => AuthFlowState::Pending,
+        }
+    }
+
+    pub fn is_pending(&self) -> bool {
+        matches!(self, AuthFlowState::Pending)
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        matches!(self, AuthFlowState::Authenticated { .. })
+    }
+
+    pub fn is_authorized(&self) -> bool {
+        matches!(self, AuthFlowState::Authorized { .. })
+    }
+
+    pub fn is_expired(&self) -> bool {
+        matches!(self, AuthFlowState::Expired)
+    }
+
+    pub fn can_authenticate(&self) -> bool {
+        matches!(self, AuthFlowState::Pending)
+    }
+
+    pub fn can_authorize(&self) -> bool {
+        matches!(self, AuthFlowState::Authenticated { .. })
+    }
+
+    pub fn can_exchange(&self) -> bool {
+        matches!(self, AuthFlowState::Authorized { .. })
+    }
+
+    pub fn did(&self) -> Option<&str> {
+        match self {
+            AuthFlowState::Authenticated { did, .. } | AuthFlowState::Authorized { did, .. } => {
+                Some(did)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            AuthFlowState::Authorized { code, .. } => Some(code),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for AuthFlowState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthFlowState::Pending => write!(f, "pending"),
+            AuthFlowState::Authenticated { did, .. } => write!(f, "authenticated ({})", did),
+            AuthFlowState::Authorized { did, code, .. } => {
+                write!(f, "authorized ({}, code={}...)", did, &code[..8.min(code.len())])
+            }
+            AuthFlowState::Expired => write!(f, "expired"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshTokenState {
+    Valid,
+    Used { at: chrono::DateTime<chrono::Utc> },
+    InGracePeriod { rotated_at: chrono::DateTime<chrono::Utc> },
+    Expired,
+    Revoked,
+}
+
+impl RefreshTokenState {
+    pub fn is_valid(&self) -> bool {
+        matches!(self, RefreshTokenState::Valid)
+    }
+
+    pub fn is_usable(&self) -> bool {
+        matches!(
+            self,
+            RefreshTokenState::Valid | RefreshTokenState::InGracePeriod { .. }
+        )
+    }
+
+    pub fn is_used(&self) -> bool {
+        matches!(self, RefreshTokenState::Used { .. })
+    }
+
+    pub fn is_in_grace_period(&self) -> bool {
+        matches!(self, RefreshTokenState::InGracePeriod { .. })
+    }
+
+    pub fn is_expired(&self) -> bool {
+        matches!(self, RefreshTokenState::Expired)
+    }
+
+    pub fn is_revoked(&self) -> bool {
+        matches!(self, RefreshTokenState::Revoked)
+    }
+}
+
+impl std::fmt::Display for RefreshTokenState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefreshTokenState::Valid => write!(f, "valid"),
+            RefreshTokenState::Used { at } => write!(f, "used ({})", at),
+            RefreshTokenState::InGracePeriod { rotated_at } => {
+                write!(f, "grace period (rotated {})", rotated_at)
+            }
+            RefreshTokenState::Expired => write!(f, "expired"),
+            RefreshTokenState::Revoked => write!(f, "revoked"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    fn make_request_data(
+        did: Option<String>,
+        code: Option<String>,
+        expires_in: Duration,
+    ) -> RequestData {
+        RequestData {
+            client_id: "test-client".into(),
+            client_auth: None,
+            parameters: AuthorizationRequestParameters {
+                response_type: "code".into(),
+                client_id: "test-client".into(),
+                redirect_uri: "https://example.com/callback".into(),
+                scope: Some("atproto".into()),
+                state: None,
+                code_challenge: "test".into(),
+                code_challenge_method: "S256".into(),
+                response_mode: None,
+                login_hint: None,
+                dpop_jkt: None,
+                extra: None,
+            },
+            expires_at: Utc::now() + expires_in,
+            did,
+            device_id: None,
+            code,
+            controller_did: None,
+        }
+    }
+
+    #[test]
+    fn test_auth_flow_state_pending() {
+        let data = make_request_data(None, None, Duration::minutes(5));
+        let state = AuthFlowState::from_request_data(&data);
+        assert!(state.is_pending());
+        assert!(!state.is_authenticated());
+        assert!(!state.is_authorized());
+        assert!(!state.is_expired());
+        assert!(state.can_authenticate());
+        assert!(!state.can_authorize());
+        assert!(!state.can_exchange());
+        assert!(state.did().is_none());
+        assert!(state.code().is_none());
+    }
+
+    #[test]
+    fn test_auth_flow_state_authenticated() {
+        let data = make_request_data(Some("did:plc:test".into()), None, Duration::minutes(5));
+        let state = AuthFlowState::from_request_data(&data);
+        assert!(!state.is_pending());
+        assert!(state.is_authenticated());
+        assert!(!state.is_authorized());
+        assert!(!state.is_expired());
+        assert!(!state.can_authenticate());
+        assert!(state.can_authorize());
+        assert!(!state.can_exchange());
+        assert_eq!(state.did(), Some("did:plc:test"));
+        assert!(state.code().is_none());
+    }
+
+    #[test]
+    fn test_auth_flow_state_authorized() {
+        let data = make_request_data(
+            Some("did:plc:test".into()),
+            Some("auth-code-123".into()),
+            Duration::minutes(5),
+        );
+        let state = AuthFlowState::from_request_data(&data);
+        assert!(!state.is_pending());
+        assert!(!state.is_authenticated());
+        assert!(state.is_authorized());
+        assert!(!state.is_expired());
+        assert!(!state.can_authenticate());
+        assert!(!state.can_authorize());
+        assert!(state.can_exchange());
+        assert_eq!(state.did(), Some("did:plc:test"));
+        assert_eq!(state.code(), Some("auth-code-123"));
+    }
+
+    #[test]
+    fn test_auth_flow_state_expired() {
+        let data = make_request_data(
+            Some("did:plc:test".into()),
+            Some("code".into()),
+            Duration::minutes(-1),
+        );
+        let state = AuthFlowState::from_request_data(&data);
+        assert!(state.is_expired());
+        assert!(!state.can_authenticate());
+        assert!(!state.can_authorize());
+        assert!(!state.can_exchange());
+    }
+
+    #[test]
+    fn test_refresh_token_state_valid() {
+        let state = RefreshTokenState::Valid;
+        assert!(state.is_valid());
+        assert!(state.is_usable());
+        assert!(!state.is_used());
+        assert!(!state.is_in_grace_period());
+        assert!(!state.is_expired());
+        assert!(!state.is_revoked());
+    }
+
+    #[test]
+    fn test_refresh_token_state_grace_period() {
+        let state = RefreshTokenState::InGracePeriod {
+            rotated_at: Utc::now(),
+        };
+        assert!(!state.is_valid());
+        assert!(state.is_usable());
+        assert!(!state.is_used());
+        assert!(state.is_in_grace_period());
+    }
+
+    #[test]
+    fn test_refresh_token_state_used() {
+        let state = RefreshTokenState::Used { at: Utc::now() };
+        assert!(!state.is_valid());
+        assert!(!state.is_usable());
+        assert!(state.is_used());
+    }
+
+    #[test]
+    fn test_refresh_token_state_expired() {
+        let state = RefreshTokenState::Expired;
+        assert!(!state.is_usable());
+        assert!(state.is_expired());
+    }
+
+    #[test]
+    fn test_refresh_token_state_revoked() {
+        let state = RefreshTokenState::Revoked;
+        assert!(!state.is_usable());
+        assert!(state.is_revoked());
+    }
+}

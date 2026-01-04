@@ -19,10 +19,13 @@ pub mod scheduled;
 pub mod state;
 pub mod storage;
 pub mod sync;
+pub mod types;
 pub mod util;
 pub mod validation;
 
 use api::proxy::XrpcProxyLayer;
+pub use sync::util::AccountStatus;
+pub use types::{AccountState, AtIdentifier, AtUri, Did, Handle, Nsid, Rkey};
 use axum::{
     Json, Router,
     extract::DefaultBodyLimit,
@@ -33,7 +36,7 @@ use axum::{
 use http::StatusCode;
 use serde_json::json;
 use state::AppState;
-use tower::{Layer, ServiceBuilder};
+use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -571,6 +574,7 @@ pub fn app(state: AppState) -> Router {
     let router = Router::new()
         .nest_service("/xrpc", xrpc_service)
         .nest("/oauth", oauth_router)
+        .nest("/.well-known", well_known_router)
         .route("/metrics", get(metrics::metrics_handler))
         .route("/health", get(api::server::health))
         .route("/robots.txt", get(api::server::robots_txt))
@@ -606,7 +610,7 @@ pub fn app(state: AppState) -> Router {
 
         let serve_dir = ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(&index_path));
 
-        router
+        return router
             .route_service("/", ServeFile::new(&homepage_file))
             .nest("/app", spa_router)
             .fallback_service(serve_dir);

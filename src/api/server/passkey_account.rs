@@ -1,7 +1,9 @@
+use crate::api::SuccessResponse;
+use crate::api::error::ApiError;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash};
@@ -18,6 +20,7 @@ use uuid::Uuid;
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{ServiceTokenVerifier, extract_bearer_token_from_header, is_service_token};
 use crate::state::{AppState, RateLimitKind};
+use crate::types::{Did, Handle, PlainPassword};
 use crate::validation::validate_password;
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
@@ -80,8 +83,8 @@ pub struct CreatePasskeyAccountInput {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePasskeyAccountResponse {
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
     pub setup_token: String,
     pub setup_expires_at: chrono::DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,14 +102,8 @@ pub async fn create_passkey_account(
         .await
     {
         warn!(ip = %client_ip, "Account creation rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({
-                "error": "RateLimitExceeded",
-                "message": "Too many account creation attempts. Please try again later."
-            })),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(Some("Too many account creation attempts. Please try again later.".into(),))
+        .into_response();
     }
 
     let byod_auth = if let Some(token) =
@@ -127,14 +124,11 @@ pub async fn create_passkey_account(
                 }
                 Err(e) => {
                     error!("Service token verification failed: {:?}", e);
-                    return (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({
-                            "error": "AuthenticationFailed",
-                            "message": format!("Service token verification failed: {}", e)
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::AuthenticationFailed(Some(format!(
+                        "Service token verification failed: {}",
+                        e
+                    )))
+                    .into_response();
                 }
             }
         } else {
@@ -165,12 +159,8 @@ pub async fn create_passkey_account(
         };
         match crate::api::validation::validate_short_handle(handle_to_validate) {
             Ok(h) => format!("{}.{}", h, hostname),
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "InvalidHandle", "message": e.to_string()})),
-                )
-                    .into_response();
+            Err(_) => {
+                return ApiError::InvalidHandle(None).into_response();
             }
         }
     } else {
@@ -185,11 +175,7 @@ pub async fn create_passkey_account(
     if let Some(ref email) = email
         && !crate::api::validation::is_valid_email(email)
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidEmail", "message": "Invalid email format"})),
-        )
-            .into_response();
+        return ApiError::InvalidEmail.into_response();
     }
 
     if let Some(ref code) = input.invite_code {
@@ -204,22 +190,14 @@ pub async fn create_passkey_account(
         .unwrap_or(Some(false));
 
         if valid != Some(true) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidInviteCode", "message": "Invalid or expired invite code"})),
-            )
-                .into_response();
+            return ApiError::InvalidInviteCode.into_response();
         }
     } else {
         let invite_required = std::env::var("INVITE_CODE_REQUIRED")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
         if invite_required {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InviteCodeRequired", "message": "An invite code is required to create an account"})),
-            )
-                .into_response();
+            return ApiError::InviteCodeRequired.into_response();
         }
     }
 
@@ -227,36 +205,21 @@ pub async fn create_passkey_account(
     let verification_recipient = match verification_channel {
         "email" => match &email {
             Some(e) if !e.is_empty() => e.clone(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingEmail", "message": "Email is required when using email verification"})),
-            ).into_response(),
+            _ => return ApiError::MissingEmail.into_response(),
         },
         "discord" => match &input.discord_id {
             Some(id) if !id.trim().is_empty() => id.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingDiscordId", "message": "Discord ID is required when using Discord verification"})),
-            ).into_response(),
+            _ => return ApiError::MissingDiscordId.into_response(),
         },
         "telegram" => match &input.telegram_username {
             Some(username) if !username.trim().is_empty() => username.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingTelegramUsername", "message": "Telegram username is required when using Telegram verification"})),
-            ).into_response(),
+            _ => return ApiError::MissingTelegramUsername.into_response(),
         },
         "signal" => match &input.signal_number {
             Some(number) if !number.trim().is_empty() => number.trim().to_string(),
-            _ => return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "MissingSignalNumber", "message": "Signal phone number is required when using Signal verification"})),
-            ).into_response(),
+            _ => return ApiError::MissingSignalNumber.into_response(),
         },
-        _ => return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidVerificationChannel", "message": "Invalid verification channel"})),
-        ).into_response(),
+        _ => return ApiError::InvalidVerificationChannel.into_response(),
     };
 
     use k256::ecdsa::SigningKey;
@@ -283,22 +246,11 @@ pub async fn create_passkey_account(
             match reserved {
                 Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
                 Ok(None) => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "InvalidSigningKey",
-                            "message": "Signing key not found, already used, or expired"
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::InvalidSigningKey.into_response();
                 }
                 Err(e) => {
                     error!("Error looking up reserved signing key: {:?}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": "InternalError"})),
-                    )
-                        .into_response();
+                    return ApiError::InternalError(None).into_response();
                 }
             }
         } else {
@@ -310,11 +262,7 @@ pub async fn create_passkey_account(
         Ok(k) => k,
         Err(e) => {
             error!("Error creating signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -330,34 +278,25 @@ pub async fn create_passkey_account(
             let d = match &input.did {
                 Some(d) if !d.trim().is_empty() => d.trim(),
                 _ => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "InvalidRequest", "message": "External did:web requires the 'did' field to be provided"})),
+                    return ApiError::InvalidRequest(
+                        "External did:web requires the 'did' field to be provided".into(),
                     )
-                        .into_response();
+                    .into_response();
                 }
             };
             if !d.starts_with("did:web:") {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(
-                        json!({"error": "InvalidDid", "message": "External DID must be a did:web"}),
-                    ),
-                )
+                return ApiError::InvalidDid("External DID must be a did:web".into())
                     .into_response();
             }
             if is_byod_did_web {
                 if let Some(ref auth_did) = byod_auth
                     && d != auth_did
                 {
-                    return (
-                            StatusCode::FORBIDDEN,
-                            Json(json!({
-                                "error": "AuthorizationError",
-                                "message": format!("Service token issuer {} does not match DID {}", auth_did, d)
-                            })),
-                        )
-                            .into_response();
+                    return ApiError::AuthorizationError(format!(
+                        "Service token issuer {} does not match DID {}",
+                        auth_did, d
+                    ))
+                    .into_response();
                 }
                 info!(did = %d, "Creating external did:web passkey account (BYOD key)");
             } else {
@@ -369,11 +308,7 @@ pub async fn create_passkey_account(
                 )
                 .await
                 {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": "InvalidDid", "message": e})),
-                    )
-                        .into_response();
+                    return ApiError::InvalidDid(e).into_response();
                 }
                 info!(did = %d, "Creating external did:web passkey account (reserved key)");
             }
@@ -384,36 +319,25 @@ pub async fn create_passkey_account(
                 if let Some(ref provided_did) = input.did {
                     if provided_did.starts_with("did:plc:") {
                         if provided_did != auth_did {
-                            return (
-                                StatusCode::FORBIDDEN,
-                                Json(json!({
-                                    "error": "AuthorizationError",
-                                    "message": format!("Service token issuer {} does not match DID {}", auth_did, provided_did)
-                                })),
-                            )
-                                .into_response();
+                            return ApiError::AuthorizationError(format!(
+                                "Service token issuer {} does not match DID {}",
+                                auth_did, provided_did
+                            ))
+                            .into_response();
                         }
                         info!(did = %provided_did, "Creating BYOD did:plc passkey account (migration)");
                         provided_did.clone()
                     } else {
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({
-                                "error": "InvalidRequest",
-                                "message": "BYOD migration requires a did:plc or did:web DID"
-                            })),
+                        return ApiError::InvalidRequest(
+                            "BYOD migration requires a did:plc or did:web DID".into(),
                         )
-                            .into_response();
+                        .into_response();
                     }
                 } else {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({
-                            "error": "InvalidRequest",
-                            "message": "BYOD migration requires the 'did' field"
-                        })),
+                    return ApiError::InvalidRequest(
+                        "BYOD migration requires the 'did' field".into(),
                     )
-                        .into_response();
+                    .into_response();
                 }
             } else {
                 let rotation_key = std::env::var("PLC_ROTATION_KEY")
@@ -428,10 +352,7 @@ pub async fn create_passkey_account(
                     Ok(r) => r,
                     Err(e) => {
                         error!("Error creating PLC genesis operation: {:?}", e);
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "InternalError", "message": "Failed to create PLC operation"})),
-                        )
+                        return ApiError::InternalError(Some("Failed to create PLC operation".into()))
                             .into_response();
                     }
                 };
@@ -442,14 +363,11 @@ pub async fn create_passkey_account(
                     .await
                 {
                     error!("Failed to submit PLC genesis operation: {:?}", e);
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({
-                            "error": "UpstreamError",
-                            "message": format!("Failed to register DID with PLC directory: {}", e)
-                        })),
-                    )
-                        .into_response();
+                    return ApiError::UpstreamErrorMsg(format!(
+                        "Failed to register DID with PLC directory: {}",
+                        e
+                    ))
+                    .into_response();
                 }
                 genesis_result.did
             }
@@ -463,11 +381,7 @@ pub async fn create_passkey_account(
         Ok(h) => h,
         Err(e) => {
             error!("Error hashing setup token: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let setup_expires_at = Utc::now() + Duration::hours(1);
@@ -476,11 +390,7 @@ pub async fn create_passkey_account(
         Ok(tx) => tx,
         Err(e) => {
             error!("Error starting transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -545,27 +455,13 @@ pub async fn create_passkey_account(
             {
                 let constraint = db_err.constraint().unwrap_or("");
                 if constraint.contains("handle") {
-                    return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({"error": "HandleNotAvailable", "message": "Handle already taken"})),
-                        )
-                            .into_response();
+                    return ApiError::HandleNotAvailable(None).into_response();
                 } else if constraint.contains("email") {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(
-                            json!({"error": "InvalidEmail", "message": "Email already registered"}),
-                        ),
-                    )
-                        .into_response();
+                    return ApiError::EmailTaken.into_response();
                 }
             }
             error!("Error inserting user: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -573,11 +469,7 @@ pub async fn create_passkey_account(
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Error encrypting signing key: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -591,11 +483,7 @@ pub async fn create_passkey_account(
     .await
     {
         error!("Error inserting user key: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Some(key_id) = reserved_key_id
@@ -607,11 +495,7 @@ pub async fn create_passkey_account(
         .await
     {
         error!("Error marking reserved key as used: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let mst = Mst::new(Arc::new(state.block_store.clone()));
@@ -619,11 +503,7 @@ pub async fn create_passkey_account(
         Ok(c) => c,
         Err(e) => {
             error!("Error persisting MST: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
@@ -632,22 +512,14 @@ pub async fn create_passkey_account(
             Ok(result) => result,
             Err(e) => {
                 error!("Error creating genesis commit: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "InternalError"})),
-                )
-                    .into_response();
+                return ApiError::InternalError(None).into_response();
             }
         };
     let commit_cid: cid::Cid = match state.block_store.put(&commit_bytes).await {
         Ok(c) => c,
         Err(e) => {
             error!("Error saving genesis commit: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let commit_cid_str = commit_cid.to_string();
@@ -662,11 +534,7 @@ pub async fn create_passkey_account(
     .await
     {
         error!("Error inserting repo: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
     if let Err(e) = sqlx::query!(
@@ -682,11 +550,7 @@ pub async fn create_passkey_account(
     .await
     {
         error!("Error inserting user_blocks: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Some(ref code) = input.invite_code {
@@ -727,11 +591,7 @@ pub async fn create_passkey_account(
 
     if let Err(e) = tx.commit().await {
         error!("Error committing transaction: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if !is_byod_did_web {
@@ -819,8 +679,8 @@ pub async fn create_passkey_account(
     };
 
     Json(CreatePasskeyAccountResponse {
-        did,
-        handle,
+        did: did.into(),
+        handle: handle.into(),
         setup_token,
         setup_expires_at,
         access_jwt,
@@ -831,7 +691,7 @@ pub async fn create_passkey_account(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletePasskeySetupInput {
-    pub did: String,
+    pub did: Did,
     pub setup_token: String,
     pub passkey_credential: serde_json::Value,
     pub passkey_friendly_name: Option<String>,
@@ -840,8 +700,8 @@ pub struct CompletePasskeySetupInput {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletePasskeySetupResponse {
-    pub did: String,
-    pub handle: String,
+    pub did: Did,
+    pub handle: Handle,
     pub app_password: String,
     pub app_password_name: String,
 }
@@ -853,7 +713,7 @@ pub async fn complete_passkey_setup(
     let user = sqlx::query!(
         r#"SELECT id, handle, recovery_token, recovery_token_expires_at, password_required
            FROM users WHERE did = $1"#,
-        input.did
+        input.did.as_str()
     )
     .fetch_optional(&state.db)
     .await;
@@ -861,57 +721,33 @@ pub async fn complete_passkey_setup(
     let user = match user {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound", "message": "Account not found"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if user.password_required {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidAccount", "message": "This account is not a passkey-only account"})),
-        )
-            .into_response();
+        return ApiError::InvalidAccount.into_response();
     }
 
     let token_hash = match &user.recovery_token {
         Some(h) => h,
         None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "SetupExpired", "message": "Setup has already been completed or expired"})),
-            )
-                .into_response();
+            return ApiError::SetupExpired.into_response();
         }
     };
 
     if let Some(expires_at) = user.recovery_token_expires_at
         && expires_at < Utc::now()
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "SetupExpired", "message": "Setup token has expired"})),
-        )
-            .into_response();
+        return ApiError::SetupExpired.into_response();
     }
 
     if !bcrypt::verify(&input.setup_token, token_hash).unwrap_or(false) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "InvalidToken", "message": "Invalid setup token"})),
-        )
-            .into_response();
+        return ApiError::InvalidToken(None).into_response();
     }
 
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -919,11 +755,7 @@ pub async fn complete_passkey_setup(
         Ok(w) => w,
         Err(e) => {
             error!("Failed to create WebAuthn config: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -932,19 +764,11 @@ pub async fn complete_passkey_setup(
     {
         Ok(Some(s)) => s,
         Ok(None) => {
-            return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "NoChallengeInProgress", "message": "Please start passkey registration first"})),
-                )
-                    .into_response();
+            return ApiError::NoChallengeInProgress.into_response();
         }
         Err(e) => {
             error!("Error loading registration state: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -953,13 +777,7 @@ pub async fn complete_passkey_setup(
             Ok(c) => c,
             Err(e) => {
                 warn!("Failed to parse credential: {:?}", e);
-                return (
-                StatusCode::BAD_REQUEST,
-                Json(
-                    json!({"error": "InvalidCredential", "message": "Failed to parse credential"}),
-                ),
-            )
-                .into_response();
+                return ApiError::InvalidCredential.into_response();
             }
         };
 
@@ -967,11 +785,7 @@ pub async fn complete_passkey_setup(
         Ok(sk) => sk,
         Err(e) => {
             warn!("Passkey registration failed: {:?}", e);
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "RegistrationFailed", "message": "Passkey registration failed"})),
-            )
-                .into_response();
+            return ApiError::RegistrationFailed.into_response();
         }
     };
 
@@ -984,11 +798,7 @@ pub async fn complete_passkey_setup(
     .await
     {
         error!("Error saving passkey: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let _ = crate::auth::webauthn::delete_registration_state(&state.db, &input.did).await;
@@ -999,11 +809,7 @@ pub async fn complete_passkey_setup(
         Ok(h) => h,
         Err(e) => {
             error!("Error hashing app password: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -1017,16 +823,12 @@ pub async fn complete_passkey_setup(
     .await
     {
         error!("Error creating app password: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Err(e) = sqlx::query!(
         "UPDATE users SET recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $1",
-        input.did
+        input.did.as_str()
     )
     .execute(&state.db)
     .await
@@ -1037,8 +839,8 @@ pub async fn complete_passkey_setup(
     info!(did = %input.did, "Passkey-only account setup completed");
 
     Json(CompletePasskeySetupResponse {
-        did: input.did,
-        handle: user.handle,
+        did: input.did.clone(),
+        handle: user.handle.into(),
         app_password,
         app_password_name,
     })
@@ -1052,7 +854,7 @@ pub async fn start_passkey_registration_for_setup(
     let user = sqlx::query!(
         r#"SELECT handle, recovery_token, recovery_token_expires_at, password_required
            FROM users WHERE did = $1"#,
-        input.did
+        input.did.as_str()
     )
     .fetch_optional(&state.db)
     .await;
@@ -1060,57 +862,33 @@ pub async fn start_passkey_registration_for_setup(
     let user = match user {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "AccountNotFound"})),
-            )
-                .into_response();
+            return ApiError::AccountNotFound.into_response();
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if user.password_required {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "InvalidAccount"})),
-        )
-            .into_response();
+        return ApiError::InvalidAccount.into_response();
     }
 
     let token_hash = match &user.recovery_token {
         Some(h) => h,
         None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "SetupExpired"})),
-            )
-                .into_response();
+            return ApiError::SetupExpired.into_response();
         }
     };
 
     if let Some(expires_at) = user.recovery_token_expires_at
         && expires_at < Utc::now()
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "SetupExpired"})),
-        )
-            .into_response();
+        return ApiError::SetupExpired.into_response();
     }
 
     if !bcrypt::verify(&input.setup_token, token_hash).unwrap_or(false) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "InvalidToken"})),
-        )
-            .into_response();
+        return ApiError::InvalidToken(None).into_response();
     }
 
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -1118,11 +896,7 @@ pub async fn start_passkey_registration_for_setup(
         Ok(w) => w,
         Err(e) => {
             error!("Failed to create WebAuthn config: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -1146,11 +920,7 @@ pub async fn start_passkey_registration_for_setup(
         Ok(result) => result,
         Err(e) => {
             error!("Failed to start passkey registration: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -1158,11 +928,7 @@ pub async fn start_passkey_registration_for_setup(
         crate::auth::webauthn::save_registration_state(&state.db, &input.did, &reg_state).await
     {
         error!("Failed to save registration state: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let options = serde_json::to_value(&ccr).unwrap_or(json!({}));
@@ -1172,7 +938,7 @@ pub async fn start_passkey_registration_for_setup(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartPasskeyRegistrationInput {
-    pub did: String,
+    pub did: Did,
     pub setup_token: String,
     pub friendly_name: Option<String>,
 }
@@ -1194,11 +960,7 @@ pub async fn request_passkey_recovery(
         .check_rate_limit(RateLimitKind::PasswordReset, &client_ip)
         .await
     {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error": "RateLimitExceeded"})),
-        )
-            .into_response();
+        return ApiError::RateLimitExceeded(None).into_response();
     }
 
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -1221,7 +983,7 @@ pub async fn request_passkey_recovery(
     let user = match user {
         Ok(Some(u)) if !u.password_required => u,
         _ => {
-            return Json(json!({"success": true})).into_response();
+            return SuccessResponse::ok().into_response();
         }
     };
 
@@ -1229,11 +991,7 @@ pub async fn request_passkey_recovery(
     let recovery_token_hash = match hash(&recovery_token, DEFAULT_COST) {
         Ok(h) => h,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let expires_at = Utc::now() + Duration::hours(1);
@@ -1242,17 +1000,13 @@ pub async fn request_passkey_recovery(
         "UPDATE users SET recovery_token = $1, recovery_token_expires_at = $2 WHERE did = $3",
         recovery_token_hash,
         expires_at,
-        user.did
+        &user.did
     )
     .execute(&state.db)
     .await
     {
         error!("Error updating recovery token: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -1267,15 +1021,15 @@ pub async fn request_passkey_recovery(
         crate::comms::enqueue_passkey_recovery(&state.db, user.id, &recovery_url, &hostname).await;
 
     info!(did = %user.did, "Passkey recovery requested");
-    Json(json!({"success": true})).into_response()
+    SuccessResponse::ok().into_response()
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoverPasskeyAccountInput {
-    pub did: String,
+    pub did: Did,
     pub recovery_token: String,
-    pub new_password: String,
+    pub new_password: PlainPassword,
 }
 
 pub async fn recover_passkey_account(
@@ -1283,19 +1037,12 @@ pub async fn recover_passkey_account(
     Json(input): Json<RecoverPasskeyAccountInput>,
 ) -> Response {
     if let Err(e) = validate_password(&input.new_password) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({
-                "error": "InvalidPassword",
-                "message": e.to_string()
-            })),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(e.to_string()).into_response();
     }
 
     let user = sqlx::query!(
         "SELECT id, did, recovery_token, recovery_token_expires_at FROM users WHERE did = $1",
-        input.did
+        input.did.as_str()
     )
     .fetch_optional(&state.db)
     .await;
@@ -1303,71 +1050,47 @@ pub async fn recover_passkey_account(
     let user = match user {
         Ok(Some(u)) => u,
         _ => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "InvalidRecoveryLink"})),
-            )
-                .into_response();
+            return ApiError::InvalidRecoveryLink.into_response();
         }
     };
 
     let token_hash = match &user.recovery_token {
         Some(h) => h,
         None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "InvalidRecoveryLink"})),
-            )
-                .into_response();
+            return ApiError::InvalidRecoveryLink.into_response();
         }
     };
 
     if let Some(expires_at) = user.recovery_token_expires_at
         && expires_at < Utc::now()
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "RecoveryLinkExpired"})),
-        )
-            .into_response();
+        return ApiError::RecoveryLinkExpired.into_response();
     }
 
     if !bcrypt::verify(&input.recovery_token, token_hash).unwrap_or(false) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "InvalidRecoveryLink"})),
-        )
-            .into_response();
+        return ApiError::InvalidRecoveryLink.into_response();
     }
 
     let password_hash = match hash(&input.new_password, DEFAULT_COST) {
         Ok(h) => h,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if let Err(e) = sqlx::query!(
         "UPDATE users SET password_hash = $1, password_required = TRUE, recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $2",
         password_hash,
-        input.did
+        input.did.as_str()
     )
     .execute(&state.db)
     .await
     {
         error!("Error updating password: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
-    let deleted = sqlx::query!("DELETE FROM passkeys WHERE did = $1", input.did)
+    let deleted = sqlx::query!("DELETE FROM passkeys WHERE did = $1", input.did.as_str())
         .execute(&state.db)
         .await;
     match deleted {
@@ -1382,5 +1105,5 @@ pub async fn recover_passkey_account(
     }
 
     info!(did = %input.did, "Passkey-only account recovered with temporary password");
-    Json(json!({"success": true})).into_response()
+    SuccessResponse::ok().into_response()
 }

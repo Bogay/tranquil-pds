@@ -1,3 +1,4 @@
+use crate::api::error::ApiError;
 use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::delegation::{self, DelegationActionType};
 use crate::state::AppState;
@@ -23,17 +24,10 @@ pub async fn upload_blob(
     headers: axum::http::HeaderMap,
     body: Body,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
+    let Some(token) = crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+    ) else {
+        return ApiError::AuthenticationRequired.into_response();
     };
 
     let is_service_auth = is_service_token(&token);
@@ -51,11 +45,11 @@ pub async fn upload_blob(
             }
             Err(e) => {
                 error!("Service token verification failed: {:?}", e);
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "AuthenticationFailed", "message": format!("Service token verification failed: {}", e)})),
-                )
-                    .into_response();
+                return ApiError::AuthenticationFailed(Some(format!(
+                    "Service token verification failed: {}",
+                    e
+                )))
+                .into_response();
             }
         }
     } else {
@@ -74,22 +68,18 @@ pub async fn upload_blob(
                 }
                 let deactivated = sqlx::query_scalar!(
                     "SELECT deactivated_at FROM users WHERE did = $1",
-                    user.did
+                    &user.did
                 )
                 .fetch_optional(&state.db)
                 .await
                 .ok()
                 .flatten()
                 .flatten();
-                let ctrl_did = user.controller_did.clone();
-                (user.did, deactivated.is_some(), ctrl_did)
+                let ctrl_did = user.controller_did.map(|d| d.to_string());
+                (user.did.to_string(), deactivated.is_some(), ctrl_did)
             }
             Err(_) => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "AuthenticationFailed"})),
-                )
-                    .into_response();
+                return ApiError::AuthenticationFailed(None).into_response();
             }
         }
     };
@@ -98,14 +88,7 @@ pub async fn upload_blob(
         .await
         .unwrap_or(false)
     {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "AccountMigrated",
-                "message": "Account has been migrated to another PDS. Blob operations are not allowed."
-            })),
-        )
-            .into_response();
+        return ApiError::Forbidden.into_response();
     }
 
     let mime_type = headers
@@ -120,11 +103,7 @@ pub async fn upload_blob(
     let user_id = match user_query {
         Ok(Some(row)) => row.id,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -143,22 +122,18 @@ pub async fn upload_blob(
         Ok(result) => result,
         Err(e) => {
             error!("Failed to stream blob to storage: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
         }
     };
 
     let size = upload_result.size;
     if size > max_size {
         let _ = state.blob_store.delete(&temp_key).await;
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(json!({"error": "BlobTooLarge", "message": format!("Blob size {} exceeds maximum of {} bytes", size, max_size)})),
-        )
-            .into_response();
+        return ApiError::InvalidRequest(format!(
+            "Blob size {} exceeds maximum of {} bytes",
+            size, max_size
+        ))
+        .into_response();
     }
 
     let multihash = match Multihash::wrap(0x12, &upload_result.sha256_hash) {
@@ -166,11 +141,7 @@ pub async fn upload_blob(
         Err(e) => {
             let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to create multihash for blob: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError", "message": "Failed to hash blob"})),
-            )
-                .into_response();
+            return ApiError::InternalError(Some("Failed to hash blob".into())).into_response();
         }
     };
     let cid = Cid::new_v1(0x55, multihash);
@@ -187,11 +158,7 @@ pub async fn upload_blob(
         Err(e) => {
             let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to begin transaction: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
@@ -212,22 +179,14 @@ pub async fn upload_blob(
         Err(e) => {
             let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to insert blob record: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
 
     if was_inserted && let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
         let _ = state.blob_store.delete(&temp_key).await;
         error!("Failed to copy blob to final location: {:?}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError", "message": "Failed to store blob"})),
-        )
-            .into_response();
+        return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
     }
 
     let _ = state.blob_store.delete(&temp_key).await;
@@ -240,11 +199,7 @@ pub async fn upload_blob(
                 storage_key, cleanup_err
             );
         }
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "InternalError"})),
-        )
-            .into_response();
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Some(ref controller) = controller_did {
@@ -303,41 +258,26 @@ pub async fn list_missing_blobs(
     headers: axum::http::HeaderMap,
     Query(params): Query<ListMissingBlobsParams>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
+    let Some(token) = crate::auth::extract_bearer_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "AuthenticationRequired"})),
-            )
-                .into_response();
-        }
+    ) else {
+        return ApiError::AuthenticationRequired.into_response();
     };
     let auth_user =
         match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
             Ok(user) => user,
             Err(_) => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({"error": "AuthenticationFailed"})),
-                )
-                    .into_response();
+                return ApiError::AuthenticationFailed(None).into_response();
             }
         };
     let did = auth_user.did;
-    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
+    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await;
     let user_id = match user_query {
         Ok(Some(row)) => row.id,
         _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
@@ -361,11 +301,7 @@ pub async fn list_missing_blobs(
         Ok(r) => r,
         Err(e) => {
             error!("DB error fetching missing blobs: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "InternalError"})),
-            )
-                .into_response();
+            return ApiError::InternalError(None).into_response();
         }
     };
     let has_more = rows.len() > limit as usize;
