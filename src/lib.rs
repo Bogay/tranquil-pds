@@ -498,7 +498,11 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/app.bsky.unspecced.getAgeAssuranceState",
             get(api::age_assurance::get_age_assurance_state),
-        );
+        )
+        .fallback(async || (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({"error": "MethodNotImplemented", "message": "XRPC method not implemented"})),
+        ));
     let xrpc_service = ServiceBuilder::new()
         .layer(XrpcProxyLayer::new(state.clone()))
         .service(xrpc_router.with_state(state.clone()));
