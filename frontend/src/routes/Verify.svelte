@@ -2,8 +2,9 @@
   import { onMount } from 'svelte'
   import { confirmSignup, resendVerification, getAuthState } from '../lib/auth.svelte'
   import { api, ApiError } from '../lib/api'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
+  import type { Session } from '../lib/types/api'
 
   const STORAGE_KEY = 'tranquil_pds_pending_verification'
 
@@ -29,16 +30,16 @@
   let successPurpose = $state<string | null>(null)
   let successChannel = $state<string | null>(null)
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
 
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
 
-  function parseQueryParams() {
-    const params: Record<string, string> = {}
-    const searchParams = new URLSearchParams(window.location.search)
-    for (const [key, value] of searchParams.entries()) {
-      params[key] = value
-    }
-    return params
+  const session = $derived(getSession())
+
+  function parseQueryParams(): Record<string, string> {
+    return Object.fromEntries(new URLSearchParams(window.location.search))
   }
 
   onMount(async () => {
@@ -74,9 +75,9 @@
   })
 
   $effect(() => {
-    if (mode === 'signup' && auth.session) {
+    if (mode === 'signup' && session) {
       clearPendingVerification()
-      navigate('/dashboard')
+      navigate(routes.dashboard)
     }
   })
 
@@ -96,8 +97,8 @@
       await confirmSignup(pendingVerification.did, verificationCode.trim())
       clearPendingVerification()
       navigate('/dashboard')
-    } catch (e: any) {
-      error = e.message || 'Verification failed'
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Verification failed'
     } finally {
       submitting = false
     }
@@ -118,7 +119,7 @@
       success = true
       successPurpose = result.purpose
       successChannel = result.channel
-    } catch (e: any) {
+    } catch (e) {
       if (e instanceof ApiError) {
         if (e.error === 'AuthenticationRequired') {
           error = 'You must be signed in to complete this verification. Please sign in and try again.'
@@ -149,7 +150,7 @@
       success = true
       successPurpose = 'email-update'
       successChannel = 'email'
-    } catch (e: any) {
+    } catch (e) {
       if (e instanceof ApiError) {
         error = e.message
       } else {
@@ -171,8 +172,8 @@
       try {
         await resendVerification(pendingVerification.did)
         resendMessage = $_('verify.codeResent')
-      } catch (e: any) {
-        error = e.message || 'Failed to resend code'
+      } catch (e) {
+        error = e instanceof Error ? e.message : 'Failed to resend code'
       } finally {
         resendingCode = false
       }
@@ -186,8 +187,8 @@
       try {
         await api.resendMigrationVerification(identifier.trim())
         resendMessage = $_('verify.codeResentDetail')
-      } catch (e: any) {
-        error = e.message || 'Failed to resend verification'
+      } catch (e) {
+        error = e instanceof Error ? e.message : 'Failed to resend verification'
       } finally {
         resendingCode = false
       }

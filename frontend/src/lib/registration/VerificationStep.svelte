@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, ApiError } from '../api'
+  import { resendVerification } from '../auth.svelte'
   import type { RegistrationFlow } from './flow.svelte'
 
   interface Props {
@@ -36,7 +37,6 @@
     flow.clearError()
 
     try {
-      const { resendVerification } = await import('../auth.svelte')
       await resendVerification(flow.account.did)
       resendMessage = 'Verification code resent!'
     } catch (err) {

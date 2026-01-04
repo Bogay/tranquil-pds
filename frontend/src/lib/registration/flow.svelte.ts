@@ -1,4 +1,5 @@
 import { api, ApiError } from "../api";
+import { setSession } from "../auth.svelte";
 import {
   createServiceJwt,
   generateDidDocument,
@@ -341,7 +342,6 @@ export function createRegistrationFlow(
 
   async function finalizeSession() {
     if (!state.session || !state.account) return;
-    const { setSession } = await import("../auth.svelte");
     setSession({
       did: state.account.did,
       handle: state.account.handle,

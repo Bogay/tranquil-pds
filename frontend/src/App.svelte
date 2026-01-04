@@ -4,6 +4,7 @@
   import { initServerConfig } from './lib/serverConfig.svelte'
   import { initI18n } from './lib/i18n'
   import { isLoading as i18nLoading } from 'svelte-i18n'
+  import Toast from './components/Toast.svelte'
   import Login from './routes/Login.svelte'
   import Register from './routes/Register.svelte'
   import RegisterPasskey from './routes/RegisterPasskey.svelte'
@@ -36,7 +37,7 @@
   import DidDocumentEditor from './routes/DidDocumentEditor.svelte'
   initI18n()
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
 
   let oauthCallbackPending = $state(hasOAuthCallback())
 
@@ -59,10 +60,10 @@
   })
 
   $effect(() => {
-    if (auth.loading) return
+    if (auth.kind === 'loading') return
     const path = getCurrentPath()
     if (path === '/') {
-      if (auth.session) {
+      if (auth.kind === 'authenticated') {
         navigate('/dashboard', true)
       } else {
         navigate('/login', true)
@@ -142,14 +143,13 @@
 </script>
 
 <main>
-  {#if auth.loading || $i18nLoading || oauthCallbackPending}
-    <div class="loading">
-      <p>Loading...</p>
-    </div>
+  {#if auth.kind === 'loading' || $i18nLoading || oauthCallbackPending}
+    <div class="loading"></div>
   {:else}
     <CurrentComponent />
   {/if}
 </main>
+<Toast />
 
 <style>
   main {
@@ -157,10 +157,6 @@
   }
 
   .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
     min-height: 100vh;
-    color: var(--text-secondary);
   }
 </style>

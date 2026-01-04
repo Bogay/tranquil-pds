@@ -1,6 +1,11 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
+  import {
+    prepareRequestOptions,
+    serializeAssertionResponse,
+    type WebAuthnRequestOptionsResponse,
+  } from '../lib/webauthn'
 
   let loading = $state(false)
   let error = $state<string | null>(null)
@@ -12,37 +17,6 @@
   }
 
   const t = $_
-
-  function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-  }
-
-  function base64UrlToArrayBuffer(base64url: string): ArrayBuffer {
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = base64 + '='.repeat((4 - base64.length % 4) % 4)
-    const binary = atob(padded)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes.buffer
-  }
-
-  function prepareAuthOptions(options: any): PublicKeyCredentialRequestOptions {
-    return {
-      ...options.publicKey,
-      challenge: base64UrlToArrayBuffer(options.publicKey.challenge),
-      allowCredentials: options.publicKey.allowCredentials?.map((cred: any) => ({
-        ...cred,
-        id: base64UrlToArrayBuffer(cred.id)
-      })) || []
-    }
-  }
 
   async function startPasskeyAuth() {
     const requestUri = getRequestUri()
@@ -75,7 +49,7 @@
       }
 
       const { options } = await startResponse.json()
-      const publicKeyOptions = prepareAuthOptions(options)
+      const publicKeyOptions = prepareRequestOptions(options as WebAuthnRequestOptionsResponse)
 
       const credential = await navigator.credentials.get({
         publicKey: publicKeyOptions
@@ -87,19 +61,7 @@
         return
       }
 
-      const pkCredential = credential as PublicKeyCredential
-      const response = pkCredential.response as AuthenticatorAssertionResponse
-      const credentialResponse = {
-        id: pkCredential.id,
-        type: pkCredential.type,
-        rawId: arrayBufferToBase64Url(pkCredential.rawId),
-        response: {
-          clientDataJSON: arrayBufferToBase64Url(response.clientDataJSON),
-          authenticatorData: arrayBufferToBase64Url(response.authenticatorData),
-          signature: arrayBufferToBase64Url(response.signature),
-          userHandle: response.userHandle ? arrayBufferToBase64Url(response.userHandle) : null,
-        },
-      }
+      const credentialResponse = serializeAssertionResponse(credential as PublicKeyCredential)
 
       const finishResponse = await fetch('/oauth/authorize/passkey', {
         method: 'POST',
@@ -141,7 +103,7 @@
   function handleCancel() {
     const requestUri = getRequestUri()
     if (requestUri) {
-      navigate(`/oauth/login?request_uri=${encodeURIComponent(requestUri)}`)
+      navigate(routes.oauthLogin, { params: { request_uri: requestUri } })
     } else {
       window.history.back()
     }

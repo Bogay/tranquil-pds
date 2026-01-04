@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
 
@@ -36,7 +36,7 @@
       <h1>{$_('requestPasskeyRecovery.successTitle')}</h1>
       <p class="subtitle">{$_('requestPasskeyRecovery.successMessage')}</p>
       <p class="info-text">{$_('requestPasskeyRecovery.successInfo')}</p>
-      <button onclick={() => navigate('/login')}>{$_('common.backToLogin')}</button>
+      <button onclick={() => navigate(routes.login)}>{$_('common.backToLogin')}</button>
     </div>
   {:else}
     <h1>{$_('requestPasskeyRecovery.title')}</h1>
@@ -71,7 +71,7 @@
   {/if}
 
   <p class="link-text">
-    <a href="/app/login">{$_('common.backToLogin')}</a>
+    <a href={getFullUrl(routes.login)}>{$_('common.backToLogin')}</a>
   </p>
 </div>
 

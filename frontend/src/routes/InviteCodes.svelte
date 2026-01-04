@@ -1,15 +1,27 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, type InviteCode, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDate } from '../lib/date'
   import { onMount } from 'svelte'
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   let codes = $state<InviteCode[]>([])
   let loading = $state(true)
-  let error = $state<string | null>(null)
   let creating = $state(false)
   let createdCode = $state<string | null>(null)
   let createdCodeCopied = $state(false)
@@ -21,46 +33,44 @@
       const serverInfo = await api.describeServer()
       inviteCodesEnabled = serverInfo.inviteCodeRequired
       if (!serverInfo.inviteCodeRequired) {
-        navigate('/dashboard')
+        navigate(routes.dashboard)
       }
     } catch {
-      navigate('/dashboard')
+      navigate(routes.dashboard)
     }
   })
 
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
   $effect(() => {
-    if (auth.session && inviteCodesEnabled) {
+    if (session && inviteCodesEnabled) {
       loadCodes()
     }
   })
   async function loadCodes() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
-    error = null
     try {
-      const result = await api.getAccountInviteCodes(auth.session.accessJwt)
+      const result = await api.getAccountInviteCodes(session.accessJwt)
       codes = result.codes
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to load invite codes'
+      toast.error(e instanceof ApiError ? e.message : $_('inviteCodes.failedToLoad'))
     } finally {
       loading = false
     }
   }
   async function handleCreate() {
-    if (!auth.session) return
+    if (!session) return
     creating = true
-    error = null
     try {
-      const result = await api.createInviteCode(auth.session.accessJwt, 1)
+      const result = await api.createInviteCode(session.accessJwt, 1)
       createdCode = result.code
       await loadCodes()
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to create invite code'
+      toast.error(e instanceof ApiError ? e.message : $_('inviteCodes.failedToCreate'))
     } finally {
       creating = false
     }
@@ -87,15 +97,12 @@
 </script>
 <div class="page">
   <header>
-    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('inviteCodes.title')}</h1>
   </header>
   <p class="description">
     {$_('inviteCodes.description')}
   </p>
-  {#if error}
-    <div class="error">{error}</div>
-  {/if}
   {#if createdCode}
     <div class="created-code">
       <h3>{$_('inviteCodes.created')}</h3>
@@ -108,7 +115,7 @@
       <button onclick={dismissCreated}>{$_('common.done')}</button>
     </div>
   {/if}
-  {#if auth.session?.isAdmin}
+  {#if session?.isAdmin}
     <section class="create-section">
       <button onclick={handleCreate} disabled={creating}>
         {creating ? $_('common.creating') : $_('inviteCodes.createNew')}
@@ -118,7 +125,11 @@
   <section class="list-section">
     <h2>{$_('inviteCodes.yourCodes')}</h2>
     {#if loading}
-      <p class="empty">{$_('common.loading')}</p>
+      <ul class="code-list">
+        {#each Array(2) as _}
+          <li class="skeleton-item"></li>
+        {/each}
+      </ul>
     {:else if codes.length === 0}
       <p class="empty">{$_('inviteCodes.noCodes')}</p>
     {:else}
@@ -324,5 +335,16 @@
     color: var(--text-secondary);
     text-align: center;
     padding: var(--space-7);
+  }
+
+  .skeleton-item {
+    height: 50px;
+    background: var(--bg-tertiary);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

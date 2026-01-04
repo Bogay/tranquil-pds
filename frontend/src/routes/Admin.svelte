@@ -1,11 +1,25 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
   import { setServerName as setGlobalServerName, setColors as setGlobalColors, setHasLogo as setGlobalHasLogo } from '../lib/serverConfig.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDate, formatDateTime } from '../lib/date'
-  const auth = getAuthState()
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
+
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   const DEFAULT_COLORS = {
     primaryLight: '#1A1D1D',
     primaryDark: '#E6E8E8',
@@ -13,7 +27,6 @@
     secondaryDark: '#E6E8E8',
   }
   let loading = $state(true)
-  let error = $state<string | null>(null)
   let stats = $state<{
     userCount: number
     repoCount: number
@@ -21,7 +34,6 @@
     blobStorageBytes: number
   } | null>(null)
   let usersLoading = $state(false)
-  let usersError = $state<string | null>(null)
   let users = $state<Array<{
     did: string
     handle: string
@@ -34,7 +46,6 @@
   let handleSearchQuery = $state('')
   let showUsers = $state(false)
   let invitesLoading = $state(false)
-  let invitesError = $state<string | null>(null)
   let invites = $state<Array<{
     code: string
     available: number
@@ -72,17 +83,15 @@
   let logoFile = $state<File | null>(null)
   let logoPreview = $state<string | null>(null)
   let serverConfigLoading = $state(false)
-  let serverConfigError = $state<string | null>(null)
-  let serverConfigSuccess = $state(false)
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
-    } else if (!auth.loading && auth.session && !auth.session.isAdmin) {
-      navigate('/dashboard')
+    if (!authLoading && !session) {
+      navigate(routes.login)
+    } else if (!authLoading && session && !session.isAdmin) {
+      navigate(routes.dashboard)
     }
   })
   $effect(() => {
-    if (auth.session?.isAdmin) {
+    if (session?.isAdmin) {
       loadStats()
       loadServerConfig()
     }
@@ -106,22 +115,20 @@
         logoPreview = '/logo'
       }
     } catch (e) {
-      serverConfigError = e instanceof ApiError ? e.message : 'Failed to load server config'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToLoadConfig'))
     }
   }
   async function saveServerConfig(e: Event) {
     e.preventDefault()
-    if (!auth.session) return
+    if (!session) return
     serverConfigLoading = true
-    serverConfigError = null
-    serverConfigSuccess = false
     try {
       let newLogoCid = logoCid
       if (logoFile) {
-        const result = await api.uploadBlob(auth.session.accessJwt, logoFile)
+        const result = await api.uploadBlob(session.accessJwt, logoFile)
         newLogoCid = result.blob.ref.$link
       }
-      await api.updateServerConfig(auth.session.accessJwt, {
+      await api.updateServerConfig(session.accessJwt, {
         serverName: serverNameInput,
         primaryColor: primaryColorInput,
         primaryColorDark: primaryColorDarkInput,
@@ -145,10 +152,9 @@
         secondaryColorDark: secondaryColorDarkInput || null,
       })
       setGlobalHasLogo(!!newLogoCid)
-      serverConfigSuccess = true
-      setTimeout(() => { serverConfigSuccess = false }, 3000)
+      toast.success($_('admin.configSaved'))
     } catch (e) {
-      serverConfigError = e instanceof ApiError ? e.message : 'Failed to save server config'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToSaveConfig'))
     } finally {
       serverConfigLoading = false
     }
@@ -179,27 +185,25 @@
       logoChanged
   }
   async function loadStats() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
-    error = null
     try {
-      stats = await api.getServerStats(auth.session.accessJwt)
+      stats = await api.getServerStats(session.accessJwt)
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to load server stats'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToLoadStats'))
     } finally {
       loading = false
     }
   }
   async function loadUsers(reset = false) {
-    if (!auth.session) return
+    if (!session) return
     usersLoading = true
-    usersError = null
     if (reset) {
       users = []
       usersCursor = undefined
     }
     try {
-      const result = await api.searchAccounts(auth.session.accessJwt, {
+      const result = await api.searchAccounts(session.accessJwt, {
         handle: handleSearchQuery || undefined,
         cursor: reset ? undefined : usersCursor,
         limit: 25,
@@ -208,7 +212,7 @@
       usersCursor = result.cursor
       showUsers = true
     } catch (e) {
-      usersError = e instanceof ApiError ? e.message : 'Failed to load users'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToLoadUsers'))
     } finally {
       usersLoading = false
     }
@@ -218,15 +222,14 @@
     loadUsers(true)
   }
   async function loadInvites(reset = false) {
-    if (!auth.session) return
+    if (!session) return
     invitesLoading = true
-    invitesError = null
     if (reset) {
       invites = []
       invitesCursor = undefined
     }
     try {
-      const result = await api.getInviteCodes(auth.session.accessJwt, {
+      const result = await api.getInviteCodes(session.accessJwt, {
         cursor: reset ? undefined : invitesCursor,
         limit: 25,
       })
@@ -234,28 +237,29 @@
       invitesCursor = result.cursor
       showInvites = true
     } catch (e) {
-      invitesError = e instanceof ApiError ? e.message : 'Failed to load invites'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToLoadInvites'))
     } finally {
       invitesLoading = false
     }
   }
   async function disableInvite(code: string) {
-    if (!auth.session) return
+    if (!session) return
     if (!confirm($_('admin.disableInviteConfirm', { values: { code } }))) return
     try {
-      await api.disableInviteCodes(auth.session.accessJwt, [code])
+      await api.disableInviteCodes(session.accessJwt, [code])
       invites = invites.map(inv => inv.code === code ? { ...inv, disabled: true } : inv)
+      toast.success($_('admin.inviteDisabled'))
     } catch (e) {
-      invitesError = e instanceof ApiError ? e.message : 'Failed to disable invite'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToDisableInvite'))
     }
   }
   async function selectUser(did: string) {
-    if (!auth.session) return
+    if (!session) return
     userDetailLoading = true
     try {
-      selectedUser = await api.getAccountInfo(auth.session.accessJwt, did)
+      selectedUser = await api.getAccountInfo(session.accessJwt, did)
     } catch (e) {
-      usersError = e instanceof ApiError ? e.message : 'Failed to load user details'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToLoadUserDetails'))
     } finally {
       userDetailLoading = false
     }
@@ -264,32 +268,35 @@
     selectedUser = null
   }
   async function toggleUserInvites() {
-    if (!auth.session || !selectedUser) return
+    if (!session || !selectedUser) return
     userActionLoading = true
     try {
       if (selectedUser.invitesDisabled) {
-        await api.enableAccountInvites(auth.session.accessJwt, selectedUser.did)
+        await api.enableAccountInvites(session.accessJwt, selectedUser.did)
         selectedUser = { ...selectedUser, invitesDisabled: false }
+        toast.success($_('admin.invitesEnabled'))
       } else {
-        await api.disableAccountInvites(auth.session.accessJwt, selectedUser.did)
+        await api.disableAccountInvites(session.accessJwt, selectedUser.did)
         selectedUser = { ...selectedUser, invitesDisabled: true }
+        toast.success($_('admin.invitesDisabled'))
       }
     } catch (e) {
-      usersError = e instanceof ApiError ? e.message : 'Failed to update user'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToUpdateUser'))
     } finally {
       userActionLoading = false
     }
   }
   async function deleteUser() {
-    if (!auth.session || !selectedUser) return
+    if (!session || !selectedUser) return
     if (!confirm($_('admin.deleteConfirm', { values: { handle: selectedUser.handle } }))) return
     userActionLoading = true
     try {
-      await api.adminDeleteAccount(auth.session.accessJwt, selectedUser.did)
+      await api.adminDeleteAccount(session.accessJwt, selectedUser.did)
       users = users.filter(u => u.did !== selectedUser!.did)
       selectedUser = null
+      toast.success($_('admin.userDeleted'))
     } catch (e) {
-      usersError = e instanceof ApiError ? e.message : 'Failed to delete user'
+      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToDeleteUser'))
     } finally {
       userActionLoading = false
     }
@@ -305,7 +312,7 @@
     return num.toLocaleString()
   }
 </script>
-{#if auth.session?.isAdmin}
+{#if session?.isAdmin}
   <div class="page">
     <header>
       <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
@@ -314,9 +321,6 @@
     {#if loading}
       <p class="loading">{$_('admin.loading')}</p>
     {:else}
-      {#if error}
-        <div class="message error">{error}</div>
-      {/if}
       <section>
         <h2>{$_('admin.serverConfig')}</h2>
         <form class="config-form" onsubmit={saveServerConfig}>
@@ -428,12 +432,6 @@
             </div>
           </div>
 
-          {#if serverConfigError}
-            <div class="message error">{serverConfigError}</div>
-          {/if}
-          {#if serverConfigSuccess}
-            <div class="message success">{$_('admin.configSaved')}</div>
-          {/if}
           <button type="submit" disabled={serverConfigLoading || !hasConfigChanges()}>
             {serverConfigLoading ? $_('common.saving') : $_('admin.saveConfig')}
           </button>
@@ -476,9 +474,6 @@
             {usersLoading ? $_('admin.loading') : $_('admin.searchUsers')}
           </button>
         </form>
-        {#if usersError}
-          <div class="message error">{usersError}</div>
-        {/if}
         {#if showUsers}
           <div class="user-list">
             {#if users.length === 0}
@@ -528,9 +523,6 @@
             {invitesLoading ? $_('admin.loading') : showInvites ? $_('admin.refresh') : $_('admin.loadInviteCodes')}
           </button>
         </div>
-        {#if invitesError}
-          <div class="message error">{invitesError}</div>
-        {/if}
         {#if showInvites}
           <div class="invite-list">
             {#if invites.length === 0}

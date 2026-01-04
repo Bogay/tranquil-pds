@@ -1,15 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError, type VerificationMethod, type DidDocument } from '../lib/api'
   import { _ } from '../lib/i18n'
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
 
   let loading = $state(true)
   let saving = $state(false)
-  let message = $state<{ type: 'success' | 'error'; text: string } | null>(null)
   let didDocument = $state<DidDocument | null>(null)
   let verificationMethods = $state<VerificationMethod[]>([])
   let alsoKnownAs = $state<string[]>([])
@@ -19,15 +31,15 @@
   let newHandle = $state('')
 
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
 
   onMount(async () => {
-    if (!auth.session) return
+    if (!session) return
     try {
-      didDocument = await api.getDidDocument(auth.session.accessJwt)
+      didDocument = await api.getDidDocument(session.accessJwt)
       verificationMethods = didDocument.verificationMethod.map(vm => ({
         id: vm.id.replace(didDocument!.id, ''),
         type: vm.type,
@@ -37,23 +49,16 @@
       const pdsService = didDocument.service.find(s => s.id === '#atproto_pds')
       serviceEndpoint = pdsService?.serviceEndpoint || ''
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('didEditor.loadFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('didEditor.loadFailed'))
     } finally {
       loading = false
     }
   })
 
-  function showMessage(type: 'success' | 'error', text: string) {
-    message = { type, text }
-    setTimeout(() => {
-      if (message?.text === text) message = null
-    }, 5000)
-  }
-
   function addVerificationMethod() {
     if (!newKeyId || !newKeyPublic) return
     if (!newKeyPublic.startsWith('z')) {
-      showMessage('error', $_('didEditor.invalidMultibase'))
+      toast.error($_('didEditor.invalidMultibase'))
       return
     }
     verificationMethods = [...verificationMethods, {
@@ -72,7 +77,7 @@
   function addHandle() {
     if (!newHandle) return
     if (!newHandle.startsWith('at://')) {
-      showMessage('error', $_('didEditor.invalidHandle'))
+      toast.error($_('didEditor.invalidHandle'))
       return
     }
     alsoKnownAs = [...alsoKnownAs, newHandle]
@@ -84,19 +89,18 @@
   }
 
   async function handleSave() {
-    if (!auth.session) return
+    if (!session) return
     saving = true
-    message = null
     try {
-      await api.updateDidDocument(auth.session.accessJwt, {
+      await api.updateDidDocument(session.accessJwt, {
         verificationMethods: verificationMethods.length > 0 ? verificationMethods : undefined,
         alsoKnownAs: alsoKnownAs.length > 0 ? alsoKnownAs : undefined,
         serviceEndpoint: serviceEndpoint || undefined
       })
-      showMessage('success', $_('didEditor.success'))
-      didDocument = await api.getDidDocument(auth.session.accessJwt)
+      toast.success($_('didEditor.success'))
+      didDocument = await api.getDidDocument(session.accessJwt)
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('didEditor.saveFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('didEditor.saveFailed'))
     } finally {
       saving = false
     }
@@ -109,12 +113,13 @@
     <h1>{$_('didEditor.title')}</h1>
   </header>
 
-  {#if message}
-    <div class="message {message.type}">{message.text}</div>
-  {/if}
-
   {#if loading}
-    <div class="loading">{$_('common.loading')}</div>
+    <div class="skeleton-sections">
+      <div class="skeleton-section small"></div>
+      <div class="skeleton-section large"></div>
+      <div class="skeleton-section"></div>
+      <div class="skeleton-section"></div>
+    </div>
   {:else}
     <div class="help-section">
       <h3>{$_('didEditor.helpTitle')}</h3>
@@ -453,5 +458,31 @@
     .add-btn {
       width: 100%;
     }
+  }
+
+  .skeleton-sections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .skeleton-section {
+    height: 180px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  .skeleton-section.small {
+    height: 80px;
+  }
+
+  .skeleton-section.large {
+    height: 250px;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

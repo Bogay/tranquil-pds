@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
 
@@ -66,11 +66,11 @@
   }
 
   function goToLogin() {
-    navigate('/login')
+    navigate(routes.login)
   }
 
   function requestNewLink() {
-    navigate('/login')
+    navigate(routes.login)
   }
 </script>
 

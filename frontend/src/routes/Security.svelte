@@ -1,13 +1,31 @@
 <script lang="ts">
   import { getAuthState, getValidToken } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import ReauthModal from '../components/ReauthModal.svelte'
   import { _ } from '../lib/i18n'
   import { formatDate as formatDateUtil } from '../lib/date'
+  import type { Session } from '../lib/types/api'
+  import {
+    prepareCreationOptions,
+    serializeAttestationResponse,
+    type WebAuthnCreationOptionsResponse,
+  } from '../lib/webauthn'
+  import { toast } from '../lib/toast.svelte'
 
-  const auth = getAuthState()
-  let message = $state<{ type: 'success' | 'error'; text: string } | null>(null)
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
+
   let loading = $state(true)
   let totpEnabled = $state(false)
   let hasBackupCodes = $state(false)
@@ -56,13 +74,13 @@
   let pendingAction = $state<(() => Promise<void>) | null>(null)
 
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
 
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadTotpStatus()
       loadPasskeys()
       loadPasswordStatus()
@@ -71,10 +89,10 @@
   })
 
   async function loadPasswordStatus() {
-    if (!auth.session) return
+    if (!session) return
     passwordLoading = true
     try {
-      const status = await api.getPasswordStatus(auth.session.accessJwt)
+      const status = await api.getPasswordStatus(session.accessJwt)
       hasPassword = status.hasPassword
     } catch {
       hasPassword = true
@@ -84,10 +102,10 @@
   }
 
   async function loadLegacyLoginPreference() {
-    if (!auth.session) return
+    if (!session) return
     legacyLoginLoading = true
     try {
-      const pref = await api.getLegacyLoginPreference(auth.session.accessJwt)
+      const pref = await api.getLegacyLoginPreference(session.accessJwt)
       allowLegacyLogin = pref.allowLegacyLogin
       hasMfa = pref.hasMfa
     } catch {
@@ -99,12 +117,12 @@
   }
 
   async function handleToggleLegacyLogin() {
-    if (!auth.session) return
+    if (!session) return
     legacyLoginUpdating = true
     try {
-      const result = await api.updateLegacyLoginPreference(auth.session.accessJwt, !allowLegacyLogin)
+      const result = await api.updateLegacyLoginPreference(session.accessJwt, !allowLegacyLogin)
       allowLegacyLogin = result.allowLegacyLogin
-      showMessage('success', allowLegacyLogin
+      toast.success(allowLegacyLogin
         ? $_('security.legacyLoginEnabled')
         : $_('security.legacyLoginDisabled'))
     } catch (e) {
@@ -114,10 +132,10 @@
           pendingAction = handleToggleLegacyLogin
           showReauthModal = true
         } else {
-          showMessage('error', e.message)
+          toast.error(e.message)
         }
       } else {
-        showMessage('error', $_('security.failedToUpdatePreference'))
+        toast.error($_('security.failedToUpdatePreference'))
       }
     } finally {
       legacyLoginUpdating = false
@@ -125,18 +143,18 @@
   }
 
   async function handleRemovePassword() {
-    if (!auth.session) return
+    if (!session) return
     removePasswordLoading = true
     try {
       const token = await getValidToken()
       if (!token) {
-        showMessage('error', $_('security.sessionExpired'))
+        toast.error($_('security.sessionExpired'))
         return
       }
       await api.removePassword(token)
       hasPassword = false
       showRemovePasswordForm = false
-      showMessage('success', $_('security.passwordRemoved'))
+      toast.success($_('security.passwordRemoved'))
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.error === 'ReauthRequired') {
@@ -144,10 +162,10 @@
           pendingAction = handleRemovePassword
           showReauthModal = true
         } else {
-          showMessage('error', e.message)
+          toast.error(e.message)
         }
       } else {
-        showMessage('error', $_('security.failedToRemovePassword'))
+        toast.error($_('security.failedToRemovePassword'))
       }
     } finally {
       removePasswordLoading = false
@@ -166,36 +184,29 @@
   }
 
   async function loadTotpStatus() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
     try {
-      const status = await api.getTotpStatus(auth.session.accessJwt)
+      const status = await api.getTotpStatus(session.accessJwt)
       totpEnabled = status.enabled
       hasBackupCodes = status.hasBackupCodes
     } catch {
-      showMessage('error', $_('security.failedToLoadTotpStatus'))
+      toast.error($_('security.failedToLoadTotpStatus'))
     } finally {
       loading = false
     }
   }
 
-  function showMessage(type: 'success' | 'error', text: string) {
-    message = { type, text }
-    setTimeout(() => {
-      if (message?.text === text) message = null
-    }, 5000)
-  }
-
   async function handleStartSetup() {
-    if (!auth.session) return
+    if (!session) return
     verifyLoading = true
     try {
-      const result = await api.createTotpSecret(auth.session.accessJwt)
+      const result = await api.createTotpSecret(session.accessJwt)
       qrBase64 = result.qrBase64
       totpUri = result.uri
       setupStep = 'qr'
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to generate TOTP secret')
+      toast.error(e instanceof ApiError ? e.message : 'Failed to generate TOTP secret')
     } finally {
       verifyLoading = false
     }
@@ -203,17 +214,17 @@
 
   async function handleVerifySetup(e: Event) {
     e.preventDefault()
-    if (!auth.session || !verifyCode) return
+    if (!session || !verifyCode) return
     verifyLoading = true
     try {
-      const result = await api.enableTotp(auth.session.accessJwt, verifyCode)
+      const result = await api.enableTotp(session.accessJwt, verifyCode)
       backupCodes = result.backupCodes
       setupStep = 'backup'
       totpEnabled = true
       hasBackupCodes = true
       verifyCodeRaw = ''
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Invalid code. Please try again.')
+      toast.error(e instanceof ApiError ? e.message : 'Invalid code. Please try again.')
     } finally {
       verifyLoading = false
     }
@@ -224,23 +235,23 @@
     backupCodes = []
     qrBase64 = ''
     totpUri = ''
-    showMessage('success', $_('security.totpEnabledSuccess'))
+    toast.success($_('security.totpEnabledSuccess'))
   }
 
   async function handleDisable(e: Event) {
     e.preventDefault()
-    if (!auth.session || !disablePassword || !disableCode) return
+    if (!session || !disablePassword || !disableCode) return
     disableLoading = true
     try {
-      await api.disableTotp(auth.session.accessJwt, disablePassword, disableCode)
+      await api.disableTotp(session.accessJwt, disablePassword, disableCode)
       totpEnabled = false
       hasBackupCodes = false
       showDisableForm = false
       disablePassword = ''
       disableCode = ''
-      showMessage('success', $_('security.totpDisabledSuccess'))
+      toast.success($_('security.totpDisabledSuccess'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to disable TOTP')
+      toast.error(e instanceof ApiError ? e.message : 'Failed to disable TOTP')
     } finally {
       disableLoading = false
     }
@@ -248,17 +259,17 @@
 
   async function handleRegenerate(e: Event) {
     e.preventDefault()
-    if (!auth.session || !regenPassword || !regenCode) return
+    if (!session || !regenPassword || !regenCode) return
     regenLoading = true
     try {
-      const result = await api.regenerateBackupCodes(auth.session.accessJwt, regenPassword, regenCode)
+      const result = await api.regenerateBackupCodes(session.accessJwt, regenPassword, regenCode)
       backupCodes = result.backupCodes
       setupStep = 'backup'
       showRegenForm = false
       regenPassword = ''
       regenCode = ''
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to regenerate backup codes')
+      toast.error(e instanceof ApiError ? e.message : 'Failed to regenerate backup codes')
     } finally {
       regenLoading = false
     }
@@ -267,57 +278,49 @@
   function copyBackupCodes() {
     const text = backupCodes.join('\n')
     navigator.clipboard.writeText(text)
-    showMessage('success', $_('security.backupCodesCopied'))
+    toast.success($_('security.backupCodesCopied'))
   }
 
   async function loadPasskeys() {
-    if (!auth.session) return
+    if (!session) return
     passkeysLoading = true
     try {
-      const result = await api.listPasskeys(auth.session.accessJwt)
+      const result = await api.listPasskeys(session.accessJwt)
       passkeys = result.passkeys
     } catch {
-      showMessage('error', $_('security.failedToLoadPasskeys'))
+      toast.error($_('security.failedToLoadPasskeys'))
     } finally {
       passkeysLoading = false
     }
   }
 
   async function handleAddPasskey() {
-    if (!auth.session) return
+    if (!session) return
     if (!window.PublicKeyCredential) {
-      showMessage('error', $_('security.passkeysNotSupported'))
+      toast.error($_('security.passkeysNotSupported'))
       return
     }
     addingPasskey = true
     try {
-      const { options } = await api.startPasskeyRegistration(auth.session.accessJwt, newPasskeyName || undefined)
-      const publicKeyOptions = preparePublicKeyOptions(options)
+      const { options } = await api.startPasskeyRegistration(session.accessJwt, newPasskeyName || undefined)
+      const publicKeyOptions = prepareCreationOptions(options as WebAuthnCreationOptionsResponse)
       const credential = await navigator.credentials.create({
         publicKey: publicKeyOptions
       })
       if (!credential) {
-        showMessage('error', $_('security.passkeyCreationCancelled'))
+        toast.error($_('security.passkeyCreationCancelled'))
         return
       }
-      const credentialResponse = {
-        id: credential.id,
-        type: credential.type,
-        rawId: arrayBufferToBase64Url((credential as PublicKeyCredential).rawId),
-        response: {
-          clientDataJSON: arrayBufferToBase64Url((credential as PublicKeyCredential).response.clientDataJSON),
-          attestationObject: arrayBufferToBase64Url(((credential as PublicKeyCredential).response as AuthenticatorAttestationResponse).attestationObject),
-        },
-      }
-      await api.finishPasskeyRegistration(auth.session.accessJwt, credentialResponse, newPasskeyName || undefined)
+      const credentialResponse = serializeAttestationResponse(credential as PublicKeyCredential)
+      await api.finishPasskeyRegistration(session.accessJwt, credentialResponse, newPasskeyName || undefined)
       await loadPasskeys()
       newPasskeyName = ''
-      showMessage('success', $_('security.passkeyAddedSuccess'))
+      toast.success($_('security.passkeyAddedSuccess'))
     } catch (e) {
       if (e instanceof DOMException && e.name === 'NotAllowedError') {
-        showMessage('error', $_('security.passkeyCreationCancelled'))
+        toast.error($_('security.passkeyCreationCancelled'))
       } else {
-        showMessage('error', e instanceof ApiError ? e.message : 'Failed to add passkey')
+        toast.error(e instanceof ApiError ? e.message : 'Failed to add passkey')
       }
     } finally {
       addingPasskey = false
@@ -325,29 +328,29 @@
   }
 
   async function handleDeletePasskey(id: string) {
-    if (!auth.session) return
+    if (!session) return
     const passkey = passkeys.find(p => p.id === id)
     const name = passkey?.friendlyName || 'this passkey'
     if (!confirm($_('security.deletePasskeyConfirm', { values: { name } }))) return
     try {
-      await api.deletePasskey(auth.session.accessJwt, id)
+      await api.deletePasskey(session.accessJwt, id)
       await loadPasskeys()
-      showMessage('success', $_('security.passkeyDeleted'))
+      toast.success($_('security.passkeyDeleted'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to delete passkey')
+      toast.error(e instanceof ApiError ? e.message : 'Failed to delete passkey')
     }
   }
 
   async function handleSavePasskeyName() {
-    if (!auth.session || !editingPasskeyId || !editPasskeyName.trim()) return
+    if (!session || !editingPasskeyId || !editPasskeyName.trim()) return
     try {
-      await api.updatePasskey(auth.session.accessJwt, editingPasskeyId, editPasskeyName.trim())
+      await api.updatePasskey(session.accessJwt, editingPasskeyId, editPasskeyName.trim())
       await loadPasskeys()
       editingPasskeyId = null
       editPasskeyName = ''
-      showMessage('success', $_('security.passkeyRenamed'))
+      toast.success($_('security.passkeyRenamed'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : 'Failed to rename passkey')
+      toast.error(e instanceof ApiError ? e.message : 'Failed to rename passkey')
     }
   }
 
@@ -361,41 +364,6 @@
     editPasskeyName = ''
   }
 
-  function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-  }
-
-  function base64UrlToArrayBuffer(base64url: string): ArrayBuffer {
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = base64 + '='.repeat((4 - base64.length % 4) % 4)
-    const binary = atob(padded)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes.buffer
-  }
-
-  function preparePublicKeyOptions(options: any): PublicKeyCredentialCreationOptions {
-    return {
-      ...options.publicKey,
-      challenge: base64UrlToArrayBuffer(options.publicKey.challenge),
-      user: {
-        ...options.publicKey.user,
-        id: base64UrlToArrayBuffer(options.publicKey.user.id)
-      },
-      excludeCredentials: options.publicKey.excludeCredentials?.map((cred: any) => ({
-        ...cred,
-        id: base64UrlToArrayBuffer(cred.id)
-      })) || []
-    }
-  }
-
   function formatDate(dateStr: string): string {
     return formatDateUtil(dateStr)
   }
@@ -403,16 +371,16 @@
 
 <div class="page">
   <header>
-    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('security.title')}</h1>
   </header>
 
-  {#if message}
-    <div class="message {message.type}">{message.text}</div>
-  {/if}
-
   {#if loading}
-    <div class="loading">{$_('common.loading')}</div>
+    <div class="skeleton-grid">
+      {#each Array(4) as _}
+        <div class="skeleton-section"></div>
+      {/each}
+    </div>
   {:else}
     <div class="sections-grid">
     <section>
@@ -594,9 +562,7 @@
         {$_('security.passkeysDescription')}
       </p>
 
-      {#if passkeysLoading}
-        <div class="loading">{$_('security.loadingPasskeys')}</div>
-      {:else}
+      {#if !passkeysLoading}
         {#if passkeys.length > 0}
           <div class="passkey-list">
             {#each passkeys as passkey}
@@ -668,9 +634,7 @@
         {$_('security.passwordDescription')}
       </p>
 
-      {#if passwordLoading}
-        <div class="loading">{$_('common.loading')}</div>
-      {:else if hasPassword}
+      {#if !passwordLoading && hasPassword}
         <div class="status enabled">
           <span>{$_('security.passwordStatus')}</span>
         </div>
@@ -722,7 +686,7 @@
       <p class="description">
         {$_('security.trustedDevicesDescription')}
       </p>
-      <a href="/app/trusted-devices" class="section-link">
+      <a href={getFullUrl(routes.trustedDevices)} class="section-link">
         {$_('security.manageTrustedDevices')} &rarr;
       </a>
     </section>
@@ -735,9 +699,7 @@
           {$_('security.legacyLoginDescription')}
         </p>
 
-        {#if legacyLoginLoading}
-          <div class="loading">{$_('common.loading')}</div>
-        {:else}
+        {#if !legacyLoginLoading}
           <div class="toggle-row">
             <div class="toggle-info">
               <span class="toggle-label">{$_('security.legacyLogin')}</span>
@@ -765,8 +727,8 @@
               <strong>{$_('security.legacyLoginWarning')}</strong>
               <p>{$_('security.totpPasswordWarning')}</p>
               <ol>
-                <li><strong>{$_('security.totpPasswordOption1Label')}</strong> {$_('security.totpPasswordOption1Text')} <a href="/app/settings">{$_('security.totpPasswordOption1Link')}</a> {$_('security.totpPasswordOption1Suffix')}</li>
-                <li><strong>{$_('security.totpPasswordOption2Label')}</strong> {$_('security.totpPasswordOption2Text')} <a href="/app/settings">{$_('security.totpPasswordOption2Link')}</a> {$_('security.totpPasswordOption2Suffix')}</li>
+                <li><strong>{$_('security.totpPasswordOption1Label')}</strong> {$_('security.totpPasswordOption1Text')} <a href={getFullUrl(routes.settings)}>{$_('security.totpPasswordOption1Link')}</a> {$_('security.totpPasswordOption1Suffix')}</li>
+                <li><strong>{$_('security.totpPasswordOption2Label')}</strong> {$_('security.totpPasswordOption2Text')} <a href={getFullUrl(routes.settings)}>{$_('security.totpPasswordOption2Link')}</a> {$_('security.totpPasswordOption2Suffix')}</li>
               </ol>
             </div>
           {/if}
@@ -1221,5 +1183,29 @@
 
   .warning-box a {
     color: var(--accent);
+  }
+
+  .skeleton-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-6);
+  }
+
+  .skeleton-section {
+    height: 200px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  @media (max-width: 900px) {
+    .skeleton-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

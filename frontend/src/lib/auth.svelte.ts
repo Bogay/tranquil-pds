@@ -1,11 +1,23 @@
 import {
   api,
   ApiError,
+  typedApi,
   type CreateAccountParams,
   type CreateAccountResult,
-  type Session,
-  setTokenRefreshCallback,
 } from "./api";
+import type { Session } from "./types/api";
+import {
+  type Did,
+  type Handle,
+  type AccessToken,
+  type RefreshToken,
+  unsafeAsDid,
+  unsafeAsHandle,
+  unsafeAsAccessToken,
+  unsafeAsRefreshToken,
+} from "./types/branded";
+import { type Result, ok, err, isOk, isErr, map } from "./types/result";
+import { assertNever } from "./types/exhaustive";
 import {
   checkForOAuthCallback,
   clearOAuthCallbackParams,
@@ -15,39 +27,184 @@ import {
 } from "./oauth";
 import { setLocale, type SupportedLocale } from "./i18n";
 
-function applyLocaleFromSession(
-  sessionInfo: { preferredLocale?: string | null },
-) {
+const STORAGE_KEY = "tranquil_pds_session";
+const ACCOUNTS_KEY = "tranquil_pds_accounts";
+
+export interface SavedAccount {
+  readonly did: Did;
+  readonly handle: Handle;
+  readonly accessJwt: AccessToken;
+  readonly refreshJwt: RefreshToken;
+}
+
+export type AuthError =
+  | { readonly type: "network"; readonly message: string }
+  | { readonly type: "unauthorized"; readonly message: string }
+  | { readonly type: "validation"; readonly message: string }
+  | { readonly type: "oauth"; readonly message: string }
+  | { readonly type: "unknown"; readonly message: string };
+
+function toAuthError(e: unknown): AuthError {
+  if (e instanceof ApiError) {
+    if (e.status === 401) {
+      return { type: "unauthorized", message: e.message };
+    }
+    return { type: "validation", message: e.message };
+  }
+  if (e instanceof Error) {
+    if (e.message.includes("network") || e.message.includes("fetch")) {
+      return { type: "network", message: e.message };
+    }
+    return { type: "unknown", message: e.message };
+  }
+  return { type: "unknown", message: "An unknown error occurred" };
+}
+
+type AuthStateKind = "unauthenticated" | "loading" | "authenticated" | "error";
+
+export type AuthState =
+  | {
+      readonly kind: "unauthenticated";
+      readonly savedAccounts: readonly SavedAccount[];
+    }
+  | {
+      readonly kind: "loading";
+      readonly savedAccounts: readonly SavedAccount[];
+      readonly previousSession: Session | null;
+    }
+  | {
+      readonly kind: "authenticated";
+      readonly session: Session;
+      readonly savedAccounts: readonly SavedAccount[];
+    }
+  | {
+      readonly kind: "error";
+      readonly error: AuthError;
+      readonly savedAccounts: readonly SavedAccount[];
+    };
+
+function createUnauthenticated(
+  savedAccounts: readonly SavedAccount[],
+): AuthState {
+  return { kind: "unauthenticated", savedAccounts };
+}
+
+function createLoading(
+  savedAccounts: readonly SavedAccount[],
+  previousSession: Session | null = null,
+): AuthState {
+  return { kind: "loading", savedAccounts, previousSession };
+}
+
+function createAuthenticated(
+  session: Session,
+  savedAccounts: readonly SavedAccount[],
+): AuthState {
+  return { kind: "authenticated", session, savedAccounts };
+}
+
+function createError(
+  error: AuthError,
+  savedAccounts: readonly SavedAccount[],
+): AuthState {
+  return { kind: "error", error, savedAccounts };
+}
+
+const state = $state<{ current: AuthState }>({
+  current: createLoading([]),
+});
+
+function applyLocaleFromSession(sessionInfo: {
+  preferredLocale?: string | null;
+}): void {
   if (sessionInfo.preferredLocale) {
     setLocale(sessionInfo.preferredLocale as SupportedLocale);
   }
 }
 
-const STORAGE_KEY = "tranquil_pds_session";
-const ACCOUNTS_KEY = "tranquil_pds_accounts";
-
-export interface SavedAccount {
-  did: string;
-  handle: string;
-  accessJwt: string;
-  refreshJwt: string;
+function sessionToSavedAccount(session: Session): SavedAccount {
+  return {
+    did: unsafeAsDid(session.did),
+    handle: unsafeAsHandle(session.handle),
+    accessJwt: unsafeAsAccessToken(session.accessJwt),
+    refreshJwt: unsafeAsRefreshToken(session.refreshJwt),
+  };
 }
 
-interface AuthState {
-  session: Session | null;
-  loading: boolean;
-  error: string | null;
-  savedAccounts: SavedAccount[];
+interface StoredSession {
+  readonly did: string;
+  readonly handle: string;
+  readonly accessJwt: string;
+  readonly refreshJwt: string;
+  readonly email?: string;
+  readonly emailConfirmed?: boolean;
+  readonly preferredChannel?: string;
+  readonly preferredChannelVerified?: boolean;
+  readonly preferredLocale?: string | null;
 }
 
-const state = $state<AuthState>({
-  session: null,
-  loading: true,
-  error: null,
-  savedAccounts: [],
-});
+function parseStoredSession(json: string): Result<StoredSession, Error> {
+  try {
+    const parsed = JSON.parse(json);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof parsed.did === "string" &&
+      typeof parsed.handle === "string" &&
+      typeof parsed.accessJwt === "string" &&
+      typeof parsed.refreshJwt === "string"
+    ) {
+      return ok(parsed as StoredSession);
+    }
+    return err(new Error("Invalid session format"));
+  } catch (e) {
+    return err(e instanceof Error ? e : new Error("Failed to parse session"));
+  }
+}
 
-function saveSession(session: Session | null) {
+function parseStoredAccounts(json: string): Result<SavedAccount[], Error> {
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) {
+      return err(new Error("Invalid accounts format"));
+    }
+    const accounts: SavedAccount[] = parsed
+      .filter(
+        (a): a is { did: string; handle: string; accessJwt: string; refreshJwt: string } =>
+          typeof a === "object" &&
+          a !== null &&
+          typeof a.did === "string" &&
+          typeof a.handle === "string" &&
+          typeof a.accessJwt === "string" &&
+          typeof a.refreshJwt === "string",
+      )
+      .map((a) => ({
+        did: unsafeAsDid(a.did),
+        handle: unsafeAsHandle(a.handle),
+        accessJwt: unsafeAsAccessToken(a.accessJwt),
+        refreshJwt: unsafeAsRefreshToken(a.refreshJwt),
+      }));
+    return ok(accounts);
+  } catch (e) {
+    return err(e instanceof Error ? e : new Error("Failed to parse accounts"));
+  }
+}
+
+function loadSessionFromStorage(): StoredSession | null {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) return null;
+  const result = parseStoredSession(stored);
+  return isOk(result) ? result.value : null;
+}
+
+function loadSavedAccountsFromStorage(): readonly SavedAccount[] {
+  const stored = localStorage.getItem(ACCOUNTS_KEY);
+  if (!stored) return [];
+  const result = parseStoredAccounts(stored);
+  return isOk(result) ? result.value : [];
+}
+
+function persistSession(session: Session | null): void {
   if (session) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
   } else {
@@ -55,82 +212,85 @@ function saveSession(session: Session | null) {
   }
 }
 
-function loadSession(): Session | null {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-function loadSavedAccounts(): SavedAccount[] {
-  const stored = localStorage.getItem(ACCOUNTS_KEY);
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function saveSavedAccounts(accounts: SavedAccount[]) {
+function persistSavedAccounts(accounts: readonly SavedAccount[]): void {
   localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
 }
 
-function addOrUpdateSavedAccount(session: Session) {
-  const accounts = loadSavedAccounts();
-  const existing = accounts.findIndex((a) => a.did === session.did);
-  const savedAccount: SavedAccount = {
-    did: session.did,
-    handle: session.handle,
-    accessJwt: session.accessJwt,
-    refreshJwt: session.refreshJwt,
-  };
-  if (existing >= 0) {
-    accounts[existing] = savedAccount;
-  } else {
-    accounts.push(savedAccount);
-  }
-  saveSavedAccounts(accounts);
-  state.savedAccounts = accounts;
+function updateSavedAccounts(
+  accounts: readonly SavedAccount[],
+  session: Session,
+): readonly SavedAccount[] {
+  const newAccount = sessionToSavedAccount(session);
+  const filtered = accounts.filter((a) => a.did !== newAccount.did);
+  return [...filtered, newAccount];
 }
 
-function removeSavedAccount(did: string) {
-  const accounts = loadSavedAccounts().filter((a) => a.did !== did);
-  saveSavedAccounts(accounts);
-  state.savedAccounts = accounts;
+function removeSavedAccountByDid(
+  accounts: readonly SavedAccount[],
+  did: Did,
+): readonly SavedAccount[] {
+  return accounts.filter((a) => a.did !== did);
+}
+
+function findSavedAccount(
+  accounts: readonly SavedAccount[],
+  did: Did,
+): SavedAccount | undefined {
+  return accounts.find((a) => a.did === did);
+}
+
+function getSavedAccounts(): readonly SavedAccount[] {
+  return state.current.savedAccounts;
+}
+
+function setState(newState: AuthState): void {
+  state.current = newState;
+}
+
+function setAuthenticated(session: Session): void {
+  const accounts = updateSavedAccounts(getSavedAccounts(), session);
+  persistSession(session);
+  persistSavedAccounts(accounts);
+  setState(createAuthenticated(session, accounts));
+}
+
+function setUnauthenticated(): void {
+  persistSession(null);
+  setState(createUnauthenticated(getSavedAccounts()));
+}
+
+function setError(error: AuthError): void {
+  setState(createError(error, getSavedAccounts()));
+}
+
+function setLoading(previousSession: Session | null = null): void {
+  setState(createLoading(getSavedAccounts(), previousSession));
 }
 
 async function tryRefreshToken(): Promise<string | null> {
-  if (!state.session) return null;
+  if (state.current.kind !== "authenticated") return null;
+  const currentSession = state.current.session;
   try {
-    const tokens = await refreshOAuthToken(state.session.refreshJwt);
+    const tokens = await refreshOAuthToken(currentSession.refreshJwt);
     const sessionInfo = await api.getSession(tokens.access_token);
     const session: Session = {
       ...sessionInfo,
       accessJwt: tokens.access_token,
-      refreshJwt: tokens.refresh_token || state.session.refreshJwt,
+      refreshJwt: tokens.refresh_token || currentSession.refreshJwt,
     };
-    state.session = session;
-    saveSession(session);
-    addOrUpdateSavedAccount(session);
+    setAuthenticated(session);
     return session.accessJwt;
   } catch {
     return null;
   }
 }
 
+import { setTokenRefreshCallback } from "./api";
+
 export async function initAuth(): Promise<{ oauthLoginCompleted: boolean }> {
   setTokenRefreshCallback(tryRefreshToken);
-  state.loading = true;
-  state.error = null;
-  state.savedAccounts = loadSavedAccounts();
+  const savedAccounts = loadSavedAccountsFromStorage();
+  setState(createLoading(savedAccounts));
 
   const oauthCallback = checkForOAuthCallback();
   if (oauthCallback) {
@@ -146,29 +306,25 @@ export async function initAuth(): Promise<{ oauthLoginCompleted: boolean }> {
         accessJwt: tokens.access_token,
         refreshJwt: tokens.refresh_token || "",
       };
-      state.session = session;
-      saveSession(session);
-      addOrUpdateSavedAccount(session);
+      setAuthenticated(session);
       applyLocaleFromSession(sessionInfo);
-      state.loading = false;
       return { oauthLoginCompleted: true };
     } catch (e) {
-      state.error = e instanceof Error ? e.message : "OAuth login failed";
-      state.loading = false;
+      setError({ type: "oauth", message: e instanceof Error ? e.message : "OAuth login failed" });
       return { oauthLoginCompleted: false };
     }
   }
 
-  const stored = loadSession();
+  const stored = loadSessionFromStorage();
   if (stored) {
     try {
       const sessionInfo = await api.getSession(stored.accessJwt);
-      state.session = {
+      const session: Session = {
         ...sessionInfo,
         accessJwt: stored.accessJwt,
         refreshJwt: stored.refreshJwt,
       };
-      addOrUpdateSavedAccount(state.session);
+      setAuthenticated(session);
       applyLocaleFromSession(sessionInfo);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -180,85 +336,72 @@ export async function initAuth(): Promise<{ oauthLoginCompleted: boolean }> {
             accessJwt: tokens.access_token,
             refreshJwt: tokens.refresh_token || stored.refreshJwt,
           };
-          state.session = session;
-          saveSession(session);
-          addOrUpdateSavedAccount(session);
+          setAuthenticated(session);
           applyLocaleFromSession(sessionInfo);
         } catch (refreshError) {
           console.error("Token refresh failed during init:", refreshError);
-          saveSession(null);
-          state.session = null;
+          setUnauthenticated();
         }
       } else {
         console.error("Non-401 error during getSession:", e);
-        saveSession(null);
-        state.session = null;
+        setUnauthenticated();
       }
     }
+  } else {
+    setState(createUnauthenticated(savedAccounts));
   }
-  state.loading = false;
+
   return { oauthLoginCompleted: false };
 }
 
 export async function login(
   identifier: string,
   password: string,
-): Promise<void> {
-  state.loading = true;
-  state.error = null;
-  try {
-    const session = await api.createSession(identifier, password);
-    state.session = session;
-    saveSession(session);
-    addOrUpdateSavedAccount(session);
-  } catch (e) {
-    if (e instanceof ApiError) {
-      state.error = e.message;
-    } else {
-      state.error = "Login failed";
-    }
-    throw e;
-  } finally {
-    state.loading = false;
+): Promise<Result<Session, AuthError>> {
+  const currentState = state.current;
+  const previousSession =
+    currentState.kind === "authenticated" ? currentState.session : null;
+  setLoading(previousSession);
+
+  const result = await typedApi.createSession(identifier, password);
+  if (isErr(result)) {
+    const error = toAuthError(result.error);
+    setError(error);
+    return err(error);
   }
+
+  setAuthenticated(result.value);
+  return ok(result.value);
 }
 
-export async function loginWithOAuth(): Promise<void> {
-  state.loading = true;
-  state.error = null;
+export async function loginWithOAuth(): Promise<Result<void, AuthError>> {
+  setLoading();
   try {
     await startOAuthLogin();
+    return ok(undefined);
   } catch (e) {
-    state.loading = false;
-    state.error = e instanceof Error
-      ? e.message
-      : "Failed to start OAuth login";
-    throw e;
+    const error = toAuthError(e);
+    setError(error);
+    return err(error);
   }
 }
 
 export async function register(
   params: CreateAccountParams,
-): Promise<CreateAccountResult> {
+): Promise<Result<CreateAccountResult, AuthError>> {
   try {
     const result = await api.createAccount(params);
-    return result;
+    return ok(result);
   } catch (e) {
-    if (e instanceof ApiError) {
-      state.error = e.message;
-    } else {
-      state.error = "Registration failed";
-    }
-    throw e;
+    return err(toAuthError(e));
   }
 }
 
 export async function confirmSignup(
   did: string,
   verificationCode: string,
-): Promise<void> {
-  state.loading = true;
-  state.error = null;
+): Promise<Result<Session, AuthError>> {
+  setLoading();
   try {
     const result = await api.confirmSignup(did, verificationCode);
     const session: Session = {
@@ -271,160 +414,170 @@ export async function confirmSignup(
       preferredChannel: result.preferredChannel,
       preferredChannelVerified: result.preferredChannelVerified,
     };
-    state.session = session;
-    saveSession(session);
-    addOrUpdateSavedAccount(session);
+    setAuthenticated(session);
+    return ok(session);
   } catch (e) {
-    if (e instanceof ApiError) {
-      state.error = e.message;
-    } else {
-      state.error = "Verification failed";
-    }
-    throw e;
-  } finally {
-    state.loading = false;
+    const error = toAuthError(e);
+    setError(error);
+    return err(error);
   }
 }
 
-export async function resendVerification(did: string): Promise<void> {
+export async function resendVerification(
+  did: string,
+): Promise<Result<void, AuthError>> {
   try {
     await api.resendVerification(did);
+    return ok(undefined);
   } catch (e) {
-    if (e instanceof ApiError) {
-      throw e;
-    }
-    throw new Error("Failed to resend verification code");
+    return err(toAuthError(e));
   }
 }
 
-export function setSession(
-  session: {
-    did: string;
-    handle: string;
-    accessJwt: string;
-    refreshJwt: string;
-  },
-): void {
+export function setSession(session: {
+  did: string;
+  handle: string;
+  accessJwt: string;
+  refreshJwt: string;
+}): void {
   const newSession: Session = {
     did: session.did,
     handle: session.handle,
     accessJwt: session.accessJwt,
     refreshJwt: session.refreshJwt,
   };
-  state.session = newSession;
-  saveSession(newSession);
-  addOrUpdateSavedAccount(newSession);
+  setAuthenticated(newSession);
 }
 
-export async function logout(): Promise<void> {
-  if (state.session) {
-    const did = state.session.did;
-    const refreshToken = state.session.refreshJwt;
+export async function logout(): Promise<Result<void, AuthError>> {
+  if (state.current.kind === "authenticated") {
+    const { session } = state.current;
+    const did = unsafeAsDid(session.did);
     try {
       await fetch("/oauth/revoke", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ token: refreshToken }),
+        body: new URLSearchParams({ token: session.refreshJwt }),
       });
     } catch {
-      // Ignore errors on logout
+      // Ignore revocation errors
     }
-    removeSavedAccount(did);
+    const accounts = removeSavedAccountByDid(getSavedAccounts(), did);
+    persistSavedAccounts(accounts);
+    persistSession(null);
+    setState(createUnauthenticated(accounts));
+  } else {
+    setUnauthenticated();
   }
-  state.session = null;
-  saveSession(null);
+  return ok(undefined);
 }
 
-export async function switchAccount(did: string): Promise<void> {
-  const account = state.savedAccounts.find((a) => a.did === did);
+export async function switchAccount(
+  did: Did,
+): Promise<Result<Session, AuthError>> {
+  const account = findSavedAccount(getSavedAccounts(), did);
   if (!account) {
-    throw new Error("Account not found");
+    return err({ type: "validation", message: "Account not found" });
   }
-  state.loading = true;
-  state.error = null;
+
+  setLoading();
+
   try {
-    const session = await api.getSession(account.accessJwt);
-    state.session = {
-      ...session,
-      accessJwt: account.accessJwt,
-      refreshJwt: account.refreshJwt,
+    const sessionInfo = await api.getSession(account.accessJwt as string);
+    const session: Session = {
+      ...sessionInfo,
+      accessJwt: account.accessJwt as string,
+      refreshJwt: account.refreshJwt as string,
     };
-    saveSession(state.session);
-    addOrUpdateSavedAccount(state.session);
+    setAuthenticated(session);
+    return ok(session);
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {
       try {
-        const tokens = await refreshOAuthToken(account.refreshJwt);
+        const tokens = await refreshOAuthToken(account.refreshJwt as string);
         const sessionInfo = await api.getSession(tokens.access_token);
         const session: Session = {
           ...sessionInfo,
           accessJwt: tokens.access_token,
-          refreshJwt: tokens.refresh_token || account.refreshJwt,
+          refreshJwt: tokens.refresh_token || (account.refreshJwt as string),
         };
-        state.session = session;
-        saveSession(session);
-        addOrUpdateSavedAccount(session);
+        setAuthenticated(session);
+        return ok(session);
       } catch {
-        removeSavedAccount(did);
-        state.error = "Session expired. Please log in again.";
-        throw new Error("Session expired");
+        const accounts = removeSavedAccountByDid(getSavedAccounts(), did);
+        persistSavedAccounts(accounts);
+        const error: AuthError = {
+          type: "unauthorized",
+          message: "Session expired. Please log in again.",
+        };
+        setState(createError(error, accounts));
+        return err(error);
       }
-    } else {
-      state.error = "Failed to switch account";
-      throw e;
     }
-  } finally {
-    state.loading = false;
+    const error = toAuthError(e);
+    setError(error);
+    return err(error);
   }
 }
 
-export function forgetAccount(did: string): void {
-  removeSavedAccount(did);
+export function forgetAccount(did: Did): void {
+  const accounts = removeSavedAccountByDid(getSavedAccounts(), did);
+  persistSavedAccounts(accounts);
+  setState({
+    ...state.current,
+    savedAccounts: accounts,
+  } as AuthState);
 }
 
-export function getAuthState() {
-  return state;
+export function getAuthState(): AuthState {
+  return state.current;
 }
 
-export async function refreshSession(): Promise<void> {
-  if (!state.session) return;
+export async function refreshSession(): Promise<Result<Session, AuthError>> {
+  if (state.current.kind !== "authenticated") {
+    return err({ type: "unauthorized", message: "Not authenticated" });
+  }
+  const currentSession = state.current.session;
   try {
-    const sessionInfo = await api.getSession(state.session.accessJwt);
-    state.session = {
+    const sessionInfo = await api.getSession(currentSession.accessJwt);
+    const session: Session = {
       ...sessionInfo,
-      accessJwt: state.session.accessJwt,
-      refreshJwt: state.session.refreshJwt,
+      accessJwt: currentSession.accessJwt,
+      refreshJwt: currentSession.refreshJwt,
     };
-    saveSession(state.session);
-    addOrUpdateSavedAccount(state.session);
+    setAuthenticated(session);
+    return ok(session);
   } catch (e) {
     console.error("Failed to refresh session:", e);
+    return err(toAuthError(e));
   }
 }
 
-export function getToken(): string | null {
-  return state.session?.accessJwt ?? null;
+export function getToken(): AccessToken | null {
+  if (state.current.kind === "authenticated") {
+    return unsafeAsAccessToken(state.current.session.accessJwt);
+  }
+  return null;
 }
 
-export async function getValidToken(): Promise<string | null> {
-  if (!state.session) return null;
+export async function getValidToken(): Promise<AccessToken | null> {
+  if (state.current.kind !== "authenticated") return null;
+  const currentSession = state.current.session;
   try {
-    await api.getSession(state.session.accessJwt);
-    return state.session.accessJwt;
+    await api.getSession(currentSession.accessJwt);
+    return unsafeAsAccessToken(currentSession.accessJwt);
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {
       try {
-        const tokens = await refreshOAuthToken(state.session.refreshJwt);
+        const tokens = await refreshOAuthToken(currentSession.refreshJwt);
         const sessionInfo = await api.getSession(tokens.access_token);
         const session: Session = {
           ...sessionInfo,
           accessJwt: tokens.access_token,
-          refreshJwt: tokens.refresh_token || state.session.refreshJwt,
+          refreshJwt: tokens.refresh_token || currentSession.refreshJwt,
         };
-        state.session = session;
-        saveSession(session);
-        addOrUpdateSavedAccount(session);
-        return session.accessJwt;
+        setAuthenticated(session);
+        return unsafeAsAccessToken(session.accessJwt);
       } catch {
         return null;
       }
@@ -434,32 +587,68 @@ export async function getValidToken(): Promise<string | null> {
 }
 
 export function isAuthenticated(): boolean {
-  return state.session !== null;
+  return state.current.kind === "authenticated";
 }
 
-export function _testSetState(
-  newState: {
-    session: Session | null;
-    loading: boolean;
-    error: string | null;
-    savedAccounts?: SavedAccount[];
-  },
-) {
-  state.session = newState.session;
-  state.loading = newState.loading;
-  state.error = newState.error;
-  state.savedAccounts = newState.savedAccounts ?? [];
+export function isLoading(): boolean {
+  return state.current.kind === "loading";
 }
 
-export function _testResetState() {
-  state.session = null;
-  state.loading = true;
-  state.error = null;
-  state.savedAccounts = [];
+export function getError(): AuthError | null {
+  return state.current.kind === "error" ? state.current.error : null;
 }
 
-export function _testReset() {
+export function getSession(): Session | null {
+  return state.current.kind === "authenticated" ? state.current.session : null;
+}
+
+export function matchAuthState<T>(handlers: {
+  unauthenticated: (accounts: readonly SavedAccount[]) => T;
+  loading: (accounts: readonly SavedAccount[], previousSession: Session | null) => T;
+  authenticated: (session: Session, accounts: readonly SavedAccount[]) => T;
+  error: (error: AuthError, accounts: readonly SavedAccount[]) => T;
+}): T {
+  const current = state.current;
+  switch (current.kind) {
+    case "unauthenticated":
+      return handlers.unauthenticated(current.savedAccounts);
+    case "loading":
+      return handlers.loading(current.savedAccounts, current.previousSession);
+    case "authenticated":
+      return handlers.authenticated(current.session, current.savedAccounts);
+    case "error":
+      return handlers.error(current.error, current.savedAccounts);
+    default:
+      return assertNever(current);
+  }
+}
+
+export function _testSetState(newState: {
+  session: Session | null;
+  loading: boolean;
+  error: string | null;
+  savedAccounts?: SavedAccount[];
+}): void {
+  const accounts = newState.savedAccounts ?? [];
+  if (newState.loading) {
+    setState(createLoading(accounts, newState.session));
+  } else if (newState.error) {
+    setState(createError({ type: "unknown", message: newState.error }, accounts));
+  } else if (newState.session) {
+    setState(createAuthenticated(newState.session, accounts));
+  } else {
+    setState(createUnauthenticated(accounts));
+  }
+}
+
+export function _testResetState(): void {
+  setState(createLoading([]));
+}
+
+export function _testReset(): void {
   _testResetState();
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(ACCOUNTS_KEY);
 }
+
+export { type Session };

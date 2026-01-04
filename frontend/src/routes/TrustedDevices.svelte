@@ -1,9 +1,11 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDateTime } from '../lib/date'
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
 
   interface TrustedDevice {
     id: string
@@ -14,54 +16,57 @@
     lastSeenAt: string
   }
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   let devices = $state<TrustedDevice[]>([])
   let loading = $state(true)
-  let message = $state<{ type: 'success' | 'error'; text: string } | null>(null)
   let editingDeviceId = $state<string | null>(null)
   let editDeviceName = $state('')
 
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
 
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadDevices()
     }
   })
 
   async function loadDevices() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
     try {
-      const result = await api.listTrustedDevices(auth.session.accessJwt)
+      const result = await api.listTrustedDevices(session.accessJwt)
       devices = result.devices
     } catch {
-      showMessage('error', $_('trustedDevices.failedToLoad'))
+      toast.error($_('trustedDevices.failedToLoad'))
     } finally {
       loading = false
     }
   }
 
-  function showMessage(type: 'success' | 'error', text: string) {
-    message = { type, text }
-    setTimeout(() => {
-      if (message?.text === text) message = null
-    }, 5000)
-  }
-
   async function handleRevoke(deviceId: string) {
-    if (!auth.session) return
+    if (!session) return
     if (!confirm($_('trustedDevices.revokeConfirm'))) return
     try {
-      await api.revokeTrustedDevice(auth.session.accessJwt, deviceId)
+      await api.revokeTrustedDevice(session.accessJwt, deviceId)
       await loadDevices()
-      showMessage('success', $_('trustedDevices.deviceRevoked'))
+      toast.success($_('trustedDevices.deviceRevoked'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('common.error'))
+      toast.error(e instanceof ApiError ? e.message : $_('common.error'))
     }
   }
 
@@ -76,15 +81,15 @@
   }
 
   async function handleSaveDeviceName() {
-    if (!auth.session || !editingDeviceId || !editDeviceName.trim()) return
+    if (!session || !editingDeviceId || !editDeviceName.trim()) return
     try {
-      await api.updateTrustedDevice(auth.session.accessJwt, editingDeviceId, editDeviceName.trim())
+      await api.updateTrustedDevice(session.accessJwt, editingDeviceId, editDeviceName.trim())
       await loadDevices()
       editingDeviceId = null
       editDeviceName = ''
-      showMessage('success', $_('trustedDevices.deviceRenamed'))
+      toast.success($_('trustedDevices.deviceRenamed'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('common.error'))
+      toast.error(e instanceof ApiError ? e.message : $_('common.error'))
     }
   }
 
@@ -112,13 +117,9 @@
 
 <div class="page">
   <header>
-    <a href="/app/security" class="back">{$_('trustedDevices.backToSecurity')}</a>
+    <a href={getFullUrl(routes.security)} class="back">{$_('trustedDevices.backToSecurity')}</a>
     <h1>{$_('trustedDevices.title')}</h1>
   </header>
-
-  {#if message}
-    <div class="message {message.type}">{message.text}</div>
-  {/if}
 
   <div class="description">
     <p>
@@ -127,7 +128,11 @@
   </div>
 
   {#if loading}
-    <div class="loading">{$_('common.loading')}</div>
+    <div class="skeleton-list">
+      {#each Array(2) as _}
+        <div class="skeleton-card"></div>
+      {/each}
+    </div>
   {:else if devices.length === 0}
     <div class="empty-state">
       <p>{$_('trustedDevices.noDevices')}</p>
@@ -378,5 +383,24 @@
 
   .btn-danger:hover {
     background: var(--error-bg);
+  }
+
+  .skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .skeleton-card {
+    height: 100px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

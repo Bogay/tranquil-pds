@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
 
   interface ScopeInfo {
@@ -57,15 +57,12 @@
       const data: ConsentData = await response.json()
       consentData = data
 
-      for (const scope of data.scopes) {
-        if (scope.required) {
-          scopeSelections[scope.scope] = true
-        } else if (scope.granted !== null) {
-          scopeSelections[scope.scope] = scope.granted
-        } else {
-          scopeSelections[scope.scope] = true
-        }
-      }
+      scopeSelections = Object.fromEntries(
+        data.scopes.map((scope) => [
+          scope.scope,
+          scope.required ? true : scope.granted ?? true,
+        ])
+      )
 
       if (!data.show_consent) {
         await submitConsent()
@@ -144,14 +141,13 @@
   }
 
   function groupScopesByCategory(scopes: ScopeInfo[]): Record<string, ScopeInfo[]> {
-    const groups: Record<string, ScopeInfo[]> = {}
-    for (const scope of scopes) {
-      if (!groups[scope.category]) {
-        groups[scope.category] = []
-      }
-      groups[scope.category].push(scope)
-    }
-    return groups
+    return scopes.reduce(
+      (groups, scope) => ({
+        ...groups,
+        [scope.category]: [...(groups[scope.category] ?? []), scope],
+      }),
+      {} as Record<string, ScopeInfo[]>
+    )
   }
 
   $effect(() => {
@@ -163,14 +159,12 @@
 
 <div class="consent-container">
   {#if loading}
-    <div class="loading">
-      <p>{$_('common.loading')}</p>
-    </div>
+    <div class="loading"></div>
   {:else if error}
     <div class="error-container">
       <h1>{$_('oauth.error.title')}</h1>
       <div class="error">{error}</div>
-      <button type="button" onclick={() => navigate('/login')}>
+      <button type="button" onclick={() => navigate(routes.login)}>
         {$_('common.backToLogin')}
       </button>
     </div>

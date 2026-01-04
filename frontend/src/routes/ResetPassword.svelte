@@ -1,10 +1,17 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { getAuthState } from '../lib/auth.svelte'
   import { _ } from '../lib/i18n'
+  import type { Session } from '../lib/types/api'
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  const session = $derived(getSession())
 
   let email = $state('')
   let token = $state('')
@@ -16,8 +23,8 @@
   let tokenSent = $state(false)
 
   $effect(() => {
-    if (auth.session) {
-      navigate('/dashboard')
+    if (session) {
+      navigate(routes.dashboard)
     }
   })
 
@@ -55,7 +62,7 @@
     try {
       await api.resetPassword(token, newPassword)
       success = $_('resetPassword.success')
-      setTimeout(() => navigate('/login'), 2000)
+      setTimeout(() => navigate(routes.login), 2000)
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Failed to reset password'
     } finally {

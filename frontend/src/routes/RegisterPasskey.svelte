@@ -9,6 +9,11 @@
     DidDocStep,
     AppPasswordStep,
   } from '../lib/registration'
+  import {
+    prepareCreationOptions,
+    serializeAttestationResponse,
+    type WebAuthnCreationOptionsResponse,
+  } from '../lib/webauthn'
 
   let serverInfo = $state<{
     availableUserDomains: string[]
@@ -84,41 +89,6 @@
     return null
   }
 
-  function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-  }
-
-  function base64UrlToArrayBuffer(base64url: string): ArrayBuffer {
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = base64 + '='.repeat((4 - base64.length % 4) % 4)
-    const binary = atob(padded)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes.buffer
-  }
-
-  function preparePublicKeyOptions(options: any): PublicKeyCredentialCreationOptions {
-    return {
-      ...options.publicKey,
-      challenge: base64UrlToArrayBuffer(options.publicKey.challenge),
-      user: {
-        ...options.publicKey.user,
-        id: base64UrlToArrayBuffer(options.publicKey.user.id)
-      },
-      excludeCredentials: options.publicKey.excludeCredentials?.map((cred: any) => ({
-        ...cred,
-        id: base64UrlToArrayBuffer(cred.id)
-      })) || []
-    }
-  }
-
   async function handleInfoSubmit(e: Event) {
     e.preventDefault()
     if (!flow) return
@@ -156,7 +126,7 @@
         passkeyName || undefined
       )
 
-      const publicKeyOptions = preparePublicKeyOptions(options)
+      const publicKeyOptions = prepareCreationOptions(options as WebAuthnCreationOptionsResponse)
       const credential = await navigator.credentials.create({
         publicKey: publicKeyOptions
       })
@@ -167,17 +137,7 @@
         return
       }
 
-      const pkCredential = credential as PublicKeyCredential
-      const response = pkCredential.response as AuthenticatorAttestationResponse
-      const credentialResponse = {
-        id: pkCredential.id,
-        type: pkCredential.type,
-        rawId: arrayBufferToBase64Url(pkCredential.rawId),
-        response: {
-          clientDataJSON: arrayBufferToBase64Url(response.clientDataJSON),
-          attestationObject: arrayBufferToBase64Url(response.attestationObject),
-        },
-      }
+      const credentialResponse = serializeAttestationResponse(credential as PublicKeyCredential)
 
       const result = await api.completePasskeySetup(
         flow.account.did,

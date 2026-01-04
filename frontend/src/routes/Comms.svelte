@@ -1,14 +1,26 @@
 <script lang="ts">
   import { getAuthState, refreshSession } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDateTime } from '../lib/date'
-  const auth = getAuthState()
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
+
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   let loading = $state(true)
   let saving = $state(false)
-  let error = $state<string | null>(null)
-  let success = $state<string | null>(null)
   let preferredChannel = $state('email')
   let availableCommsChannels = $state<string[]>(['email'])
   let email = $state('')
@@ -20,10 +32,7 @@
   let signalVerified = $state(false)
   let verifyingChannel = $state<string | null>(null)
   let verificationCode = $state('')
-  let verificationError = $state<string | null>(null)
-  let verificationSuccess = $state<string | null>(null)
   let historyLoading = $state(true)
-  let historyError = $state<string | null>(null)
   let messages = $state<Array<{
     createdAt: string
     channel: string
@@ -33,23 +42,22 @@
     body: string
   }>>([])
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadPrefs()
       loadHistory()
     }
   })
   async function loadPrefs() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
-    error = null
     try {
       const [prefs, serverInfo] = await Promise.all([
-        api.getNotificationPrefs(auth.session.accessJwt),
+        api.getNotificationPrefs(session.accessJwt),
         api.describeServer()
       ])
       preferredChannel = prefs.preferredChannel
@@ -62,37 +70,33 @@
       signalVerified = prefs.signalVerified
       availableCommsChannels = serverInfo.availableCommsChannels ?? ['email']
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to load notification preferences'
+      toast.error(e instanceof ApiError ? e.message : $_('comms.failedToLoad'))
     } finally {
       loading = false
     }
   }
   async function handleSave(e: Event) {
     e.preventDefault()
-    if (!auth.session) return
+    if (!session) return
     saving = true
-    error = null
-    success = null
     try {
-      await api.updateNotificationPrefs(auth.session.accessJwt, {
+      await api.updateNotificationPrefs(session.accessJwt, {
         preferredChannel,
         discordId: discordId || undefined,
         telegramUsername: telegramUsername || undefined,
         signalNumber: signalNumber || undefined,
       })
       await refreshSession()
-      success = $_('comms.preferencesSaved')
+      toast.success($_('comms.preferencesSaved'))
       await loadPrefs()
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to save preferences'
+      toast.error(e instanceof ApiError ? e.message : $_('comms.failedToSave'))
     } finally {
       saving = false
     }
   }
   async function handleVerify(channel: string) {
-    if (!auth.session || !verificationCode) return
-    verificationError = null
-    verificationSuccess = null
+    if (!session || !verificationCode) return
 
     let identifier = ''
     switch (channel) {
@@ -103,25 +107,24 @@
     if (!identifier) return
 
     try {
-      await api.confirmChannelVerification(auth.session.accessJwt, channel, identifier, verificationCode)
+      await api.confirmChannelVerification(session.accessJwt, channel, identifier, verificationCode)
       await refreshSession()
-      verificationSuccess = $_('comms.verifiedSuccess', { values: { channel } })
+      toast.success($_('comms.verifiedSuccess', { values: { channel } }))
       verificationCode = ''
       verifyingChannel = null
       await loadPrefs()
     } catch (e) {
-      verificationError = e instanceof ApiError ? e.message : 'Failed to verify channel'
+      toast.error(e instanceof ApiError ? e.message : $_('comms.failedToVerify'))
     }
   }
   async function loadHistory() {
-    if (!auth.session) return
+    if (!session) return
     historyLoading = true
-    historyError = null
     try {
-      const result = await api.getNotificationHistory(auth.session.accessJwt)
+      const result = await api.getNotificationHistory(session.accessJwt)
       messages = result.notifications
     } catch (e) {
-      historyError = e instanceof ApiError ? e.message : 'Failed to load notification history'
+      toast.error(e instanceof ApiError ? e.message : $_('comms.failedToLoadHistory'))
     } finally {
       historyLoading = false
     }
@@ -168,21 +171,17 @@
 </script>
 <div class="page">
   <header>
-    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('comms.title')}</h1>
     <p class="description">{$_('comms.description')}</p>
   </header>
 
   {#if loading}
-    <p class="loading">{$_('common.loading')}</p>
+    <div class="skeleton-sections">
+      <div class="skeleton-section"></div>
+      <div class="skeleton-section"></div>
+    </div>
   {:else}
-    {#if error}
-      <div class="message error">{error}</div>
-    {/if}
-    {#if success}
-      <div class="message success">{success}</div>
-    {/if}
-
     <div class="split-layout">
       <div class="main-column">
         <form onsubmit={handleSave}>
@@ -331,12 +330,6 @@
               </div>
             </div>
 
-            {#if verificationError}
-              <div class="message error" style="margin-top: 1rem">{verificationError}</div>
-            {/if}
-            {#if verificationSuccess}
-              <div class="message success" style="margin-top: 1rem">{verificationSuccess}</div>
-            {/if}
           </section>
 
           <div class="actions">
@@ -364,8 +357,6 @@
                 </div>
               {/each}
             </div>
-          {:else if historyError}
-            <div class="message error">{historyError}</div>
           {:else if messages.length === 0}
             <p class="no-messages">{$_('comms.noMessages')}</p>
           {:else}
@@ -789,5 +780,23 @@
     font-size: var(--text-xs);
     color: var(--text-muted);
     margin-top: var(--space-2);
+  }
+
+  .skeleton-sections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .skeleton-section {
+    height: 180px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

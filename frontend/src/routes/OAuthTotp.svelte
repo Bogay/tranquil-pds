@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
 
   let code = $state('')
@@ -61,7 +61,7 @@
   function handleCancel() {
     const requestUri = getRequestUri()
     if (requestUri) {
-      navigate(`/oauth/login?request_uri=${encodeURIComponent(requestUri)}`)
+      navigate(routes.oauthLogin, { params: { request_uri: requestUri } })
     } else {
       window.history.back()
     }

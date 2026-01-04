@@ -1,8 +1,10 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
   import { formatDateTime } from '../lib/date'
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
 
   interface AuditEntry {
     id: string
@@ -14,42 +16,52 @@
     createdAt: string
   }
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
+
   let loading = $state(true)
-  let error = $state<string | null>(null)
   let entries = $state<AuditEntry[]>([])
   let total = $state(0)
   let offset = $state(0)
   const limit = 20
 
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
 
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadAuditLog()
     }
   })
 
   async function loadAuditLog() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
-    error = null
 
     try {
       const response = await fetch(
         `/xrpc/_delegation.getAuditLog?limit=${limit}&offset=${offset}`,
         {
-          headers: { 'Authorization': `Bearer ${auth.session.accessJwt}` }
+          headers: { 'Authorization': `Bearer ${session.accessJwt}` }
         }
       )
 
       if (!response.ok) {
         const data = await response.json()
-        error = data.message || data.error || $_('delegation.failedToLoadAuditLog')
+        toast.error(data.message || data.error || $_('delegation.failedToLoadAuditLog'))
         return
       }
 
@@ -57,7 +69,7 @@
       entries = data.entries || []
       total = data.total || 0
     } catch (e) {
-      error = $_('delegation.failedToLoadAuditLog')
+      toast.error($_('delegation.failedToLoadAuditLog'))
     } finally {
       loading = false
     }
@@ -92,12 +104,9 @@
 
   function formatActionDetails(details: Record<string, unknown> | null): string {
     if (!details) return ''
-    const parts: string[] = []
-    for (const [key, value] of Object.entries(details)) {
-      const formattedKey = key.replace(/_/g, ' ')
-      parts.push(`${formattedKey}: ${JSON.stringify(value)}`)
-    }
-    return parts.join(', ')
+    return Object.entries(details)
+      .map(([key, value]) => `${key.replace(/_/g, ' ')}: ${JSON.stringify(value)}`)
+      .join(', ')
   }
 
   function truncateDid(did: string): string {
@@ -113,12 +122,12 @@
   </header>
 
   {#if loading}
-    <p class="loading">{$_('delegation.loading')}</p>
+    <div class="skeleton-list">
+      {#each Array(3) as _}
+        <div class="skeleton-entry"></div>
+      {/each}
+    </div>
   {:else}
-    {#if error}
-      <div class="message error">{error}</div>
-    {/if}
-
     {#if entries.length === 0}
       <p class="empty">{$_('delegation.noActivity')}</p>
     {:else}
@@ -318,5 +327,24 @@
   .actions-bar button {
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
+  }
+
+  .skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .skeleton-entry {
+    height: 100px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

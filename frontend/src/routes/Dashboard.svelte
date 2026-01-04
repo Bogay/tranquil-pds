@@ -1,16 +1,40 @@
 <script lang="ts">
-  import { getAuthState, logout, switchAccount } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import {
+    getAuthState,
+    logout,
+    switchAccount,
+    type SavedAccount,
+  } from '../lib/auth.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
   import { api } from '../lib/api'
+  import { isOk } from '../lib/types/result'
+  import { unsafeAsDid, type Did } from '../lib/types/branded'
+  import type { Session } from '../lib/types/api'
   import { onMount } from 'svelte'
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
   let dropdownOpen = $state(false)
   let switching = $state(false)
   let inviteCodesEnabled = $state(false)
 
-  const isDidWeb = $derived(auth.session?.did?.startsWith('did:web:') ?? false)
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function getSavedAccounts(): readonly SavedAccount[] {
+    return auth.savedAccounts
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const savedAccounts = $derived(getSavedAccounts())
+  const loading = $derived(isLoading())
+  const isDidWeb = $derived(session?.did?.startsWith('did:web:') ?? false)
+  const otherAccounts = $derived(savedAccounts.filter(a => a.did !== session?.did))
 
   onMount(async () => {
     try {
@@ -22,26 +46,24 @@
   })
 
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!loading && !session) {
+      navigate(routes.login)
     }
   })
 
   async function handleLogout() {
     await logout()
-    navigate('/login')
+    navigate(routes.login)
   }
 
-  async function handleSwitchAccount(did: string) {
+  async function handleSwitchAccount(did: Did) {
     switching = true
     dropdownOpen = false
-    try {
-      await switchAccount(did)
-    } catch {
-      navigate('/login')
-    } finally {
-      switching = false
+    const result = await switchAccount(did)
+    if (!isOk(result)) {
+      navigate(routes.login)
     }
+    switching = false
   }
 
   function toggleDropdown() {
@@ -61,19 +83,15 @@
       return () => document.removeEventListener('click', closeDropdown)
     }
   })
-
-  let otherAccounts = $derived(
-    auth.savedAccounts.filter(a => a.did !== auth.session?.did)
-  )
 </script>
 
-{#if auth.session}
+{#if session}
   <div class="dashboard">
     <header>
       <h1>{$_('dashboard.title')}</h1>
       <div class="account-dropdown">
         <button class="account-trigger" onclick={toggleDropdown} disabled={switching}>
-          <span class="account-handle">@{auth.session.handle}</span>
+          <span class="account-handle">@{session.handle}</span>
           <span class="dropdown-arrow">{dropdownOpen ? '▲' : '▼'}</span>
         </button>
         {#if dropdownOpen}
@@ -89,24 +107,24 @@
               </div>
               <div class="dropdown-divider"></div>
             {/if}
-            <button type="button" class="dropdown-item" onclick={() => { dropdownOpen = false; navigate('/login') }}>
+            <button type="button" class="dropdown-item" onclick={() => { dropdownOpen = false; navigate(routes.login) }}>
               {$_('dashboard.addAnotherAccount')}
             </button>
             <div class="dropdown-divider"></div>
             <button type="button" class="dropdown-item logout-item" onclick={handleLogout}>
-              {$_('dashboard.signOut', { values: { handle: auth.session.handle } })}
+              {$_('dashboard.signOut', { values: { handle: session.handle } })}
             </button>
           </div>
         {/if}
       </div>
     </header>
 
-    {#if auth.session.status === 'migrated'}
+    {#if session.status === 'migrated'}
       <div class="migrated-banner">
         <strong>{$_('dashboard.migratedTitle')}</strong>
-        <p>{$_('dashboard.migratedMessage', { values: { pds: auth.session.migratedToPds || 'another PDS' } })}</p>
+        <p>{$_('dashboard.migratedMessage', { values: { pds: session.migratedToPds || 'another PDS' } })}</p>
       </div>
-    {:else if auth.session.status === 'deactivated' || auth.session.active === false}
+    {:else if session.status === 'deactivated' || session.active === false}
       <div class="deactivated-banner">
         <strong>{$_('dashboard.deactivatedTitle')}</strong>
         <p>{$_('dashboard.deactivatedMessage')}</p>
@@ -118,43 +136,43 @@
       <dl>
         <dt>{$_('dashboard.handle')}</dt>
         <dd>
-          @{auth.session.handle}
-          {#if auth.session.isAdmin}
+          @{session.handle}
+          {#if session.isAdmin}
             <span class="badge admin">{$_('dashboard.admin')}</span>
           {/if}
-          {#if auth.session.status === 'migrated'}
+          {#if session.status === 'migrated'}
             <span class="badge migrated">{$_('dashboard.migrated')}</span>
-          {:else if auth.session.status === 'deactivated' || auth.session.active === false}
+          {:else if session.status === 'deactivated' || session.active === false}
             <span class="badge deactivated">{$_('dashboard.deactivated')}</span>
           {/if}
         </dd>
         <dt>{$_('dashboard.did')}</dt>
-        <dd class="mono">{auth.session.did}</dd>
-        {#if auth.session.preferredChannel}
+        <dd class="mono">{session.did}</dd>
+        {#if session.preferredChannel}
           <dt>{$_('dashboard.primaryContact')}</dt>
           <dd>
-            {#if auth.session.preferredChannel === 'email'}
-              {auth.session.email || $_('register.email')}
-            {:else if auth.session.preferredChannel === 'discord'}
+            {#if session.preferredChannel === 'email'}
+              {session.email || $_('register.email')}
+            {:else if session.preferredChannel === 'discord'}
               {$_('register.discord')}
-            {:else if auth.session.preferredChannel === 'telegram'}
+            {:else if session.preferredChannel === 'telegram'}
               {$_('register.telegram')}
-            {:else if auth.session.preferredChannel === 'signal'}
+            {:else if session.preferredChannel === 'signal'}
               {$_('register.signal')}
             {:else}
-              {auth.session.preferredChannel}
+              {session.preferredChannel}
             {/if}
-            {#if auth.session.preferredChannelVerified}
+            {#if session.preferredChannelVerified}
               <span class="badge success">{$_('dashboard.verified')}</span>
             {:else}
               <span class="badge warning">{$_('dashboard.unverified')}</span>
             {/if}
           </dd>
-        {:else if auth.session.email}
+        {:else if session.email}
           <dt>{$_('register.email')}</dt>
           <dd>
-            {auth.session.email}
-            {#if auth.session.emailConfirmed}
+            {session.email}
+            {#if session.emailConfirmed}
               <span class="badge success">{$_('dashboard.verified')}</span>
             {:else}
               <span class="badge warning">{$_('dashboard.unverified')}</span>
@@ -165,74 +183,74 @@
     </section>
 
     <nav class="nav-grid">
-      {#if auth.session.status === 'migrated'}
-        <a href="/app/did-document" class="nav-card migrated-card">
+      {#if session.status === 'migrated'}
+        <a href={getFullUrl(routes.didDocument)} class="nav-card migrated-card">
           <h3>{$_('dashboard.navDidDocument')}</h3>
           <p>{$_('dashboard.navDidDocumentDesc')}</p>
         </a>
-        <a href="/app/sessions" class="nav-card">
+        <a href={getFullUrl(routes.sessions)} class="nav-card">
           <h3>{$_('dashboard.navSessions')}</h3>
           <p>{$_('dashboard.navSessionsDesc')}</p>
         </a>
-        <a href="/app/security" class="nav-card">
+        <a href={getFullUrl(routes.security)} class="nav-card">
           <h3>{$_('dashboard.navSecurity')}</h3>
           <p>{$_('dashboard.navSecurityDesc')}</p>
         </a>
-        <a href="/app/settings" class="nav-card">
+        <a href={getFullUrl(routes.settings)} class="nav-card">
           <h3>{$_('dashboard.navSettings')}</h3>
           <p>{$_('dashboard.navSettingsDesc')}</p>
         </a>
-        <a href="/app/migrate" class="nav-card">
+        <a href={getFullUrl(routes.migrate)} class="nav-card">
           <h3>{$_('dashboard.navMigrateAgain')}</h3>
           <p>{$_('dashboard.navMigrateAgainDesc')}</p>
         </a>
       {:else}
-        <a href="/app/app-passwords" class="nav-card">
+        <a href={getFullUrl(routes.appPasswords)} class="nav-card">
           <h3>{$_('dashboard.navAppPasswords')}</h3>
           <p>{$_('dashboard.navAppPasswordsDesc')}</p>
         </a>
-        <a href="/app/sessions" class="nav-card">
+        <a href={getFullUrl(routes.sessions)} class="nav-card">
           <h3>{$_('dashboard.navSessions')}</h3>
           <p>{$_('dashboard.navSessionsDesc')}</p>
         </a>
-        {#if inviteCodesEnabled && auth.session.isAdmin}
-          <a href="/app/invite-codes" class="nav-card">
+        {#if inviteCodesEnabled && session.isAdmin}
+          <a href={getFullUrl(routes.inviteCodes)} class="nav-card">
             <h3>{$_('dashboard.navInviteCodes')}</h3>
             <p>{$_('dashboard.navInviteCodesDesc')}</p>
           </a>
         {/if}
-        <a href="/app/settings" class="nav-card">
+        <a href={getFullUrl(routes.settings)} class="nav-card">
           <h3>{$_('dashboard.navSettings')}</h3>
           <p>{$_('dashboard.navSettingsDesc')}</p>
         </a>
-        <a href="/app/security" class="nav-card">
+        <a href={getFullUrl(routes.security)} class="nav-card">
           <h3>{$_('dashboard.navSecurity')}</h3>
           <p>{$_('dashboard.navSecurityDesc')}</p>
         </a>
-        <a href="/app/comms" class="nav-card">
+        <a href={getFullUrl(routes.comms)} class="nav-card">
           <h3>{$_('dashboard.navComms')}</h3>
           <p>{$_('dashboard.navCommsDesc')}</p>
         </a>
-        <a href="/app/repo" class="nav-card">
+        <a href={getFullUrl(routes.repo)} class="nav-card">
           <h3>{$_('dashboard.navRepo')}</h3>
           <p>{$_('dashboard.navRepoDesc')}</p>
         </a>
-        <a href="/app/controllers" class="nav-card">
+        <a href={getFullUrl(routes.controllers)} class="nav-card">
           <h3>{$_('dashboard.navDelegation')}</h3>
           <p>{$_('dashboard.navDelegationDesc')}</p>
         </a>
         {#if isDidWeb}
-          <a href="/app/did-document" class="nav-card did-web-card">
+          <a href={getFullUrl(routes.didDocument)} class="nav-card did-web-card">
             <h3>{$_('dashboard.navDidDocument')}</h3>
             <p>{$_('dashboard.navDidDocumentDescActive')}</p>
           </a>
         {/if}
-        <a href="/app/migrate" class="nav-card">
+        <a href={getFullUrl(routes.migrate)} class="nav-card">
           <h3>{$_('migration.navTitle')}</h3>
           <p>{$_('migration.navDesc')}</p>
         </a>
-        {#if auth.session.isAdmin}
-          <a href="/app/admin" class="nav-card admin-card">
+        {#if session.isAdmin}
+          <a href={getFullUrl(routes.admin)} class="nav-card admin-card">
             <h3>{$_('dashboard.navAdmin')}</h3>
             <p>{$_('dashboard.navAdminDesc')}</p>
           </a>
@@ -240,8 +258,15 @@
       {/if}
     </nav>
   </div>
-{:else if auth.loading}
-  <div class="loading">{$_('common.loading')}</div>
+{:else if loading}
+  <div class="dashboard">
+    <div class="skeleton-section"></div>
+    <nav class="nav-grid">
+      {#each Array(6) as _}
+        <div class="skeleton-card"></div>
+      {/each}
+    </nav>
+  </div>
 {/if}
 
 <style>
@@ -460,10 +485,25 @@
     box-shadow: 0 2px 12px var(--accent-muted);
   }
 
-  .loading {
-    text-align: center;
-    padding: var(--space-9);
-    color: var(--text-secondary);
+  .skeleton-section {
+    height: 140px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-7);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  .skeleton-card {
+    height: 100px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 
   .deactivated-banner {

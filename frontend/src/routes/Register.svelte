@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import {
@@ -30,7 +30,7 @@
 
   $effect(() => {
     if (flow?.state.step === 'redirect-to-dashboard') {
-      navigate('/dashboard')
+      navigate(routes.dashboard)
     }
   })
 
@@ -109,7 +109,7 @@
     if (flow) {
       await flow.finalizeSession()
     }
-    navigate('/dashboard')
+    navigate(routes.dashboard)
   }
 
   function isChannelAvailable(ch: string): boolean {
@@ -166,15 +166,14 @@
   {/if}
 
   {#if loadingServerInfo || !flow}
-    <p class="loading">{$_('common.loading')}</p>
-
+    <div class="loading"></div>
   {:else if flow.state.step === 'info'}
     <div class="migrate-callout">
       <div class="migrate-icon">↗</div>
       <div class="migrate-content">
         <strong>{$_('register.migrateTitle')}</strong>
         <p>{$_('register.migrateDescription')}</p>
-        <a href="/app/migrate" class="migrate-link">
+        <a href={getFullUrl(routes.migrate)} class="migrate-link">
           {$_('register.migrateLink')} →
         </a>
       </div>
@@ -381,10 +380,10 @@
 
         <div class="form-links">
           <p class="link-text">
-            {$_('register.alreadyHaveAccount')} <a href="/app/login">{$_('register.signIn')}</a>
+            {$_('register.alreadyHaveAccount')} <a href={getFullUrl(routes.login)}>{$_('register.signIn')}</a>
           </p>
           <p class="link-text">
-            {$_('register.wantPasswordless')} <a href="/app/register-passkey">{$_('register.createPasskeyAccount')}</a>
+            {$_('register.wantPasswordless')} <a href={getFullUrl(routes.registerPasskey)}>{$_('register.createPasskeyAccount')}</a>
           </p>
         </div>
       </div>

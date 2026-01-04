@@ -36,9 +36,7 @@ export async function migrateBlobs(
       "blobs, cursor:",
       nextCursor,
     );
-    for (const blob of blobs) {
-      missingBlobs.push(blob.cid);
-    }
+    missingBlobs.push(...blobs.map((blob) => blob.cid));
     cursor = nextCursor;
   } while (cursor);
 

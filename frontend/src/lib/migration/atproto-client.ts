@@ -600,10 +600,7 @@ export async function generatePKCE(): Promise<{
 
 export function base64UrlEncode(buffer: Uint8Array | ArrayBuffer): string {
   const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer;
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
     /=+$/,
     "",
@@ -614,11 +611,7 @@ export function base64UrlDecode(base64url: string): Uint8Array {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
   const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
 export function prepareWebAuthnCreationOptions(
@@ -865,13 +858,12 @@ export async function resolvePdsUrl(
       );
       if (dnsRes.ok) {
         const dnsData = await dnsRes.json();
-        const txtRecords = dnsData.Answer ?? [];
-        for (const record of txtRecords) {
-          const txt = record.data?.replace(/"/g, "") ?? "";
-          if (txt.startsWith("did=")) {
-            did = txt.slice(4);
-            break;
-          }
+        const txtRecords: Array<{ data?: string }> = dnsData.Answer ?? [];
+        const didRecord = txtRecords
+          .map((record) => record.data?.replace(/"/g, "") ?? "")
+          .find((txt) => txt.startsWith("did="));
+        if (didRecord) {
+          did = didRecord.slice(4);
         }
       }
 

@@ -1,9 +1,22 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _, locale } from '../lib/i18n'
-  const auth = getAuthState()
+  import type { Session } from '../lib/types/api'
+
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   type View = 'collections' | 'records' | 'record' | 'create'
   let view = $state<View>('collections')
   let collections = $state<string[]>([])
@@ -31,21 +44,21 @@
   let saving = $state(false)
   let filter = $state('')
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadCollections()
     }
   })
   async function loadCollections() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
     error = null
     try {
-      const result = await api.describeRepo(auth.session.accessJwt, auth.session.did)
+      const result = await api.describeRepo(session.accessJwt, session.did)
       collections = result.collections.sort()
     } catch (e) {
       setError(e)
@@ -54,7 +67,7 @@
     }
   }
   async function selectCollection(collection: string) {
-    if (!auth.session) return
+    if (!session) return
     selectedCollection = collection
     records = []
     recordsCursor = undefined
@@ -62,7 +75,7 @@
     loading = true
     error = null
     try {
-      const result = await api.listRecords(auth.session.accessJwt, auth.session.did, collection, { limit: 50 })
+      const result = await api.listRecords(session.accessJwt, session.did, collection, { limit: 50 })
       records = result.records.map(r => ({
         ...r,
         rkey: r.uri.split('/').pop()!
@@ -75,10 +88,10 @@
     }
   }
   async function loadMoreRecords() {
-    if (!auth.session || !selectedCollection || !recordsCursor || loadingMore) return
+    if (!session || !selectedCollection || !recordsCursor || loadingMore) return
     loadingMore = true
     try {
-      const result = await api.listRecords(auth.session.accessJwt, auth.session.did, selectedCollection, {
+      const result = await api.listRecords(session.accessJwt, session.did, selectedCollection, {
         limit: 50,
         cursor: recordsCursor
       })
@@ -154,7 +167,7 @@
   }
   async function handleCreate(e: Event) {
     e.preventDefault()
-    if (!auth.session) return
+    if (!session) return
     const record = validateJson()
     if (!record) return
     if (!newCollection.trim()) {
@@ -165,8 +178,8 @@
     error = null
     try {
       const result = await api.createRecord(
-        auth.session.accessJwt,
-        auth.session.did,
+        session.accessJwt,
+        session.did,
         newCollection.trim(),
         record,
         newRkey.trim() || undefined
@@ -182,23 +195,23 @@
   }
   async function handleUpdate(e: Event) {
     e.preventDefault()
-    if (!auth.session || !selectedRecord || !selectedCollection) return
+    if (!session || !selectedRecord || !selectedCollection) return
     const record = validateJson()
     if (!record) return
     saving = true
     error = null
     try {
       await api.putRecord(
-        auth.session.accessJwt,
-        auth.session.did,
+        session.accessJwt,
+        session.did,
         selectedCollection,
         selectedRecord.rkey,
         record
       )
       success = $_('repoExplorer.recordUpdated')
       const updated = await api.getRecord(
-        auth.session.accessJwt,
-        auth.session.did,
+        session.accessJwt,
+        session.did,
         selectedCollection,
         selectedRecord.rkey
       )
@@ -211,14 +224,14 @@
     }
   }
   async function handleDelete() {
-    if (!auth.session || !selectedRecord || !selectedCollection) return
+    if (!session || !selectedRecord || !selectedCollection) return
     if (!confirm($_('repoExplorer.deleteConfirm', { values: { rkey: selectedRecord.rkey } }))) return
     saving = true
     error = null
     try {
       await api.deleteRecord(
-        auth.session.accessJwt,
-        auth.session.did,
+        session.accessJwt,
+        session.did,
         selectedCollection,
         selectedRecord.rkey
       )
@@ -259,17 +272,12 @@
       : records
   )
   function groupCollectionsByAuthority(cols: string[]): Map<string, string[]> {
-    const groups = new Map<string, string[]>()
-    for (const col of cols) {
+    return cols.reduce((groups, col) => {
       const parts = col.split('.')
       const authority = parts.slice(0, -1).join('.')
       const name = parts[parts.length - 1]
-      if (!groups.has(authority)) {
-        groups.set(authority, [])
-      }
-      groups.get(authority)!.push(name)
-    }
-    return groups
+      return groups.set(authority, [...(groups.get(authority) ?? []), name])
+    }, new Map<string, string[]>())
   }
   let groupedCollections = $derived(groupCollectionsByAuthority(filteredCollections))
 </script>
@@ -303,8 +311,8 @@
         {$_('repoExplorer.createRecord')}
       {/if}
     </h1>
-    {#if auth.session}
-      <p class="did">{auth.session.did}</p>
+    {#if session}
+      <p class="did">{session.did}</p>
     {/if}
   </header>
   {#if error}
@@ -319,7 +327,11 @@
     <div class="message success">{success}</div>
   {/if}
   {#if loading}
-    <p class="loading-text">{$_('common.loading')}</p>
+    <div class="skeleton-list">
+      {#each Array(4) as _}
+        <div class="skeleton-row"></div>
+      {/each}
+    </div>
   {:else if view === 'collections'}
     <div class="toolbar">
       <input
@@ -979,5 +991,23 @@
   .page ::-moz-selection {
     background: var(--accent);
     color: var(--text-inverse);
+  }
+
+  .skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .skeleton-row {
+    height: 44px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

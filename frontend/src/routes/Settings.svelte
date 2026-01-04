@@ -1,12 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { getAuthState, logout, refreshSession } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { locale, setLocale, getSupportedLocales, localeNames, _, type SupportedLocale } from '../lib/i18n'
-  const auth = getAuthState()
+  import { isOk } from '../lib/types/result'
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
+
+  const auth = $derived(getAuthState())
   const supportedLocales = getSupportedLocales()
   let pdsHostname = $state<string | null>(null)
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const loading = $derived(isLoading())
 
   onMount(() => {
     api.describeServer().then(info => {
@@ -15,20 +30,21 @@
       }
     }).catch(() => {})
   })
+
   let localeLoading = $state(false)
   async function handleLocaleChange(newLocale: SupportedLocale) {
-    if (!auth.session) return
+    if (!session) return
     setLocale(newLocale)
     localeLoading = true
     try {
-      await api.updateLocale(auth.session.accessJwt, newLocale)
+      await api.updateLocale(session.accessJwt, newLocale)
     } catch (e) {
       console.error('Failed to save locale preference:', e)
     } finally {
       localeLoading = false
     }
   }
-  let message = $state<{ type: 'success' | 'error'; text: string } | null>(null)
+
   let emailLoading = $state(false)
   let newEmail = $state('')
   let emailToken = $state('')
@@ -46,112 +62,107 @@
   let newPassword = $state('')
   let confirmNewPassword = $state('')
   let showBYOHandle = $state(false)
+
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!loading && !session) {
+      navigate(routes.login)
     }
   })
-  function showMessage(type: 'success' | 'error', text: string) {
-    message = { type, text }
-    setTimeout(() => {
-      if (message?.text === text) message = null
-    }, 5000)
-  }
+
   async function handleRequestEmailUpdate() {
-    if (!auth.session) return
+    if (!session) return
     emailLoading = true
-    message = null
     try {
-      const result = await api.requestEmailUpdate(auth.session.accessJwt)
+      const result = await api.requestEmailUpdate(session.accessJwt)
       emailTokenRequired = result.tokenRequired
       if (emailTokenRequired) {
-        showMessage('success', $_('settings.messages.emailCodeSentToCurrent'))
+        toast.success($_('settings.messages.emailCodeSentToCurrent'))
       } else {
         emailTokenRequired = true
       }
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
     } finally {
       emailLoading = false
     }
   }
+
   async function handleConfirmEmailUpdate(e: Event) {
     e.preventDefault()
-    if (!auth.session || !newEmail || !emailToken) return
+    if (!session || !newEmail || !emailToken) return
     emailLoading = true
-    message = null
     try {
-      await api.updateEmail(auth.session.accessJwt, newEmail, emailToken)
+      await api.updateEmail(session.accessJwt, newEmail, emailToken)
       await refreshSession()
-      showMessage('success', $_('settings.messages.emailUpdated'))
+      toast.success($_('settings.messages.emailUpdated'))
       newEmail = ''
       emailToken = ''
       emailTokenRequired = false
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
     } finally {
       emailLoading = false
     }
   }
+
   async function handleUpdateHandle(e: Event) {
     e.preventDefault()
-    if (!auth.session || !newHandle) return
+    if (!session || !newHandle) return
     handleLoading = true
-    message = null
     try {
       const fullHandle = showBYOHandle
         ? newHandle
         : `${newHandle}.${pdsHostname}`
-      await api.updateHandle(auth.session.accessJwt, fullHandle)
+      await api.updateHandle(session.accessJwt, fullHandle)
       await refreshSession()
-      showMessage('success', $_('settings.messages.handleUpdated'))
+      toast.success($_('settings.messages.handleUpdated'))
       newHandle = ''
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.handleUpdateFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.handleUpdateFailed'))
     } finally {
       handleLoading = false
     }
   }
+
   async function handleRequestDelete() {
-    if (!auth.session) return
+    if (!session) return
     deleteLoading = true
-    message = null
     try {
-      await api.requestAccountDelete(auth.session.accessJwt)
+      await api.requestAccountDelete(session.accessJwt)
       deleteTokenSent = true
-      showMessage('success', $_('settings.messages.deletionConfirmationSent'))
+      toast.success($_('settings.messages.deletionConfirmationSent'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.deletionRequestFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.deletionRequestFailed'))
     } finally {
       deleteLoading = false
     }
   }
+
   async function handleConfirmDelete(e: Event) {
     e.preventDefault()
-    if (!auth.session || !deletePassword || !deleteToken) return
+    if (!session || !deletePassword || !deleteToken) return
     if (!confirm($_('settings.messages.deleteConfirmation'))) {
       return
     }
     deleteLoading = true
-    message = null
     try {
-      await api.deleteAccount(auth.session.did, deletePassword, deleteToken)
+      await api.deleteAccount(session.did, deletePassword, deleteToken)
       await logout()
-      navigate('/login')
+      navigate(routes.login)
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.deletionFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.deletionFailed'))
     } finally {
       deleteLoading = false
     }
   }
+
   async function handleExportRepo() {
-    if (!auth.session) return
+    if (!session) return
     exportLoading = true
-    message = null
     try {
-      const response = await fetch(`/xrpc/com.atproto.sync.getRepo?did=${encodeURIComponent(auth.session.did)}`, {
+      const response = await fetch(`/xrpc/com.atproto.sync.getRepo?did=${encodeURIComponent(session.did)}`, {
         headers: {
-          'Authorization': `Bearer ${auth.session.accessJwt}`
+          'Authorization': `Bearer ${session.accessJwt}`
         }
       })
       if (!response.ok) {
@@ -162,26 +173,26 @@
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${auth.session.handle}-repo.car`
+      a.download = `${session.handle}-repo.car`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      showMessage('success', $_('settings.messages.repoExported'))
+      toast.success($_('settings.messages.repoExported'))
     } catch (e) {
-      showMessage('error', e instanceof Error ? e.message : $_('settings.messages.exportFailed'))
+      toast.error(e instanceof Error ? e.message : $_('settings.messages.exportFailed'))
     } finally {
       exportLoading = false
     }
   }
+
   async function handleExportBlobs() {
-    if (!auth.session) return
+    if (!session) return
     exportBlobsLoading = true
-    message = null
     try {
       const response = await fetch('/xrpc/_backup.exportBlobs', {
         headers: {
-          'Authorization': `Bearer ${auth.session.accessJwt}`
+          'Authorization': `Bearer ${session.accessJwt}`
         }
       })
       if (!response.ok) {
@@ -190,20 +201,20 @@
       }
       const blob = await response.blob()
       if (blob.size === 0) {
-        showMessage('success', $_('settings.messages.noBlobsToExport'))
+        toast.success($_('settings.messages.noBlobsToExport'))
         return
       }
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${auth.session.handle}-blobs.zip`
+      a.download = `${session.handle}-blobs.zip`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      showMessage('success', $_('settings.messages.blobsExported'))
+      toast.success($_('settings.messages.blobsExported'))
     } catch (e) {
-      showMessage('error', e instanceof Error ? e.message : $_('settings.messages.exportFailed'))
+      toast.error(e instanceof Error ? e.message : $_('settings.messages.exportFailed'))
     } finally {
       exportBlobsLoading = false
     }
@@ -225,10 +236,10 @@
   let restoreLoading = $state(false)
 
   async function loadBackups() {
-    if (!auth.session) return
+    if (!session) return
     backupsLoading = true
     try {
-      const result = await api.listBackups(auth.session.accessJwt)
+      const result = await api.listBackups(session.accessJwt)
       backups = result.backups
       backupEnabled = result.backupEnabled
     } catch (e) {
@@ -243,60 +254,59 @@
   })
 
   async function handleToggleBackup() {
-    if (!auth.session) return
+    if (!session) return
     const newEnabled = !backupEnabled
     backupsLoading = true
     try {
-      await api.setBackupEnabled(auth.session.accessJwt, newEnabled)
+      await api.setBackupEnabled(session.accessJwt, newEnabled)
       backupEnabled = newEnabled
-      showMessage('success', newEnabled ? $_('settings.backups.enabled') : $_('settings.backups.disabled'))
+      toast.success(newEnabled ? $_('settings.backups.enabled') : $_('settings.backups.disabled'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.toggleFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.toggleFailed'))
     } finally {
       backupsLoading = false
     }
   }
 
   async function handleCreateBackup() {
-    if (!auth.session) return
+    if (!session) return
     createBackupLoading = true
-    message = null
     try {
-      await api.createBackup(auth.session.accessJwt)
+      await api.createBackup(session.accessJwt)
       await loadBackups()
-      showMessage('success', $_('settings.backups.created'))
+      toast.success($_('settings.backups.created'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.createFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.createFailed'))
     } finally {
       createBackupLoading = false
     }
   }
 
   async function handleDownloadBackup(id: string, rev: string) {
-    if (!auth.session) return
+    if (!session) return
     try {
-      const blob = await api.getBackup(auth.session.accessJwt, id)
+      const blob = await api.getBackup(session.accessJwt, id)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${auth.session.handle}-${rev}.car`
+      a.download = `${session.handle}-${rev}.car`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.downloadFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.downloadFailed'))
     }
   }
 
   async function handleDeleteBackup(id: string) {
-    if (!auth.session) return
+    if (!session) return
     try {
-      await api.deleteBackup(auth.session.accessJwt, id)
+      await api.deleteBackup(session.accessJwt, id)
       await loadBackups()
-      showMessage('success', $_('settings.backups.deleted'))
+      toast.success($_('settings.backups.deleted'))
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.deleteFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.deleteFailed'))
     }
   }
 
@@ -308,17 +318,16 @@
   }
 
   async function handleRestore() {
-    if (!auth.session || !restoreFile) return
+    if (!session || !restoreFile) return
     restoreLoading = true
-    message = null
     try {
       const buffer = await restoreFile.arrayBuffer()
       const car = new Uint8Array(buffer)
-      await api.importRepo(auth.session.accessJwt, car)
-      showMessage('success', $_('settings.backups.restored'))
+      await api.importRepo(session.accessJwt, car)
+      toast.success($_('settings.backups.restored'))
       restoreFile = null
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.backups.restoreFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.backups.restoreFailed'))
     } finally {
       restoreLoading = false
     }
@@ -342,25 +351,24 @@
 
   async function handleChangePassword(e: Event) {
     e.preventDefault()
-    if (!auth.session || !currentPassword || !newPassword || !confirmNewPassword) return
+    if (!session || !currentPassword || !newPassword || !confirmNewPassword) return
     if (newPassword !== confirmNewPassword) {
-      showMessage('error', $_('settings.messages.passwordsDoNotMatch'))
+      toast.error($_('settings.messages.passwordsDoNotMatch'))
       return
     }
     if (newPassword.length < 8) {
-      showMessage('error', $_('settings.messages.passwordTooShort'))
+      toast.error($_('settings.messages.passwordTooShort'))
       return
     }
     passwordLoading = true
-    message = null
     try {
-      await api.changePassword(auth.session.accessJwt, currentPassword, newPassword)
-      showMessage('success', $_('settings.messages.passwordChanged'))
+      await api.changePassword(session.accessJwt, currentPassword, newPassword)
+      toast.success($_('settings.messages.passwordChanged'))
       currentPassword = ''
       newPassword = ''
       confirmNewPassword = ''
     } catch (e) {
-      showMessage('error', e instanceof ApiError ? e.message : $_('settings.messages.passwordChangeFailed'))
+      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.passwordChangeFailed'))
     } finally {
       passwordLoading = false
     }
@@ -368,12 +376,9 @@
 </script>
 <div class="page">
   <header>
-    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('settings.title')}</h1>
   </header>
-  {#if message}
-    <div class="message {message.type}">{message.text}</div>
-  {/if}
   <div class="sections-grid">
   <section>
     <h2>{$_('settings.language')}</h2>
@@ -391,8 +396,8 @@
   </section>
   <section>
     <h2>{$_('settings.changeEmail')}</h2>
-    {#if auth.session?.email}
-      <p class="current">{$_('settings.currentEmail', { values: { email: auth.session.email } })}</p>
+    {#if session?.email}
+      <p class="current">{$_('settings.currentEmail', { values: { email: session.email } })}</p>
     {/if}
     {#if emailTokenRequired}
       <form onsubmit={handleConfirmEmailUpdate}>
@@ -435,8 +440,8 @@
   </section>
   <section>
     <h2>{$_('settings.changeHandle')}</h2>
-    {#if auth.session}
-      <p class="current">{$_('settings.currentHandle', { values: { handle: auth.session.handle } })}</p>
+    {#if session}
+      <p class="current">{$_('settings.currentHandle', { values: { handle: session.handle } })}</p>
     {/if}
     <div class="tabs">
       <button
@@ -459,21 +464,21 @@
     {#if showBYOHandle}
       <div class="byo-handle">
         <p class="description">{$_('settings.customDomainDescription')}</p>
-        {#if auth.session}
+        {#if session}
           <div class="verification-info">
             <h3>{$_('settings.setupInstructions')}</h3>
             <p>{$_('settings.setupMethodsIntro')}</p>
             <div class="method">
               <h4>{$_('settings.dnsMethod')}</h4>
               <p>{$_('settings.dnsMethodDesc')}</p>
-              <code class="record">_atproto.{newHandle || 'yourdomain.com'} TXT "did={auth.session.did}"</code>
+              <code class="record">_atproto.{newHandle || 'yourdomain.com'} TXT "did={session.did}"</code>
             </div>
             <div class="method">
               <h4>{$_('settings.httpMethod')}</h4>
               <p>{$_('settings.httpMethodDesc')}</p>
               <code class="record">https://{newHandle || 'yourdomain.com'}/.well-known/atproto-did</code>
               <p>{$_('settings.httpMethodContent')}</p>
-              <code class="record">{auth.session.did}</code>
+              <code class="record">{session.did}</code>
             </div>
           </div>
         {/if}
@@ -579,9 +584,7 @@
       <span>{$_('settings.backups.enableAutomatic')}</span>
     </label>
 
-    {#if backupsLoading}
-      <p class="loading">{$_('common.loading')}</p>
-    {:else if backups.length > 0}
+    {#if !backupsLoading && backups.length > 0}
       <ul class="backup-list">
         {#each backups as backup}
           <li class="backup-item">

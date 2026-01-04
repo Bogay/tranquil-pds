@@ -1,10 +1,22 @@
 <script lang="ts">
   import { getAuthState, logout } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { generateCodeVerifier, generateCodeChallenge, saveOAuthState, generateState } from '../lib/oauth'
   import { _ } from '../lib/i18n'
+  import type { Session } from '../lib/types/api'
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   let error = $state<string | null>(null)
   let loading = $state(true)
   let actAsInProgress = $state(false)
@@ -15,13 +27,13 @@
   }
 
   $effect(() => {
-    if (!auth.loading && !auth.session && !actAsInProgress) {
-      navigate('/login')
+    if (!authLoading && !session && !actAsInProgress) {
+      navigate(routes.login)
     }
   })
 
   $effect(() => {
-    if (auth.session && !actAsInProgress) {
+    if (session && !actAsInProgress) {
       actAsInProgress = true
       initiateActAs()
     }
@@ -39,7 +51,7 @@
       const response = await fetch(
         `/xrpc/_delegation.listControlledAccounts`,
         {
-          headers: { 'Authorization': `Bearer ${auth.session!.accessJwt}` }
+          headers: { 'Authorization': `Bearer ${session!.accessJwt}` }
         }
       )
 

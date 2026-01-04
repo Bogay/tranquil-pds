@@ -1,6 +1,11 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
+  import {
+    prepareRequestOptions,
+    serializeAssertionResponse,
+    type WebAuthnRequestOptionsResponse,
+  } from '../lib/webauthn'
 
   let delegatedDid = $state<string | null>(null)
   let delegatedHandle = $state<string | null>(null)
@@ -103,37 +108,6 @@
     }
   }
 
-  function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-  }
-
-  function base64UrlToArrayBuffer(base64url: string): ArrayBuffer {
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = base64 + '='.repeat((4 - base64.length % 4) % 4)
-    const binary = atob(padded)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes.buffer
-  }
-
-  function prepareCredentialRequestOptions(options: any): PublicKeyCredentialRequestOptions {
-    return {
-      ...options,
-      challenge: base64UrlToArrayBuffer(options.challenge),
-      allowCredentials: options.allowCredentials?.map((cred: any) => ({
-        ...cred,
-        id: base64UrlToArrayBuffer(cred.id)
-      })) || []
-    }
-  }
-
   async function handlePasskeyLogin() {
     const requestUri = getRequestUri()
     if (!requestUri || !controllerDid || !delegatedDid) {
@@ -165,9 +139,10 @@
       }
 
       const { options } = await startResponse.json()
+      const publicKeyOptions = prepareRequestOptions(options as WebAuthnRequestOptionsResponse)
 
       const credential = await navigator.credentials.get({
-        publicKey: prepareCredentialRequestOptions(options.publicKey)
+        publicKey: publicKeyOptions
       }) as PublicKeyCredential | null
 
       if (!credential) {
@@ -176,18 +151,7 @@
         return
       }
 
-      const assertionResponse = credential.response as AuthenticatorAssertionResponse
-      const credentialData = {
-        id: credential.id,
-        type: credential.type,
-        rawId: arrayBufferToBase64Url(credential.rawId),
-        response: {
-          clientDataJSON: arrayBufferToBase64Url(assertionResponse.clientDataJSON),
-          authenticatorData: arrayBufferToBase64Url(assertionResponse.authenticatorData),
-          signature: arrayBufferToBase64Url(assertionResponse.signature),
-          userHandle: assertionResponse.userHandle ? arrayBufferToBase64Url(assertionResponse.userHandle) : null
-        }
-      }
+      const credentialData = serializeAssertionResponse(credential)
 
       const finishResponse = await fetch('/oauth/passkey/finish', {
         method: 'POST',
@@ -213,12 +177,12 @@
       }
 
       if (data.needs_totp) {
-        navigate(`/oauth/totp?request_uri=${encodeURIComponent(requestUri)}`)
+        navigate(routes.oauthTotp, { params: { request_uri: requestUri } })
         return
       }
 
       if (data.needs_2fa) {
-        navigate(`/oauth/2fa?request_uri=${encodeURIComponent(requestUri)}&channel=${encodeURIComponent(data.channel || '')}`)
+        navigate(routes.oauth2fa, { params: { request_uri: requestUri, channel: data.channel || '' } })
         return
       }
 
@@ -272,12 +236,12 @@
       }
 
       if (data.needs_totp) {
-        navigate(`/oauth/totp?request_uri=${encodeURIComponent(requestUri)}`)
+        navigate(routes.oauthTotp, { params: { request_uri: requestUri } })
         return
       }
 
       if (data.needs_2fa) {
-        navigate(`/oauth/2fa?request_uri=${encodeURIComponent(requestUri)}&channel=${encodeURIComponent(data.channel || '')}`)
+        navigate(routes.oauth2fa, { params: { request_uri: requestUri, channel: data.channel || '' } })
         return
       }
 

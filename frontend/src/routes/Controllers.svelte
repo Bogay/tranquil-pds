@@ -1,8 +1,10 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
   import { formatDateTime } from '../lib/date'
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
 
   interface Controller {
     did: string
@@ -26,10 +28,20 @@
     scopes: string
   }
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
+
   let loading = $state(true)
-  let error = $state<string | null>(null)
-  let success = $state<string | null>(null)
   let controllers = $state<Controller[]>([])
   let controlledAccounts = $state<ControlledAccount[]>([])
   let scopePresets = $state<ScopePreset[]>([])
@@ -51,20 +63,19 @@
   let creatingDelegated = $state(false)
 
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
 
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadData()
     }
   })
 
   async function loadData() {
     loading = true
-    error = null
     try {
       await Promise.all([loadControllers(), loadControlledAccounts(), loadScopePresets()])
     } finally {
@@ -73,10 +84,10 @@
   }
 
   async function loadControllers() {
-    if (!auth.session) return
+    if (!session) return
     try {
       const response = await fetch('/xrpc/_delegation.listControllers', {
-        headers: { 'Authorization': `Bearer ${auth.session.accessJwt}` }
+        headers: { 'Authorization': `Bearer ${session.accessJwt}` }
       })
       if (response.ok) {
         const data = await response.json()
@@ -88,10 +99,10 @@
   }
 
   async function loadControlledAccounts() {
-    if (!auth.session) return
+    if (!session) return
     try {
       const response = await fetch('/xrpc/_delegation.listControlledAccounts', {
-        headers: { 'Authorization': `Bearer ${auth.session.accessJwt}` }
+        headers: { 'Authorization': `Bearer ${session.accessJwt}` }
       })
       if (response.ok) {
         const data = await response.json()
@@ -115,16 +126,14 @@
   }
 
   async function addController() {
-    if (!auth.session || !addControllerDid.trim()) return
+    if (!session || !addControllerDid.trim()) return
     addingController = true
-    error = null
-    success = null
 
     try {
       const response = await fetch('/xrpc/_delegation.addController', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${auth.session.accessJwt}`,
+          'Authorization': `Bearer ${session.accessJwt}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -135,34 +144,31 @@
 
       if (!response.ok) {
         const data = await response.json()
-        error = data.message || data.error || $_('delegation.failedToAddController')
+        toast.error(data.message || data.error || $_('delegation.failedToAddController'))
         return
       }
 
-      success = $_('delegation.controllerAdded')
+      toast.success($_('delegation.controllerAdded'))
       addControllerDid = ''
       addControllerScopes = 'atproto'
       showAddController = false
       await loadControllers()
     } catch (e) {
-      error = $_('delegation.failedToAddController')
+      toast.error($_('delegation.failedToAddController'))
     } finally {
       addingController = false
     }
   }
 
   async function removeController(controllerDid: string) {
-    if (!auth.session) return
+    if (!session) return
     if (!confirm($_('delegation.removeConfirm'))) return
-
-    error = null
-    success = null
 
     try {
       const response = await fetch('/xrpc/_delegation.removeController', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${auth.session.accessJwt}`,
+          'Authorization': `Bearer ${session.accessJwt}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ controller_did: controllerDid })
@@ -170,28 +176,26 @@
 
       if (!response.ok) {
         const data = await response.json()
-        error = data.message || data.error || $_('delegation.failedToRemoveController')
+        toast.error(data.message || data.error || $_('delegation.failedToRemoveController'))
         return
       }
 
-      success = $_('delegation.controllerRemoved')
+      toast.success($_('delegation.controllerRemoved'))
       await loadControllers()
     } catch (e) {
-      error = $_('delegation.failedToRemoveController')
+      toast.error($_('delegation.failedToRemoveController'))
     }
   }
 
   async function createDelegatedAccount() {
-    if (!auth.session || !newDelegatedHandle.trim()) return
+    if (!session || !newDelegatedHandle.trim()) return
     creatingDelegated = true
-    error = null
-    success = null
 
     try {
       const response = await fetch('/xrpc/_delegation.createDelegatedAccount', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${auth.session.accessJwt}`,
+          'Authorization': `Bearer ${session.accessJwt}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -203,19 +207,19 @@
 
       if (!response.ok) {
         const data = await response.json()
-        error = data.message || data.error || $_('delegation.failedToCreateAccount')
+        toast.error(data.message || data.error || $_('delegation.failedToCreateAccount'))
         return
       }
 
       const data = await response.json()
-      success = $_('delegation.accountCreated', { values: { handle: data.handle } })
+      toast.success($_('delegation.accountCreated', { values: { handle: data.handle } }))
       newDelegatedHandle = ''
       newDelegatedEmail = ''
       newDelegatedScopes = 'atproto'
       showCreateDelegated = false
       await loadControlledAccounts()
     } catch (e) {
-      error = $_('delegation.failedToCreateAccount')
+      toast.error($_('delegation.failedToCreateAccount'))
     } finally {
       creatingDelegated = false
     }
@@ -237,16 +241,12 @@
   </header>
 
   {#if loading}
-    <p class="loading">{$_('delegation.loading')}</p>
+    <div class="skeleton-list">
+      {#each Array(2) as _}
+        <div class="skeleton-card"></div>
+      {/each}
+    </div>
   {:else}
-    {#if error}
-      <div class="message error">{error}</div>
-    {/if}
-
-    {#if success}
-      <div class="message success">{success}</div>
-    {/if}
-
     <section class="section">
       <div class="section-header">
         <h2>{$_('delegation.controllers')}</h2>
@@ -676,5 +676,24 @@
   .form-actions button {
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
+  }
+
+  .skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .skeleton-card {
+    height: 120px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

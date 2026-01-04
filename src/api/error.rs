@@ -128,6 +128,8 @@ impl ApiError {
             | Self::AccountTakedown
             | Self::InvalidCode(_)
             | Self::InvalidPassword(_)
+            | Self::InvalidToken(_)
+            | Self::ExpiredToken(_)
             | Self::PasskeyCounterAnomaly => StatusCode::UNAUTHORIZED,
             Self::Forbidden
             | Self::AdminRequired
@@ -196,8 +198,6 @@ impl ApiError {
             | Self::InvalidVerificationChannel
             | Self::SelfHostedDidWebDisabled
             | Self::AccountAlreadyExists
-            | Self::InvalidToken(_)
-            | Self::ExpiredToken(_)
             | Self::TokenRequired => StatusCode::BAD_REQUEST,
             Self::PasskeyNotFound => StatusCode::NOT_FOUND,
         }

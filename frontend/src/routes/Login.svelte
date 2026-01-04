@@ -1,86 +1,124 @@
 <script lang="ts">
-  import { loginWithOAuth, confirmSignup, resendVerification, getAuthState, switchAccount, forgetAccount } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import {
+    loginWithOAuth,
+    confirmSignup,
+    resendVerification,
+    getAuthState,
+    switchAccount,
+    forgetAccount,
+    matchAuthState,
+    type SavedAccount,
+    type AuthError,
+  } from '../lib/auth.svelte'
+  import { navigate, routes } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
+  import { isOk, isErr } from '../lib/types/result'
+  import { unsafeAsDid, type Did } from '../lib/types/branded'
 
+  type PageState =
+    | { kind: 'login' }
+    | { kind: 'verification'; did: string }
+
+  let pageState = $state<PageState>({ kind: 'login' })
   let submitting = $state(false)
-  let pendingVerification = $state<{ did: string } | null>(null)
   let verificationCode = $state('')
   let resendingCode = $state(false)
   let resendMessage = $state<string | null>(null)
   let autoRedirectAttempted = $state(false)
-  const auth = getAuthState()
+
+  const auth = $derived(getAuthState())
+
+  function getSavedAccounts(): readonly SavedAccount[] {
+    return auth.savedAccounts
+  }
+
+  function getErrorMessage(): string | null {
+    if (auth.kind === 'error') {
+      return auth.error.message
+    }
+    return null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
 
   $effect(() => {
-    if (!auth.loading && !auth.error && auth.savedAccounts.length === 0 && !pendingVerification && !autoRedirectAttempted) {
+    const accounts = getSavedAccounts()
+    const loading = isLoading()
+    const hasError = auth.kind === 'error'
+
+    if (!loading && !hasError && accounts.length === 0 && pageState.kind === 'login' && !autoRedirectAttempted) {
       autoRedirectAttempted = true
       loginWithOAuth()
     }
   })
 
-  async function handleSwitchAccount(did: string) {
+  async function handleSwitchAccount(did: Did) {
     submitting = true
-    try {
-      await switchAccount(did)
-      navigate('/dashboard')
-    } catch {
+    const result = await switchAccount(did)
+    if (isOk(result)) {
+      navigate(routes.dashboard)
+    } else {
       submitting = false
     }
   }
 
-  function handleForgetAccount(did: string, e: Event) {
+  function handleForgetAccount(did: Did, e: Event) {
     e.stopPropagation()
     forgetAccount(did)
   }
 
   async function handleOAuthLogin() {
     submitting = true
-    try {
-      await loginWithOAuth()
-    } catch {
+    const result = await loginWithOAuth()
+    if (isErr(result)) {
       submitting = false
     }
   }
 
   async function handleVerification(e: Event) {
     e.preventDefault()
-    if (!pendingVerification || !verificationCode.trim()) return
+    if (pageState.kind !== 'verification' || !verificationCode.trim()) return
+
     submitting = true
-    try {
-      await confirmSignup(pendingVerification.did, verificationCode.trim())
-      navigate('/dashboard')
-    } catch {
+    const result = await confirmSignup(pageState.did, verificationCode.trim())
+    if (isOk(result)) {
+      navigate(routes.dashboard)
+    } else {
       submitting = false
     }
   }
 
   async function handleResendCode() {
-    if (!pendingVerification || resendingCode) return
+    if (pageState.kind !== 'verification' || resendingCode) return
+
     resendingCode = true
     resendMessage = null
-    try {
-      await resendVerification(pendingVerification.did)
+    const result = await resendVerification(pageState.did)
+    if (isOk(result)) {
       resendMessage = $_('verification.resent')
-    } catch {
-      resendMessage = null
-    } finally {
-      resendingCode = false
     }
+    resendingCode = false
   }
 
   function backToLogin() {
-    pendingVerification = null
+    pageState = { kind: 'login' }
     verificationCode = ''
     resendMessage = null
   }
+
+  const errorMessage = $derived(getErrorMessage())
+  const savedAccounts = $derived(getSavedAccounts())
+  const loading = $derived(isLoading())
 </script>
 
 <div class="login-page">
-  {#if auth.error}
-    <div class="message error">{auth.error}</div>
+  {#if errorMessage}
+    <div class="message error">{errorMessage}</div>
   {/if}
 
-  {#if pendingVerification}
+  {#if pageState.kind === 'verification'}
     <header class="page-header">
       <h1>{$_('verification.title')}</h1>
       <p class="subtitle">{$_('verification.subtitle')}</p>
@@ -121,14 +159,14 @@
   {:else}
     <header class="page-header">
       <h1>{$_('login.title')}</h1>
-      <p class="subtitle">{auth.savedAccounts.length > 0 ? $_('login.chooseAccount') : $_('login.subtitle')}</p>
+      <p class="subtitle">{savedAccounts.length > 0 ? $_('login.chooseAccount') : $_('login.subtitle')}</p>
     </header>
 
     <div class="split-layout sidebar-right">
       <div class="main-section">
-        {#if auth.savedAccounts.length > 0}
+        {#if savedAccounts.length > 0}
           <div class="saved-accounts">
-            {#each auth.savedAccounts as account}
+            {#each savedAccounts as account}
               <div
                 class="account-item"
                 class:disabled={submitting}
@@ -156,7 +194,7 @@
           <p class="or-divider">{$_('login.signInToAnother')}</p>
         {/if}
 
-        <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || auth.loading}>
+        <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || loading}>
           {submitting ? $_('login.redirecting') : $_('login.button')}
         </button>
 
@@ -172,7 +210,7 @@
       </div>
 
       <aside class="info-panel">
-        {#if auth.savedAccounts.length > 0}
+        {#if savedAccounts.length > 0}
           <h3>{$_('login.infoSavedAccountsTitle')}</h3>
           <p>{$_('login.infoSavedAccountsDesc')}</p>
 

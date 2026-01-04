@@ -1,12 +1,25 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDateTime } from '../lib/date'
-  const auth = getAuthState()
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
+
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   let loading = $state(true)
-  let error = $state<string | null>(null)
   let sessions = $state<Array<{
     id: string
     sessionType: string
@@ -16,58 +29,59 @@
     isCurrent: boolean
   }>>([])
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadSessions()
     }
   })
   async function loadSessions() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
-    error = null
     try {
-      const result = await api.listSessions(auth.session.accessJwt)
+      const result = await api.listSessions(session.accessJwt)
       sessions = result.sessions
     } catch (e) {
-      error = e instanceof ApiError ? e.message : $_('sessions.failedToLoad')
+      toast.error(e instanceof ApiError ? e.message : $_('sessions.failedToLoad'))
     } finally {
       loading = false
     }
   }
   async function revokeSession(sessionId: string, isCurrent: boolean) {
-    if (!auth.session) return
+    if (!session) return
     const msg = isCurrent
       ? $_('sessions.revokeCurrentConfirm')
       : $_('sessions.revokeConfirm')
     if (!confirm(msg)) return
     try {
-      await api.revokeSession(auth.session.accessJwt, sessionId)
+      await api.revokeSession(session.accessJwt, sessionId)
       if (isCurrent) {
-        navigate('/login')
+        navigate(routes.login)
       } else {
         sessions = sessions.filter(s => s.id !== sessionId)
+        toast.success($_('sessions.sessionRevoked'))
       }
     } catch (e) {
-      error = e instanceof ApiError ? e.message : $_('sessions.failedToRevoke')
+      toast.error(e instanceof ApiError ? e.message : $_('sessions.failedToRevoke'))
     }
   }
   async function revokeAllSessions() {
-    if (!auth.session) return
+    if (!session) return
     const otherSessions = sessions.filter(s => !s.isCurrent)
     if (otherSessions.length === 0) {
-      error = $_('sessions.noOtherSessions')
+      toast.warning($_('sessions.noOtherSessions'))
       return
     }
     if (!confirm($_('sessions.revokeAllConfirm', { values: { count: otherSessions.length } }))) return
     try {
-      await api.revokeAllSessions(auth.session.accessJwt)
+      await api.revokeAllSessions(session.accessJwt)
       sessions = sessions.filter(s => s.isCurrent)
+      toast.success($_('sessions.allSessionsRevoked'))
     } catch (e) {
-      error = e instanceof ApiError ? e.message : $_('sessions.failedToRevokeAll')
+      toast.error(e instanceof ApiError ? e.message : $_('sessions.failedToRevokeAll'))
     }
   }
   function formatDate(dateStr: string): string {
@@ -88,15 +102,16 @@
 </script>
 <div class="page">
   <header>
-    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('sessions.title')}</h1>
   </header>
   {#if loading}
-    <p class="loading">{$_('sessions.loadingSessions')}</p>
+    <div class="sessions-list">
+      {#each Array(3) as _}
+        <div class="skeleton-card"></div>
+      {/each}
+    </div>
   {:else}
-    {#if error}
-      <div class="message error">{error}</div>
-    {/if}
     {#if sessions.length === 0}
       <p class="empty">{$_('sessions.noSessions')}</p>
     {:else}
@@ -172,11 +187,23 @@
     margin: var(--space-2) 0 0 0;
   }
 
-  .loading,
   .empty {
     text-align: center;
     color: var(--text-secondary);
     padding: var(--space-7);
+  }
+
+  .skeleton-card {
+    height: 80px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 
   .sessions-list {

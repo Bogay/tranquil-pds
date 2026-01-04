@@ -2,6 +2,12 @@
   import { getAuthState, getValidToken } from '../lib/auth.svelte'
   import { api, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
+  import type { Session } from '../lib/types/api'
+  import {
+    prepareRequestOptions,
+    serializeAssertionResponse,
+    type WebAuthnRequestOptionsResponse,
+  } from '../lib/webauthn'
 
   interface Props {
     show: boolean
@@ -12,7 +18,13 @@
 
   let { show = $bindable(), availableMethods = ['password'], onSuccess, onCancel }: Props = $props()
 
-  const auth = getAuthState()
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  const session = $derived(getSession())
   let activeMethod = $state<'password' | 'totp' | 'passkey'>('password')
   let password = $state('')
   let totpCode = $state('')
@@ -37,40 +49,9 @@
     }
   })
 
-  function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer)
-    let binary = ''
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-  }
-
-  function base64UrlToArrayBuffer(base64url: string): ArrayBuffer {
-    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = base64 + '='.repeat((4 - base64.length % 4) % 4)
-    const binary = atob(padded)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-    return bytes.buffer
-  }
-
-  function prepareAuthOptions(options: any): PublicKeyCredentialRequestOptions {
-    return {
-      ...options.publicKey,
-      challenge: base64UrlToArrayBuffer(options.publicKey.challenge),
-      allowCredentials: options.publicKey.allowCredentials?.map((cred: any) => ({
-        ...cred,
-        id: base64UrlToArrayBuffer(cred.id)
-      })) || []
-    }
-  }
-
   async function handlePasswordSubmit(e: Event) {
     e.preventDefault()
-    if (!auth.session || !password) return
+    if (!session || !password) return
     loading = true
     error = ''
     try {
@@ -91,7 +72,7 @@
 
   async function handleTotpSubmit(e: Event) {
     e.preventDefault()
-    if (!auth.session || !totpCode) return
+    if (!session || !totpCode) return
     loading = true
     error = ''
     try {
@@ -111,7 +92,7 @@
   }
 
   async function handlePasskeyAuth() {
-    if (!auth.session) return
+    if (!session) return
     if (!window.PublicKeyCredential) {
       error = 'Passkeys are not supported in this browser'
       return
@@ -125,7 +106,7 @@
         return
       }
       const { options } = await api.reauthPasskeyStart(token)
-      const publicKeyOptions = prepareAuthOptions(options)
+      const publicKeyOptions = prepareRequestOptions(options as WebAuthnRequestOptionsResponse)
       const credential = await navigator.credentials.get({
         publicKey: publicKeyOptions
       })
@@ -133,19 +114,7 @@
         error = 'Passkey authentication was cancelled'
         return
       }
-      const pkCredential = credential as PublicKeyCredential
-      const response = pkCredential.response as AuthenticatorAssertionResponse
-      const credentialResponse = {
-        id: pkCredential.id,
-        type: pkCredential.type,
-        rawId: arrayBufferToBase64Url(pkCredential.rawId),
-        response: {
-          clientDataJSON: arrayBufferToBase64Url(response.clientDataJSON),
-          authenticatorData: arrayBufferToBase64Url(response.authenticatorData),
-          signature: arrayBufferToBase64Url(response.signature),
-          userHandle: response.userHandle ? arrayBufferToBase64Url(response.userHandle) : null,
-        },
-      }
+      const credentialResponse = serializeAssertionResponse(credential as PublicKeyCredential)
       await api.reauthPasskeyFinish(token, credentialResponse)
       show = false
       onSuccess()

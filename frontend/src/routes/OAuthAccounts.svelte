@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
 
   interface AccountInfo {
@@ -75,12 +75,12 @@
       }
 
       if (data.needs_totp) {
-        navigate(`/oauth/totp?request_uri=${encodeURIComponent(requestUri)}`)
+        navigate(routes.oauthTotp, { params: { request_uri: requestUri } })
         return
       }
 
       if (data.needs_2fa) {
-        navigate(`/oauth/2fa?request_uri=${encodeURIComponent(requestUri)}&channel=${encodeURIComponent(data.channel || '')}`)
+        navigate(routes.oauth2fa, { params: { request_uri: requestUri, channel: data.channel || '' } })
         return
       }
 
@@ -100,9 +100,9 @@
   function handleDifferentAccount() {
     const requestUri = getRequestUri()
     if (requestUri) {
-      navigate(`/oauth/login?request_uri=${encodeURIComponent(requestUri)}`)
+      navigate(routes.oauthLogin, { params: { request_uri: requestUri } })
     } else {
-      navigate('/oauth/login')
+      navigate(routes.oauthLogin)
     }
   }
 
@@ -113,9 +113,7 @@
 
 <div class="oauth-accounts-container">
   {#if loading}
-    <div class="loading">
-      <p>{$_('common.loading')}</p>
-    </div>
+    <div class="loading"></div>
   {:else if error}
     <div class="error-container">
       <h1>Error</h1>

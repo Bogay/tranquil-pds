@@ -1,6 +1,6 @@
 <script lang="ts">
   import { setSession } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
   import {
     createInboundMigrationFlow,
@@ -151,7 +151,7 @@
         refreshJwt: '',
       })
     }
-    navigate('/dashboard')
+    navigate(routes.dashboard)
   }
 
   function handleOfflineComplete() {
@@ -164,7 +164,7 @@
         refreshJwt: '',
       })
     }
-    navigate('/dashboard')
+    navigate(routes.dashboard)
   }
 </script>
 

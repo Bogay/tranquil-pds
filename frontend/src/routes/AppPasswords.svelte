@@ -1,13 +1,26 @@
 <script lang="ts">
   import { getAuthState } from '../lib/auth.svelte'
-  import { navigate } from '../lib/router.svelte'
+  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, type AppPassword, ApiError } from '../lib/api'
   import { _ } from '../lib/i18n'
   import { formatDate } from '../lib/date'
-  const auth = getAuthState()
+  import type { Session } from '../lib/types/api'
+  import { toast } from '../lib/toast.svelte'
+
+  const auth = $derived(getAuthState())
+
+  function getSession(): Session | null {
+    return auth.kind === 'authenticated' ? auth.session : null
+  }
+
+  function isLoading(): boolean {
+    return auth.kind === 'loading'
+  }
+
+  const session = $derived(getSession())
+  const authLoading = $derived(isLoading())
   let passwords = $state<AppPassword[]>([])
   let loading = $state(true)
-  let error = $state<string | null>(null)
   let newPasswordName = $state('')
   let selectedScope = $state<string | null>(null)
   let creating = $state(false)
@@ -29,58 +42,56 @@
     return $_('appPasswords.scopeCustom')
   }
   $effect(() => {
-    if (!auth.loading && !auth.session) {
-      navigate('/login')
+    if (!authLoading && !session) {
+      navigate(routes.login)
     }
   })
   $effect(() => {
-    if (auth.session) {
+    if (session) {
       loadPasswords()
     }
   })
   async function loadPasswords() {
-    if (!auth.session) return
+    if (!session) return
     loading = true
-    error = null
     try {
-      const result = await api.listAppPasswords(auth.session.accessJwt)
+      const result = await api.listAppPasswords(session.accessJwt)
       passwords = result.passwords
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to load app passwords'
+      toast.error(e instanceof ApiError ? e.message : $_('appPasswords.failedToLoad'))
     } finally {
       loading = false
     }
   }
   async function handleCreate(e: Event) {
     e.preventDefault()
-    if (!auth.session || !newPasswordName.trim()) return
+    if (!session || !newPasswordName.trim()) return
     creating = true
-    error = null
     try {
       const scopeValue = selectedScope === null ? undefined : selectedScope
-      const result = await api.createAppPassword(auth.session.accessJwt, newPasswordName.trim(), scopeValue ?? undefined)
+      const result = await api.createAppPassword(session.accessJwt, newPasswordName.trim(), scopeValue ?? undefined)
       createdPassword = { name: result.name, password: result.password }
       newPasswordName = ''
       selectedScope = null
       await loadPasswords()
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to create app password'
+      toast.error(e instanceof ApiError ? e.message : $_('appPasswords.failedToCreate'))
     } finally {
       creating = false
     }
   }
   async function handleRevoke(name: string) {
-    if (!auth.session) return
+    if (!session) return
     if (!confirm($_('appPasswords.revokeConfirm', { values: { name } }))) {
       return
     }
     revoking = name
-    error = null
     try {
-      await api.revokeAppPassword(auth.session.accessJwt, name)
+      await api.revokeAppPassword(session.accessJwt, name)
       await loadPasswords()
+      toast.success($_('appPasswords.passwordRevoked'))
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Failed to revoke app password'
+      toast.error(e instanceof ApiError ? e.message : $_('appPasswords.failedToRevoke'))
     } finally {
       revoking = null
     }
@@ -99,15 +110,12 @@
 </script>
 <div class="page">
   <header>
-    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
+    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
     <h1>{$_('appPasswords.title')}</h1>
   </header>
   <p class="description">
     {$_('appPasswords.description')}
   </p>
-  {#if error}
-    <div class="error">{error}</div>
-  {/if}
   {#if createdPassword}
     <div class="created-password">
       <div class="warning-box">
@@ -162,7 +170,11 @@
   <section class="list-section">
     <h2>{$_('appPasswords.yourPasswords')}</h2>
     {#if loading}
-      <p class="empty">{$_('common.loading')}</p>
+      <ul class="password-list">
+        {#each Array(2) as _}
+          <li class="skeleton-item"></li>
+        {/each}
+      </ul>
     {:else if passwords.length === 0}
       <p class="empty">{$_('appPasswords.noPasswords')}</p>
     {:else}
@@ -458,5 +470,16 @@
     color: var(--text-secondary);
     text-align: center;
     padding: var(--space-7);
+  }
+
+  .skeleton-item {
+    height: 60px;
+    background: var(--bg-tertiary);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>
