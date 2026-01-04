@@ -17,7 +17,27 @@ use multihash::Multihash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::pin::Pin;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+fn detect_mime_type(data: &[u8], client_hint: &str) -> String {
+    if let Some(kind) = infer::get(data) {
+        let detected = kind.mime_type().to_string();
+        if detected != client_hint {
+            debug!(
+                "MIME type detection: client sent '{}', detected '{}'",
+                client_hint, detected
+            );
+        }
+        detected
+    } else {
+        if client_hint == "*/*" || client_hint.is_empty() {
+            warn!("Could not detect MIME type and client sent invalid hint: '{}'", client_hint);
+            "application/octet-stream".to_string()
+        } else {
+            client_hint.to_string()
+        }
+    }
+}
 
 pub async fn upload_blob(
     State(state): State<AppState>,
@@ -91,11 +111,10 @@ pub async fn upload_blob(
         return ApiError::Forbidden.into_response();
     }
 
-    let mime_type = headers
+    let client_mime_hint = headers
         .get("content-type")
         .and_then(|h| h.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .to_string();
+        .unwrap_or("application/octet-stream");
 
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
         .fetch_optional(&state.db)
@@ -135,6 +154,14 @@ pub async fn upload_blob(
         ))
         .into_response();
     }
+
+    let mime_type = match state.blob_store.get_head(&temp_key, 8192).await {
+        Ok(head_bytes) => detect_mime_type(&head_bytes, client_mime_hint),
+        Err(e) => {
+            warn!("Failed to read blob head for MIME detection: {:?}", e);
+            client_mime_hint.to_string()
+        }
+    };
 
     let multihash = match Multihash::wrap(0x12, &upload_result.sha256_hash) {
         Ok(mh) => mh,

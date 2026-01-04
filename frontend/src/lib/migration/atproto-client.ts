@@ -227,6 +227,28 @@ export class AtprotoClient {
     });
   }
 
+  async getBlobWithContentType(
+    did: string,
+    cid: string,
+  ): Promise<{ data: Uint8Array; contentType: string }> {
+    const url = `${this.baseUrl}/xrpc/com.atproto.sync.getBlob?did=${encodeURIComponent(did)}&cid=${encodeURIComponent(cid)}`;
+    const headers: Record<string, string> = {};
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new Error(err.message || err.error || res.statusText);
+    }
+    const contentType = res.headers.get("content-type") || "application/octet-stream";
+    const data = new Uint8Array(await res.arrayBuffer());
+    return { data, contentType };
+  }
+
   async uploadBlob(
     data: Uint8Array,
     mimeType: string,

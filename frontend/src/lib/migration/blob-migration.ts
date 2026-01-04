@@ -87,15 +87,17 @@ export async function migrateBlobs(
       });
 
       console.log("[blob-migration] Fetching blob", cid, "from source");
-      const blobData = await sourceClient.getBlob(userDid, cid);
+      const { data: blobData, contentType } = await sourceClient.getBlobWithContentType(userDid, cid);
       console.log(
         "[blob-migration] Got blob",
         cid,
         "size:",
         blobData.byteLength,
+        "contentType:",
+        contentType,
       );
-      await localClient.uploadBlob(blobData, "application/octet-stream");
-      console.log("[blob-migration] Uploaded blob", cid);
+      await localClient.uploadBlob(blobData, contentType);
+      console.log("[blob-migration] Uploaded blob", cid, "with contentType:", contentType);
       migrated++;
       onProgress({ blobsMigrated: migrated });
     } catch (e) {

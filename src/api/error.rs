@@ -480,7 +480,7 @@ impl From<crate::auth::extractor::AuthError> for ApiError {
                 Self::AuthenticationFailed(None)
             }
             crate::auth::extractor::AuthError::TokenExpired => {
-                Self::AuthenticationFailed(Some("Token has expired".to_string()))
+                Self::ExpiredToken(Some("Token has expired".to_string()))
             }
             crate::auth::extractor::AuthError::AccountDeactivated => Self::AccountDeactivated,
             crate::auth::extractor::AuthError::AccountTakedown => Self::AccountTakedown,

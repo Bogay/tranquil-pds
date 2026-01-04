@@ -22,6 +22,7 @@ governor = "0.10"
 hex = "0.4"
 hkdf = "0.12"
 hmac = "0.12"
+infer = "0.19"
 aes-gcm = "0.10"
 jacquard = { version = "0.9.5", default-features = false, features = ["api", "api_bluesky", "api_full", "derive", "dns"] }
 jacquard-axum = "0.9.6"

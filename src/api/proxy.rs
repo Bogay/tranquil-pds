@@ -15,22 +15,87 @@ use tower::{Service, util::BoxCloneSyncService};
 use tracing::{error, info, warn};
 
 const PROTECTED_METHODS: &[&str] = &[
+    "app.bsky.actor.getPreferences",
+    "app.bsky.actor.putPreferences",
+    "com.atproto.admin.deleteAccount",
+    "com.atproto.admin.disableAccountInvites",
+    "com.atproto.admin.disableInviteCodes",
+    "com.atproto.admin.enableAccountInvites",
+    "com.atproto.admin.getAccountInfo",
+    "com.atproto.admin.getAccountInfos",
+    "com.atproto.admin.getInviteCodes",
+    "com.atproto.admin.getSubjectStatus",
+    "com.atproto.admin.searchAccounts",
     "com.atproto.admin.sendEmail",
+    "com.atproto.admin.updateAccountEmail",
+    "com.atproto.admin.updateAccountHandle",
+    "com.atproto.admin.updateAccountPassword",
+    "com.atproto.admin.updateSubjectStatus",
+    "com.atproto.identity.getRecommendedDidCredentials",
     "com.atproto.identity.requestPlcOperationSignature",
     "com.atproto.identity.signPlcOperation",
+    "com.atproto.identity.submitPlcOperation",
     "com.atproto.identity.updateHandle",
+    "com.atproto.repo.applyWrites",
+    "com.atproto.repo.createRecord",
+    "com.atproto.repo.deleteRecord",
+    "com.atproto.repo.importRepo",
+    "com.atproto.repo.putRecord",
+    "com.atproto.repo.uploadBlob",
     "com.atproto.server.activateAccount",
+    "com.atproto.server.checkAccountStatus",
     "com.atproto.server.confirmEmail",
+    "com.atproto.server.confirmSignup",
+    "com.atproto.server.createAccount",
     "com.atproto.server.createAppPassword",
+    "com.atproto.server.createInviteCode",
+    "com.atproto.server.createInviteCodes",
+    "com.atproto.server.createSession",
+    "com.atproto.server.createTotpSecret",
     "com.atproto.server.deactivateAccount",
+    "com.atproto.server.deleteAccount",
+    "com.atproto.server.deletePasskey",
+    "com.atproto.server.deleteSession",
+    "com.atproto.server.describeServer",
+    "com.atproto.server.disableTotp",
+    "com.atproto.server.enableTotp",
+    "com.atproto.server.finishPasskeyRegistration",
     "com.atproto.server.getAccountInviteCodes",
+    "com.atproto.server.getServiceAuth",
     "com.atproto.server.getSession",
+    "com.atproto.server.getTotpStatus",
     "com.atproto.server.listAppPasswords",
+    "com.atproto.server.listPasskeys",
+    "com.atproto.server.refreshSession",
+    "com.atproto.server.regenerateBackupCodes",
     "com.atproto.server.requestAccountDelete",
     "com.atproto.server.requestEmailConfirmation",
     "com.atproto.server.requestEmailUpdate",
+    "com.atproto.server.requestPasswordReset",
+    "com.atproto.server.resendMigrationVerification",
+    "com.atproto.server.resendVerification",
+    "com.atproto.server.reserveSigningKey",
+    "com.atproto.server.resetPassword",
     "com.atproto.server.revokeAppPassword",
+    "com.atproto.server.startPasskeyRegistration",
     "com.atproto.server.updateEmail",
+    "com.atproto.server.updatePasskey",
+    "com.atproto.server.verifyMigrationEmail",
+    "com.atproto.sync.getBlob",
+    "com.atproto.sync.getBlocks",
+    "com.atproto.sync.getCheckout",
+    "com.atproto.sync.getHead",
+    "com.atproto.sync.getLatestCommit",
+    "com.atproto.sync.getRecord",
+    "com.atproto.sync.getRepo",
+    "com.atproto.sync.getRepoStatus",
+    "com.atproto.sync.listBlobs",
+    "com.atproto.sync.listRepos",
+    "com.atproto.sync.notifyOfUpdate",
+    "com.atproto.sync.requestCrawl",
+    "com.atproto.sync.subscribeRepos",
+    "com.atproto.temp.checkSignupQueue",
+    "com.atproto.temp.dereferenceScope",
 ];
 
 fn is_protected_method(method: &str) -> bool {
@@ -89,13 +154,17 @@ impl<S: Service<Request, Response = Response, Error = Infallible>> Service<Reque
             .headers()
             .contains_key(http::HeaderName::from(jacquard::xrpc::Header::AtprotoProxy))
         {
-            // If the age assurance override is set and this is an age assurance call then we dont want to proxy even if the client requests it.
-            if !std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_err()
-                && (req.uri().path().ends_with("app.bsky.ageassurance.getState")
-                    || req
-                        .uri()
-                        .path()
-                        .ends_with("app.bsky.unspecced.getAgeAssuranceState"))
+            let path = req.uri().path();
+            let method = path.trim_start_matches("/");
+
+            if is_protected_method(method) {
+                return Either::Right(self.inner.call(req));
+            }
+
+            // If the age assurance override is set and this is an age assurance call then we dont want to proxy even if the client requests it
+            if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok()
+                && (path.ends_with("app.bsky.ageassurance.getState")
+                    || path.ends_with("app.bsky.unspecced.getAgeAssuranceState"))
             {
                 return Either::Right(self.inner.call(req));
             }

@@ -34,6 +34,7 @@ pub trait BlobStorage: Send + Sync {
     async fn put_bytes(&self, key: &str, data: Bytes) -> Result<(), StorageError>;
     async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError>;
     async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError>;
+    async fn get_head(&self, key: &str, size: usize) -> Result<Bytes, StorageError>;
     async fn delete(&self, key: &str) -> Result<(), StorageError>;
     async fn put_stream(
         &self,
@@ -230,6 +231,35 @@ impl BlobStorage for S3BlobStorage {
             .into_bytes();
 
         crate::metrics::record_s3_operation("get", "success");
+        Ok(data)
+    }
+
+    async fn get_head(&self, key: &str, size: usize) -> Result<Bytes, StorageError> {
+        let range = format!("bytes=0-{}", size.saturating_sub(1));
+        let resp = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .range(range)
+            .send()
+            .await
+            .map_err(|e| {
+                crate::metrics::record_s3_operation("get_head", "error");
+                StorageError::S3(e.to_string())
+            })?;
+
+        let data = resp
+            .body
+            .collect()
+            .await
+            .map_err(|e| {
+                crate::metrics::record_s3_operation("get_head", "error");
+                StorageError::S3(e.to_string())
+            })?
+            .into_bytes();
+
+        crate::metrics::record_s3_operation("get_head", "success");
         Ok(data)
     }
 
