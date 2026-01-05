@@ -22,7 +22,18 @@ use urlencoding::encode as url_encode;
 const DEVICE_COOKIE_NAME: &str = "oauth_device_id";
 
 fn redirect_see_other(uri: &str) -> Response {
-    (StatusCode::SEE_OTHER, [(LOCATION, uri.to_string())]).into_response()
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (LOCATION, uri.to_string()),
+            (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+            (
+                SET_COOKIE,
+                "bfCacheBypass=foo; max-age=1; SameSite=Lax".to_string(),
+            ),
+        ],
+    )
+        .into_response()
 }
 
 fn redirect_to_frontend_error(error: &str, description: &str) -> Response {
@@ -783,13 +794,13 @@ pub async fn authorize_post(
     {
         return show_login_error("An error occurred. Please try again.", json_response);
     }
-    let redirect_url = build_success_redirect(
-        &request_data.parameters.redirect_uri,
-        &code.0,
-        request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.as_deref(),
-    );
     if json_response {
+        let redirect_url = build_intermediate_redirect_url(
+            &request_data.parameters.redirect_uri,
+            &code.0,
+            request_data.parameters.state.as_deref(),
+            request_data.parameters.response_mode.as_deref(),
+        );
         if let Some(cookie) = new_cookie {
             (
                 StatusCode::OK,
@@ -800,14 +811,22 @@ pub async fn authorize_post(
         } else {
             Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
         }
-    } else if let Some(cookie) = new_cookie {
-        (
-            StatusCode::SEE_OTHER,
-            [(SET_COOKIE, cookie), (LOCATION, redirect_url)],
-        )
-            .into_response()
     } else {
-        redirect_see_other(&redirect_url)
+        let redirect_url = build_success_redirect(
+            &request_data.parameters.redirect_uri,
+            &code.0,
+            request_data.parameters.state.as_deref(),
+            request_data.parameters.response_mode.as_deref(),
+        );
+        if let Some(cookie) = new_cookie {
+            (
+                StatusCode::SEE_OTHER,
+                [(SET_COOKIE, cookie), (LOCATION, redirect_url)],
+            )
+                .into_response()
+        } else {
+            redirect_see_other(&redirect_url)
+        }
     }
 }
 
@@ -984,7 +1003,7 @@ pub async fn authorize_select(
             "An error occurred. Please try again.",
         );
     }
-    let redirect_url = build_success_redirect(
+    let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
@@ -1012,16 +1031,68 @@ fn build_success_redirect(
         '?'
     };
     redirect_url.push(separator);
-    redirect_url.push_str(&format!("code={}", url_encode(code)));
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    redirect_url.push_str(&format!(
+        "iss={}",
+        url_encode(&format!("https://{}", pds_hostname))
+    ));
     if let Some(req_state) = state {
         redirect_url.push_str(&format!("&state={}", url_encode(req_state)));
     }
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    redirect_url.push_str(&format!(
-        "&iss={}",
-        url_encode(&format!("https://{}", pds_hostname))
-    ));
+    redirect_url.push_str(&format!("&code={}", url_encode(code)));
     redirect_url
+}
+
+fn build_intermediate_redirect_url(
+    redirect_uri: &str,
+    code: &str,
+    state: Option<&str>,
+    response_mode: Option<&str>,
+) -> String {
+    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let mut url = format!(
+        "https://{}/oauth/authorize/redirect?redirect_uri={}&code={}",
+        pds_hostname,
+        url_encode(redirect_uri),
+        url_encode(code)
+    );
+    if let Some(s) = state {
+        url.push_str(&format!("&state={}", url_encode(s)));
+    }
+    if let Some(rm) = response_mode {
+        url.push_str(&format!("&response_mode={}", url_encode(rm)));
+    }
+    url
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuthorizeRedirectParams {
+    redirect_uri: String,
+    code: String,
+    state: Option<String>,
+    response_mode: Option<String>,
+}
+
+pub async fn authorize_redirect(Query(params): Query<AuthorizeRedirectParams>) -> Response {
+    let final_url = build_success_redirect(
+        &params.redirect_uri,
+        &params.code,
+        params.state.as_deref(),
+        params.response_mode.as_deref(),
+    );
+    tracing::info!(
+        final_url = %final_url,
+        client_redirect = %params.redirect_uri,
+        "authorize_redirect performing 303 redirect"
+    );
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (axum::http::header::LOCATION, final_url),
+            (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+    )
+        .into_response()
 }
 
 #[derive(Debug, Serialize)]
@@ -1367,11 +1438,16 @@ pub async fn consent_post(
             }
         };
 
-    if let Some(err_response) = validate_auth_flow_state(&flow_state, true) {
-        if flow_state.is_expired() {
-            let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
-        }
-        return err_response;
+    if flow_state.is_expired() {
+        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "Authorization request has expired",
+        );
+    }
+    if flow_state.is_pending() {
+        return json_error(StatusCode::FORBIDDEN, "access_denied", "Not authenticated");
     }
 
     let did = flow_state.did().unwrap().to_string();
@@ -1420,14 +1496,11 @@ pub async fn consent_post(
         && !has_granular_scopes
         && !form.approved_scopes.contains(&"atproto".to_string())
     {
-        return (
+        return json_error(
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "invalid_request",
-                "error_description": "The atproto scope was requested and must be approved"
-            })),
-        )
-            .into_response();
+            "invalid_request",
+            "The atproto scope was requested and must be approved",
+        );
     }
     let final_approved: Vec<String> = if user_denied_some_granular {
         form.approved_scopes
@@ -1439,14 +1512,11 @@ pub async fn consent_post(
         form.approved_scopes.clone()
     };
     if final_approved.is_empty() {
-        return (
+        return json_error(
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "invalid_request",
-                "error_description": "At least one scope must be approved"
-            })),
-        )
-            .into_response();
+            "invalid_request",
+            "At least one scope must be approved",
+        );
     }
     let approved_scope_str = final_approved.join(" ");
     let has_valid_scope = final_approved.iter().all(|s| {
@@ -1462,14 +1532,11 @@ pub async fn consent_post(
             || s.starts_with("include:")
     });
     if !has_valid_scope {
-        return (
+        return json_error(
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "invalid_request",
-                "error_description": "Invalid scope format"
-            })),
-        )
-            .into_response();
+            "invalid_request",
+            "Invalid scope format",
+        );
     }
     if form.remember {
         let preferences: Vec<db::ScopePreference> = requested_scopes
@@ -1503,25 +1570,25 @@ pub async fn consent_post(
     .await
     .is_err()
     {
-        return (
+        return json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "server_error",
-                "error_description": "Failed to complete authorization"
-            })),
-        )
-            .into_response();
+            "server_error",
+            "Failed to complete authorization",
+        );
     }
-    let redirect_url = build_success_redirect(
-        &request_data.parameters.redirect_uri,
+    let redirect_uri = &request_data.parameters.redirect_uri;
+    let intermediate_url = build_intermediate_redirect_url(
+        redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
         request_data.parameters.response_mode.as_deref(),
     );
-    Json(serde_json::json!({
-        "redirect_uri": redirect_url
-    }))
-    .into_response()
+    tracing::info!(
+        intermediate_url = %intermediate_url,
+        client_redirect = %redirect_uri,
+        "consent_post returning JSON with intermediate URL (for 303 redirect)"
+    );
+    Json(serde_json::json!({ "redirect_uri": intermediate_url })).into_response()
 }
 
 pub async fn authorize_2fa_post(
@@ -1630,7 +1697,7 @@ pub async fn authorize_2fa_post(
                 "An error occurred. Please try again.",
             );
         }
-        let redirect_url = build_success_redirect(
+        let redirect_url = build_intermediate_redirect_url(
             &request_data.parameters.redirect_uri,
             &code.0,
             request_data.parameters.state.as_deref(),
@@ -1725,7 +1792,7 @@ pub async fn authorize_2fa_post(
             "An error occurred. Please try again.",
         );
     }
-    let redirect_url = build_success_redirect(
+    let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
@@ -2367,7 +2434,7 @@ pub async fn passkey_finish(
             .into_response();
     }
 
-    let redirect_url = build_success_redirect(
+    let redirect_url = build_intermediate_redirect_url(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),

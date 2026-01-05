@@ -550,6 +550,10 @@ pub fn app(state: AppState) -> Router {
         .route("/authorize/deny", post(oauth::endpoints::authorize_deny))
         .route("/authorize/consent", get(oauth::endpoints::consent_get))
         .route("/authorize/consent", post(oauth::endpoints::consent_post))
+        .route(
+            "/authorize/redirect",
+            get(oauth::endpoints::authorize_redirect),
+        )
         .route("/delegation/auth", post(oauth::endpoints::delegation_auth))
         .route(
             "/delegation/totp",

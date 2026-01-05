@@ -453,29 +453,10 @@
     margin: var(--space-2) 0 0 0;
   }
 
-  .loading,
   .empty {
     text-align: center;
     color: var(--text-secondary);
     padding: var(--space-4);
-  }
-
-  .message {
-    padding: var(--space-3);
-    border-radius: var(--radius-md);
-    margin-bottom: var(--space-4);
-  }
-
-  .message.error {
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
-
-  .message.success {
-    background: var(--success-bg);
-    border: 1px solid var(--success-border);
-    color: var(--success-text);
   }
 
   .constraint-notice {

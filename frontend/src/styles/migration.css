@@ -3,6 +3,14 @@
   margin: 0 auto;
 }
 
+.field-label {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
 .step-indicator {
   display: flex;
   align-items: center;

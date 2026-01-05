@@ -795,12 +795,6 @@
     margin: var(--space-2) 0 0 0;
   }
 
-  .loading {
-    text-align: center;
-    color: var(--text-secondary);
-    padding: var(--space-7);
-  }
-
   section {
     padding: var(--space-6);
     background: var(--bg-secondary);

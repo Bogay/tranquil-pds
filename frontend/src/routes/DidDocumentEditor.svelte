@@ -439,12 +439,6 @@
     margin-top: var(--space-6);
   }
 
-  .loading {
-    text-align: center;
-    padding: var(--space-9);
-    color: var(--text-secondary);
-  }
-
   @media (max-width: 600px) {
     .field-row {
       flex-direction: column;

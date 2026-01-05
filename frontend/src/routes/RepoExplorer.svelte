@@ -599,12 +599,6 @@
     color: var(--success-text);
   }
 
-  .loading-text {
-    text-align: center;
-    color: var(--text-secondary);
-    padding: var(--space-7);
-  }
-
   .toolbar {
     display: flex;
     gap: var(--space-2);

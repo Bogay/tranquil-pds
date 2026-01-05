@@ -960,8 +960,7 @@
     font-size: var(--text-xs);
   }
 
-  .empty,
-  .loading {
+  .empty {
     color: var(--text-secondary);
     font-size: var(--text-sm);
     margin-bottom: var(--space-4);

@@ -111,7 +111,7 @@
   </div>
 
   <div class="field">
-    <label>{$_('migration.inbound.chooseHandle.authMethod')}</label>
+    <span class="field-label">{$_('migration.inbound.chooseHandle.authMethod')}</span>
     <div class="auth-method-options">
       <label class="auth-option" class:selected={authMethod === 'password'}>
         <input

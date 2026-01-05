@@ -216,20 +216,10 @@
     margin: var(--space-2) 0 0 0;
   }
 
-  .loading,
   .empty {
     text-align: center;
     color: var(--text-secondary);
     padding: var(--space-7);
-  }
-
-  .message.error {
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    margin-bottom: var(--space-4);
   }
 
   .audit-list {

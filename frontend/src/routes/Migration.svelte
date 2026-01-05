@@ -74,17 +74,18 @@
 
   if (!hasOAuthCallback) {
     if (hasPendingMigration()) {
-      resumeInfo = getResumeInfo()
-      if (resumeInfo) {
-        if (resumeInfo.step === 'success') {
+      const info = getResumeInfo()
+      if (info) {
+        if (info.step === 'success') {
           clearMigrationState()
-          resumeInfo = null
         } else {
+          resumeInfo = info
           const stored = loadMigrationState()
           if (stored && stored.direction === 'inbound') {
             direction = 'inbound'
-            inboundFlow = createInboundMigrationFlow()
-            inboundFlow.resumeFromState(stored)
+            const flow = createInboundMigrationFlow()
+            flow.resumeFromState(stored)
+            inboundFlow = flow
           }
         }
       }
@@ -94,8 +95,9 @@
         clearOfflineState()
       } else {
         direction = 'offline-inbound'
-        offlineFlow = createOfflineInboundMigrationFlow()
-        offlineFlow.tryResume()
+        const flow = createOfflineInboundMigrationFlow()
+        flow.tryResume()
+        offlineFlow = flow
       }
     }
   }

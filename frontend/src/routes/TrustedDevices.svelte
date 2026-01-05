@@ -244,12 +244,6 @@
     font-size: var(--text-sm);
   }
 
-  .loading {
-    text-align: center;
-    padding: var(--space-7);
-    color: var(--text-secondary);
-  }
-
   .empty-state {
     text-align: center;
     padding: var(--space-8) var(--space-4);

@@ -234,15 +234,6 @@
     margin-bottom: var(--space-7);
   }
 
-  .error {
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    margin-bottom: var(--space-4);
-  }
-
   .created-password {
     display: flex;
     flex-direction: column;

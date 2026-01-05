@@ -93,8 +93,8 @@
         body: JSON.stringify({
           request_uri: consentData.request_uri,
           approved_scopes: approvedScopes,
-          remember: rememberChoice
-        })
+          remember: rememberChoice,
+        }),
       })
 
       if (!response.ok) {

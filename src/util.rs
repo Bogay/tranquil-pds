@@ -154,7 +154,16 @@ pub fn pds_public_url() -> String {
 }
 
 pub fn build_full_url(path: &str) -> String {
-    format!("{}{}", pds_public_url(), path)
+    let normalized_path = if !path.starts_with("/xrpc/")
+        && (path.starts_with("/com.atproto.")
+            || path.starts_with("/app.bsky.")
+            || path.starts_with("/_"))
+    {
+        format!("/xrpc{}", path)
+    } else {
+        path.to_string()
+    };
+    format!("{}{}", pds_public_url(), normalized_path)
 }
 
 pub fn json_to_ipld(value: &JsonValue) -> Ipld {
@@ -354,5 +363,30 @@ mod tests {
             return;
         }
         panic!("Failed to find CID link in parsed CBOR");
+    }
+
+    #[test]
+    fn test_build_full_url_adds_xrpc_prefix_for_atproto_paths() {
+        unsafe { std::env::set_var("PDS_HOSTNAME", "example.com") };
+        assert_eq!(
+            build_full_url("/com.atproto.server.getSession"),
+            "https://example.com/xrpc/com.atproto.server.getSession"
+        );
+        assert_eq!(
+            build_full_url("/app.bsky.feed.getTimeline"),
+            "https://example.com/xrpc/app.bsky.feed.getTimeline"
+        );
+        assert_eq!(
+            build_full_url("/_health"),
+            "https://example.com/xrpc/_health"
+        );
+        assert_eq!(
+            build_full_url("/xrpc/com.atproto.server.getSession"),
+            "https://example.com/xrpc/com.atproto.server.getSession"
+        );
+        assert_eq!(
+            build_full_url("/oauth/token"),
+            "https://example.com/oauth/token"
+        );
     }
 }

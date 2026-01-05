@@ -516,12 +516,6 @@
     color: var(--error-text);
   }
 
-  .section-hint {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-5) 0;
-  }
-
   .radio-group {
     display: flex;
     flex-direction: column;
