@@ -7,6 +7,7 @@ use crate::oauth::{
     client::{ClientMetadataCache, verify_client_auth},
     db::{self, RefreshTokenLookup},
     dpop::DPoPVerifier,
+    scopes::expand_include_scopes,
 };
 use crate::state::AppState;
 use axum::Json;
@@ -122,7 +123,7 @@ pub async fn handle_authorization_code_grant(
     let refresh_token = RefreshToken::generate();
     let now = Utc::now();
 
-    let (final_scope, controller_did) = if let Some(ref controller) = auth_request.controller_did {
+    let (raw_scope, controller_did) = if let Some(ref controller) = auth_request.controller_did {
         let grant = delegation::get_delegation(&state.db, &did, controller)
             .await
             .ok()
@@ -137,6 +138,16 @@ pub async fn handle_authorization_code_grant(
         (Some(intersected), Some(controller.clone()))
     } else {
         (auth_request.parameters.scope.clone(), None)
+    };
+
+    let final_scope = if let Some(ref scope) = raw_scope {
+        if scope.contains("include:") {
+            Some(expand_include_scopes(scope).await)
+        } else {
+            raw_scope
+        }
+    } else {
+        raw_scope
     };
 
     let access_token = create_access_token_with_delegation(
