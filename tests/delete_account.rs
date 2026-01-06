@@ -174,7 +174,7 @@ async fn test_delete_account_invalid_token() {
         .send()
         .await
         .expect("Failed to send delete request");
-    assert_eq!(delete_res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(delete_res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = delete_res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidToken");
 }
@@ -228,7 +228,7 @@ async fn test_delete_account_expired_token() {
         .send()
         .await
         .expect("Failed to send delete request");
-    assert_eq!(delete_res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(delete_res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = delete_res.json().await.unwrap();
     assert_eq!(body["error"], "ExpiredToken");
 }
@@ -280,7 +280,7 @@ async fn test_delete_account_token_mismatch() {
         .send()
         .await
         .expect("Failed to send delete request");
-    assert_eq!(delete_res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(delete_res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = delete_res.json().await.unwrap();
     assert_eq!(body["error"], "InvalidToken");
 }

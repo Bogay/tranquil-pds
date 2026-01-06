@@ -388,18 +388,15 @@ pub async fn apply_writes(
             return ApiError::InternalError(Some("Failed to persist MST".into())).into_response();
         }
     };
-    let mut relevant_blocks = std::collections::BTreeMap::new();
+    let mut new_mst_blocks = std::collections::BTreeMap::new();
+    let mut old_mst_blocks = std::collections::BTreeMap::new();
     for key in &modified_keys {
-        if mst
-            .blocks_for_path(key, &mut relevant_blocks)
-            .await
-            .is_err()
-        {
+        if mst.blocks_for_path(key, &mut new_mst_blocks).await.is_err() {
             return ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
                 .into_response();
         }
         if original_mst
-            .blocks_for_path(key, &mut relevant_blocks)
+            .blocks_for_path(key, &mut old_mst_blocks)
             .await
             .is_err()
         {
@@ -407,16 +404,36 @@ pub async fn apply_writes(
                 .into_response();
         }
     }
-    let mut written_cids = tracking_store.get_all_relevant_cids();
-    for cid in relevant_blocks.keys() {
-        if !written_cids.contains(cid) {
-            written_cids.push(*cid);
+    let mut relevant_blocks = new_mst_blocks.clone();
+    relevant_blocks.extend(old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));
+    let written_cids: Vec<Cid> = tracking_store
+        .get_all_relevant_cids()
+        .into_iter()
+        .chain(relevant_blocks.keys().copied())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
+    let prev_record_cids = ops.iter().filter_map(|op| match op {
+        RecordOp::Update {
+            prev: Some(cid), ..
         }
-    }
-    let written_cids_str = written_cids
-        .iter()
-        .map(|c| c.to_string())
-        .collect::<Vec<_>>();
+        | RecordOp::Delete {
+            prev: Some(cid), ..
+        } => Some(*cid),
+        _ => None,
+    });
+    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
+        .chain(
+            old_mst_blocks
+                .keys()
+                .filter(|cid| !new_mst_blocks.contains_key(*cid))
+                .copied(),
+        )
+        .chain(prev_record_cids)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     let commit_res = match commit_and_log(
         &state,
         CommitParams {
@@ -428,6 +445,7 @@ pub async fn apply_writes(
             ops,
             blocks_cids: &written_cids_str,
             blobs: &all_blob_cids,
+            obsolete_cids,
         },
     )
     .await

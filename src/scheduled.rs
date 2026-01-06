@@ -226,72 +226,92 @@ pub async fn backfill_user_blocks(db: &PgPool, block_store: PostgresBlockStore) 
             }
         };
 
-        let mut block_cids: Vec<Vec<u8>> = Vec::new();
-        let mut to_visit = vec![root_cid];
-        let mut visited = std::collections::HashSet::new();
-
-        while let Some(cid) = to_visit.pop() {
-            if visited.contains(&cid) {
-                continue;
-            }
-            visited.insert(cid);
-            block_cids.push(cid.to_bytes());
-
-            let block = match block_store.get(&cid).await {
-                Ok(Some(b)) => b,
-                _ => continue,
-            };
-
-            if let Ok(commit) = Commit::from_cbor(&block) {
-                to_visit.push(commit.data);
-                if let Some(prev) = commit.prev {
-                    to_visit.push(prev);
+        match collect_current_repo_blocks(&block_store, &root_cid).await {
+            Ok(block_cids) => {
+                if block_cids.is_empty() {
+                    failed += 1;
+                    continue;
                 }
-            } else if let Ok(Ipld::Map(ref obj)) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
-                if let Some(Ipld::Link(left_cid)) = obj.get("l") {
-                    to_visit.push(*left_cid);
-                }
-                if let Some(Ipld::List(entries)) = obj.get("e") {
-                    for entry in entries {
-                        if let Ipld::Map(entry_obj) = entry {
-                            if let Some(Ipld::Link(tree_cid)) = entry_obj.get("t") {
-                                to_visit.push(*tree_cid);
-                            }
-                            if let Some(Ipld::Link(val_cid)) = entry_obj.get("v") {
-                                to_visit.push(*val_cid);
-                            }
-                        }
-                    }
+
+                if let Err(e) = sqlx::query!(
+                    r#"
+                    INSERT INTO user_blocks (user_id, block_cid)
+                    SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
+                    ON CONFLICT (user_id, block_cid) DO NOTHING
+                    "#,
+                    user.user_id,
+                    &block_cids
+                )
+                .execute(db)
+                .await
+                {
+                    warn!(user_id = %user.user_id, error = %e, "Failed to backfill user_blocks");
+                    failed += 1;
+                } else {
+                    info!(user_id = %user.user_id, block_count = block_cids.len(), "Backfilled user_blocks");
+                    success += 1;
                 }
             }
-        }
-
-        if block_cids.is_empty() {
-            failed += 1;
-            continue;
-        }
-
-        if let Err(e) = sqlx::query!(
-            r#"
-            INSERT INTO user_blocks (user_id, block_cid)
-            SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
-            ON CONFLICT (user_id, block_cid) DO NOTHING
-            "#,
-            user.user_id,
-            &block_cids
-        )
-        .execute(db)
-        .await
-        {
-            warn!(user_id = %user.user_id, error = %e, "Failed to backfill user_blocks");
-            failed += 1;
-        } else {
-            info!(user_id = %user.user_id, block_count = block_cids.len(), "Backfilled user_blocks");
-            success += 1;
+            Err(e) => {
+                warn!(user_id = %user.user_id, error = %e, "Failed to collect repo blocks for backfill");
+                failed += 1;
+            }
         }
     }
 
     info!(success, failed, "Completed user_blocks backfill");
+}
+
+pub async fn collect_current_repo_blocks(
+    block_store: &PostgresBlockStore,
+    head_cid: &Cid,
+) -> Result<Vec<Vec<u8>>, String> {
+    let mut block_cids: Vec<Vec<u8>> = Vec::new();
+    let mut to_visit = vec![*head_cid];
+    let mut visited = std::collections::HashSet::new();
+
+    while let Some(cid) = to_visit.pop() {
+        if visited.contains(&cid) {
+            continue;
+        }
+        visited.insert(cid);
+        block_cids.push(cid.to_bytes());
+
+        let block = match block_store.get(&cid).await {
+            Ok(Some(b)) => b,
+            Ok(None) => continue,
+            Err(e) => return Err(format!("Failed to get block {}: {:?}", cid, e)),
+        };
+
+        if let Ok(commit) = Commit::from_cbor(&block) {
+            to_visit.push(commit.data);
+        } else if let Ok(Ipld::Map(ref obj)) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
+            if let Some(Ipld::Link(left_cid)) = obj.get("l") {
+                to_visit.push(*left_cid);
+            }
+            if let Some(Ipld::List(entries)) = obj.get("e") {
+                to_visit.extend(
+                    entries
+                        .iter()
+                        .filter_map(|entry| match entry {
+                            Ipld::Map(entry_obj) => Some(entry_obj),
+                            _ => None,
+                        })
+                        .flat_map(|entry_obj| {
+                            [entry_obj.get("t"), entry_obj.get("v")]
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|v| match v {
+                                    Ipld::Link(cid) => Some(*cid),
+                                    _ => None,
+                                })
+                        }),
+                );
+            }
+        }
+    }
+
+    Ok(block_cids)
 }
 
 pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore) {
@@ -664,7 +684,7 @@ async fn process_scheduled_backups(
             }
         };
 
-        let car_result = generate_full_backup(block_store, &head_cid).await;
+        let car_result = generate_full_backup(db, block_store, user.user_id, &head_cid).await;
         let car_bytes = match car_result {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -736,67 +756,105 @@ pub async fn generate_repo_car(
     head_cid: &Cid,
 ) -> Result<Vec<u8>, String> {
     use jacquard_repo::storage::BlockStore;
-    use std::io::Write;
 
-    let mut car_bytes =
+    let block_cids_bytes = collect_current_repo_blocks(block_store, head_cid).await?;
+    let block_cids: Vec<Cid> = block_cids_bytes
+        .iter()
+        .filter_map(|b| Cid::try_from(b.as_slice()).ok())
+        .collect();
+
+    let car_bytes =
         encode_car_header(head_cid).map_err(|e| format!("Failed to encode CAR header: {}", e))?;
 
-    let mut stack = vec![*head_cid];
-    let mut visited = std::collections::HashSet::new();
+    let blocks = block_store
+        .get_many(&block_cids)
+        .await
+        .map_err(|e| format!("Failed to fetch blocks: {:?}", e))?;
 
-    while let Some(cid) = stack.pop() {
-        if visited.contains(&cid) {
-            continue;
+    let car_bytes = block_cids
+        .iter()
+        .zip(blocks.iter())
+        .filter_map(|(cid, block_opt)| block_opt.as_ref().map(|block| (cid, block)))
+        .fold(car_bytes, |mut acc, (cid, block)| {
+            acc.extend(encode_car_block(cid, block));
+            acc
+        });
+
+    Ok(car_bytes)
+}
+
+fn encode_car_block(cid: &Cid, block: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let cid_bytes = cid.to_bytes();
+    let total_len = cid_bytes.len() + block.len();
+    let mut writer = Vec::new();
+    crate::sync::car::write_varint(&mut writer, total_len as u64)
+        .expect("Writing to Vec<u8> should never fail");
+    writer
+        .write_all(&cid_bytes)
+        .expect("Writing to Vec<u8> should never fail");
+    writer
+        .write_all(block)
+        .expect("Writing to Vec<u8> should never fail");
+    writer
+}
+
+pub async fn generate_repo_car_from_user_blocks(
+    db: &PgPool,
+    block_store: &PostgresBlockStore,
+    user_id: uuid::Uuid,
+    head_cid: &Cid,
+) -> Result<Vec<u8>, String> {
+    use jacquard_repo::storage::BlockStore;
+
+    let block_cid_bytes: Vec<Vec<u8>> = sqlx::query_scalar!(
+        "SELECT block_cid FROM user_blocks WHERE user_id = $1",
+        user_id
+    )
+    .fetch_all(db)
+    .await
+    .map_err(|e| format!("Failed to fetch user_blocks: {}", e))?;
+
+    if block_cid_bytes.is_empty() {
+        let cids = collect_current_repo_blocks(block_store, head_cid).await?;
+        if cids.is_empty() {
+            return Err("No blocks found for repo".to_string());
         }
-        visited.insert(cid);
-
-        if let Ok(Some(block)) = block_store.get(&cid).await {
-            let cid_bytes = cid.to_bytes();
-            let total_len = cid_bytes.len() + block.len();
-            let mut writer = Vec::new();
-            crate::sync::car::write_varint(&mut writer, total_len as u64)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&cid_bytes)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&block)
-                .expect("Writing to Vec<u8> should never fail");
-            car_bytes.extend_from_slice(&writer);
-
-            if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
-                extract_links(&value, &mut stack);
-            }
-        }
+        return generate_repo_car(block_store, head_cid).await;
     }
+
+    let block_cids: Vec<Cid> = block_cid_bytes
+        .iter()
+        .filter_map(|bytes| Cid::try_from(bytes.as_slice()).ok())
+        .collect();
+
+    let car_bytes =
+        encode_car_header(head_cid).map_err(|e| format!("Failed to encode CAR header: {}", e))?;
+
+    let blocks = block_store
+        .get_many(&block_cids)
+        .await
+        .map_err(|e| format!("Failed to fetch blocks: {:?}", e))?;
+
+    let car_bytes = block_cids
+        .iter()
+        .zip(blocks.iter())
+        .filter_map(|(cid, block_opt)| block_opt.as_ref().map(|block| (cid, block)))
+        .fold(car_bytes, |mut acc, (cid, block)| {
+            acc.extend(encode_car_block(cid, block));
+            acc
+        });
 
     Ok(car_bytes)
 }
 
 pub async fn generate_full_backup(
+    db: &PgPool,
     block_store: &PostgresBlockStore,
+    user_id: uuid::Uuid,
     head_cid: &Cid,
 ) -> Result<Vec<u8>, String> {
-    generate_repo_car(block_store, head_cid).await
-}
-
-fn extract_links(value: &Ipld, stack: &mut Vec<Cid>) {
-    match value {
-        Ipld::Link(cid) => {
-            stack.push(*cid);
-        }
-        Ipld::Map(map) => {
-            for v in map.values() {
-                extract_links(v, stack);
-            }
-        }
-        Ipld::List(arr) => {
-            for v in arr {
-                extract_links(v, stack);
-            }
-        }
-        _ => {}
-    }
+    generate_repo_car_from_user_blocks(db, block_store, user_id, head_cid).await
 }
 
 pub fn count_car_blocks(car_bytes: &[u8]) -> i32 {

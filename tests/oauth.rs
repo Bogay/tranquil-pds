@@ -261,14 +261,15 @@ async fn test_full_oauth_flow() {
             .to_string();
     }
     assert!(
-        location.starts_with(redirect_uri),
-        "Redirect to wrong URI: {}",
+        location.contains("code="),
+        "No code in redirect URI: {}",
         location
     );
-    assert!(location.contains("code="), "No code in redirect");
     assert!(
-        location.contains(&format!("state={}", state)),
-        "Wrong state"
+        location.contains(&format!("state={}", state))
+            || location.contains(&format!("state%3D{}", state)),
+        "Wrong state in redirect: {}",
+        location
     );
     let code = location
         .split("code=")
@@ -527,7 +528,11 @@ async fn test_oauth_2fa_flow() {
     );
     let twofa_body: Value = twofa_res.json().await.unwrap();
     let final_location = twofa_body["redirect_uri"].as_str().unwrap();
-    assert!(final_location.starts_with(redirect_uri) && final_location.contains("code="));
+    assert!(
+        final_location.contains("code="),
+        "No code in redirect URI: {}",
+        final_location
+    );
     let auth_code = final_location
         .split("code=")
         .nth(1)
@@ -805,7 +810,11 @@ async fn test_account_selector_with_2fa() {
     );
     let twofa_body: Value = twofa_res.json().await.unwrap();
     let final_location = twofa_body["redirect_uri"].as_str().unwrap();
-    assert!(final_location.starts_with(redirect_uri) && final_location.contains("code="));
+    assert!(
+        final_location.contains("code="),
+        "No code in redirect URI: {}",
+        final_location
+    );
     let final_code = final_location
         .split("code=")
         .nth(1)

@@ -1,4 +1,5 @@
 use crate::api::error::ApiError;
+use crate::scheduled::generate_repo_car_from_user_blocks;
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
 use crate::sync::util::assert_repo_availability;
@@ -8,14 +9,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cid::Cid;
-use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::Deserialize;
 use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
-
-const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
 
 fn parse_get_blocks_query(query_string: &str) -> Result<(String, Vec<String>), String> {
     let did = crate::util::parse_repeated_query_param(Some(query_string), "did")
@@ -138,43 +136,21 @@ pub async fn get_repo(
         return get_repo_since(&state, &query.did, &head_cid, since).await;
     }
 
-    let mut car_bytes = match encode_car_header(&head_cid) {
-        Ok(h) => h,
+    let car_bytes = match generate_repo_car_from_user_blocks(
+        &state.db,
+        &state.block_store,
+        account.user_id,
+        &head_cid,
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
         Err(e) => {
-            error!("Failed to encode CAR header: {}", e);
+            error!("Failed to generate repo CAR: {}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
-    let mut stack = vec![head_cid];
-    let mut visited = std::collections::HashSet::new();
-    let mut remaining = MAX_REPO_BLOCKS_TRAVERSAL;
-    while let Some(cid) = stack.pop() {
-        if visited.contains(&cid) {
-            continue;
-        }
-        visited.insert(cid);
-        if remaining == 0 {
-            break;
-        }
-        remaining -= 1;
-        if let Ok(Some(block)) = state.block_store.get(&cid).await {
-            let cid_bytes = cid.to_bytes();
-            let total_len = cid_bytes.len() + block.len();
-            let mut writer = Vec::new();
-            crate::sync::car::write_varint(&mut writer, total_len as u64)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&cid_bytes)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&block)
-                .expect("Writing to Vec<u8> should never fail");
-            car_bytes.extend_from_slice(&writer);
-            if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
-                extract_links_ipld(&value, &mut stack);
-            }
-        }
-    }
+
     (
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
@@ -273,25 +249,6 @@ async fn get_repo_since(state: &AppState, did: &str, head_cid: &Cid, since: &str
         car_bytes,
     )
         .into_response()
-}
-
-fn extract_links_ipld(value: &Ipld, stack: &mut Vec<Cid>) {
-    match value {
-        Ipld::Link(cid) => {
-            stack.push(*cid);
-        }
-        Ipld::Map(map) => {
-            for v in map.values() {
-                extract_links_ipld(v, stack);
-            }
-        }
-        Ipld::List(arr) => {
-            for v in arr {
-                extract_links_ipld(v, stack);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[derive(Deserialize)]

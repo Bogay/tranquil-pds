@@ -92,6 +92,7 @@ pub struct CommitParams<'a> {
     pub ops: Vec<RecordOp>,
     pub blocks_cids: &'a [String],
     pub blobs: &'a [String],
+    pub obsolete_cids: Vec<Cid>,
 }
 
 pub async fn commit_and_log(
@@ -107,6 +108,7 @@ pub async fn commit_and_log(
         ops,
         blocks_cids,
         blobs,
+        obsolete_cids,
     } = params;
     let key_row = sqlx::query!(
         "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
@@ -200,6 +202,21 @@ pub async fn commit_and_log(
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("DB Error (user_blocks): {}", e))?;
+    }
+    if !obsolete_cids.is_empty() {
+        let obsolete_bytes: Vec<Vec<u8>> = obsolete_cids.iter().map(|c| c.to_bytes()).collect();
+        sqlx::query!(
+            r#"
+            DELETE FROM user_blocks
+            WHERE user_id = $1
+            AND block_cid = ANY($2)
+            "#,
+            user_id,
+            &obsolete_bytes as &[Vec<u8>]
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("DB Error (user_blocks delete obsolete): {}", e))?;
     }
     let mut upsert_collections: Vec<String> = Vec::new();
     let mut upsert_rkeys: Vec<String> = Vec::new();
@@ -404,21 +421,33 @@ pub async fn create_record_internal(
         rkey: rkey.to_string(),
         cid: record_cid,
     };
-    let mut relevant_blocks = std::collections::BTreeMap::new();
+    let mut new_mst_blocks = std::collections::BTreeMap::new();
+    let mut old_mst_blocks = std::collections::BTreeMap::new();
     new_mst
-        .blocks_for_path(&key, &mut relevant_blocks)
+        .blocks_for_path(&key, &mut new_mst_blocks)
         .await
         .map_err(|e| format!("Failed to get new MST blocks for path: {:?}", e))?;
-    mst.blocks_for_path(&key, &mut relevant_blocks)
+    mst.blocks_for_path(&key, &mut old_mst_blocks)
         .await
         .map_err(|e| format!("Failed to get old MST blocks for path: {:?}", e))?;
+    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
+        .chain(
+            old_mst_blocks
+                .keys()
+                .filter(|cid| !new_mst_blocks.contains_key(*cid))
+                .copied(),
+        )
+        .collect();
+    let mut relevant_blocks = new_mst_blocks;
+    relevant_blocks.extend(old_mst_blocks);
     relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));
-    let mut written_cids = tracking_store.get_all_relevant_cids();
-    for cid in relevant_blocks.keys() {
-        if !written_cids.contains(cid) {
-            written_cids.push(*cid);
-        }
-    }
+    let written_cids: Vec<Cid> = tracking_store
+        .get_all_relevant_cids()
+        .into_iter()
+        .chain(relevant_blocks.keys().copied())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
     let blob_cids = extract_blob_cids(record);
     let result = commit_and_log(
@@ -432,6 +461,7 @@ pub async fn create_record_internal(
             ops: vec![op],
             blocks_cids: &written_cids_str,
             blobs: &blob_cids,
+            obsolete_cids,
         },
     )
     .await?;

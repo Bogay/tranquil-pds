@@ -220,14 +220,15 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         }
     };
 
-    let car_bytes = match generate_full_backup(&state.block_store, &head_cid).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            error!("Failed to generate CAR: {:?}", e);
-            return ApiError::InternalError(Some("Failed to generate backup".into()))
-                .into_response();
-        }
-    };
+    let car_bytes =
+        match generate_full_backup(&state.db, &state.block_store, user.id, &head_cid).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to generate CAR: {:?}", e);
+                return ApiError::InternalError(Some("Failed to generate backup".into()))
+                    .into_response();
+            }
+        };
 
     let block_count = crate::scheduled::count_car_blocks(&car_bytes);
     let size_bytes = car_bytes.len() as i64;

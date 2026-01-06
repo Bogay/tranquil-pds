@@ -93,9 +93,15 @@ async fn test_check_account_status_returns_correct_block_count() {
     let body3: Value = status3.json().await.unwrap();
     let after_delete_blocks = body3["repoBlocks"].as_i64().unwrap();
     assert!(
-        after_delete_blocks >= after_create_blocks,
-        "Block count should not decrease after deleting a record (was {}, now {})",
+        after_delete_blocks <= after_create_blocks,
+        "Block count should decrease or stay same after deleting a record (was {}, now {})",
         after_create_blocks,
+        after_delete_blocks
+    );
+    assert!(
+        after_delete_blocks >= initial_blocks,
+        "Block count after delete should be at least initial count (initial {}, now {})",
+        initial_blocks,
         after_delete_blocks
     );
 }

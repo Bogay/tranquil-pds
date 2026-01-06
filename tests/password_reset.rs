@@ -177,7 +177,7 @@ async fn test_reset_password_with_invalid_token() {
         .send()
         .await
         .expect("Failed to reset password");
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidToken");
 }
@@ -241,7 +241,7 @@ async fn test_reset_password_with_expired_token() {
         .send()
         .await
         .expect("Failed to reset password");
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "ExpiredToken");
 }

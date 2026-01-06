@@ -76,7 +76,7 @@ async fn test_sign_plc_operation_validation() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["error"] == "InvalidToken" || body["error"] == "ExpiredToken");
 }

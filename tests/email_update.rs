@@ -193,7 +193,7 @@ async fn test_update_email_invalid_token() {
         .send()
         .await
         .expect("Failed to attempt email update");
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidToken");
 }
@@ -390,7 +390,7 @@ async fn test_confirm_email_invalid_token() {
         .send()
         .await
         .expect("Failed to confirm email");
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body: Value = res.json().await.expect("Invalid JSON");
     assert_eq!(body["error"], "InvalidToken");
 }
