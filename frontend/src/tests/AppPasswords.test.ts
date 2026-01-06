@@ -4,6 +4,7 @@ import AppPasswords from "../routes/AppPasswords.svelte";
 import {
   clearMocks,
   errorResponse,
+  getErrorToasts,
   jsonResponse,
   mockData,
   mockEndpoint,
@@ -51,7 +52,7 @@ describe("AppPasswords", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
     });
-    it("shows loading text while fetching passwords", () => {
+    it("shows loading skeleton while fetching passwords", () => {
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
         () =>
@@ -59,8 +60,8 @@ describe("AppPasswords", () => {
             setTimeout(() => resolve(jsonResponse({ passwords: [] })), 100)
           ),
       );
-      render(AppPasswords);
-      expect(screen.getByText(/loading/i)).toBeInTheDocument();
+      const { container } = render(AppPasswords);
+      expect(container.querySelectorAll(".skeleton-item").length).toBeGreaterThan(0);
     });
   });
   describe("empty state", () => {
@@ -236,7 +237,7 @@ describe("AppPasswords", () => {
           .toBeInTheDocument();
       });
     });
-    it("shows error when creation fails", async () => {
+    it("shows error toast when creation fails", async () => {
       mockEndpoint(
         "com.atproto.server.createAppPassword",
         () => errorResponse("InvalidRequest", "Name already exists", 400),
@@ -250,8 +251,8 @@ describe("AppPasswords", () => {
       });
       await fireEvent.click(screen.getByRole("button", { name: /create/i }));
       await waitFor(() => {
-        expect(screen.getByText(/name already exists/i)).toBeInTheDocument();
-        expect(screen.getByText(/name already exists/i)).toHaveClass("error");
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /name already exists/i.test(e))).toBe(true);
       });
     });
   });
@@ -358,7 +359,7 @@ describe("AppPasswords", () => {
         expect(screen.getByText(/no app passwords yet/i)).toBeInTheDocument();
       });
     });
-    it("shows error when revocation fails", async () => {
+    it("shows error toast when revocation fails", async () => {
       globalThis.confirm = vi.fn(() => true);
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
@@ -374,8 +375,8 @@ describe("AppPasswords", () => {
       });
       await fireEvent.click(screen.getByRole("button", { name: /revoke/i }));
       await waitFor(() => {
-        expect(screen.getByText(/server error/i)).toBeInTheDocument();
-        expect(screen.getByText(/server error/i)).toHaveClass("error");
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /server error/i.test(e))).toBe(true);
       });
     });
   });
@@ -383,18 +384,15 @@ describe("AppPasswords", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
     });
-    it("shows error when loading passwords fails", async () => {
+    it("shows error toast when loading passwords fails", async () => {
       mockEndpoint(
         "com.atproto.server.listAppPasswords",
         () => errorResponse("InternalError", "Database connection failed", 500),
       );
       render(AppPasswords);
       await waitFor(() => {
-        expect(screen.getByText(/database connection failed/i))
-          .toBeInTheDocument();
-        expect(screen.getByText(/database connection failed/i)).toHaveClass(
-          "error",
-        );
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /database connection failed/i.test(e))).toBe(true);
       });
     });
   });

@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import type { AppPassword, InviteCode, Session } from "../lib/api.ts";
-import { _testSetState } from "../lib/auth.svelte.ts";
+import { _testSetState, _testResetState } from "../lib/auth.svelte.ts";
+import { toast, clearAllToasts, getToasts } from "../lib/toast.svelte.ts";
 import {
   unsafeAsAccessToken,
   unsafeAsDid,
@@ -70,7 +71,17 @@ export function mockEndpointOnce(endpoint: string, handler: MockHandler): void {
 }
 export function clearMocks(): void {
   mockHandlers.clear();
+  _testResetState();
+  clearAllToasts();
 }
+
+export function getErrorToasts(): string[] {
+  return getToasts()
+    .filter((t) => t.type === "error")
+    .map((t) => t.message);
+}
+
+export { toast, getToasts };
 function extractEndpoint(url: string): string {
   const match = url.match(/\/xrpc\/([^?]+)/);
   return match ? match[1] : url;

@@ -4,6 +4,8 @@ import Comms from "../routes/Comms.svelte";
 import {
   clearMocks,
   errorResponse,
+  getErrorToasts,
+  getToasts,
   jsonResponse,
   mockData,
   mockEndpoint,
@@ -71,7 +73,7 @@ describe("Comms", () => {
         () => jsonResponse({ notifications: [] }),
       );
     });
-    it("shows loading text while fetching preferences", () => {
+    it("shows loading skeleton while fetching preferences", () => {
       mockEndpoint(
         "_account.getNotificationPrefs",
         () =>
@@ -82,8 +84,8 @@ describe("Comms", () => {
             )
           ),
       );
-      render(Comms);
-      expect(screen.getByText(/loading/i)).toBeInTheDocument();
+      const { container } = render(Comms);
+      expect(container.querySelectorAll(".skeleton-section").length).toBeGreaterThan(0);
     });
   });
   describe("channel options", () => {
@@ -354,7 +356,7 @@ describe("Comms", () => {
         .toBeInTheDocument();
       expect(screen.getByRole("button", { name: /saving/i })).toBeDisabled();
     });
-    it("shows success message after saving", async () => {
+    it("shows success toast after saving", async () => {
       mockEndpoint(
         "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
@@ -372,11 +374,11 @@ describe("Comms", () => {
         screen.getByRole("button", { name: /save preferences/i }),
       );
       await waitFor(() => {
-        expect(screen.getByText(/preferences saved/i))
-          .toBeInTheDocument();
+        const toasts = getToasts();
+        expect(toasts.some((t) => t.type === "success" && /saved/i.test(t.message))).toBe(true);
       });
     });
-    it("shows error when save fails", async () => {
+    it("shows error toast when save fails", async () => {
       mockEndpoint(
         "_account.getNotificationPrefs",
         () => jsonResponse(mockData.notificationPrefs()),
@@ -395,13 +397,8 @@ describe("Comms", () => {
         screen.getByRole("button", { name: /save preferences/i }),
       );
       await waitFor(() => {
-        expect(screen.getByText(/invalid channel configuration/i))
-          .toBeInTheDocument();
-        expect(
-          screen.getByText(/invalid channel configuration/i).closest(
-            ".message",
-          ),
-        ).toHaveClass("error");
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /invalid channel configuration/i.test(e))).toBe(true);
       });
     });
     it("reloads preferences after successful save", async () => {
@@ -490,15 +487,15 @@ describe("Comms", () => {
         () => jsonResponse({ notifications: [] }),
       );
     });
-    it("shows error when loading preferences fails", async () => {
+    it("shows error toast when loading preferences fails", async () => {
       mockEndpoint(
         "_account.getNotificationPrefs",
         () => errorResponse("InternalError", "Database connection failed", 500),
       );
       render(Comms);
       await waitFor(() => {
-        expect(screen.getByText(/database connection failed/i))
-          .toBeInTheDocument();
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /database connection failed/i.test(e))).toBe(true);
       });
     });
   });

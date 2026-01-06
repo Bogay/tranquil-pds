@@ -6,6 +6,7 @@
     getAuthState,
     switchAccount,
     forgetAccount,
+    clearError,
     matchAuthState,
     type SavedAccount,
     type AuthError,
@@ -14,6 +15,7 @@
   import { _ } from '../lib/i18n'
   import { isOk, isErr } from '../lib/types/result'
   import { unsafeAsDid, type Did } from '../lib/types/branded'
+  import { toast } from '../lib/toast.svelte'
 
   type PageState =
     | { kind: 'login' }
@@ -32,16 +34,16 @@
     return auth.savedAccounts
   }
 
-  function getErrorMessage(): string | null {
-    if (auth.kind === 'error') {
-      return auth.error.message
-    }
-    return null
-  }
-
   function isLoading(): boolean {
     return auth.kind === 'loading'
   }
+
+  $effect(() => {
+    if (auth.kind === 'error') {
+      toast.error(auth.error.message)
+      clearError()
+    }
+  })
 
   $effect(() => {
     const accounts = getSavedAccounts()
@@ -108,16 +110,11 @@
     resendMessage = null
   }
 
-  const errorMessage = $derived(getErrorMessage())
   const savedAccounts = $derived(getSavedAccounts())
   const loading = $derived(isLoading())
 </script>
 
 <div class="login-page">
-  {#if errorMessage}
-    <div class="message error">{errorMessage}</div>
-  {/if}
-
   {#if pageState.kind === 'verification'}
     <header class="page-header">
       <h1>{$_('verification.title')}</h1>

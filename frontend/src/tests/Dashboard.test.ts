@@ -25,8 +25,9 @@ describe("Dashboard", () => {
       });
     });
     it("shows loading state while checking auth", () => {
-      render(Dashboard);
-      expect(screen.getByText(/loading/i)).toBeInTheDocument();
+      const { container } = render(Dashboard);
+      expect(container.querySelector(".skeleton-section")).toBeInTheDocument();
+      expect(container.querySelectorAll(".skeleton-card").length).toBeGreaterThan(0);
     });
   });
   describe("authenticated view", () => {

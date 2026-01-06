@@ -20,6 +20,7 @@ import { err, isErr, isOk, ok, type Result } from "./types/result.ts";
 import { assertNever } from "./types/exhaustive.ts";
 import {
   checkForOAuthCallback,
+  clearAllOAuthState,
   clearOAuthCallbackParams,
   handleOAuthCallback,
   refreshOAuthToken,
@@ -274,6 +275,12 @@ function setLoading(previousSession: Session | null = null): void {
   setState(createLoading(getSavedAccounts(), previousSession));
 }
 
+export function clearError(): void {
+  if (state.current.kind === "error") {
+    setState(createUnauthenticated(getSavedAccounts()));
+  }
+}
+
 async function tryRefreshToken(): Promise<string | null> {
   if (state.current.kind !== "authenticated") return null;
   const currentSession = state.current.session;
@@ -323,6 +330,7 @@ export async function initAuth(): Promise<{ oauthLoginCompleted: boolean }> {
       applyLocaleFromSession(session);
       return { oauthLoginCompleted: true };
     } catch (e) {
+      clearAllOAuthState();
       setError({
         type: "oauth",
         message: e instanceof Error ? e.message : "OAuth login failed",
@@ -398,6 +406,7 @@ export async function login(
 }
 
 export async function loginWithOAuth(): Promise<Result<void, AuthError>> {
+  clearAllOAuthState();
   setLoading();
   try {
     await startOAuthLogin();

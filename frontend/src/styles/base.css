@@ -29,6 +29,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.3s ease;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -336,12 +338,16 @@ hr {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
   padding: var(--space-6);
+  overflow: hidden;
+  min-width: 0;
 }
 
 .section {
   background: var(--bg-secondary);
   border-radius: var(--radius-xl);
   padding: var(--space-6);
+  overflow: hidden;
+  min-width: 0;
 }
 
 .section + .section {
@@ -469,6 +475,8 @@ hr {
   border-radius: var(--radius-xl);
   padding: var(--space-6);
   height: fit-content;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .info-panel h3 {

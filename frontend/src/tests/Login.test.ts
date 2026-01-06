@@ -15,6 +15,7 @@ import {
   unsafeAsHandle,
   unsafeAsRefreshToken,
 } from "../lib/types/branded.ts";
+import { getToasts } from "../lib/toast.svelte.ts";
 
 describe("Login", () => {
   beforeEach(() => {
@@ -147,7 +148,7 @@ describe("Login", () => {
   });
 
   describe("error handling", () => {
-    it("displays error message when auth state has error", async () => {
+    it("displays error message as toast when auth state has error", async () => {
       _testSetState({
         session: null,
         loading: false,
@@ -156,8 +157,11 @@ describe("Login", () => {
       });
       render(Login);
       await waitFor(() => {
-        expect(screen.getByText(/oauth login failed/i)).toBeInTheDocument();
-        expect(screen.getByText(/oauth login failed/i)).toHaveClass("error");
+        const toasts = getToasts();
+        const errorToast = toasts.find(
+          (t) => t.type === "error" && t.message.includes("OAuth login failed"),
+        );
+        expect(errorToast).toBeDefined();
       });
     });
   });

@@ -4,6 +4,8 @@ import Settings from "../routes/Settings.svelte";
 import {
   clearMocks,
   errorResponse,
+  getErrorToasts,
+  getToasts,
   jsonResponse,
   mockData,
   mockEndpoint,
@@ -140,7 +142,7 @@ describe("Settings", () => {
         expect(capturedBody?.token).toBe("123456");
       });
     });
-    it("shows success message after email update", async () => {
+    it("shows success toast after email update", async () => {
       mockEndpoint(
         "com.atproto.server.requestEmailUpdate",
         () => jsonResponse({ tokenRequired: true }),
@@ -171,8 +173,8 @@ describe("Settings", () => {
         screen.getByRole("button", { name: /confirm email change/i }),
       );
       await waitFor(() => {
-        expect(screen.getByText(/email updated/i))
-          .toBeInTheDocument();
+        const toasts = getToasts();
+        expect(toasts.some((t) => t.type === "success" && /email.*updated/i.test(t.message))).toBe(true);
       });
     });
     it("shows cancel button to return to initial state", async () => {
@@ -205,7 +207,7 @@ describe("Settings", () => {
           .toBeInTheDocument();
       });
     });
-    it("shows error when request fails", async () => {
+    it("shows error toast when request fails", async () => {
       mockEndpoint(
         "com.atproto.server.requestEmailUpdate",
         () => errorResponse("InvalidEmail", "Invalid email format", 400),
@@ -219,7 +221,8 @@ describe("Settings", () => {
         screen.getByRole("button", { name: /change email/i }),
       );
       await waitFor(() => {
-        expect(screen.getByText(/invalid email format/i)).toBeInTheDocument();
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /invalid email format/i.test(e))).toBe(true);
       });
     });
   });
@@ -261,7 +264,7 @@ describe("Settings", () => {
       expect(screen.getByRole("button", { name: /change handle/i }))
         .toBeInTheDocument();
     });
-    it("shows success message after handle change", async () => {
+    it("shows success toast after handle change", async () => {
       mockEndpoint("com.atproto.identity.updateHandle", () => jsonResponse({}));
       mockEndpoint(
         "com.atproto.server.getSession",
@@ -279,11 +282,11 @@ describe("Settings", () => {
       const button = screen.getByRole("button", { name: /change handle/i });
       await fireEvent.submit(button.closest("form")!);
       await waitFor(() => {
-        expect(screen.getByText(/handle updated/i))
-          .toBeInTheDocument();
+        const toasts = getToasts();
+        expect(toasts.some((t) => t.type === "success" && /handle.*updated/i.test(t.message))).toBe(true);
       });
     });
-    it("shows error when handle change fails", async () => {
+    it("shows error toast when handle change fails", async () => {
       mockEndpoint(
         "com.atproto.identity.updateHandle",
         () =>
@@ -302,9 +305,8 @@ describe("Settings", () => {
       const button = screen.getByRole("button", { name: /change handle/i });
       await fireEvent.submit(button.closest("form")!);
       await waitFor(() => {
-        const errorMessage = screen.queryByText(/handle is already taken/i) ||
-          screen.queryByText(/handle update failed/i);
-        expect(errorMessage).toBeInTheDocument();
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /handle is already taken/i.test(e))).toBe(true);
       });
     });
   });
@@ -500,7 +502,7 @@ describe("Settings", () => {
         ).toBeInTheDocument();
       });
     });
-    it("shows error when deletion fails", async () => {
+    it("shows error toast when deletion fails", async () => {
       globalThis.confirm = vi.fn(() => true);
       mockEndpoint(
         "com.atproto.server.requestAccountDelete",
@@ -532,8 +534,8 @@ describe("Settings", () => {
         screen.getByRole("button", { name: /permanently delete account/i }),
       );
       await waitFor(() => {
-        expect(screen.getByText(/invalid confirmation code/i))
-          .toBeInTheDocument();
+        const errors = getErrorToasts();
+        expect(errors.some((e) => /invalid confirmation code/i.test(e))).toBe(true);
       });
     });
   });

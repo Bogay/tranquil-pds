@@ -285,14 +285,24 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: var(--space-7);
+    gap: var(--space-4);
+  }
+
+  @media (max-width: 500px) {
+    header {
+      flex-direction: column-reverse;
+      align-items: flex-start;
+    }
   }
 
   header h1 {
     margin: 0;
+    min-width: 0;
   }
 
   .account-dropdown {
     position: relative;
+    max-width: 100%;
   }
 
   .account-trigger {
@@ -305,6 +315,14 @@
     border-radius: var(--radius-md);
     cursor: pointer;
     color: var(--text-primary);
+    max-width: 100%;
+  }
+
+  .account-trigger .account-handle {
+    font-weight: var(--font-medium);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .account-trigger:hover:not(:disabled) {
@@ -314,10 +332,6 @@
   .account-trigger:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-  }
-
-  .account-trigger .account-handle {
-    font-weight: var(--font-medium);
   }
 
   .dropdown-arrow {
@@ -383,6 +397,8 @@
     padding: var(--space-6);
     border-radius: var(--radius-xl);
     margin-bottom: var(--space-7);
+    overflow: hidden;
+    min-width: 0;
   }
 
   section h2 {
@@ -400,10 +416,12 @@
   dt {
     font-weight: var(--font-medium);
     color: var(--text-secondary);
+    max-width: 6rem;
   }
 
   dd {
     margin: 0;
+    min-width: 0;
   }
 
   .mono {
