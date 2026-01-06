@@ -504,7 +504,7 @@ pub fn app(state: AppState) -> Router {
         )
         .fallback(async || (
             StatusCode::NOT_IMPLEMENTED,
-            Json(json!({"error": "MethodNotImplemented", "message": "XRPC method not implemented"})),
+            Json(json!({"error": "MethodNotImplemented", "message": "Method not implemented. For app.bsky.* methods, include an atproto-proxy header specifying your AppView."})),
         ));
     let xrpc_service = ServiceBuilder::new()
         .layer(XrpcProxyLayer::new(state.clone()))

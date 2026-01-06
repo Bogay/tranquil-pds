@@ -82,6 +82,7 @@ impl ClientMetadataCache {
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .pool_max_idle_per_host(10)
                 .pool_idle_timeout(std::time::Duration::from_secs(90))
+                .user_agent("Tranquil-PDS/1.0 (ATProto; +https://tangled.org/lewis.moe/bspds-sandbox)")
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             cache_ttl_secs,
@@ -256,9 +257,11 @@ impl ClientMetadataCache {
             .send()
             .await
             .map_err(|e| {
+                tracing::warn!(client_id = %client_id, error = %e, "Failed to fetch client metadata");
                 OAuthError::InvalidClient(format!("Failed to fetch client metadata: {}", e))
             })?;
         if !response.status().is_success() {
+            tracing::warn!(client_id = %client_id, status = %response.status(), "Failed to fetch client metadata");
             return Err(OAuthError::InvalidClient(format!(
                 "Failed to fetch client metadata: HTTP {}",
                 response.status()
