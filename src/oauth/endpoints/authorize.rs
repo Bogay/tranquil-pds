@@ -55,6 +55,23 @@ fn json_error(status: StatusCode, error: &str, description: &str) -> Response {
         .into_response()
 }
 
+fn is_granular_scope(s: &str) -> bool {
+    s.starts_with("repo:") || s.starts_with("repo?") || s == "repo"
+        || s.starts_with("blob:") || s.starts_with("blob?") || s == "blob"
+        || s.starts_with("rpc:") || s.starts_with("rpc?")
+        || s.starts_with("account:")
+        || s.starts_with("identity:")
+}
+
+fn is_valid_scope(s: &str) -> bool {
+    s == "atproto"
+        || s == "transition:generic"
+        || s == "transition:chat.bsky"
+        || s == "transition:email"
+        || is_granular_scope(s)
+        || s.starts_with("include:")
+}
+
 fn validate_auth_flow_state(
     flow_state: &AuthFlowState,
     require_authenticated: bool,
@@ -1473,23 +1490,11 @@ pub async fn consent_post(
     };
 
     let requested_scopes: Vec<&str> = effective_scope_str.split_whitespace().collect();
-    let has_granular_scopes = requested_scopes.iter().any(|s| {
-        s.starts_with("repo:")
-            || s.starts_with("blob:")
-            || s.starts_with("rpc:")
-            || s.starts_with("account:")
-            || s.starts_with("identity:")
-    });
+    let has_granular_scopes = requested_scopes.iter().any(|s| is_granular_scope(s));
     let user_denied_some_granular = has_granular_scopes
         && requested_scopes
             .iter()
-            .filter(|s| {
-                s.starts_with("repo:")
-                    || s.starts_with("blob:")
-                    || s.starts_with("rpc:")
-                    || s.starts_with("account:")
-                    || s.starts_with("identity:")
-            })
+            .filter(|s| is_granular_scope(s))
             .any(|s| !form.approved_scopes.contains(&s.to_string()));
     let atproto_was_requested = requested_scopes.contains(&"atproto");
     if atproto_was_requested
@@ -1519,18 +1524,7 @@ pub async fn consent_post(
         );
     }
     let approved_scope_str = final_approved.join(" ");
-    let has_valid_scope = final_approved.iter().all(|s| {
-        s == "atproto"
-            || s == "transition:generic"
-            || s == "transition:chat.bsky"
-            || s == "transition:email"
-            || s.starts_with("repo:")
-            || s.starts_with("blob:")
-            || s.starts_with("rpc:")
-            || s.starts_with("account:")
-            || s.starts_with("identity:")
-            || s.starts_with("include:")
-    });
+    let has_valid_scope = final_approved.iter().all(|s| is_valid_scope(s));
     if !has_valid_scope {
         return json_error(
             StatusCode::BAD_REQUEST,

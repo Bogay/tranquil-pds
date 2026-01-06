@@ -508,6 +508,7 @@
     margin-bottom: var(--space-2);
     cursor: pointer;
     transition: border-color var(--transition-fast);
+    overflow: hidden;
   }
 
   .scope-item:hover:not(.required) {
@@ -532,19 +533,23 @@
 
   .scope-info {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    overflow: hidden;
   }
 
   .scope-name {
     font-weight: var(--font-medium);
     color: var(--text-primary);
+    word-break: break-all;
   }
 
   .scope-description {
     font-size: var(--text-sm);
     color: var(--text-secondary);
+    word-break: break-all;
   }
 
   .required-badge {
