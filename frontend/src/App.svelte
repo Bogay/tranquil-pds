@@ -76,9 +76,9 @@
       case '/login':
         return Login
       case '/register':
-        return Register
-      case '/register-passkey':
         return RegisterPasskey
+      case '/register-password':
+        return Register
       case '/verify':
         return Verify
       case '/reset-password':

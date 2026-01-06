@@ -8,6 +8,7 @@
     KeyChoiceStep,
     DidDocStep,
   } from '../lib/registration'
+  import AccountTypeSwitcher from '../components/AccountTypeSwitcher.svelte'
 
   let serverInfo = $state<{
     availableUserDomains: string[]
@@ -178,6 +179,8 @@
         </a>
       </div>
     </div>
+
+    <AccountTypeSwitcher active="password" />
 
     <div class="split-layout sidebar-right">
       <div class="form-section">
@@ -381,9 +384,6 @@
         <div class="form-links">
           <p class="link-text">
             {$_('register.alreadyHaveAccount')} <a href={getFullUrl(routes.login)}>{$_('register.signIn')}</a>
-          </p>
-          <p class="link-text">
-            {$_('register.wantPasswordless')} <a href={getFullUrl(routes.registerPasskey)}>{$_('register.createPasskeyAccount')}</a>
           </p>
         </div>
       </div>

@@ -237,7 +237,10 @@
         <div class="actions">
           <a href="/app/settings" class="btn">{$_('common.backToSettings')}</a>
         </div>
-      {:else if successPurpose === 'migration' || successPurpose === 'signup'}
+      {:else if successPurpose === 'migration'}
+        <p class="subtitle">{$_('verify.channelVerified', { values: { channel: channelLabel(successChannel || '') } })}</p>
+        <p class="info-text">{$_('verify.migrationContinue')}</p>
+      {:else if successPurpose === 'signup'}
         <p class="subtitle">{$_('verify.channelVerified', { values: { channel: channelLabel(successChannel || '') } })}</p>
         <p class="info-text">{$_('verify.canNowSignIn')}</p>
         <div class="actions">

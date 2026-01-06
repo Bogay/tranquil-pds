@@ -1,7 +1,7 @@
 export const routes = {
   login: "/login",
   register: "/register",
-  registerPasskey: "/register-passkey",
+  registerPassword: "/register-password",
   dashboard: "/dashboard",
   settings: "/settings",
   security: "/security",

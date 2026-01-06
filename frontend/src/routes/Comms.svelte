@@ -182,7 +182,7 @@
       <div class="skeleton-section"></div>
     </div>
   {:else}
-    <div class="split-layout">
+    <div class="split-layout sidebar-right">
       <div class="main-column">
         <form onsubmit={handleSave}>
           <section>
@@ -410,23 +410,6 @@
   .description {
     color: var(--text-secondary);
     margin: var(--space-2) 0 0 0;
-  }
-
-  .split-layout {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-6);
-  }
-
-  @media (min-width: 900px) {
-    .split-layout {
-      grid-template-columns: 1.5fr 1fr;
-      align-items: start;
-    }
-  }
-
-  .main-column, .side-column {
-    min-width: 0;
   }
 
   section {

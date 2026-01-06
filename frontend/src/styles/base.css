@@ -431,6 +431,7 @@ hr {
 @media (min-width: 800px) {
   .split-layout {
     grid-template-columns: 1fr 1fr;
+    align-items: start;
   }
   .split-layout.sidebar-right {
     grid-template-columns: 1.5fr 1fr;
@@ -438,6 +439,10 @@ hr {
   .split-layout.sidebar-left {
     grid-template-columns: 1fr 1.5fr;
   }
+}
+
+.split-layout > * {
+  min-width: 0;
 }
 
 .form-row {
