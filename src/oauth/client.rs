@@ -82,7 +82,9 @@ impl ClientMetadataCache {
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .pool_max_idle_per_host(10)
                 .pool_idle_timeout(std::time::Duration::from_secs(90))
-                .user_agent("Tranquil-PDS/1.0 (ATProto; +https://tangled.org/lewis.moe/bspds-sandbox)")
+                .user_agent(
+                    "Tranquil-PDS/1.0 (ATProto; +https://tangled.org/lewis.moe/bspds-sandbox)",
+                )
                 .build()
                 .unwrap_or_else(|_| Client::new()),
             cache_ttl_secs,

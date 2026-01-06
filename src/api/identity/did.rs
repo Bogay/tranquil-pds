@@ -1,4 +1,5 @@
 use crate::api::{ApiError, DidResponse, EmptyResponse};
+use crate::auth::BearerAuthAllowDeactivated;
 use crate::plc::signing_key_to_did_key;
 use crate::state::AppState;
 use axum::{
@@ -522,21 +523,9 @@ pub struct AtprotoPds {
 
 pub async fn get_recommended_did_credentials(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return ApiError::AuthenticationRequired.into_response();
-        }
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-            Ok(user) => user,
-            Err(e) => return ApiError::from(e).into_response(),
-        };
+    let auth_user = auth.0;
     let user = match sqlx::query!(
         "SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1",
         &auth_user.did
@@ -601,20 +590,10 @@ pub struct UpdateHandleInput {
 
 pub async fn update_handle(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
     Json(input): Json<UpdateHandleInput>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-            Ok(user) => user,
-            Err(e) => return ApiError::from(e).into_response(),
-        };
+    let auth_user = auth.0;
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
         auth_user.is_oauth,
         auth_user.scope.as_deref(),

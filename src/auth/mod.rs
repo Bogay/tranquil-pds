@@ -416,6 +416,7 @@ pub async fn invalidate_auth_cache(cache: &dyn Cache, did: &str) {
     let _ = cache.delete(&status_cache_key).await;
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn validate_token_with_dpop(
     db: &PgPool,
     token: &str,
@@ -424,9 +425,12 @@ pub async fn validate_token_with_dpop(
     http_method: &str,
     http_uri: &str,
     allow_deactivated: bool,
+    allow_takendown: bool,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
     if !is_dpop_token {
-        if allow_deactivated {
+        if allow_takendown {
+            return validate_bearer_token_allow_takendown(db, token).await;
+        } else if allow_deactivated {
             return validate_bearer_token_allow_deactivated(db, token).await;
         } else {
             return validate_bearer_token(db, token).await;
@@ -464,7 +468,7 @@ pub async fn validate_token_with_dpop(
             if !allow_deactivated && status.is_deactivated() {
                 return Err(TokenValidationError::AccountDeactivated);
             }
-            if status.is_takendown() {
+            if !allow_takendown && status.is_takendown() {
                 return Err(TokenValidationError::AccountTakedown);
             }
             let key_bytes = if let (Some(kb), Some(ev)) =

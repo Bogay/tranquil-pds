@@ -5,8 +5,9 @@ use axum::{
 };
 
 use super::{
-    AuthenticatedUser, TokenValidationError, validate_bearer_token_cached,
-    validate_bearer_token_cached_allow_deactivated, validate_token_with_dpop,
+    AuthenticatedUser, TokenValidationError, validate_bearer_token_allow_takendown,
+    validate_bearer_token_cached, validate_bearer_token_cached_allow_deactivated,
+    validate_token_with_dpop,
 };
 use crate::api::error::ApiError;
 use crate::state::AppState;
@@ -136,6 +137,7 @@ impl FromRequestParts<AppState> for BearerAuth {
                 method,
                 &uri,
                 false,
+                false,
             )
             .await
             {
@@ -191,6 +193,7 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
                 method,
                 &uri,
                 true,
+                false,
             )
             .await
             {
@@ -209,6 +212,58 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
             {
                 Ok(user) => Ok(BearerAuthAllowDeactivated(user)),
                 Err(TokenValidationError::AccountTakedown) => Err(AuthError::AccountTakedown),
+                Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
+                Err(_) => Err(AuthError::AuthenticationFailed),
+            }
+        }
+    }
+}
+
+pub struct BearerAuthAllowTakendown(pub AuthenticatedUser);
+
+impl FromRequestParts<AppState> for BearerAuthAllowTakendown {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let auth_header = parts
+            .headers
+            .get(AUTHORIZATION)
+            .ok_or(AuthError::MissingToken)?
+            .to_str()
+            .map_err(|_| AuthError::InvalidFormat)?;
+
+        let extracted =
+            extract_auth_token_from_header(Some(auth_header)).ok_or(AuthError::InvalidFormat)?;
+
+        if extracted.is_dpop {
+            let dpop_proof = parts.headers.get("dpop").and_then(|h| h.to_str().ok());
+            let method = parts.method.as_str();
+            let uri = build_full_url(&parts.uri.to_string());
+
+            match validate_token_with_dpop(
+                &state.db,
+                &extracted.token,
+                true,
+                dpop_proof,
+                method,
+                &uri,
+                false,
+                true,
+            )
+            .await
+            {
+                Ok(user) => Ok(BearerAuthAllowTakendown(user)),
+                Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
+                Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
+                Err(_) => Err(AuthError::AuthenticationFailed),
+            }
+        } else {
+            match validate_bearer_token_allow_takendown(&state.db, &extracted.token).await {
+                Ok(user) => Ok(BearerAuthAllowTakendown(user)),
+                Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
                 Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
@@ -247,6 +302,7 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
                 dpop_proof,
                 method,
                 &uri,
+                false,
                 false,
             )
             .await

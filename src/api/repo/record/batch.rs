@@ -2,6 +2,7 @@ use super::validation::validate_record_with_status;
 use super::write::has_verified_comms_channel;
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
+use crate::auth::BearerAuth;
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -85,7 +86,7 @@ pub struct CommitInfo {
 
 pub async fn apply_writes(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuth,
     Json(input): Json<ApplyWritesInput>,
 ) -> Response {
     info!(
@@ -93,15 +94,7 @@ pub async fn apply_writes(
         input.repo,
         input.writes.len()
     );
-    let Some(token) = crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) else {
-        return ApiError::AuthenticationRequired.into_response();
-    };
-    let auth_user = match crate::auth::validate_bearer_token(&state.db, &token).await {
-        Ok(user) => user,
-        Err(_) => return ApiError::AuthenticationFailed(None).into_response(),
-    };
+    let auth_user = auth.0;
     let did = auth_user.did.clone();
     let is_oauth = auth_user.is_oauth;
     let scope = auth_user.scope;

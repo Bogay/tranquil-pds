@@ -1,6 +1,7 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
 use crate::api::repo::record::create_signed_commit;
+use crate::auth::BearerAuthAllowDeactivated;
 use crate::state::AppState;
 use crate::sync::import::{ImportError, apply_import, parse_car};
 use crate::sync::verify::CarVerifier;
@@ -20,7 +21,7 @@ const DEFAULT_MAX_BLOCKS: usize = 500000;
 
 pub async fn import_repo(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
     body: Bytes,
 ) -> Response {
     let accepting_imports = std::env::var("ACCEPTING_REPO_IMPORTS")
@@ -41,17 +42,7 @@ pub async fn import_repo(
         ))
         .into_response();
     }
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-            Ok(user) => user,
-            Err(e) => return ApiError::from(e).into_response(),
-        };
+    let auth_user = auth.0;
     let did = &auth_user.did;
     let user = match sqlx::query!(
         "SELECT id, handle, deactivated_at, takedown_ref FROM users WHERE did = $1",

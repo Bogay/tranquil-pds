@@ -365,18 +365,19 @@ pub async fn get_session(
 pub async fn delete_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
+    _auth: BearerAuth,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
-    let jti = match crate::auth::get_jti_from_token(&token) {
+    let jti = match crate::auth::get_jti_from_token(&extracted.token) {
         Ok(jti) => jti,
         Err(_) => return ApiError::AuthenticationFailed(None).into_response(),
     };
-    let did = crate::auth::get_did_from_token(&token).ok();
+    let did = crate::auth::get_did_from_token(&extracted.token).ok();
     match sqlx::query!("DELETE FROM session_tokens WHERE access_jti = $1", jti)
         .execute(&state.db)
         .await
@@ -408,12 +409,13 @@ pub async fn refresh_session(
         tracing::warn!(ip = %client_ip, "Refresh session rate limit exceeded");
         return ApiError::RateLimitExceeded(None).into_response();
     }
-    let refresh_token = match crate::auth::extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
+    let refresh_token = extracted.token;
     let refresh_jti = match crate::auth::get_jti_from_token(&refresh_token) {
         Ok(jti) => jti,
         Err(_) => {
@@ -1048,11 +1050,10 @@ pub async fn revoke_all_sessions(
     headers: HeaderMap,
     auth: BearerAuth,
 ) -> Response {
-    let current_jti = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .and_then(|token| crate::auth::get_jti_from_token(token).ok());
+    let current_jti = crate::auth::extract_auth_token_from_header(
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+    )
+    .and_then(|extracted| crate::auth::get_jti_from_token(&extracted.token).ok());
 
     let Some(ref jti) = current_jti else {
         return ApiError::InvalidToken(None).into_response();

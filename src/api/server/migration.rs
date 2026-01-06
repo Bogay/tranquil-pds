@@ -58,6 +58,7 @@ pub async fn update_did_document(
         "POST",
         &http_uri,
         true,
+        false,
     )
     .await
     {
@@ -224,6 +225,7 @@ pub async fn get_did_document(
         "GET",
         &http_uri,
         true,
+        false,
     )
     .await
     {

@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::{extract_bearer_token_from_header, validate_bearer_token};
+use crate::auth::{BearerAuth, extract_auth_token_from_header, validate_token_with_dpop};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -23,12 +23,25 @@ pub struct CheckSignupQueueOutput {
 }
 
 pub async fn check_signup_queue(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(token) =
-        extract_bearer_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
-        && let Ok(user) = validate_bearer_token(&state.db, &token).await
-        && user.is_oauth
+    if let Some(extracted) =
+        extract_auth_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
     {
-        return ApiError::Forbidden.into_response();
+        let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+        if let Ok(user) = validate_token_with_dpop(
+            &state.db,
+            &extracted.token,
+            extracted.is_dpop,
+            dpop_proof,
+            "GET",
+            "/",
+            false,
+            false,
+        )
+        .await
+            && user.is_oauth
+        {
+            return ApiError::Forbidden.into_response();
+        }
     }
     Json(CheckSignupQueueOutput {
         activated: true,
@@ -52,18 +65,10 @@ pub struct DereferenceScopeOutput {
 
 pub async fn dereference_scope(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    auth: BearerAuth,
     Json(input): Json<DereferenceScopeInput>,
 ) -> Response {
-    let Some(token) = extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) else {
-        return ApiError::AuthenticationRequired.into_response();
-    };
-
-    if validate_bearer_token(&state.db, &token).await.is_err() {
-        return ApiError::AuthenticationFailed(None).into_response();
-    }
+    let _ = auth;
 
     let scope_parts: Vec<&str> = input.scope.split_whitespace().collect();
     let mut resolved_scopes: Vec<String> = Vec::new();

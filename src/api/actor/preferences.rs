@@ -1,4 +1,5 @@
 use crate::api::error::ApiError;
+use crate::auth::BearerAuthAllowDeactivated;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -33,23 +34,9 @@ pub struct GetPreferencesOutput {
 }
 pub async fn get_preferences(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return ApiError::AuthenticationRequired.into_response();
-        }
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-            Ok(user) => user,
-            Err(_) => {
-                return ApiError::AuthenticationFailed(None).into_response();
-            }
-        };
+    let auth_user = auth.0;
     let has_full_access = auth_user.permissions().has_full_access();
     let user_id: uuid::Uuid =
         match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &*auth_user.did)
@@ -117,24 +104,10 @@ pub struct PutPreferencesInput {
 }
 pub async fn put_preferences(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
     Json(input): Json<PutPreferencesInput>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return ApiError::AuthenticationRequired.into_response();
-        }
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-            Ok(user) => user,
-            Err(_) => {
-                return ApiError::AuthenticationFailed(None).into_response();
-            }
-        };
+    let auth_user = auth.0;
     let has_full_access = auth_user.permissions().has_full_access();
     let user_id: uuid::Uuid =
         match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &*auth_user.did)

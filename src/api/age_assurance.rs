@@ -1,4 +1,4 @@
-use crate::auth::{extract_bearer_token_from_header, validate_bearer_token};
+use crate::auth::{extract_auth_token_from_header, validate_token_with_dpop};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -36,10 +36,24 @@ async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option
     let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
     tracing::debug!(?auth_header, "age assurance: extracting token");
 
-    let token = extract_bearer_token_from_header(auth_header)?;
+    let extracted = extract_auth_token_from_header(auth_header)?;
     tracing::debug!("age assurance: got token, validating");
 
-    let auth_user = match validate_bearer_token(&state.db, &token).await {
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let http_uri = "/";
+
+    let auth_user = match validate_token_with_dpop(
+        &state.db,
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        "GET",
+        http_uri,
+        false,
+        false,
+    )
+    .await
+    {
         Ok(user) => {
             tracing::debug!(did = %user.did, "age assurance: validated user");
             user

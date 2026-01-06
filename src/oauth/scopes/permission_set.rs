@@ -57,11 +57,11 @@ pub async fn expand_include_scopes(scope_string: &str) -> String {
 async fn expand_permission_set(nsid: &str) -> Result<String, String> {
     {
         let cache = LEXICON_CACHE.read().await;
-        if let Some(cached) = cache.get(nsid) {
-            if cached.cached_at.elapsed().as_secs() < CACHE_TTL_SECS {
-                debug!(nsid, "Using cached permission set expansion");
-                return Ok(cached.expanded_scope.clone());
-            }
+        if let Some(cached) = cache.get(nsid)
+            && cached.cached_at.elapsed().as_secs() < CACHE_TTL_SECS
+        {
+            debug!(nsid, "Using cached permission set expansion");
+            return Ok(cached.expanded_scope.clone());
         }
     }
 
@@ -156,8 +156,6 @@ async fn expand_permission_set(nsid: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_nsid_to_url() {
         let nsid = "io.atcr.authFullApp";

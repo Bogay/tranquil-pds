@@ -214,13 +214,28 @@ async fn proxy_handler(
     info!("Proxying {} request to {}", method_verb, target_url);
 
     let client = proxy_client();
-    let mut request_builder = client.request(method_verb, &target_url);
+    let mut request_builder = client.request(method_verb.clone(), &target_url);
 
     let mut auth_header_val = headers.get("Authorization").cloned();
-    if let Some(token) = crate::auth::extract_bearer_token_from_header(
+    if let Some(extracted) = crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
-        match crate::auth::validate_bearer_token(&state.db, &token).await {
+        let token = extracted.token;
+        let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+        let http_uri = uri.to_string();
+
+        match crate::auth::validate_token_with_dpop(
+            &state.db,
+            &token,
+            extracted.is_dpop,
+            dpop_proof,
+            method_verb.as_str(),
+            &http_uri,
+            false,
+            false,
+        )
+        .await
+        {
             Ok(auth_user) => {
                 if let Err(e) = crate::auth::scope_check::check_rpc_scope(
                     auth_user.is_oauth,
@@ -254,14 +269,7 @@ async fn proxy_handler(
             Err(e) => {
                 warn!("Token validation failed: {:?}", e);
                 if matches!(e, crate::auth::TokenValidationError::TokenExpired) {
-                    let auth_header_str = headers
-                        .get("Authorization")
-                        .and_then(|h| h.to_str().ok())
-                        .unwrap_or("");
-                    let is_dpop = auth_header_str
-                        .trim()
-                        .get(..5)
-                        .is_some_and(|s| s.eq_ignore_ascii_case("dpop "));
+                    let is_dpop = extracted.is_dpop;
                     let scheme = if is_dpop { "DPoP" } else { "Bearer" };
                     let www_auth = format!(
                         "{} error=\"invalid_token\", error_description=\"Token has expired\"",

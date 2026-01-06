@@ -191,18 +191,18 @@ fn test_dpop_iat_clock_skew_beyond_bounds() {
     let verifier = DPoPVerifier::new(b"test-secret-32-bytes-long!!!!!!!");
     let url = "https://pds.example/xrpc/foo";
 
-    let (proof_301s_future, _) = create_dpop_proof("GET", url, 301, "ES256", None, None);
+    let (proof_301s_future, _) = create_dpop_proof("GET", url, 310, "ES256", None, None);
     let result = verifier.verify_proof(&proof_301s_future, "GET", url, None);
     assert!(
         result.is_err(),
-        "301s in future should exceed clock skew tolerance"
+        "310s in future should exceed clock skew tolerance"
     );
 
-    let (proof_301s_past, _) = create_dpop_proof("GET", url, -301, "ES256", None, None);
+    let (proof_301s_past, _) = create_dpop_proof("GET", url, -310, "ES256", None, None);
     let result = verifier.verify_proof(&proof_301s_past, "GET", url, None);
     assert!(
         result.is_err(),
-        "301s in past should exceed clock skew tolerance"
+        "310s in past should exceed clock skew tolerance"
     );
 }
 

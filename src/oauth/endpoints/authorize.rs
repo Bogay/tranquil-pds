@@ -56,9 +56,14 @@ fn json_error(status: StatusCode, error: &str, description: &str) -> Response {
 }
 
 fn is_granular_scope(s: &str) -> bool {
-    s.starts_with("repo:") || s.starts_with("repo?") || s == "repo"
-        || s.starts_with("blob:") || s.starts_with("blob?") || s == "blob"
-        || s.starts_with("rpc:") || s.starts_with("rpc?")
+    s.starts_with("repo:")
+        || s.starts_with("repo?")
+        || s == "repo"
+        || s.starts_with("blob:")
+        || s.starts_with("blob?")
+        || s == "blob"
+        || s.starts_with("rpc:")
+        || s.starts_with("rpc?")
         || s.starts_with("account:")
         || s.starts_with("identity:")
 }

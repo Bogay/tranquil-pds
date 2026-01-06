@@ -59,6 +59,7 @@ pub async fn check_account_status(
         "GET",
         &http_uri,
         true,
+        false,
     )
     .await
     {
@@ -370,6 +371,7 @@ pub async fn activate_account(
         "POST",
         &http_uri,
         true,
+        false,
     )
     .await
     {
@@ -561,6 +563,7 @@ pub async fn deactivate_account(
         "POST",
         &http_uri,
         false,
+        false,
     )
     .await
     {
@@ -646,6 +649,7 @@ pub async fn request_account_delete(
         "POST",
         &http_uri,
         true,
+        false,
     )
     .await
     {

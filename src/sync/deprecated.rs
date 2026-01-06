@@ -1,5 +1,4 @@
 use crate::api::error::ApiError;
-use crate::auth::{extract_bearer_token_from_header, validate_bearer_token_allow_takendown};
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
 use crate::sync::util::assert_repo_availability;
@@ -19,13 +18,26 @@ use std::str::FromStr;
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
 
 async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &str) -> bool {
-    let token = match extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
     ) {
         Some(t) => t,
         None => return false,
     };
-    match validate_bearer_token_allow_takendown(&state.db, &token).await {
+    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let http_uri = "/";
+    match crate::auth::validate_token_with_dpop(
+        &state.db,
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        "GET",
+        http_uri,
+        false,
+        true,
+    )
+    .await
+    {
         Ok(auth_user) => auth_user.is_admin || auth_user.did == did,
         Err(_) => false,
     }

@@ -1,5 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
+use crate::auth::BearerAuthAllowDeactivated;
 use crate::state::AppState;
 use axum::{
     extract::State,
@@ -14,19 +15,9 @@ fn generate_plc_token() -> String {
 
 pub async fn request_plc_operation_signature(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-            Ok(user) => user,
-            Err(e) => return ApiError::from(e).into_response(),
-        };
+    let auth_user = auth.0;
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
         auth_user.is_oauth,
         auth_user.scope.as_deref(),

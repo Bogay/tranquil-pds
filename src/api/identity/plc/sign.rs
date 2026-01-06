@@ -1,4 +1,5 @@
 use crate::api::ApiError;
+use crate::auth::BearerAuthAllowDeactivated;
 use crate::circuit_breaker::with_circuit_breaker;
 use crate::plc::{PlcClient, PlcError, PlcService, create_update_op, sign_operation};
 use crate::state::AppState;
@@ -39,20 +40,10 @@ pub struct SignPlcOperationOutput {
 
 pub async fn sign_plc_operation(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
     Json(input): Json<SignPlcOperationInput>,
 ) -> Response {
-    let bearer = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
-            Ok(user) => user,
-            Err(e) => return ApiError::from(e).into_response(),
-        };
+    let auth_user = auth.0;
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
         auth_user.is_oauth,
         auth_user.scope.as_deref(),

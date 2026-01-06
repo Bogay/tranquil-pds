@@ -1,10 +1,9 @@
 use crate::api::error::ApiError;
-use crate::auth::validate_bearer_token;
+use crate::auth::BearerAuth;
 use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -25,19 +24,8 @@ pub struct NotificationPrefsResponse {
     pub signal_verified: bool,
 }
 
-pub async fn get_notification_prefs(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let user = match validate_bearer_token(&state.db, &token).await {
-        Ok(u) => u,
-        Err(_) => {
-            return ApiError::AuthenticationFailed(None).into_response();
-        }
-    };
+pub async fn get_notification_prefs(State(state): State<AppState>, auth: BearerAuth) -> Response {
+    let user = auth.0;
     let row = match sqlx::query(
         r#"
         SELECT
@@ -100,22 +88,8 @@ pub struct GetNotificationHistoryResponse {
     pub notifications: Vec<NotificationHistoryEntry>,
 }
 
-pub async fn get_notification_history(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let user = match validate_bearer_token(&state.db, &token).await {
-        Ok(u) => u,
-        Err(_) => {
-            return ApiError::AuthenticationFailed(None).into_response();
-        }
-    };
+pub async fn get_notification_history(State(state): State<AppState>, auth: BearerAuth) -> Response {
+    let user = auth.0;
 
     let user_id: uuid::Uuid =
         match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &user.did)
@@ -253,21 +227,10 @@ pub async fn request_channel_verification(
 
 pub async fn update_notification_prefs(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    auth: BearerAuth,
     Json(input): Json<UpdateNotificationPrefsInput>,
 ) -> Response {
-    let token = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let user = match validate_bearer_token(&state.db, &token).await {
-        Ok(u) => u,
-        Err(_) => {
-            return ApiError::AuthenticationFailed(None).into_response();
-        }
-    };
+    let user = auth.0;
 
     let user_row = match sqlx::query!(
         "SELECT id, handle, email FROM users WHERE did = $1",

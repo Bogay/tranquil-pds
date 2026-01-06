@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::api::repo::record::utils::create_signed_commit;
-use crate::auth::{ServiceTokenVerifier, extract_bearer_token_from_header, is_service_token};
+use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{Did, Handle, PlainPassword};
 use crate::validation::validate_password;
@@ -108,9 +108,10 @@ pub async fn create_passkey_account(
         .into_response();
     }
 
-    let byod_auth = if let Some(token) =
-        extract_bearer_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
-    {
+    let byod_auth = if let Some(extracted) = crate::auth::extract_auth_token_from_header(
+        headers.get("Authorization").and_then(|h| h.to_str().ok()),
+    ) {
+        let token = extracted.token;
         if is_service_token(&token) {
             let verifier = ServiceTokenVerifier::new();
             match verifier

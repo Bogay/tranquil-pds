@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::{ServiceTokenVerifier, is_service_token};
+use crate::auth::{BearerAuthAllowDeactivated, ServiceTokenVerifier, is_service_token};
 use crate::delegation::{self, DelegationActionType};
 use crate::state::AppState;
 use crate::util::get_max_blob_size;
@@ -45,11 +45,13 @@ pub async fn upload_blob(
     headers: axum::http::HeaderMap,
     body: Body,
 ) -> Response {
-    let Some(token) = crate::auth::extract_bearer_token_from_header(
+    let extracted = match crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) else {
-        return ApiError::AuthenticationRequired.into_response();
+    ) {
+        Some(t) => t,
+        None => return ApiError::AuthenticationRequired.into_response(),
     };
+    let token = extracted.token;
 
     let is_service_auth = is_service_token(&token);
 
@@ -74,7 +76,23 @@ pub async fn upload_blob(
             }
         }
     } else {
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
+        let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+        let http_uri = format!(
+            "https://{}/xrpc/com.atproto.repo.uploadBlob",
+            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+        );
+        match crate::auth::validate_token_with_dpop(
+            &state.db,
+            &token,
+            extracted.is_dpop,
+            dpop_proof,
+            "POST",
+            &http_uri,
+            true,
+            false,
+        )
+        .await
+        {
             Ok(user) => {
                 let mime_type_for_check = headers
                     .get("content-type")
@@ -283,21 +301,10 @@ pub struct ListMissingBlobsOutput {
 
 pub async fn list_missing_blobs(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
     Query(params): Query<ListMissingBlobsParams>,
 ) -> Response {
-    let Some(token) = crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) else {
-        return ApiError::AuthenticationRequired.into_response();
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &token).await {
-            Ok(user) => user,
-            Err(_) => {
-                return ApiError::AuthenticationFailed(None).into_response();
-            }
-        };
+    let auth_user = auth.0;
     let did = auth_user.did;
     let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)

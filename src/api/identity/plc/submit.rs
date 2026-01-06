@@ -1,4 +1,5 @@
 use crate::api::{ApiError, EmptyResponse};
+use crate::auth::BearerAuthAllowDeactivated;
 use crate::circuit_breaker::with_circuit_breaker;
 use crate::plc::{PlcClient, signing_key_to_did_key, validate_plc_operation};
 use crate::state::AppState;
@@ -19,24 +20,10 @@ pub struct SubmitPlcOperationInput {
 
 pub async fn submit_plc_operation(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuthAllowDeactivated,
     Json(input): Json<SubmitPlcOperationInput>,
 ) -> Response {
-    let bearer = match crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            return ApiError::AuthenticationRequired.into_response();
-        }
-    };
-    let auth_user =
-        match crate::auth::validate_bearer_token_allow_deactivated(&state.db, &bearer).await {
-            Ok(user) => user,
-            Err(e) => {
-                return ApiError::from(e).into_response();
-            }
-        };
+    let auth_user = auth.0;
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
         auth_user.is_oauth,
         auth_user.scope.as_deref(),

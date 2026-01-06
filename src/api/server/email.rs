@@ -193,20 +193,10 @@ pub struct UpdateEmailInput {
 
 pub async fn update_email(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuth,
     Json(input): Json<UpdateEmailInput>,
 ) -> Response {
-    let Some(bearer_token) = crate::auth::extract_bearer_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) else {
-        return ApiError::AuthenticationRequired.into_response();
-    };
-
-    let auth_result = crate::auth::validate_bearer_token(&state.db, &bearer_token).await;
-    let auth_user = match auth_result {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user = auth.0;
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
         auth_user.is_oauth,
