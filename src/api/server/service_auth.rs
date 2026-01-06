@@ -85,11 +85,11 @@ pub async fn get_service_auth(
             &token,
             dpop_proof,
             "GET",
-            &format!(
+            &crate::util::build_full_url(&format!(
                 "/xrpc/com.atproto.server.getServiceAuth?aud={}&lxm={}",
                 params.aud,
                 params.lxm.as_deref().unwrap_or("")
-            ),
+            )),
         )
         .await
         {
