@@ -53,8 +53,6 @@ podman-compose -f docker-compose.prod.yml up -d
 | Guide | Best For |
 |-------|----------|
 | [Debian](docs/install-debian.md) | Debian 13+ with systemd |
-| [Alpine](docs/install-alpine.md) | Alpine 3.23+ with OpenRC |
-| [OpenBSD](docs/install-openbsd.md) | OpenBSD 7.8+ with rc.d |
 | [Containers](docs/install-containers.md) | Podman with quadlets or OpenRC |
 | [Kubernetes](docs/install-kubernetes.md) | You know what you're doing |
 
