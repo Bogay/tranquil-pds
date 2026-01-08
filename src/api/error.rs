@@ -427,7 +427,16 @@ impl IntoResponse for ApiError {
             error: self.error_name(),
             message: self.message(),
         };
-        (self.status_code(), Json(body)).into_response()
+        let mut response = (self.status_code(), Json(body)).into_response();
+        if matches!(self, Self::ExpiredToken(_)) {
+            response.headers_mut().insert(
+                "WWW-Authenticate",
+                "Bearer error=\"invalid_token\", error_description=\"Token has expired\""
+                    .parse()
+                    .unwrap(),
+            );
+        }
+        response
     }
 }
 

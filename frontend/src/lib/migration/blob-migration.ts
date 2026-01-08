@@ -20,7 +20,15 @@ export async function migrateBlobs(
   console.log("[blob-migration] Starting blob migration for", userDid);
   console.log(
     "[blob-migration] Source client:",
-    sourceClient ? "available" : "NOT AVAILABLE",
+    sourceClient ? `available (baseUrl: ${sourceClient.getBaseUrl()})` : "NOT AVAILABLE",
+  );
+  console.log(
+    "[blob-migration] Local client baseUrl:",
+    localClient.getBaseUrl(),
+  );
+  console.log(
+    "[blob-migration] Local client has access token:",
+    localClient.getAccessToken() ? "yes" : "NO",
   );
 
   onProgress({ currentOperation: "Checking for missing blobs..." });
@@ -95,12 +103,13 @@ export async function migrateBlobs(
         "contentType:",
         contentType,
       );
-      await localClient.uploadBlob(blobData, contentType);
+      console.log("[blob-migration] Uploading blob", cid, "to local PDS...");
+      const uploadResult = await localClient.uploadBlob(blobData, contentType);
       console.log(
-        "[blob-migration] Uploaded blob",
+        "[blob-migration] Upload response for",
         cid,
-        "with contentType:",
-        contentType,
+        ":",
+        JSON.stringify(uploadResult),
       );
       migrated++;
       onProgress({ blobsMigrated: migrated });

@@ -590,7 +590,13 @@ pub fn app(state: AppState) -> Router {
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-                .allow_headers(Any),
+                .allow_headers(Any)
+                .expose_headers([
+                    "WWW-Authenticate".parse().unwrap(),
+                    "DPoP-Nonce".parse().unwrap(),
+                    "atproto-repo-rev".parse().unwrap(),
+                    "atproto-content-labelers".parse().unwrap(),
+                ]),
         )
         .with_state(state);
 

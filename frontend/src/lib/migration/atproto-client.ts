@@ -48,6 +48,10 @@ export class AtprotoClient {
     return this.accessToken;
   }
 
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
   setDPoPKeyPair(keyPair: DPoPKeyPair | null) {
     this.dpopKeyPair = keyPair;
   }
