@@ -6314,6 +6314,110 @@ dependencies = [
 ]
 
 [[package]]
+name = "tranquil-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base32",
+ "base64 0.22.1",
+ "bcrypt",
+ "chrono",
+ "hmac",
+ "k256",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "thiserror 2.0.17",
+ "totp-rs",
+ "tranquil-crypto",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "tranquil-cache"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "redis",
+ "thiserror 2.0.17",
+ "tracing",
+ "tranquil-infra",
+]
+
+[[package]]
+name = "tranquil-comms"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.17",
+ "tokio",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "tranquil-crypto"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
+ "hkdf",
+ "hmac",
+ "p256 0.13.2",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "tranquil-infra"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tranquil-oauth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "ed25519-dalek",
+ "p256 0.13.2",
+ "p384",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "tranquil-types",
+ "uuid",
+]
+
+[[package]]
 name = "tranquil-pds"
 version = "0.1.0"
 dependencies = [
@@ -6380,12 +6484,76 @@ dependencies = [
  "tower-layer",
  "tracing",
  "tracing-subscriber",
+ "tranquil-auth",
+ "tranquil-cache",
+ "tranquil-comms",
+ "tranquil-crypto",
+ "tranquil-infra",
+ "tranquil-oauth",
+ "tranquil-repo",
+ "tranquil-scopes",
+ "tranquil-storage",
+ "tranquil-types",
  "urlencoding",
  "uuid",
  "webauthn-rs",
  "webauthn-rs-proto",
  "wiremock",
  "zip",
+]
+
+[[package]]
+name = "tranquil-repo"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "cid",
+ "jacquard-repo",
+ "multihash",
+ "sha2",
+ "sqlx",
+ "tranquil-types",
+]
+
+[[package]]
+name = "tranquil-scopes"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "futures",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tranquil-storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "aws-config",
+ "aws-sdk-s3",
+ "bytes",
+ "futures",
+ "sha2",
+ "thiserror 2.0.17",
+ "tracing",
+ "tranquil-infra",
+]
+
+[[package]]
+name = "tranquil-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cid",
+ "jacquard",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.17",
 ]
 
 [[package]]

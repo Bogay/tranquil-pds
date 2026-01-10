@@ -1,0 +1,15 @@
+[package]
+name = "tranquil-repo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tranquil-types = { workspace = true }
+
+bytes = { workspace = true }
+cid = { workspace = true }
+jacquard-repo = { workspace = true }
+multihash = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true }
