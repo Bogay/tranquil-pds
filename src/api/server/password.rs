@@ -412,3 +412,87 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
     info!(did = %&auth.0.did, "Password removed - account is now passkey-only");
     SuccessResponse::ok().into_response()
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPasswordInput {
+    pub new_password: PlainPassword,
+}
+
+pub async fn set_password(
+    State(state): State<AppState>,
+    auth: BearerAuth,
+    Json(input): Json<SetPasswordInput>,
+) -> Response {
+    if crate::api::server::reauth::check_reauth_required_cached(
+        &state.db,
+        &state.cache,
+        &auth.0.did,
+    )
+    .await
+    {
+        return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
+    }
+
+    let new_password = &input.new_password;
+    if new_password.is_empty() {
+        return ApiError::InvalidRequest("newPassword is required".into()).into_response();
+    }
+    if let Err(e) = validate_password(new_password) {
+        return ApiError::InvalidRequest(e.to_string()).into_response();
+    }
+
+    let user = sqlx::query!(
+        "SELECT id, password_hash FROM users WHERE did = $1",
+        &auth.0.did
+    )
+    .fetch_optional(&state.db)
+    .await;
+
+    let user = match user {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return ApiError::AccountNotFound.into_response();
+        }
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    if user.password_hash.is_some() {
+        return ApiError::InvalidRequest(
+            "Account already has a password. Use changePassword instead.".into(),
+        )
+        .into_response();
+    }
+
+    let new_password_clone = new_password.to_string();
+    let new_hash =
+        match tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST)).await {
+            Ok(Ok(h)) => h,
+            Ok(Err(e)) => {
+                error!("Failed to hash password: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+            Err(e) => {
+                error!("Failed to spawn blocking task: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
+
+    if let Err(e) = sqlx::query!(
+        "UPDATE users SET password_hash = $1, password_required = TRUE WHERE id = $2",
+        new_hash,
+        user.id
+    )
+    .execute(&state.db)
+    .await
+    {
+        error!("DB error setting password: {:?}", e);
+        return ApiError::InternalError(None).into_response();
+    }
+
+    info!(did = %&auth.0.did, "Password set for passkey-only account");
+    SuccessResponse::ok().into_response()
+}

@@ -136,6 +136,7 @@ async fn setup_with_external_infra() -> String {
         );
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
     }
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
@@ -170,6 +171,7 @@ async fn setup_with_testcontainers() -> String {
         std::env::set_var("AWS_REGION", "us-east-1");
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
     }
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region("us-east-1")

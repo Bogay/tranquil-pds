@@ -156,7 +156,14 @@ async fn test_import_accepts_own_exported_repo() {
         .send()
         .await
         .expect("Failed to import repo");
-    assert_eq!(import_res.status(), StatusCode::OK);
+    let status = import_res.status();
+    if status != StatusCode::OK {
+        let body = import_res.text().await.unwrap_or_default();
+        panic!(
+            "Import failed with status {}: {}",
+            status, body
+        );
+    }
 }
 
 #[tokio::test]
@@ -285,7 +292,7 @@ async fn test_import_car_with_no_roots() {
 async fn test_import_preserves_records_after_reimport() {
     let client = client();
     let (token, did) = create_account_and_login(&client).await;
-    let mut rkeys = Vec::new();
+    let mut rkeys = Vec::with_capacity(3);
     for i in 0..3 {
         let post_payload = json!({
             "repo": did,
@@ -309,8 +316,7 @@ async fn test_import_preserves_records_after_reimport() {
         assert_eq!(res.status(), StatusCode::OK);
         let body: serde_json::Value = res.json().await.unwrap();
         let uri = body["uri"].as_str().unwrap();
-        let rkey = uri.split('/').next_back().unwrap().to_string();
-        rkeys.push(rkey);
+        rkeys.push(uri.split('/').next_back().unwrap().to_string());
     }
     for rkey in &rkeys {
         let get_res = client
@@ -352,7 +358,11 @@ async fn test_import_preserves_records_after_reimport() {
         .send()
         .await
         .expect("Failed to import repo");
-    assert_eq!(import_res.status(), StatusCode::OK);
+    let status = import_res.status();
+    if status != StatusCode::OK {
+        let body = import_res.text().await.unwrap_or_default();
+        panic!("Import failed with status {}: {}", status, body);
+    }
     let list_res = client
         .get(format!(
             "{}/xrpc/com.atproto.repo.listRecords?repo={}&collection=app.bsky.feed.post",

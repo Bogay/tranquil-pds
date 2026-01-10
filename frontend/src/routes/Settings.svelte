@@ -8,6 +8,7 @@
   import { unsafeAsHandle } from '../lib/types/branded'
   import type { Session } from '../lib/types/api'
   import { toast } from '../lib/toast.svelte'
+  import ReauthModal from '../components/ReauthModal.svelte'
 
   const auth = $derived(getAuthState())
   const supportedLocales = getSupportedLocales()
@@ -63,12 +64,37 @@
   let newPassword = $state('')
   let confirmNewPassword = $state('')
   let showBYOHandle = $state(false)
+  let hasPassword = $state(true)
+  let passwordStatusLoading = $state(true)
+  let setPasswordLoading = $state(false)
+  let showReauthModal = $state(false)
+  let reauthMethods = $state<string[]>(['passkey'])
+  let pendingAction = $state<(() => Promise<void>) | null>(null)
 
   $effect(() => {
     if (!loading && !session) {
       navigate(routes.login)
     }
   })
+
+  $effect(() => {
+    if (session) {
+      loadPasswordStatus()
+    }
+  })
+
+  async function loadPasswordStatus() {
+    if (!session) return
+    passwordStatusLoading = true
+    try {
+      const status = await api.getPasswordStatus(session.accessJwt)
+      hasPassword = status.hasPassword
+    } catch {
+      hasPassword = true
+    } finally {
+      passwordStatusLoading = false
+    }
+  }
 
   async function handleRequestEmailUpdate() {
     if (!session) return
@@ -374,6 +400,52 @@
       passwordLoading = false
     }
   }
+
+  async function handleSetPassword(e: Event) {
+    e.preventDefault()
+    if (!session || !newPassword || !confirmNewPassword) return
+    if (newPassword !== confirmNewPassword) {
+      toast.error($_('settings.messages.passwordsDoNotMatch'))
+      return
+    }
+    if (newPassword.length < 8) {
+      toast.error($_('settings.messages.passwordTooShort'))
+      return
+    }
+    setPasswordLoading = true
+    try {
+      await api.setPassword(session.accessJwt, newPassword)
+      toast.success($_('settings.messages.passwordSet'))
+      hasPassword = true
+      newPassword = ''
+      confirmNewPassword = ''
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.error === 'ReauthRequired') {
+          reauthMethods = e.reauthMethods || ['passkey']
+          pendingAction = () => handleSetPassword(new Event('submit'))
+          showReauthModal = true
+        } else {
+          toast.error(e.message)
+        }
+      } else {
+        toast.error($_('settings.messages.passwordSetFailed'))
+      }
+    } finally {
+      setPasswordLoading = false
+    }
+  }
+
+  function handleReauthSuccess() {
+    if (pendingAction) {
+      pendingAction()
+      pendingAction = null
+    }
+  }
+
+  function handleReauthCancel() {
+    pendingAction = null
+  }
 </script>
 <div class="page">
   <header>
@@ -522,48 +594,85 @@
       </form>
     {/if}
   </section>
-  <section>
-    <h2>{$_('settings.changePassword')}</h2>
-    <form onsubmit={handleChangePassword}>
-      <div class="field">
-        <label for="current-password">{$_('settings.currentPassword')}</label>
-        <input
-          id="current-password"
-          type="password"
-          bind:value={currentPassword}
-          placeholder={$_('settings.currentPasswordPlaceholder')}
-          disabled={passwordLoading}
-          required
-        />
-      </div>
-      <div class="field">
-        <label for="new-password">{$_('settings.newPassword')}</label>
-        <input
-          id="new-password"
-          type="password"
-          bind:value={newPassword}
-          placeholder={$_('settings.newPasswordPlaceholder')}
-          disabled={passwordLoading}
-          required
-          minlength="8"
-        />
-      </div>
-      <div class="field">
-        <label for="confirm-new-password">{$_('settings.confirmNewPassword')}</label>
-        <input
-          id="confirm-new-password"
-          type="password"
-          bind:value={confirmNewPassword}
-          placeholder={$_('settings.confirmNewPasswordPlaceholder')}
-          disabled={passwordLoading}
-          required
-        />
-      </div>
-      <button type="submit" disabled={passwordLoading || !currentPassword || !newPassword || !confirmNewPassword}>
-        {passwordLoading ? $_('settings.changing') : $_('settings.changePasswordButton')}
-      </button>
-    </form>
-  </section>
+  {#if !passwordStatusLoading}
+    {#if hasPassword}
+      <section>
+        <h2>{$_('settings.changePassword')}</h2>
+        <form onsubmit={handleChangePassword}>
+          <div class="field">
+            <label for="current-password">{$_('settings.currentPassword')}</label>
+            <input
+              id="current-password"
+              type="password"
+              bind:value={currentPassword}
+              placeholder={$_('settings.currentPasswordPlaceholder')}
+              disabled={passwordLoading}
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="new-password">{$_('settings.newPassword')}</label>
+            <input
+              id="new-password"
+              type="password"
+              bind:value={newPassword}
+              placeholder={$_('settings.newPasswordPlaceholder')}
+              disabled={passwordLoading}
+              required
+              minlength="8"
+            />
+          </div>
+          <div class="field">
+            <label for="confirm-new-password">{$_('settings.confirmNewPassword')}</label>
+            <input
+              id="confirm-new-password"
+              type="password"
+              bind:value={confirmNewPassword}
+              placeholder={$_('settings.confirmNewPasswordPlaceholder')}
+              disabled={passwordLoading}
+              required
+            />
+          </div>
+          <button type="submit" disabled={passwordLoading || !currentPassword || !newPassword || !confirmNewPassword}>
+            {passwordLoading ? $_('settings.changing') : $_('settings.changePasswordButton')}
+          </button>
+        </form>
+      </section>
+    {:else}
+      <section>
+        <h2>{$_('settings.setPassword')}</h2>
+        <p class="description">{$_('settings.setPasswordDescription')}</p>
+        <form onsubmit={handleSetPassword}>
+          <div class="field">
+            <label for="set-new-password">{$_('settings.newPassword')}</label>
+            <input
+              id="set-new-password"
+              type="password"
+              bind:value={newPassword}
+              placeholder={$_('settings.newPasswordPlaceholder')}
+              disabled={setPasswordLoading}
+              required
+              minlength="8"
+            />
+          </div>
+          <div class="field">
+            <label for="set-confirm-password">{$_('settings.confirmNewPassword')}</label>
+            <input
+              id="set-confirm-password"
+              type="password"
+              bind:value={confirmNewPassword}
+              placeholder={$_('settings.confirmNewPasswordPlaceholder')}
+              disabled={setPasswordLoading}
+              required
+            />
+          </div>
+          <button type="submit" disabled={setPasswordLoading || !newPassword || !confirmNewPassword}>
+            {setPasswordLoading ? $_('settings.setting') : $_('settings.setPasswordButton')}
+          </button>
+        </form>
+      </section>
+    {/if}
+  {/if}
   <section>
     <h2>{$_('settings.exportData')}</h2>
     <p class="description">{$_('settings.exportDataDescription')}</p>
@@ -681,6 +790,15 @@
     {/if}
   </section>
 </div>
+
+{#if showReauthModal && session}
+  <ReauthModal
+    bind:show={showReauthModal}
+    availableMethods={reauthMethods}
+    onSuccess={handleReauthSuccess}
+    onCancel={handleReauthCancel}
+  />
+{/if}
 <style>
   .page {
     max-width: var(--width-lg);

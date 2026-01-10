@@ -116,9 +116,6 @@ pub async fn handle_authorization_code_grant(
     } else {
         None
     };
-    if let Err(e) = db::revoke_tokens_for_client(&state.db, &did, &auth_request.client_id).await {
-        tracing::warn!("Failed to revoke previous tokens for client: {:?}", e);
-    }
     let token_id = TokenId::generate();
     let refresh_token = RefreshToken::generate();
     let now = Utc::now();

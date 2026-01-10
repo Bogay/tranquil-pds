@@ -37,6 +37,7 @@ pub use passkeys::{
 };
 pub use password::{
     change_password, get_password_status, remove_password, request_password_reset, reset_password,
+    set_password,
 };
 pub use reauth::{
     check_legacy_session_mfa, check_reauth_required, get_reauth_status,

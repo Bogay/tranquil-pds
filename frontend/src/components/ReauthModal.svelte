@@ -330,7 +330,7 @@
   .tab.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: white;
+    color: var(--text-inverse);
   }
 
   .modal-content {
@@ -375,7 +375,7 @@
     width: 100%;
     padding: 0.75rem 1.5rem;
     background: var(--accent);
-    color: white;
+    color: var(--text-inverse);
     border: none;
     border-radius: 4px;
     font-size: 1rem;

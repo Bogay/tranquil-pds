@@ -127,8 +127,8 @@ impl ApiError {
             | Self::InvalidCode(_)
             | Self::InvalidPassword(_)
             | Self::InvalidToken(_)
-            | Self::ExpiredToken(_)
             | Self::PasskeyCounterAnomaly => StatusCode::UNAUTHORIZED,
+            Self::ExpiredToken(_) => StatusCode::BAD_REQUEST,
             Self::Forbidden
             | Self::AdminRequired
             | Self::InsufficientScope(_)

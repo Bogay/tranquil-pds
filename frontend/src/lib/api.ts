@@ -540,6 +540,14 @@ export const api = {
     });
   },
 
+  setPassword(token: AccessToken, newPassword: string): Promise<SuccessResponse> {
+    return xrpc("_account.setPassword", {
+      method: "POST",
+      token,
+      body: { newPassword },
+    });
+  },
+
   getPasswordStatus(token: AccessToken): Promise<PasswordStatus> {
     return xrpc("_account.getPasswordStatus", { token });
   },

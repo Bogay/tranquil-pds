@@ -83,20 +83,16 @@ pub async fn prepare_repo_write(
     .map_err(|e| {
         tracing::warn!(error = ?e, is_dpop = extracted.is_dpop, "Token validation failed in prepare_repo_write");
         let mut response = ApiError::from(e).into_response();
-        if matches!(e, crate::auth::TokenValidationError::TokenExpired) {
-            let scheme = if extracted.is_dpop { "DPoP" } else { "Bearer" };
-            let www_auth = format!(
-                "{} error=\"invalid_token\", error_description=\"Token has expired\"",
-                scheme
-            );
+        if matches!(e, crate::auth::TokenValidationError::TokenExpired) && extracted.is_dpop {
+            *response.status_mut() = axum::http::StatusCode::UNAUTHORIZED;
+            let www_auth =
+                "DPoP error=\"invalid_token\", error_description=\"Token has expired\"";
             response.headers_mut().insert(
                 "WWW-Authenticate",
                 www_auth.parse().unwrap(),
             );
-            if extracted.is_dpop {
-                let nonce = crate::oauth::verify::generate_dpop_nonce();
-                response.headers_mut().insert("DPoP-Nonce", nonce.parse().unwrap());
-            }
+            let nonce = crate::oauth::verify::generate_dpop_nonce();
+            response.headers_mut().insert("DPoP-Nonce", nonce.parse().unwrap());
         }
         response
     })?;
@@ -322,6 +318,9 @@ pub async fn create_record(
     .await
     {
         Ok(res) => res,
+        Err(e) if e.contains("ConcurrentModification") => {
+            return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+        }
         Err(e) => return ApiError::InternalError(Some(e)).into_response(),
     };
 
@@ -580,6 +579,9 @@ pub async fn put_record(
     .await
     {
         Ok(res) => res,
+        Err(e) if e.contains("ConcurrentModification") => {
+            return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+        }
         Err(e) => return ApiError::InternalError(Some(e)).into_response(),
     };
 

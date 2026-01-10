@@ -678,6 +678,12 @@
         <p class="hint">
           {$_('security.passkeyOnlyHint')}
         </p>
+        <p class="hint">
+          {$_('security.addPasswordHint')}
+        </p>
+        <a href={getFullUrl(routes.settings)} class="section-link">
+          {$_('security.goToSettings')}
+        </a>
       {/if}
     </section>
 

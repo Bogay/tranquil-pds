@@ -268,24 +268,21 @@ async fn proxy_handler(
             }
             Err(e) => {
                 warn!("Token validation failed: {:?}", e);
-                if matches!(e, crate::auth::TokenValidationError::TokenExpired) {
-                    let is_dpop = extracted.is_dpop;
-                    let scheme = if is_dpop { "DPoP" } else { "Bearer" };
-                    let www_auth = format!(
-                        "{} error=\"invalid_token\", error_description=\"Token has expired\"",
-                        scheme
-                    );
+                if matches!(e, crate::auth::TokenValidationError::TokenExpired)
+                    && extracted.is_dpop
+                {
+                    let www_auth =
+                        "DPoP error=\"invalid_token\", error_description=\"Token has expired\"";
                     let mut response =
                         ApiError::ExpiredToken(Some("Token has expired".into())).into_response();
+                    *response.status_mut() = axum::http::StatusCode::UNAUTHORIZED;
                     response
                         .headers_mut()
                         .insert("WWW-Authenticate", www_auth.parse().unwrap());
-                    if is_dpop {
-                        let nonce = crate::oauth::verify::generate_dpop_nonce();
-                        response
-                            .headers_mut()
-                            .insert("DPoP-Nonce", nonce.parse().unwrap());
-                    }
+                    let nonce = crate::oauth::verify::generate_dpop_nonce();
+                    response
+                        .headers_mut()
+                        .insert("DPoP-Nonce", nonce.parse().unwrap());
                     return response;
                 }
             }

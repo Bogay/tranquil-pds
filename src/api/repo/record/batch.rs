@@ -444,6 +444,9 @@ pub async fn apply_writes(
     .await
     {
         Ok(res) => res,
+        Err(e) if e.contains("ConcurrentModification") => {
+            return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+        }
         Err(e) => {
             error!("Commit failed: {}", e);
             return ApiError::InternalError(Some("Failed to commit changes".into()))

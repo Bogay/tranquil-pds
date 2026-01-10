@@ -198,6 +198,10 @@ pub fn app(state: AppState) -> Router {
             post(api::server::remove_password),
         )
         .route(
+            "/_account.setPassword",
+            post(api::server::set_password),
+        )
+        .route(
             "/_account.getPasswordStatus",
             get(api::server::get_password_status),
         )
@@ -590,7 +594,16 @@ pub fn app(state: AppState) -> Router {
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-                .allow_headers(Any)
+                .allow_headers([
+                    "Authorization".parse().unwrap(),
+                    "Content-Type".parse().unwrap(),
+                    "Content-Encoding".parse().unwrap(),
+                    "Accept-Encoding".parse().unwrap(),
+                    "DPoP".parse().unwrap(),
+                    "atproto-proxy".parse().unwrap(),
+                    "atproto-accept-labelers".parse().unwrap(),
+                    "x-bsky-topics".parse().unwrap(),
+                ])
                 .expose_headers([
                     "WWW-Authenticate".parse().unwrap(),
                     "DPoP-Nonce".parse().unwrap(),

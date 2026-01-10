@@ -803,49 +803,23 @@ pub async fn generate_repo_car_from_user_blocks(
     db: &PgPool,
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
-    head_cid: &Cid,
+    _head_cid: &Cid,
 ) -> Result<Vec<u8>, String> {
-    use jacquard_repo::storage::BlockStore;
+    use std::str::FromStr;
 
-    let block_cid_bytes: Vec<Vec<u8>> = sqlx::query_scalar!(
-        "SELECT block_cid FROM user_blocks WHERE user_id = $1",
+    let repo_root_cid_str: String = sqlx::query_scalar!(
+        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
         user_id
     )
-    .fetch_all(db)
+    .fetch_optional(db)
     .await
-    .map_err(|e| format!("Failed to fetch user_blocks: {}", e))?;
+    .map_err(|e| format!("Failed to fetch repo: {}", e))?
+    .ok_or_else(|| "Repository not found".to_string())?;
 
-    if block_cid_bytes.is_empty() {
-        let cids = collect_current_repo_blocks(block_store, head_cid).await?;
-        if cids.is_empty() {
-            return Err("No blocks found for repo".to_string());
-        }
-        return generate_repo_car(block_store, head_cid).await;
-    }
+    let actual_head_cid = Cid::from_str(&repo_root_cid_str)
+        .map_err(|e| format!("Invalid repo_root_cid: {}", e))?;
 
-    let block_cids: Vec<Cid> = block_cid_bytes
-        .iter()
-        .filter_map(|bytes| Cid::try_from(bytes.as_slice()).ok())
-        .collect();
-
-    let car_bytes =
-        encode_car_header(head_cid).map_err(|e| format!("Failed to encode CAR header: {}", e))?;
-
-    let blocks = block_store
-        .get_many(&block_cids)
-        .await
-        .map_err(|e| format!("Failed to fetch blocks: {:?}", e))?;
-
-    let car_bytes = block_cids
-        .iter()
-        .zip(blocks.iter())
-        .filter_map(|(cid, block_opt)| block_opt.as_ref().map(|block| (cid, block)))
-        .fold(car_bytes, |mut acc, (cid, block)| {
-            acc.extend(encode_car_block(cid, block));
-            acc
-        });
-
-    Ok(car_bytes)
+    generate_repo_car(block_store, &actual_head_cid).await
 }
 
 pub async fn generate_full_backup(

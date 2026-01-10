@@ -183,6 +183,9 @@ pub async fn delete_record(
     .await
     {
         Ok(res) => res,
+        Err(e) if e.contains("ConcurrentModification") => {
+            return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+        }
         Err(e) => return ApiError::InternalError(Some(e)).into_response(),
     };
 
