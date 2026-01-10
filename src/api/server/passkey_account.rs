@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{ServiceTokenVerifier, is_service_token};
 use crate::state::{AppState, RateLimitKind};
-use crate::types::{Did, Handle, PlainPassword};
+use crate::types::{Did, Handle, Nsid, PlainPassword, Rkey};
 use crate::validation::validate_password;
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
@@ -512,8 +512,9 @@ pub async fn create_passkey_account(
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
+    let did_typed = Did::new_unchecked(&did);
     let (commit_bytes, _sig) =
-        match create_signed_commit(&did, mst_root, rev.as_ref(), None, &secret_key) {
+        match create_signed_commit(&did_typed, mst_root, rev.as_ref(), None, &secret_key) {
             Ok(result) => result,
             Err(e) => {
                 error!("Error creating genesis commit: {:?}", e);
@@ -600,13 +601,14 @@ pub async fn create_passkey_account(
     }
 
     if !is_byod_did_web {
+        let handle_typed = Handle::new_unchecked(&handle);
         if let Err(e) =
-            crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
+            crate::api::repo::record::sequence_identity_event(&state, &did_typed, Some(&handle_typed)).await
         {
             warn!("Failed to sequence identity event for {}: {}", did, e);
         }
         if let Err(e) =
-            crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+            crate::api::repo::record::sequence_account_event(&state, &did_typed, true, None).await
         {
             warn!("Failed to sequence account event for {}: {}", did, e);
         }
@@ -614,11 +616,13 @@ pub async fn create_passkey_account(
             "$type": "app.bsky.actor.profile",
             "displayName": handle
         });
+        let profile_collection = Nsid::new_unchecked("app.bsky.actor.profile");
+        let profile_rkey = Rkey::new_unchecked("self");
         if let Err(e) = crate::api::repo::record::create_record_internal(
             &state,
-            &did,
-            "app.bsky.actor.profile",
-            "self",
+            &did_typed,
+            &profile_collection,
+            &profile_rkey,
             &profile_record,
         )
         .await

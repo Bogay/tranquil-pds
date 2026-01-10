@@ -1,28 +1,33 @@
 use crate::api::error::ApiError;
+use crate::types::{Nsid, Rkey};
 use crate::validation::{RecordValidator, ValidationError, ValidationStatus};
 use axum::response::Response;
 
-pub fn validate_record(record: &serde_json::Value, collection: &str) -> Result<(), Box<Response>> {
+pub fn validate_record(record: &serde_json::Value, collection: &Nsid) -> Result<(), Box<Response>> {
     validate_record_with_rkey(record, collection, None)
 }
 
 pub fn validate_record_with_rkey(
     record: &serde_json::Value,
-    collection: &str,
-    rkey: Option<&str>,
+    collection: &Nsid,
+    rkey: Option<&Rkey>,
 ) -> Result<(), Box<Response>> {
     let validator = RecordValidator::new();
-    validation_error_to_response(validator.validate_with_rkey(record, collection, rkey))
+    validation_error_to_response(validator.validate_with_rkey(
+        record,
+        collection.as_str(),
+        rkey.map(|r| r.as_str()),
+    ))
 }
 
 pub fn validate_record_with_status(
     record: &serde_json::Value,
-    collection: &str,
-    rkey: Option<&str>,
+    collection: &Nsid,
+    rkey: Option<&Rkey>,
     require_lexicon: bool,
 ) -> Result<ValidationStatus, Box<Response>> {
     let validator = RecordValidator::new().require_lexicon(require_lexicon);
-    match validator.validate_with_rkey(record, collection, rkey) {
+    match validator.validate_with_rkey(record, collection.as_str(), rkey.map(|r| r.as_str())) {
         Ok(status) => Ok(status),
         Err(e) => Err(validation_error_to_box_response(e)),
     }

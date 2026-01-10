@@ -13,7 +13,6 @@ use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
 use std::str::FromStr;
 use tracing::error;
 
@@ -237,14 +236,15 @@ pub async fn list_records(
         }
     };
     let last_rkey = rows.last().map(|(rkey, _)| rkey.clone());
-    let mut cid_to_rkey: HashMap<Cid, (String, String)> = HashMap::new();
-    let mut cids: Vec<Cid> = Vec::with_capacity(rows.len());
-    for (rkey, cid_str) in &rows {
-        if let Ok(cid) = Cid::from_str(cid_str) {
-            cid_to_rkey.insert(cid, (rkey.clone(), cid_str.clone()));
-            cids.push(cid);
-        }
-    }
+    let parsed_rows: Vec<(Cid, String, String)> = rows
+        .iter()
+        .filter_map(|(rkey, cid_str)| {
+            Cid::from_str(cid_str)
+                .ok()
+                .map(|cid| (cid, rkey.clone(), cid_str.clone()))
+        })
+        .collect();
+    let cids: Vec<Cid> = parsed_rows.iter().map(|(cid, _, _)| *cid).collect();
     let blocks = match state.block_store.get_many(&cids).await {
         Ok(b) => b,
         Err(e) => {
@@ -252,20 +252,21 @@ pub async fn list_records(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let mut records = Vec::new();
-    for (cid, block_opt) in cids.iter().zip(blocks.into_iter()) {
-        if let Some(block) = block_opt
-            && let Some((rkey, cid_str)) = cid_to_rkey.get(cid)
-            && let Ok(ipld) = serde_ipld_dagcbor::from_slice::<Ipld>(&block)
-        {
-            let value = ipld_to_json(ipld);
-            records.push(json!({
-                "uri": format!("at://{}/{}/{}", input.repo, input.collection, rkey),
-                "cid": cid_str,
-                "value": value
-            }));
-        }
-    }
+    let records: Vec<Value> = parsed_rows
+        .iter()
+        .zip(blocks.into_iter())
+        .filter_map(|((_, rkey, cid_str), block_opt)| {
+            block_opt.and_then(|block| {
+                serde_ipld_dagcbor::from_slice::<Ipld>(&block).ok().map(|ipld| {
+                    json!({
+                        "uri": format!("at://{}/{}/{}", input.repo, input.collection, rkey),
+                        "cid": cid_str,
+                        "value": ipld_to_json(ipld)
+                    })
+                })
+            })
+        })
+        .collect();
     Json(ListRecordsOutput {
         cursor: last_rkey,
         records,

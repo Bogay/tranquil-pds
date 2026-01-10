@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use crate::types::{Did, Handle, Nsid, Rkey};
 use bytes::Bytes;
 use cid::Cid;
 use jacquard::types::{integer::LimitedU32, string::Tid};
@@ -38,14 +39,14 @@ fn extract_blob_cids_recursive(value: &Value, blobs: &mut Vec<String>) {
 }
 
 pub fn create_signed_commit(
-    did: &str,
+    did: &Did,
     data: Cid,
     rev: &str,
     prev: Option<Cid>,
     signing_key: &SigningKey,
 ) -> Result<(Vec<u8>, Bytes), String> {
-    let did =
-        jacquard::types::string::Did::new(did).map_err(|e| format!("Invalid DID: {:?}", e))?;
+    let did = jacquard::types::string::Did::new(did.as_str())
+        .map_err(|e| format!("Invalid DID: {:?}", e))?;
     let rev =
         jacquard::types::string::Tid::from_str(rev).map_err(|e| format!("Invalid TID: {:?}", e))?;
     let unsigned = Commit::new_unsigned(did, data, rev, prev);
@@ -61,19 +62,19 @@ pub fn create_signed_commit(
 
 pub enum RecordOp {
     Create {
-        collection: String,
-        rkey: String,
+        collection: Nsid,
+        rkey: Rkey,
         cid: Cid,
     },
     Update {
-        collection: String,
-        rkey: String,
+        collection: Nsid,
+        rkey: Rkey,
         cid: Cid,
         prev: Option<Cid>,
     },
     Delete {
-        collection: String,
-        rkey: String,
+        collection: Nsid,
+        rkey: Rkey,
         prev: Option<Cid>,
     },
 }
@@ -84,7 +85,7 @@ pub struct CommitResult {
 }
 
 pub struct CommitParams<'a> {
-    pub did: &'a str,
+    pub did: &'a Did,
     pub user_id: Uuid,
     pub current_root_cid: Option<Cid>,
     pub prev_data_cid: Option<Cid>,
@@ -218,36 +219,44 @@ pub async fn commit_and_log(
         .await
         .map_err(|e| format!("DB Error (user_blocks delete obsolete): {}", e))?;
     }
-    let mut upsert_collections: Vec<String> = Vec::new();
-    let mut upsert_rkeys: Vec<String> = Vec::new();
-    let mut upsert_cids: Vec<String> = Vec::new();
-    let mut delete_collections: Vec<String> = Vec::new();
-    let mut delete_rkeys: Vec<String> = Vec::new();
-    for op in &ops {
-        match op {
-            RecordOp::Create {
-                collection,
-                rkey,
-                cid,
-            }
-            | RecordOp::Update {
-                collection,
-                rkey,
-                cid,
-                ..
-            } => {
-                upsert_collections.push(collection.clone());
-                upsert_rkeys.push(rkey.clone());
-                upsert_cids.push(cid.to_string());
-            }
+    let (upserts, deletes): (Vec<_>, Vec<_>) = ops.iter().partition(|op| {
+        matches!(op, RecordOp::Create { .. } | RecordOp::Update { .. })
+    });
+    let (upsert_collections, upsert_rkeys, upsert_cids): (Vec<String>, Vec<String>, Vec<String>) =
+        upserts
+            .into_iter()
+            .filter_map(|op| match op {
+                RecordOp::Create {
+                    collection,
+                    rkey,
+                    cid,
+                }
+                | RecordOp::Update {
+                    collection,
+                    rkey,
+                    cid,
+                    ..
+                } => Some((collection.to_string(), rkey.to_string(), cid.to_string())),
+                _ => None,
+            })
+            .fold(
+                (Vec::new(), Vec::new(), Vec::new()),
+                |(mut cols, mut rkeys, mut cids), (c, r, ci)| {
+                    cols.push(c);
+                    rkeys.push(r);
+                    cids.push(ci);
+                    (cols, rkeys, cids)
+                },
+            );
+    let (delete_collections, delete_rkeys): (Vec<String>, Vec<String>) = deletes
+        .into_iter()
+        .filter_map(|op| match op {
             RecordOp::Delete {
                 collection, rkey, ..
-            } => {
-                delete_collections.push(collection.clone());
-                delete_rkeys.push(rkey.clone());
-            }
-        }
-    }
+            } => Some((collection.to_string(), rkey.to_string())),
+            _ => None,
+        })
+        .unzip();
     if !upsert_collections.is_empty() {
         sqlx::query!(
             r#"
@@ -337,7 +346,7 @@ pub async fn commit_and_log(
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING seq
             "#,
-            did,
+            did.as_str(),
             event_type,
             new_root_cid.to_string(),
             prev_cid_str,
@@ -367,15 +376,15 @@ pub async fn commit_and_log(
 }
 pub async fn create_record_internal(
     state: &AppState,
-    did: &str,
-    collection: &str,
-    rkey: &str,
+    did: &Did,
+    collection: &Nsid,
+    rkey: &Rkey,
     record: &serde_json::Value,
 ) -> Result<(String, Cid), String> {
     use crate::repo::tracking::TrackingBlockStore;
     use jacquard_repo::mst::Mst;
     use std::sync::Arc;
-    let user_id: Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+    let user_id: Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
         .fetch_optional(&state.db)
         .await
         .map_err(|e| format!("DB error: {}", e))?
@@ -417,8 +426,8 @@ pub async fn create_record_internal(
         .await
         .map_err(|e| format!("Failed to persist MST: {:?}", e))?;
     let op = RecordOp::Create {
-        collection: collection.to_string(),
-        rkey: rkey.to_string(),
+        collection: collection.clone(),
+        rkey: rkey.clone(),
         cid: record_cid,
     };
     let mut new_mst_blocks = std::collections::BTreeMap::new();
@@ -471,81 +480,105 @@ pub async fn create_record_internal(
 
 pub async fn sequence_identity_event(
     state: &AppState,
-    did: &str,
-    handle: Option<&str>,
+    did: &Did,
+    handle: Option<&Handle>,
 ) -> Result<i64, String> {
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
     let seq_row = sqlx::query!(
         r#"
         INSERT INTO repo_seq (did, event_type, handle)
         VALUES ($1, 'identity', $2)
         RETURNING seq
         "#,
-        did,
-        handle,
+        did.as_str(),
+        handle.map(|h| h.as_str()),
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (repo_seq identity): {}", e))?;
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("DB Error (notify): {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
     Ok(seq_row.seq)
 }
 pub async fn sequence_account_event(
     state: &AppState,
-    did: &str,
+    did: &Did,
     active: bool,
     status: Option<&str>,
 ) -> Result<i64, String> {
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
     let seq_row = sqlx::query!(
         r#"
         INSERT INTO repo_seq (did, event_type, active, status)
         VALUES ($1, 'account', $2, $3)
         RETURNING seq
         "#,
-        did,
+        did.as_str(),
         active,
         status,
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (repo_seq account): {}", e))?;
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("DB Error (notify): {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
     Ok(seq_row.seq)
 }
 pub async fn sequence_sync_event(
     state: &AppState,
-    did: &str,
+    did: &Did,
     commit_cid: &str,
     rev: Option<&str>,
 ) -> Result<i64, String> {
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
     let seq_row = sqlx::query!(
         r#"
         INSERT INTO repo_seq (did, event_type, commit_cid, rev)
         VALUES ($1, 'sync', $2, $3)
         RETURNING seq
         "#,
-        did,
+        did.as_str(),
         commit_cid,
         rev,
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (repo_seq sync): {}", e))?;
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("DB Error (notify): {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
     Ok(seq_row.seq)
 }
 
 pub async fn sequence_genesis_commit(
     state: &AppState,
-    did: &str,
+    did: &Did,
     commit_cid: &Cid,
     mst_root_cid: &Cid,
     rev: &str,
@@ -555,13 +588,18 @@ pub async fn sequence_genesis_commit(
     let blocks_cids: Vec<String> = vec![mst_root_cid.to_string(), commit_cid.to_string()];
     let prev_cid: Option<&str> = None;
     let commit_cid_str = commit_cid.to_string();
+    let mut tx = state
+        .db
+        .begin()
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
     let seq_row = sqlx::query!(
         r#"
         INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, rev)
         VALUES ($1, 'commit', $2, $3::TEXT, $4, $5, $6, $7)
         RETURNING seq
         "#,
-        did,
+        did.as_str(),
         commit_cid_str,
         prev_cid,
         ops,
@@ -569,12 +607,15 @@ pub async fn sequence_genesis_commit(
         &blocks_cids,
         rev
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| format!("DB Error (repo_seq genesis commit): {}", e))?;
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("DB Error (notify): {}", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
     Ok(seq_row.seq)
 }

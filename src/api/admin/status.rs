@@ -1,6 +1,7 @@
 use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
+use crate::types::Did;
 use axum::{
     Json,
     extract::{Query, State},
@@ -183,8 +184,9 @@ pub async fn update_subject_status(
     let subject_type = input.subject.get("$type").and_then(|t| t.as_str());
     match subject_type {
         Some("com.atproto.admin.defs#repoRef") => {
-            let did = input.subject.get("did").and_then(|d| d.as_str());
-            if let Some(did) = did {
+            let did_str = input.subject.get("did").and_then(|d| d.as_str());
+            if let Some(did_str) = did_str {
+                let did = Did::new_unchecked(did_str);
                 let mut tx = match state.db.begin().await {
                     Ok(tx) => tx,
                     Err(e) => {
@@ -201,7 +203,7 @@ pub async fn update_subject_status(
                     if let Err(e) = sqlx::query!(
                         "UPDATE users SET takedown_ref = $1 WHERE did = $2",
                         takedown_ref,
-                        did
+                        did.as_str()
                     )
                     .execute(&mut *tx)
                     .await
@@ -217,12 +219,12 @@ pub async fn update_subject_status(
                     let result = if deactivated.applied {
                         sqlx::query!(
                             "UPDATE users SET deactivated_at = NOW() WHERE did = $1",
-                            did
+                            did.as_str()
                         )
                         .execute(&mut *tx)
                         .await
                     } else {
-                        sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did)
+                        sqlx::query!("UPDATE users SET deactivated_at = NULL WHERE did = $1", did.as_str())
                             .execute(&mut *tx)
                             .await
                     };
@@ -249,7 +251,7 @@ pub async fn update_subject_status(
                     };
                     if let Err(e) = crate::api::repo::record::sequence_account_event(
                         &state,
-                        did,
+                        &did,
                         !takedown.applied,
                         status,
                     )
@@ -266,7 +268,7 @@ pub async fn update_subject_status(
                     };
                     if let Err(e) = crate::api::repo::record::sequence_account_event(
                         &state,
-                        did,
+                        &did,
                         !deactivated.applied,
                         status,
                     )
@@ -276,7 +278,7 @@ pub async fn update_subject_status(
                     }
                 }
                 if let Ok(Some(handle)) =
-                    sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did)
+                    sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did.as_str())
                         .fetch_optional(&state.db)
                         .await
                 {

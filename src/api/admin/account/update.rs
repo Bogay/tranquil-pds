@@ -2,7 +2,7 @@ use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
 use crate::auth::BearerAuthAdmin;
 use crate::state::AppState;
-use crate::types::{Did, PlainPassword};
+use crate::types::{Did, Handle, PlainPassword};
 use axum::{
     Json,
     extract::State,
@@ -103,10 +103,11 @@ pub async fn update_account_handle(
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+            let handle_typed = Handle::new_unchecked(&handle);
             if let Err(e) = crate::api::repo::record::sequence_identity_event(
                 &state,
-                did.as_str(),
-                Some(&handle),
+                did,
+                Some(&handle_typed),
             )
             .await
             {

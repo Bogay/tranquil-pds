@@ -132,7 +132,7 @@ pub async fn delete_account(
     }
     if let Err(e) = crate::api::repo::record::sequence_account_event(
         &state,
-        did.as_str(),
+        did,
         false,
         Some("deleted"),
     )

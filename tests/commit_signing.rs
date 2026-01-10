@@ -3,6 +3,7 @@ use jacquard::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
 use k256::ecdsa::SigningKey;
 use std::str::FromStr;
+use tranquil_pds::Did;
 
 #[test]
 fn test_commit_signing_produces_valid_signature() {
@@ -98,12 +99,12 @@ fn test_create_signed_commit_helper() {
     use tranquil_pds::api::repo::record::utils::create_signed_commit;
 
     let signing_key = SigningKey::random(&mut rand::thread_rng());
-    let did = "did:plc:testuser123456789abcdef";
+    let did = Did::new_unchecked("did:plc:testuser123456789abcdef");
     let data_cid =
         Cid::from_str("bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi").unwrap();
     let rev = Tid::now(LimitedU32::MIN).to_string();
 
-    let (signed_bytes, sig) = create_signed_commit(did, data_cid, &rev, None, &signing_key)
+    let (signed_bytes, sig) = create_signed_commit(&did, data_cid, &rev, None, &signing_key)
         .expect("signing should succeed");
 
     assert!(!signed_bytes.is_empty());

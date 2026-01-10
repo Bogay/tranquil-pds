@@ -6,7 +6,7 @@ use crate::auth::BearerAuth;
 use crate::delegation::{self, DelegationActionType};
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
-use crate::types::{AtIdentifier, AtUri, Nsid, Rkey};
+use crate::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
 use axum::{
     Json,
     extract::State,
@@ -22,6 +22,183 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 const MAX_BATCH_WRITES: usize = 200;
+
+struct WriteAccumulator {
+    mst: Mst<TrackingBlockStore>,
+    results: Vec<WriteResult>,
+    ops: Vec<RecordOp>,
+    modified_keys: Vec<String>,
+    all_blob_cids: Vec<String>,
+}
+
+async fn process_single_write(
+    write: &WriteOp,
+    acc: WriteAccumulator,
+    did: &Did,
+    validate: Option<bool>,
+    tracking_store: &TrackingBlockStore,
+) -> Result<WriteAccumulator, Response> {
+    let WriteAccumulator {
+        mst,
+        mut results,
+        mut ops,
+        mut modified_keys,
+        mut all_blob_cids,
+    } = acc;
+
+    match write {
+        WriteOp::Create {
+            collection,
+            rkey,
+            value,
+        } => {
+            let validation_status = match validate {
+                Some(false) => None,
+                _ => {
+                    let require_lexicon = validate == Some(true);
+                    match validate_record_with_status(
+                        value,
+                        collection,
+                        rkey.as_ref(),
+                        require_lexicon,
+                    ) {
+                        Ok(status) => Some(status),
+                        Err(err_response) => return Err(*err_response),
+                    }
+                }
+            };
+            all_blob_cids.extend(extract_blob_cids(value));
+            let rkey = rkey.clone().unwrap_or_else(Rkey::generate);
+            let record_ipld = crate::util::json_to_ipld(value);
+            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld).map_err(|_| {
+                ApiError::InvalidRecord("Failed to serialize record".into()).into_response()
+            })?;
+            let record_cid = tracking_store.put(&record_bytes).await.map_err(|_| {
+                ApiError::InternalError(Some("Failed to store record".into())).into_response()
+            })?;
+            let key = format!("{}/{}", collection, rkey);
+            modified_keys.push(key.clone());
+            let new_mst = mst.add(&key, record_cid).await.map_err(|_| {
+                ApiError::InternalError(Some("Failed to add to MST".into())).into_response()
+            })?;
+            let uri = AtUri::from_parts(did, collection, &rkey);
+            results.push(WriteResult::CreateResult {
+                uri,
+                cid: record_cid.to_string(),
+                validation_status: validation_status.map(|s| s.to_string()),
+            });
+            ops.push(RecordOp::Create {
+                collection: collection.clone(),
+                rkey: rkey.clone(),
+                cid: record_cid,
+            });
+            Ok(WriteAccumulator {
+                mst: new_mst,
+                results,
+                ops,
+                modified_keys,
+                all_blob_cids,
+            })
+        }
+        WriteOp::Update {
+            collection,
+            rkey,
+            value,
+        } => {
+            let validation_status = match validate {
+                Some(false) => None,
+                _ => {
+                    let require_lexicon = validate == Some(true);
+                    match validate_record_with_status(
+                        value,
+                        collection,
+                        Some(rkey),
+                        require_lexicon,
+                    ) {
+                        Ok(status) => Some(status),
+                        Err(err_response) => return Err(*err_response),
+                    }
+                }
+            };
+            all_blob_cids.extend(extract_blob_cids(value));
+            let record_ipld = crate::util::json_to_ipld(value);
+            let record_bytes = serde_ipld_dagcbor::to_vec(&record_ipld).map_err(|_| {
+                ApiError::InvalidRecord("Failed to serialize record".into()).into_response()
+            })?;
+            let record_cid = tracking_store.put(&record_bytes).await.map_err(|_| {
+                ApiError::InternalError(Some("Failed to store record".into())).into_response()
+            })?;
+            let key = format!("{}/{}", collection, rkey);
+            modified_keys.push(key.clone());
+            let prev_record_cid = mst.get(&key).await.ok().flatten();
+            let new_mst = mst.update(&key, record_cid).await.map_err(|_| {
+                ApiError::InternalError(Some("Failed to update MST".into())).into_response()
+            })?;
+            let uri = AtUri::from_parts(did, collection, rkey);
+            results.push(WriteResult::UpdateResult {
+                uri,
+                cid: record_cid.to_string(),
+                validation_status: validation_status.map(|s| s.to_string()),
+            });
+            ops.push(RecordOp::Update {
+                collection: collection.clone(),
+                rkey: rkey.clone(),
+                cid: record_cid,
+                prev: prev_record_cid,
+            });
+            Ok(WriteAccumulator {
+                mst: new_mst,
+                results,
+                ops,
+                modified_keys,
+                all_blob_cids,
+            })
+        }
+        WriteOp::Delete { collection, rkey } => {
+            let key = format!("{}/{}", collection, rkey);
+            modified_keys.push(key.clone());
+            let prev_record_cid = mst.get(&key).await.ok().flatten();
+            let new_mst = mst.delete(&key).await.map_err(|_| {
+                ApiError::InternalError(Some("Failed to delete from MST".into())).into_response()
+            })?;
+            results.push(WriteResult::DeleteResult {});
+            ops.push(RecordOp::Delete {
+                collection: collection.clone(),
+                rkey: rkey.clone(),
+                prev: prev_record_cid,
+            });
+            Ok(WriteAccumulator {
+                mst: new_mst,
+                results,
+                ops,
+                modified_keys,
+                all_blob_cids,
+            })
+        }
+    }
+}
+
+async fn process_writes(
+    writes: &[WriteOp],
+    initial_mst: Mst<TrackingBlockStore>,
+    did: &Did,
+    validate: Option<bool>,
+    tracking_store: &TrackingBlockStore,
+) -> Result<WriteAccumulator, Response> {
+    use futures::stream::{self, TryStreamExt};
+    let initial_acc = WriteAccumulator {
+        mst: initial_mst,
+        results: Vec::new(),
+        ops: Vec::new(),
+        modified_keys: Vec::new(),
+        all_blob_cids: Vec::new(),
+    };
+    stream::iter(writes.iter().map(Ok::<_, Response>))
+        .try_fold(initial_acc, |acc, write| async move {
+            process_single_write(write, acc, did, validate, tracking_store).await
+        })
+        .await
+}
 
 #[derive(Deserialize)]
 #[serde(tag = "$type")]
@@ -237,144 +414,18 @@ pub async fn apply_writes(
         _ => return ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
     };
     let original_mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
-    let mut mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
-    let mut results: Vec<WriteResult> = Vec::new();
-    let mut ops: Vec<RecordOp> = Vec::new();
-    let mut modified_keys: Vec<String> = Vec::new();
-    let mut all_blob_cids: Vec<String> = Vec::new();
-    for write in &input.writes {
-        match write {
-            WriteOp::Create {
-                collection,
-                rkey,
-                value,
-            } => {
-                let validation_status = if input.validate == Some(false) {
-                    None
-                } else {
-                    let require_lexicon = input.validate == Some(true);
-                    match validate_record_with_status(
-                        value,
-                        collection,
-                        rkey.as_ref().map(|r| r.as_str()),
-                        require_lexicon,
-                    ) {
-                        Ok(status) => Some(status),
-                        Err(err_response) => return *err_response,
-                    }
-                };
-                all_blob_cids.extend(extract_blob_cids(value));
-                let rkey = rkey.clone().unwrap_or_else(Rkey::generate);
-                let record_ipld = crate::util::json_to_ipld(value);
-                let mut record_bytes = Vec::new();
-                if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
-                    return ApiError::InvalidRecord("Failed to serialize record".into())
-                        .into_response();
-                }
-                let record_cid = match tracking_store.put(&record_bytes).await {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return ApiError::InternalError(Some("Failed to store record".into()))
-                            .into_response();
-                    }
-                };
-                let key = format!("{}/{}", collection, rkey);
-                modified_keys.push(key.clone());
-                mst = match mst.add(&key, record_cid).await {
-                    Ok(m) => m,
-                    Err(_) => {
-                        return ApiError::InternalError(Some("Failed to add to MST".into()))
-                            .into_response();
-                    }
-                };
-                let uri = AtUri::from_parts(&did, collection, &rkey);
-                results.push(WriteResult::CreateResult {
-                    uri,
-                    cid: record_cid.to_string(),
-                    validation_status: validation_status.map(|s| s.to_string()),
-                });
-                ops.push(RecordOp::Create {
-                    collection: collection.to_string(),
-                    rkey: rkey.to_string(),
-                    cid: record_cid,
-                });
-            }
-            WriteOp::Update {
-                collection,
-                rkey,
-                value,
-            } => {
-                let validation_status = if input.validate == Some(false) {
-                    None
-                } else {
-                    let require_lexicon = input.validate == Some(true);
-                    match validate_record_with_status(
-                        value,
-                        collection,
-                        Some(rkey.as_str()),
-                        require_lexicon,
-                    ) {
-                        Ok(status) => Some(status),
-                        Err(err_response) => return *err_response,
-                    }
-                };
-                all_blob_cids.extend(extract_blob_cids(value));
-                let record_ipld = crate::util::json_to_ipld(value);
-                let mut record_bytes = Vec::new();
-                if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
-                    return ApiError::InvalidRecord("Failed to serialize record".into())
-                        .into_response();
-                }
-                let record_cid = match tracking_store.put(&record_bytes).await {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return ApiError::InternalError(Some("Failed to store record".into()))
-                            .into_response();
-                    }
-                };
-                let key = format!("{}/{}", collection, rkey);
-                modified_keys.push(key.clone());
-                let prev_record_cid = mst.get(&key).await.ok().flatten();
-                mst = match mst.update(&key, record_cid).await {
-                    Ok(m) => m,
-                    Err(_) => {
-                        return ApiError::InternalError(Some("Failed to update MST".into()))
-                            .into_response();
-                    }
-                };
-                let uri = AtUri::from_parts(&did, collection, rkey);
-                results.push(WriteResult::UpdateResult {
-                    uri,
-                    cid: record_cid.to_string(),
-                    validation_status: validation_status.map(|s| s.to_string()),
-                });
-                ops.push(RecordOp::Update {
-                    collection: collection.to_string(),
-                    rkey: rkey.to_string(),
-                    cid: record_cid,
-                    prev: prev_record_cid,
-                });
-            }
-            WriteOp::Delete { collection, rkey } => {
-                let key = format!("{}/{}", collection, rkey);
-                modified_keys.push(key.clone());
-                let prev_record_cid = mst.get(&key).await.ok().flatten();
-                mst = match mst.delete(&key).await {
-                    Ok(m) => m,
-                    Err(_) => {
-                        return ApiError::InternalError(Some("Failed to delete from MST".into()))
-                            .into_response();
-                    }
-                };
-                results.push(WriteResult::DeleteResult {});
-                ops.push(RecordOp::Delete {
-                    collection: collection.to_string(),
-                    rkey: rkey.to_string(),
-                    prev: prev_record_cid,
-                });
-            }
-        }
-    }
+    let initial_mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+    let WriteAccumulator {
+        mst,
+        results,
+        ops,
+        modified_keys,
+        all_blob_cids,
+    } = match process_writes(&input.writes, initial_mst, &did, input.validate, &tracking_store).await
+    {
+        Ok(acc) => acc,
+        Err(response) => return response,
+    };
     let new_mst_root = match mst.persist().await {
         Ok(c) => c,
         Err(_) => {

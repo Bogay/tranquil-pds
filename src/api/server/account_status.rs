@@ -3,7 +3,7 @@ use crate::api::error::ApiError;
 use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
-use crate::types::PlainPassword;
+use crate::types::{Handle, PlainPassword};
 use axum::{
     Json,
     extract::State,
@@ -449,7 +449,7 @@ pub async fn activate_account(
                 did
             );
             if let Err(e) =
-                crate::api::repo::record::sequence_account_event(&state, did.as_str(), true, None)
+                crate::api::repo::record::sequence_account_event(&state, &did, true, None)
                     .await
             {
                 warn!(
@@ -463,10 +463,11 @@ pub async fn activate_account(
                 "[MIGRATION] activateAccount: Sequencing identity event for did={} handle={:?}",
                 did, handle
             );
+            let handle_typed = handle.as_ref().map(|h| Handle::new_unchecked(h));
             if let Err(e) = crate::api::repo::record::sequence_identity_event(
                 &state,
-                did.as_str(),
-                handle.as_deref(),
+                &did,
+                handle_typed.as_ref(),
             )
             .await
             {
@@ -501,7 +502,7 @@ pub async fn activate_account(
                 };
                 if let Err(e) = crate::api::repo::record::sequence_sync_event(
                     &state,
-                    did.as_str(),
+                    &did,
                     &root_cid,
                     rev.as_deref(),
                 )
@@ -609,7 +610,7 @@ pub async fn deactivate_account(
             }
             if let Err(e) = crate::api::repo::record::sequence_account_event(
                 &state,
-                did.as_str(),
+                &did,
                 false,
                 Some("deactivated"),
             )

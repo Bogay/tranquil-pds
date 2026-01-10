@@ -2,6 +2,7 @@ use crate::api::{ApiError, DidResponse, EmptyResponse};
 use crate::auth::BearerAuthAllowDeactivated;
 use crate::plc::signing_key_to_did_key;
 use crate::state::AppState;
+use crate::types::Handle;
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -669,8 +670,9 @@ pub async fn update_handle(
             format!("{}.{}", new_handle, hostname)
         };
         if full_handle == current_handle {
+            let handle_typed = Handle::new_unchecked(&full_handle);
             if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&full_handle))
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
                     .await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
@@ -692,8 +694,9 @@ pub async fn update_handle(
         full_handle
     } else {
         if new_handle == current_handle {
+            let handle_typed = Handle::new_unchecked(&new_handle);
             if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&new_handle))
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
                     .await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
@@ -749,8 +752,9 @@ pub async fn update_handle(
                     .await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+            let handle_typed = Handle::new_unchecked(&handle);
             if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
+                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed)).await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }

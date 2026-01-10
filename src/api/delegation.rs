@@ -4,7 +4,7 @@ use crate::auth::BearerAuth;
 use crate::delegation::{self, DelegationActionType};
 use crate::oauth::db as oauth_db;
 use crate::state::{AppState, RateLimitKind};
-use crate::types::{Did, Handle};
+use crate::types::{Did, Handle, Nsid, Rkey};
 use crate::util::extract_client_ip;
 use axum::{
     Json,
@@ -568,7 +568,8 @@ pub async fn create_delegated_account(
         .into_response();
     }
 
-    let did = genesis_result.did;
+    let did = Did::new_unchecked(&genesis_result.did);
+    let handle = Handle::new_unchecked(&handle);
     info!(did = %did, handle = %handle, controller = %&auth.0.did, "Created DID for delegated account");
 
     let mut tx = match state.db.begin().await {
@@ -585,9 +586,9 @@ pub async fn create_delegated_account(
             account_type, preferred_comms_channel
         ) VALUES ($1, $2, $3, NULL, FALSE, 'delegated'::account_type, 'email'::comms_channel) RETURNING id"#,
     )
-    .bind(&handle)
+    .bind(handle.as_str())
     .bind(&email)
-    .bind(&did)
+    .bind(did.as_str())
     .fetch_one(&mut *tx)
     .await;
 
@@ -633,10 +634,10 @@ pub async fn create_delegated_account(
     if let Err(e) = sqlx::query!(
         r#"INSERT INTO account_delegations (delegated_did, controller_did, granted_scopes, granted_by)
            VALUES ($1, $2, $3, $4)"#,
-        did,
-        &auth.0.did,
+        did.as_str(),
+        auth.0.did.as_str(),
         input.controller_scopes,
-        &auth.0.did
+        auth.0.did.as_str()
     )
     .execute(&mut *tx)
     .await
@@ -736,11 +737,13 @@ pub async fn create_delegated_account(
         "$type": "app.bsky.actor.profile",
         "displayName": handle
     });
+    let profile_collection = Nsid::new_unchecked("app.bsky.actor.profile");
+    let profile_rkey = Rkey::new_unchecked("self");
     if let Err(e) = crate::api::repo::record::create_record_internal(
         &state,
         &did,
-        "app.bsky.actor.profile",
-        "self",
+        &profile_collection,
+        &profile_rkey,
         &profile_record,
     )
     .await

@@ -65,13 +65,6 @@ pub async fn delete_record(
         return e;
     }
 
-    if crate::util::is_account_migrated(&state.db, &auth.did)
-        .await
-        .unwrap_or(false)
-    {
-        return ApiError::AccountMigrated.into_response();
-    }
-
     let did = auth.did;
     let user_id = auth.user_id;
     let current_root_cid = auth.current_root_cid;
@@ -125,8 +118,8 @@ pub async fn delete_record(
     let collection_for_audit = input.collection.to_string();
     let rkey_for_audit = input.rkey.to_string();
     let op = RecordOp::Delete {
-        collection: input.collection.to_string(),
-        rkey: rkey_for_audit.clone(),
+        collection: input.collection.clone(),
+        rkey: input.rkey.clone(),
         prev: prev_record_cid,
     };
     let mut new_mst_blocks = std::collections::BTreeMap::new();

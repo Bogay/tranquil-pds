@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
 
-pub async fn has_verified_comms_channel(db: &PgPool, did: &str) -> Result<bool, sqlx::Error> {
+pub async fn has_verified_comms_channel(db: &PgPool, did: &Did) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -33,7 +33,7 @@ pub async fn has_verified_comms_channel(db: &PgPool, did: &str) -> Result<bool, 
         WHERE did = $1
         "#,
     )
-    .bind(did)
+    .bind(did.as_str())
     .fetch_optional(db)
     .await?;
     match row {
@@ -60,7 +60,7 @@ pub struct RepoWriteAuth {
 pub async fn prepare_repo_write(
     state: &AppState,
     headers: &HeaderMap,
-    repo_did: &str,
+    repo: &AtIdentifier,
     http_method: &str,
     http_uri: &str,
 ) -> Result<RepoWriteAuth, Response> {
@@ -96,7 +96,7 @@ pub async fn prepare_repo_write(
         }
         response
     })?;
-    if repo_did != auth_user.did {
+    if repo.as_str() != auth_user.did.as_str() {
         return Err(
             ApiError::InvalidRepo("Repo does not match authenticated user".into()).into_response(),
         );
@@ -229,7 +229,7 @@ pub async fn create_record(
         match validate_record_with_status(
             &input.record,
             &input.collection,
-            input.rkey.as_ref().map(|r| r.as_str()),
+            input.rkey.as_ref(),
             require_lexicon,
         ) {
             Ok(status) => Some(status),
@@ -259,8 +259,8 @@ pub async fn create_record(
         _ => return ApiError::InternalError(Some("Failed to persist MST".into())).into_response(),
     };
     let op = RecordOp::Create {
-        collection: input.collection.to_string(),
-        rkey: rkey.to_string(),
+        collection: input.collection.clone(),
+        rkey: rkey.clone(),
         cid: record_cid,
     };
     let mut new_mst_blocks = std::collections::BTreeMap::new();
@@ -443,7 +443,7 @@ pub async fn put_record(
         match validate_record_with_status(
             &input.record,
             &input.collection,
-            Some(input.rkey.as_str()),
+            Some(&input.rkey),
             require_lexicon,
         ) {
             Ok(status) => Some(status),
@@ -510,15 +510,15 @@ pub async fn put_record(
     };
     let op = if existing_cid.is_some() {
         RecordOp::Update {
-            collection: input.collection.to_string(),
-            rkey: input.rkey.to_string(),
+            collection: input.collection.clone(),
+            rkey: input.rkey.clone(),
             cid: record_cid,
             prev: existing_cid,
         }
     } else {
         RecordOp::Create {
-            collection: input.collection.to_string(),
-            rkey: input.rkey.to_string(),
+            collection: input.collection.clone(),
+            rkey: input.rkey.clone(),
             cid: record_cid,
         }
     };
