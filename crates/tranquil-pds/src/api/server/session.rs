@@ -949,16 +949,16 @@ pub async fn list_sessions(
         }
     };
 
-    let jwt_sessions = jwt_rows.into_iter().map(|(id, access_jti, created_at, expires_at)| {
-        SessionInfo {
+    let jwt_sessions = jwt_rows
+        .into_iter()
+        .map(|(id, access_jti, created_at, expires_at)| SessionInfo {
             id: format!("jwt:{}", id),
             session_type: "legacy".to_string(),
             client_name: None,
             created_at: created_at.to_rfc3339(),
             expires_at: expires_at.to_rfc3339(),
             is_current: current_jti.as_ref() == Some(&access_jti),
-        }
-    });
+        });
 
     let is_oauth = auth.0.is_oauth;
     let oauth_sessions =

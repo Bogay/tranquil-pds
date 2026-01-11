@@ -203,7 +203,9 @@ async fn assert_valid_did_document_for_service(
                     Ok(data) => {
                         let pds_endpoint = data
                             .get("services")
-                            .and_then(|s: &serde_json::Value| s.get("atproto_pds").or_else(|| s.get("atprotoPds")))
+                            .and_then(|s: &serde_json::Value| {
+                                s.get("atproto_pds").or_else(|| s.get("atprotoPds"))
+                            })
                             .and_then(|p: &serde_json::Value| p.get("endpoint"))
                             .and_then(|e: &serde_json::Value| e.as_str());
 

@@ -142,9 +142,9 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         return Err(OAuthError::ExpiredToken("Token has expired".to_string()));
     }
     let token_id = payload
-        .get("jti")
+        .get("sid")
         .and_then(|j| j.as_str())
-        .ok_or_else(|| OAuthError::InvalidToken("Missing jti claim".to_string()))?
+        .ok_or_else(|| OAuthError::InvalidToken("Missing sid claim".to_string()))?
         .to_string();
     let did = payload
         .get("sub")

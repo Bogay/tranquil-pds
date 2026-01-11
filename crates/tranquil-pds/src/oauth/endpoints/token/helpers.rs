@@ -11,6 +11,7 @@ const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 300;
 
 pub struct TokenClaims {
     pub jti: String,
+    pub sid: String,
     pub exp: i64,
     pub iat: i64,
 }
@@ -33,22 +34,23 @@ pub fn verify_pkce(code_challenge: &str, code_verifier: &str) -> Result<(), OAut
 }
 
 pub fn create_access_token(
-    token_id: &str,
+    session_id: &str,
     sub: &str,
     dpop_jkt: Option<&str>,
     scope: Option<&str>,
 ) -> Result<String, OAuthError> {
-    create_access_token_with_delegation(token_id, sub, dpop_jkt, scope, None)
+    create_access_token_with_delegation(session_id, sub, dpop_jkt, scope, None)
 }
 
 pub fn create_access_token_with_delegation(
-    token_id: &str,
+    session_id: &str,
     sub: &str,
     dpop_jkt: Option<&str>,
     scope: Option<&str>,
     controller_did: Option<&str>,
 ) -> Result<String, OAuthError> {
     use serde_json::json;
+    let jti = uuid::Uuid::new_v4().to_string();
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let issuer = format!("https://{}", pds_hostname);
     let now = Utc::now().timestamp();
@@ -60,7 +62,8 @@ pub fn create_access_token_with_delegation(
         "aud": issuer,
         "iat": now,
         "exp": exp,
-        "jti": token_id,
+        "jti": jti,
+        "sid": session_id,
         "scope": actual_scope
     });
     if let Some(jkt) = dpop_jkt {
@@ -132,6 +135,11 @@ pub fn extract_token_claims(token: &str) -> Result<TokenClaims, OAuthError> {
         .and_then(|j| j.as_str())
         .ok_or_else(|| OAuthError::InvalidToken("Missing jti claim".to_string()))?
         .to_string();
+    let sid = payload
+        .get("sid")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| OAuthError::InvalidToken("Missing sid claim".to_string()))?
+        .to_string();
     let exp = payload
         .get("exp")
         .and_then(|e| e.as_i64())
@@ -140,5 +148,5 @@ pub fn extract_token_claims(token: &str) -> Result<TokenClaims, OAuthError> {
         .get("iat")
         .and_then(|i| i.as_i64())
         .ok_or_else(|| OAuthError::InvalidToken("Missing iat claim".to_string()))?;
-    Ok(TokenClaims { jti, exp, iat })
+    Ok(TokenClaims { jti, sid, exp, iat })
 }

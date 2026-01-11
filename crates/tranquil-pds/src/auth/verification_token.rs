@@ -296,15 +296,14 @@ pub fn verify_token_signature(token: &str) -> Result<VerificationToken, VerifyEr
 }
 
 pub fn format_token_for_display(token: &str) -> String {
-    let clean = token.replace(['-', ' '], "");
-    let mut result = String::new();
-    for (i, c) in clean.chars().enumerate() {
-        if i > 0 && i % 4 == 0 {
-            result.push('-');
-        }
-        result.push(c);
-    }
-    result
+    token
+        .replace(['-', ' '], "")
+        .chars()
+        .collect::<Vec<_>>()
+        .chunks(4)
+        .map(|chunk| chunk.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 pub fn normalize_token_input(input: &str) -> String {

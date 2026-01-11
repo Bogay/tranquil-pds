@@ -115,11 +115,11 @@ pub async fn update_did_document(
         }
     }
 
-    if let Some(ref handles) = input.also_known_as {
-        if handles.iter().any(|h| !h.starts_with("at://")) {
-            return ApiError::InvalidRequest("alsoKnownAs entries must be at:// URIs".into())
-                .into_response();
-        }
+    if let Some(ref handles) = input.also_known_as
+        && handles.iter().any(|h| !h.starts_with("at://"))
+    {
+        return ApiError::InvalidRequest("alsoKnownAs entries must be at:// URIs".into())
+            .into_response();
     }
 
     if let Some(ref endpoint) = input.service_endpoint {

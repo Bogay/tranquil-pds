@@ -210,13 +210,11 @@ async fn write_car_blocks(
     let mut buffer = Cursor::new(Vec::new());
     let header = CarHeader::new_v1(vec![commit_cid]);
     let mut writer = CarWriter::new(header, &mut buffer);
-    for (cid, data) in other_blocks {
-        if cid != commit_cid {
-            writer
-                .write(cid, data.as_ref())
-                .await
-                .map_err(|e| anyhow::anyhow!("writing block {}: {}", cid, e))?;
-        }
+    for (cid, data) in other_blocks.iter().filter(|(c, _)| **c != commit_cid) {
+        writer
+            .write(*cid, data.as_ref())
+            .await
+            .map_err(|e| anyhow::anyhow!("writing block {}: {}", cid, e))?;
     }
     if let Some(data) = commit_bytes {
         writer
@@ -360,20 +358,18 @@ pub async fn format_event_for_sending(
     }
     let car_bytes = if !all_cids.is_empty() {
         let fetched = state.block_store.get_many(&all_cids).await?;
-        let mut blocks = std::collections::BTreeMap::new();
-        let mut commit_bytes: Option<Bytes> = None;
-        for (cid, data_opt) in all_cids.iter().zip(fetched.iter()) {
-            if let Some(data) = data_opt {
-                if *cid == commit_cid {
-                    commit_bytes = Some(data.clone());
-                    if let Some(rev) = extract_rev_from_commit_bytes(data) {
-                        frame.rev = rev;
-                    }
-                } else {
-                    blocks.insert(*cid, data.clone());
-                }
-            }
+        let (commit_data, other_blocks): (Vec<_>, Vec<_>) = all_cids
+            .iter()
+            .zip(fetched.iter())
+            .filter_map(|(cid, data_opt)| data_opt.as_ref().map(|data| (*cid, data.clone())))
+            .partition(|(cid, _)| *cid == commit_cid);
+        let commit_bytes = commit_data.into_iter().next().map(|(_, data)| data);
+        if let Some(ref cb) = commit_bytes
+            && let Some(rev) = extract_rev_from_commit_bytes(cb)
+        {
+            frame.rev = rev;
         }
+        let blocks: std::collections::BTreeMap<Cid, Bytes> = other_blocks.into_iter().collect();
         write_car_blocks(commit_cid, commit_bytes, blocks).await?
     } else {
         Vec::new()
@@ -393,38 +389,33 @@ pub async fn prefetch_blocks_for_events(
     state: &AppState,
     events: &[SequencedEvent],
 ) -> Result<HashMap<Cid, Bytes>, anyhow::Error> {
-    let mut all_cids: Vec<Cid> = Vec::new();
-    for event in events {
-        if let Some(ref commit_cid_str) = event.commit_cid
-            && let Ok(cid) = Cid::from_str(commit_cid_str)
-        {
-            all_cids.push(cid);
-        }
-        if let Some(ref prev_cid_str) = event.prev_cid
-            && let Ok(cid) = Cid::from_str(prev_cid_str)
-        {
-            all_cids.push(cid);
-        }
-        if let Some(ref block_cids_str) = event.blocks_cids {
-            for s in block_cids_str {
-                if let Ok(cid) = Cid::from_str(s) {
-                    all_cids.push(cid);
-                }
-            }
-        }
-    }
+    let mut all_cids: Vec<Cid> = events
+        .iter()
+        .flat_map(|event| {
+            let commit_cid = event
+                .commit_cid
+                .as_ref()
+                .and_then(|s| Cid::from_str(s).ok());
+            let prev_cid = event.prev_cid.as_ref().and_then(|s| Cid::from_str(s).ok());
+            let block_cids = event
+                .blocks_cids
+                .as_ref()
+                .map(|cids| cids.iter().filter_map(|s| Cid::from_str(s).ok()).collect())
+                .unwrap_or_else(Vec::new);
+            commit_cid.into_iter().chain(prev_cid).chain(block_cids)
+        })
+        .collect();
     all_cids.sort();
     all_cids.dedup();
     if all_cids.is_empty() {
         return Ok(HashMap::new());
     }
     let fetched = state.block_store.get_many(&all_cids).await?;
-    let mut blocks_map = HashMap::with_capacity(all_cids.len());
-    for (cid, data_opt) in all_cids.into_iter().zip(fetched.into_iter()) {
-        if let Some(data) = data_opt {
-            blocks_map.insert(cid, data);
-        }
-    }
+    let blocks_map: HashMap<Cid, Bytes> = all_cids
+        .into_iter()
+        .zip(fetched)
+        .filter_map(|(cid, data_opt)| data_opt.map(|data| (cid, data)))
+        .collect();
     Ok(blocks_map)
 }
 
@@ -511,17 +502,12 @@ pub async fn format_event_with_prefetched_blocks(
         frame.since = Some(rev);
     }
     let car_bytes = if !all_cids.is_empty() {
-        let mut blocks = BTreeMap::new();
-        let mut commit_bytes_for_car: Option<Bytes> = None;
-        for cid in all_cids {
-            if let Some(data) = prefetched.get(&cid) {
-                if cid == commit_cid {
-                    commit_bytes_for_car = Some(data.clone());
-                } else {
-                    blocks.insert(cid, data.clone());
-                }
-            }
-        }
+        let (commit_data, other_blocks): (Vec<_>, Vec<_>) = all_cids
+            .into_iter()
+            .filter_map(|cid| prefetched.get(&cid).map(|data| (cid, data.clone())))
+            .partition(|(cid, _)| *cid == commit_cid);
+        let commit_bytes_for_car = commit_data.into_iter().next().map(|(_, data)| data);
+        let blocks: BTreeMap<Cid, Bytes> = other_blocks.into_iter().collect();
         write_car_blocks(commit_cid, commit_bytes_for_car, blocks).await?
     } else {
         Vec::new()

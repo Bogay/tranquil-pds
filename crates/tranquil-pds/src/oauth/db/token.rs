@@ -315,26 +315,26 @@ pub async fn list_tokens_for_user(pool: &PgPool, did: &str) -> Result<Vec<TokenD
     )
     .fetch_all(pool)
     .await?;
-    let mut tokens = Vec::with_capacity(rows.len());
-    for r in rows {
-        tokens.push(TokenData {
-            did: r.did,
-            token_id: r.token_id,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-            expires_at: r.expires_at,
-            client_id: r.client_id,
-            client_auth: from_json(r.client_auth)?,
-            device_id: r.device_id,
-            parameters: from_json(r.parameters)?,
-            details: r.details,
-            code: r.code,
-            current_refresh_token: r.current_refresh_token,
-            scope: r.scope,
-            controller_did: r.controller_did,
-        });
-    }
-    Ok(tokens)
+    rows.into_iter()
+        .map(|r| {
+            Ok(TokenData {
+                did: r.did,
+                token_id: r.token_id,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+                expires_at: r.expires_at,
+                client_id: r.client_id,
+                client_auth: from_json(r.client_auth)?,
+                device_id: r.device_id,
+                parameters: from_json(r.parameters)?,
+                details: r.details,
+                code: r.code,
+                current_refresh_token: r.current_refresh_token,
+                scope: r.scope,
+                controller_did: r.controller_did,
+            })
+        })
+        .collect()
 }
 
 pub async fn count_tokens_for_user(pool: &PgPool, did: &str) -> Result<i64, OAuthError> {

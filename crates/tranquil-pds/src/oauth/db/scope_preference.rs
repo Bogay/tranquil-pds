@@ -75,13 +75,9 @@ pub async fn should_show_consent(
     let stored_scopes: std::collections::HashSet<&str> =
         stored_prefs.iter().map(|p| p.scope.as_str()).collect();
 
-    for scope in requested_scopes {
-        if !stored_scopes.contains(scope.as_str()) {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
+    Ok(requested_scopes
+        .iter()
+        .any(|scope| !stored_scopes.contains(scope.as_str())))
 }
 
 pub async fn delete_scope_preferences(

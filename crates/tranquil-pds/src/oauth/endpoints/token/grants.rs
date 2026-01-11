@@ -334,13 +334,7 @@ pub async fn handle_refresh_token_grant(
         REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL
     };
     let new_expires_at = Utc::now() + Duration::days(refresh_expiry_days);
-    db::rotate_token(
-        &state.db,
-        db_id,
-        &new_refresh_token.0,
-        new_expires_at,
-    )
-    .await?;
+    db::rotate_token(&state.db, db_id, &new_refresh_token.0, new_expires_at).await?;
     tracing::info!(
         did = %token_data.did,
         new_expires_at = %new_expires_at,

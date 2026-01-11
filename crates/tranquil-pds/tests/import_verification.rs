@@ -159,10 +159,7 @@ async fn test_import_accepts_own_exported_repo() {
     let status = import_res.status();
     if status != StatusCode::OK {
         let body = import_res.text().await.unwrap_or_default();
-        panic!(
-            "Import failed with status {}: {}",
-            status, body
-        );
+        panic!("Import failed with status {}: {}", status, body);
     }
 }
 

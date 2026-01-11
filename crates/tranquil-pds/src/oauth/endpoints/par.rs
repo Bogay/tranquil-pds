@@ -182,34 +182,35 @@ fn validate_scope(
     if requested_scopes.is_empty() {
         return Ok(Some("atproto".to_string()));
     }
-    let mut has_transition = false;
-    let mut has_granular = false;
-
-    for scope in &requested_scopes {
-        let parsed = parse_scope(scope);
-        match &parsed {
-            ParsedScope::Unknown(_) => {
-                return Err(OAuthError::InvalidScope(format!(
-                    "Unsupported scope: {}",
-                    scope
-                )));
-            }
-            ParsedScope::TransitionGeneric
-            | ParsedScope::TransitionChat
-            | ParsedScope::TransitionEmail => {
-                has_transition = true;
-            }
-            ParsedScope::Repo(_)
-            | ParsedScope::Blob(_)
-            | ParsedScope::Rpc(_)
-            | ParsedScope::Account(_)
-            | ParsedScope::Identity(_)
-            | ParsedScope::Include(_) => {
-                has_granular = true;
-            }
-            ParsedScope::Atproto => {}
-        }
+    if let Some(unknown) = requested_scopes
+        .iter()
+        .find(|s| matches!(parse_scope(s), ParsedScope::Unknown(_)))
+    {
+        return Err(OAuthError::InvalidScope(format!(
+            "Unsupported scope: {}",
+            unknown
+        )));
     }
+
+    let has_transition = requested_scopes.iter().any(|s| {
+        matches!(
+            parse_scope(s),
+            ParsedScope::TransitionGeneric
+                | ParsedScope::TransitionChat
+                | ParsedScope::TransitionEmail
+        )
+    });
+    let has_granular = requested_scopes.iter().any(|s| {
+        matches!(
+            parse_scope(s),
+            ParsedScope::Repo(_)
+                | ParsedScope::Blob(_)
+                | ParsedScope::Rpc(_)
+                | ParsedScope::Account(_)
+                | ParsedScope::Identity(_)
+                | ParsedScope::Include(_)
+        )
+    });
 
     if has_transition && has_granular {
         return Err(OAuthError::InvalidScope(
@@ -219,13 +220,14 @@ fn validate_scope(
 
     if let Some(client_scope) = &client_metadata.scope {
         let client_scopes: Vec<&str> = client_scope.split_whitespace().collect();
-        for scope in &requested_scopes {
-            if !client_scopes.iter().any(|cs| scope_matches(cs, scope)) {
-                return Err(OAuthError::InvalidScope(format!(
-                    "Scope '{}' not registered for this client",
-                    scope
-                )));
-            }
+        if let Some(unregistered) = requested_scopes
+            .iter()
+            .find(|scope| !client_scopes.iter().any(|cs| scope_matches(cs, scope)))
+        {
+            return Err(OAuthError::InvalidScope(format!(
+                "Scope '{}' not registered for this client",
+                unregistered
+            )));
         }
     }
     Ok(Some(requested_scopes.join(" ")))

@@ -146,14 +146,10 @@ fn extract_links_ipld(value: &Ipld, stack: &mut Vec<Cid>) {
             stack.push(*cid);
         }
         Ipld::Map(map) => {
-            for v in map.values() {
-                extract_links_ipld(v, stack);
-            }
+            map.values().for_each(|v| extract_links_ipld(v, stack));
         }
         Ipld::List(arr) => {
-            for v in arr {
-                extract_links_ipld(v, stack);
-            }
+            arr.iter().for_each(|v| extract_links_ipld(v, stack));
         }
         _ => {}
     }

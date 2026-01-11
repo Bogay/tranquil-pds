@@ -189,14 +189,13 @@ pub async fn create_account(
         if input.handle.contains(' ') || input.handle.contains('\t') {
             return ApiError::InvalidRequest("Handle cannot contain spaces".into()).into_response();
         }
-        for c in input.handle.chars() {
-            if !c.is_ascii_alphanumeric() && c != '.' && c != '-' {
-                return ApiError::InvalidRequest(format!(
-                    "Handle contains invalid character: {}",
-                    c
-                ))
+        if let Some(c) = input
+            .handle
+            .chars()
+            .find(|c| !c.is_ascii_alphanumeric() && *c != '.' && *c != '-')
+        {
+            return ApiError::InvalidRequest(format!("Handle contains invalid character: {}", c))
                 .into_response();
-            }
         }
         let handle_lower = input.handle.to_lowercase();
         if crate::moderation::has_explicit_slur(&handle_lower) {

@@ -256,10 +256,10 @@ impl Respond for PlcPostResponder {
             .unwrap_or_default()
             .to_string();
 
-        if let Ok(body) = serde_json::from_slice::<Value>(request.body.as_slice()) {
-            if let Ok(mut store) = self.store.write() {
-                store.insert(did, body);
-            }
+        if let Ok(body) = serde_json::from_slice::<Value>(request.body.as_slice())
+            && let Ok(mut store) = self.store.write()
+        {
+            store.insert(did, body);
         }
         ResponseTemplate::new(200)
     }
@@ -298,18 +298,16 @@ impl Respond for PlcGetResponder {
 
         match endpoint {
             "/log/last" => {
-                let response = operation
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        json!({
-                            "type": "plc_operation",
-                            "rotationKeys": [],
-                            "verificationMethods": {},
-                            "alsoKnownAs": [],
-                            "services": {},
-                            "prev": null
-                        })
-                    });
+                let response = operation.cloned().unwrap_or_else(|| {
+                    json!({
+                        "type": "plc_operation",
+                        "rotationKeys": [],
+                        "verificationMethods": {},
+                        "alsoKnownAs": [],
+                        "services": {},
+                        "prev": null
+                    })
+                });
                 ResponseTemplate::new(200).set_body_json(response)
             }
             "/log/audit" => ResponseTemplate::new(200).set_body_json(json!([])),

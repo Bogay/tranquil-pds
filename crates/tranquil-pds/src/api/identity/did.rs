@@ -639,17 +639,18 @@ pub async fn update_handle(
         return ApiError::InvalidHandle(Some("Handle contains invalid characters".into()))
             .into_response();
     }
-    for segment in new_handle.split('.') {
-        if segment.is_empty() {
-            return ApiError::InvalidHandle(Some("Handle contains empty segment".into()))
-                .into_response();
-        }
-        if segment.starts_with('-') || segment.ends_with('-') {
-            return ApiError::InvalidHandle(Some(
-                "Handle segment cannot start or end with hyphen".into(),
-            ))
+    if new_handle.split('.').any(|segment| segment.is_empty()) {
+        return ApiError::InvalidHandle(Some("Handle contains empty segment".into()))
             .into_response();
-        }
+    }
+    if new_handle
+        .split('.')
+        .any(|segment| segment.starts_with('-') || segment.ends_with('-'))
+    {
+        return ApiError::InvalidHandle(Some(
+            "Handle segment cannot start or end with hyphen".into(),
+        ))
+        .into_response();
     }
     if crate::moderation::has_explicit_slur(&new_handle) {
         return ApiError::InvalidHandle(Some("Inappropriate language in handle".into()))

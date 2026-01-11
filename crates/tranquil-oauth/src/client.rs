@@ -529,28 +529,27 @@ async fn verify_private_key_jwt_async(
     let signature_bytes = URL_SAFE_NO_PAD
         .decode(parts[2])
         .map_err(|_| OAuthError::InvalidClient("Invalid signature encoding".to_string()))?;
-    for key in matching_keys {
-        let key_alg = key.get("alg").and_then(|a| a.as_str());
-        if key_alg.is_some() && key_alg != Some(alg) {
-            continue;
-        }
-        let kty = key.get("kty").and_then(|k| k.as_str()).unwrap_or("");
-        let verified = match (alg, kty) {
-            ("ES256", "EC") => verify_es256(key, &signing_input, &signature_bytes),
-            ("ES384", "EC") => verify_es384(key, &signing_input, &signature_bytes),
-            ("RS256" | "RS384" | "RS512", "RSA") => {
-                verify_rsa(alg, key, &signing_input, &signature_bytes)
+    matching_keys
+        .into_iter()
+        .filter(|key| {
+            let key_alg = key.get("alg").and_then(|a| a.as_str());
+            key_alg.is_none() || key_alg == Some(alg)
+        })
+        .find_map(|key| {
+            let kty = key.get("kty").and_then(|k| k.as_str()).unwrap_or("");
+            match (alg, kty) {
+                ("ES256", "EC") => verify_es256(key, &signing_input, &signature_bytes).ok(),
+                ("ES384", "EC") => verify_es384(key, &signing_input, &signature_bytes).ok(),
+                ("RS256" | "RS384" | "RS512", "RSA") => {
+                    verify_rsa(alg, key, &signing_input, &signature_bytes).ok()
+                }
+                ("EdDSA", "OKP") => verify_eddsa(key, &signing_input, &signature_bytes).ok(),
+                _ => None,
             }
-            ("EdDSA", "OKP") => verify_eddsa(key, &signing_input, &signature_bytes),
-            _ => continue,
-        };
-        if verified.is_ok() {
-            return Ok(());
-        }
-    }
-    Err(OAuthError::InvalidClient(
-        "client_assertion signature verification failed".to_string(),
-    ))
+        })
+        .ok_or_else(|| {
+            OAuthError::InvalidClient("client_assertion signature verification failed".to_string())
+        })
 }
 
 fn verify_es256(

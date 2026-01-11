@@ -102,13 +102,11 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
         .get("cookie")
         .and_then(|v| v.to_str().ok())
         .and_then(|cookie_str| {
-            for cookie in cookie_str.split(';') {
-                let cookie = cookie.trim();
-                if let Some(value) = cookie.strip_prefix(&format!("{}=", DEVICE_COOKIE_NAME)) {
-                    return crate::config::AuthConfig::get().verify_device_cookie(value);
-                }
-            }
-            None
+            cookie_str.split(';').map(|c| c.trim()).find_map(|cookie| {
+                cookie
+                    .strip_prefix(&format!("{}=", DEVICE_COOKIE_NAME))
+                    .and_then(|value| crate::config::AuthConfig::get().verify_device_cookie(value))
+            })
         })
 }
 

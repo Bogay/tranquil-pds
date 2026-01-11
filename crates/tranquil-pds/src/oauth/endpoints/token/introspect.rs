@@ -102,7 +102,7 @@ pub async fn introspect_token(
         Ok(info) => info,
         Err(_) => return Ok(Json(inactive_response)),
     };
-    let token_data = match db::get_token_by_id(&state.db, &token_info.jti).await {
+    let token_data = match db::get_token_by_id(&state.db, &token_info.sid).await {
         Ok(Some(data)) => data,
         _ => return Ok(Json(inactive_response)),
     };

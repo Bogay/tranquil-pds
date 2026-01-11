@@ -195,7 +195,8 @@ pub async fn enable_totp(
         return ApiError::InternalError(None).into_response();
     }
 
-    let backup_hashes: Result<Vec<_>, _> = backup_codes.iter().map(|c| hash_backup_code(c)).collect();
+    let backup_hashes: Result<Vec<_>, _> =
+        backup_codes.iter().map(|c| hash_backup_code(c)).collect();
     let backup_hashes = match backup_hashes {
         Ok(hashes) => hashes,
         Err(e) => {
@@ -484,7 +485,8 @@ pub async fn regenerate_backup_codes(
         return ApiError::InternalError(None).into_response();
     }
 
-    let backup_hashes: Result<Vec<_>, _> = backup_codes.iter().map(|c| hash_backup_code(c)).collect();
+    let backup_hashes: Result<Vec<_>, _> =
+        backup_codes.iter().map(|c| hash_backup_code(c)).collect();
     let backup_hashes = match backup_hashes {
         Ok(hashes) => hashes,
         Err(e) => {

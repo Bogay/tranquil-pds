@@ -181,24 +181,26 @@ async fn get_repo_since(state: &AppState, did: &str, head_cid: &Cid, since: &str
         }
     };
 
-    let mut block_cids: Vec<Cid> = Vec::new();
-    for event in &events {
-        if let Some(cids) = &event.blocks_cids {
-            for cid_str in cids {
-                if let Ok(cid) = Cid::from_str(cid_str)
-                    && !block_cids.contains(&cid)
-                {
-                    block_cids.push(cid);
-                }
+    let block_cids: Vec<Cid> = events
+        .iter()
+        .flat_map(|event| {
+            let block_cids = event
+                .blocks_cids
+                .as_ref()
+                .map(|cids| cids.iter().filter_map(|s| Cid::from_str(s).ok()).collect())
+                .unwrap_or_else(Vec::new);
+            let commit_cid = event
+                .commit_cid
+                .as_ref()
+                .and_then(|s| Cid::from_str(s).ok());
+            block_cids.into_iter().chain(commit_cid)
+        })
+        .fold(Vec::new(), |mut acc, cid| {
+            if !acc.contains(&cid) {
+                acc.push(cid);
             }
-        }
-        if let Some(commit_cid_str) = &event.commit_cid
-            && let Ok(cid) = Cid::from_str(commit_cid_str)
-            && !block_cids.contains(&cid)
-        {
-            block_cids.push(cid);
-        }
-    }
+            acc
+        });
 
     let mut car_bytes = match encode_car_header(head_cid) {
         Ok(h) => h,
@@ -334,9 +336,9 @@ pub async fn get_record(
         car.extend_from_slice(&writer);
     };
     write_block(&mut car_bytes, &commit_cid, &commit_bytes);
-    for (cid, data) in &proof_blocks {
-        write_block(&mut car_bytes, cid, data);
-    }
+    proof_blocks
+        .iter()
+        .for_each(|(cid, data)| write_block(&mut car_bytes, cid, data));
     write_block(&mut car_bytes, &record_cid, &record_block);
     (
         StatusCode::OK,
