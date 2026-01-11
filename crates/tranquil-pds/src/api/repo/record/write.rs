@@ -82,19 +82,7 @@ pub async fn prepare_repo_write(
     .await
     .map_err(|e| {
         tracing::warn!(error = ?e, is_dpop = extracted.is_dpop, "Token validation failed in prepare_repo_write");
-        let mut response = ApiError::from(e).into_response();
-        if matches!(e, crate::auth::TokenValidationError::TokenExpired) && extracted.is_dpop {
-            *response.status_mut() = axum::http::StatusCode::UNAUTHORIZED;
-            let www_auth =
-                "DPoP error=\"invalid_token\", error_description=\"Token has expired\"";
-            response.headers_mut().insert(
-                "WWW-Authenticate",
-                www_auth.parse().unwrap(),
-            );
-            let nonce = crate::oauth::verify::generate_dpop_nonce();
-            response.headers_mut().insert("DPoP-Nonce", nonce.parse().unwrap());
-        }
-        response
+        ApiError::from(e).into_response()
     })?;
     if repo.as_str() != auth_user.did.as_str() {
         return Err(

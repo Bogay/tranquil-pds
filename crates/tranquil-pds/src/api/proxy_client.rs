@@ -88,15 +88,13 @@ pub fn is_ssrf_safe(url: &str) -> Result<(), SsrfError> {
         Ok(addrs) => addrs.collect(),
         Err(_) => return Err(SsrfError::DnsResolutionFailed(host.to_string())),
     };
-    for addr in &socket_addrs {
-        if !is_unicast_ip(&addr.ip()) {
-            warn!(
-                "DNS resolution for {} returned non-unicast IP: {}",
-                host,
-                addr.ip()
-            );
-            return Err(SsrfError::NonUnicastIp(addr.ip().to_string()));
-        }
+    if let Some(addr) = socket_addrs.iter().find(|addr| !is_unicast_ip(&addr.ip())) {
+        warn!(
+            "DNS resolution for {} returned non-unicast IP: {}",
+            host,
+            addr.ip()
+        );
+        return Err(SsrfError::NonUnicastIp(addr.ip().to_string()));
     }
     Ok(())
 }

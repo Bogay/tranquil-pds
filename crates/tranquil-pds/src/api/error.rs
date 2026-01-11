@@ -22,6 +22,7 @@ pub enum ApiError {
     InvalidRequest(String),
     InvalidToken(Option<String>),
     ExpiredToken(Option<String>),
+    OAuthExpiredToken(Option<String>),
     TokenRequired,
     AccountDeactivated,
     AccountTakedown,
@@ -127,7 +128,8 @@ impl ApiError {
             | Self::InvalidCode(_)
             | Self::InvalidPassword(_)
             | Self::InvalidToken(_)
-            | Self::PasskeyCounterAnomaly => StatusCode::UNAUTHORIZED,
+            | Self::PasskeyCounterAnomaly
+            | Self::OAuthExpiredToken(_) => StatusCode::UNAUTHORIZED,
             Self::ExpiredToken(_) => StatusCode::BAD_REQUEST,
             Self::Forbidden
             | Self::AdminRequired
@@ -216,7 +218,7 @@ impl ApiError {
             Self::AuthenticationRequired => Cow::Borrowed("AuthenticationRequired"),
             Self::AuthenticationFailed(_) => Cow::Borrowed("AuthenticationFailed"),
             Self::InvalidToken(_) => Cow::Borrowed("InvalidToken"),
-            Self::ExpiredToken(_) => Cow::Borrowed("ExpiredToken"),
+            Self::ExpiredToken(_) | Self::OAuthExpiredToken(_) => Cow::Borrowed("ExpiredToken"),
             Self::TokenRequired => Cow::Borrowed("TokenRequired"),
             Self::AccountDeactivated => Cow::Borrowed("AccountDeactivated"),
             Self::AccountTakedown => Cow::Borrowed("AccountTakedown"),
@@ -298,6 +300,7 @@ impl ApiError {
             | Self::AuthenticationFailed(msg)
             | Self::InvalidToken(msg)
             | Self::ExpiredToken(msg)
+            | Self::OAuthExpiredToken(msg)
             | Self::RepoNotFound(msg)
             | Self::BlobNotFound(msg)
             | Self::InvalidHandle(msg)
@@ -428,13 +431,24 @@ impl IntoResponse for ApiError {
             message: self.message(),
         };
         let mut response = (self.status_code(), Json(body)).into_response();
-        if matches!(self, Self::ExpiredToken(_)) {
-            response.headers_mut().insert(
-                "WWW-Authenticate",
-                "Bearer error=\"invalid_token\", error_description=\"Token has expired\""
-                    .parse()
-                    .unwrap(),
-            );
+        match &self {
+            Self::ExpiredToken(_) => {
+                response.headers_mut().insert(
+                    "WWW-Authenticate",
+                    "Bearer error=\"invalid_token\", error_description=\"Token has expired\""
+                        .parse()
+                        .unwrap(),
+                );
+            }
+            Self::OAuthExpiredToken(_) => {
+                response.headers_mut().insert(
+                    "WWW-Authenticate",
+                    "DPoP error=\"invalid_token\", error_description=\"Token has expired\""
+                        .parse()
+                        .unwrap(),
+                );
+            }
+            _ => {}
         }
         response
     }
@@ -457,6 +471,9 @@ impl From<crate::auth::TokenValidationError> for ApiError {
                 Self::AuthenticationFailed(None)
             }
             crate::auth::TokenValidationError::TokenExpired => Self::ExpiredToken(None),
+            crate::auth::TokenValidationError::OAuthTokenExpired => {
+                Self::OAuthExpiredToken(Some("Token has expired".to_string()))
+            }
         }
     }
 }

@@ -568,12 +568,21 @@ fn verify_es256(
         .get("y")
         .and_then(|v| v.as_str())
         .ok_or_else(|| OAuthError::InvalidClient("Missing y coordinate in EC key".to_string()))?;
-    let x_bytes = URL_SAFE_NO_PAD
+    let x_decoded = URL_SAFE_NO_PAD
         .decode(x)
         .map_err(|_| OAuthError::InvalidClient("Invalid x coordinate encoding".to_string()))?;
-    let y_bytes = URL_SAFE_NO_PAD
+    let y_decoded = URL_SAFE_NO_PAD
         .decode(y)
         .map_err(|_| OAuthError::InvalidClient("Invalid y coordinate encoding".to_string()))?;
+    if x_decoded.len() > 32 || y_decoded.len() > 32 {
+        return Err(OAuthError::InvalidClient(
+            "EC coordinate too long".to_string(),
+        ));
+    }
+    let mut x_bytes = [0u8; 32];
+    let mut y_bytes = [0u8; 32];
+    x_bytes[32 - x_decoded.len()..].copy_from_slice(&x_decoded);
+    y_bytes[32 - y_decoded.len()..].copy_from_slice(&y_decoded);
     let mut point_bytes = vec![0x04];
     point_bytes.extend_from_slice(&x_bytes);
     point_bytes.extend_from_slice(&y_bytes);
@@ -604,12 +613,21 @@ fn verify_es384(
         .get("y")
         .and_then(|v| v.as_str())
         .ok_or_else(|| OAuthError::InvalidClient("Missing y coordinate in EC key".to_string()))?;
-    let x_bytes = URL_SAFE_NO_PAD
+    let x_decoded = URL_SAFE_NO_PAD
         .decode(x)
         .map_err(|_| OAuthError::InvalidClient("Invalid x coordinate encoding".to_string()))?;
-    let y_bytes = URL_SAFE_NO_PAD
+    let y_decoded = URL_SAFE_NO_PAD
         .decode(y)
         .map_err(|_| OAuthError::InvalidClient("Invalid y coordinate encoding".to_string()))?;
+    if x_decoded.len() > 48 || y_decoded.len() > 48 {
+        return Err(OAuthError::InvalidClient(
+            "EC coordinate too long".to_string(),
+        ));
+    }
+    let mut x_bytes = [0u8; 48];
+    let mut y_bytes = [0u8; 48];
+    x_bytes[48 - x_decoded.len()..].copy_from_slice(&x_decoded);
+    y_bytes[48 - y_decoded.len()..].copy_from_slice(&y_decoded);
     let mut point_bytes = vec![0x04];
     point_bytes.extend_from_slice(&x_bytes);
     point_bytes.extend_from_slice(&y_bytes);

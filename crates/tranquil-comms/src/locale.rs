@@ -182,11 +182,10 @@ static STRINGS_FI: NotificationStrings = NotificationStrings {
 };
 
 pub fn format_message(template: &str, vars: &[(&str, &str)]) -> String {
-    let mut result = template.to_string();
-    for (key, value) in vars {
-        result = result.replace(&format!("{{{}}}", key), value);
-    }
-    result
+    vars.iter()
+        .fold(template.to_string(), |result, (key, value)| {
+            result.replace(&format!("{{{}}}", key), value)
+        })
 }
 
 #[cfg(test)]

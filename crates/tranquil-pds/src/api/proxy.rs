@@ -268,21 +268,8 @@ async fn proxy_handler(
             }
             Err(e) => {
                 warn!("Token validation failed: {:?}", e);
-                if matches!(e, crate::auth::TokenValidationError::TokenExpired) && extracted.is_dpop
-                {
-                    let www_auth =
-                        "DPoP error=\"invalid_token\", error_description=\"Token has expired\"";
-                    let mut response =
-                        ApiError::ExpiredToken(Some("Token has expired".into())).into_response();
-                    *response.status_mut() = axum::http::StatusCode::UNAUTHORIZED;
-                    response
-                        .headers_mut()
-                        .insert("WWW-Authenticate", www_auth.parse().unwrap());
-                    let nonce = crate::oauth::verify::generate_dpop_nonce();
-                    response
-                        .headers_mut()
-                        .insert("DPoP-Nonce", nonce.parse().unwrap());
-                    return response;
+                if matches!(e, crate::auth::TokenValidationError::OAuthTokenExpired) {
+                    return ApiError::from(e).into_response();
                 }
             }
         }
@@ -291,11 +278,12 @@ async fn proxy_handler(
     if let Some(val) = auth_header_val {
         request_builder = request_builder.header("Authorization", val);
     }
-    for header_name in crate::api::proxy_client::HEADERS_TO_FORWARD {
-        if let Some(val) = headers.get(*header_name) {
-            request_builder = request_builder.header(*header_name, val);
-        }
-    }
+    request_builder = crate::api::proxy_client::HEADERS_TO_FORWARD
+        .iter()
+        .filter_map(|name| headers.get(*name).map(|val| (*name, val)))
+        .fold(request_builder, |builder, (name, val)| {
+            builder.header(name, val)
+        });
     if !body.is_empty() {
         request_builder = request_builder.body(body);
     }
@@ -313,11 +301,12 @@ async fn proxy_handler(
                 }
             };
             let mut response_builder = Response::builder().status(status);
-            for header_name in crate::api::proxy_client::RESPONSE_HEADERS_TO_FORWARD {
-                if let Some(val) = headers.get(*header_name) {
-                    response_builder = response_builder.header(*header_name, val);
-                }
-            }
+            response_builder = crate::api::proxy_client::RESPONSE_HEADERS_TO_FORWARD
+                .iter()
+                .filter_map(|name| headers.get(*name).map(|val| (*name, val)))
+                .fold(response_builder, |builder, (name, val)| {
+                    builder.header(name, val)
+                });
             match response_builder.body(axum::body::Body::from(body)) {
                 Ok(r) => r,
                 Err(e) => {

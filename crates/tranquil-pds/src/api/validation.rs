@@ -181,10 +181,11 @@ fn validate_email_detailed(email: &str) -> Result<(), EmailValidationError> {
     if local.starts_with('.') || local.ends_with('.') || local.contains("..") {
         return Err(EmailValidationError::InvalidLocalPart);
     }
-    for c in local.chars() {
-        if !c.is_ascii_alphanumeric() && !EMAIL_LOCAL_SPECIAL_CHARS.contains(c) {
-            return Err(EmailValidationError::InvalidLocalPart);
-        }
+    if !local
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || EMAIL_LOCAL_SPECIAL_CHARS.contains(c))
+    {
+        return Err(EmailValidationError::InvalidLocalPart);
     }
     if domain.is_empty() {
         return Err(EmailValidationError::EmptyDomain);
@@ -195,18 +196,14 @@ fn validate_email_detailed(email: &str) -> Result<(), EmailValidationError> {
     if !domain.contains('.') {
         return Err(EmailValidationError::MissingDomainDot);
     }
-    for label in domain.split('.') {
-        if label.is_empty() || label.len() > MAX_DOMAIN_LABEL_LENGTH {
-            return Err(EmailValidationError::InvalidDomainLabel);
-        }
-        if label.starts_with('-') || label.ends_with('-') {
-            return Err(EmailValidationError::InvalidDomainLabel);
-        }
-        for c in label.chars() {
-            if !c.is_ascii_alphanumeric() && c != '-' {
-                return Err(EmailValidationError::InvalidDomainLabel);
-            }
-        }
+    if !domain.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= MAX_DOMAIN_LABEL_LENGTH
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    }) {
+        return Err(EmailValidationError::InvalidDomainLabel);
     }
     Ok(())
 }
@@ -293,10 +290,11 @@ pub fn validate_service_handle(
         return Err(HandleValidationError::EndsWithInvalidChar);
     }
 
-    for c in handle.chars() {
-        if !c.is_ascii_alphanumeric() && c != '-' {
-            return Err(HandleValidationError::InvalidCharacters);
-        }
+    if !handle
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(HandleValidationError::InvalidCharacters);
     }
 
     if crate::moderation::has_explicit_slur(handle) {
@@ -330,10 +328,11 @@ pub fn is_valid_email(email: &str) -> bool {
     if local.contains("..") {
         return false;
     }
-    for c in local.chars() {
-        if !c.is_ascii_alphanumeric() && !EMAIL_LOCAL_SPECIAL_CHARS.contains(c) {
-            return false;
-        }
+    if !local
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || EMAIL_LOCAL_SPECIAL_CHARS.contains(c))
+    {
+        return false;
     }
     if domain.is_empty() || domain.len() > MAX_DOMAIN_LENGTH {
         return false;
@@ -341,20 +340,13 @@ pub fn is_valid_email(email: &str) -> bool {
     if !domain.contains('.') {
         return false;
     }
-    for label in domain.split('.') {
-        if label.is_empty() || label.len() > MAX_DOMAIN_LABEL_LENGTH {
-            return false;
-        }
-        if label.starts_with('-') || label.ends_with('-') {
-            return false;
-        }
-        for c in label.chars() {
-            if !c.is_ascii_alphanumeric() && c != '-' {
-                return false;
-            }
-        }
-    }
-    true
+    domain.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= MAX_DOMAIN_LABEL_LENGTH
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    })
 }
 
 #[cfg(test)]

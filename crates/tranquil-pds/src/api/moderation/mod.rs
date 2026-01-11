@@ -211,7 +211,7 @@ async fn create_report_locally(
     }
 
     let created_at = chrono::Utc::now();
-    let report_id = created_at.timestamp_millis();
+    let report_id = (uuid::Uuid::now_v7().as_u128() & 0x7FFF_FFFF_FFFF_FFFF) as i64;
     let subject_json = json!(input.subject);
 
     let insert = sqlx::query!(

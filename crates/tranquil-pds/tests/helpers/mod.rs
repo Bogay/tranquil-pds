@@ -4,12 +4,16 @@ use serde_json::{Value, json};
 
 pub use crate::common::*;
 
+fn unique_id() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..12].to_string()
+}
+
 #[allow(dead_code)]
 pub async fn setup_new_user(handle_prefix: &str) -> (String, String) {
     let client = client();
-    let ts = Utc::now().timestamp_millis();
-    let handle = format!("{}-{}.test", handle_prefix, ts);
-    let email = format!("{}-{}@test.com", handle_prefix, ts);
+    let uid = unique_id();
+    let handle = format!("{}-{}.test", handle_prefix, uid);
+    let email = format!("{}-{}@test.com", handle_prefix, uid);
     let password = "E2epass123!";
     let create_account_payload = json!({
         "handle": handle,
@@ -51,7 +55,7 @@ pub async fn create_post(
     text: &str,
 ) -> (String, String) {
     let collection = "app.bsky.feed.post";
-    let rkey = format!("e2e_social_{}", Utc::now().timestamp_millis());
+    let rkey = format!("e2e_social_{}", unique_id());
     let now = Utc::now().to_rfc3339();
     let create_payload = json!({
         "repo": did,
@@ -95,7 +99,7 @@ pub async fn create_follow(
     followee_did: &str,
 ) -> (String, String) {
     let collection = "app.bsky.graph.follow";
-    let rkey = format!("e2e_follow_{}", Utc::now().timestamp_millis());
+    let rkey = format!("e2e_follow_{}", unique_id());
     let now = Utc::now().to_rfc3339();
     let create_payload = json!({
         "repo": follower_did,
@@ -140,7 +144,7 @@ pub async fn create_like(
     subject_cid: &str,
 ) -> (String, String) {
     let collection = "app.bsky.feed.like";
-    let rkey = format!("e2e_like_{}", Utc::now().timestamp_millis());
+    let rkey = format!("e2e_like_{}", unique_id());
     let now = Utc::now().to_rfc3339();
     let payload = json!({
         "repo": liker_did,
@@ -182,7 +186,7 @@ pub async fn create_repost(
     subject_cid: &str,
 ) -> (String, String) {
     let collection = "app.bsky.feed.repost";
-    let rkey = format!("e2e_repost_{}", Utc::now().timestamp_millis());
+    let rkey = format!("e2e_repost_{}", unique_id());
     let now = Utc::now().to_rfc3339();
     let payload = json!({
         "repo": reposter_did,

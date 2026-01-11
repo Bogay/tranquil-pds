@@ -55,18 +55,14 @@ impl BlobScope {
         if self.accept.is_empty() || self.accept.contains("*/*") {
             return true;
         }
-        for pattern in &self.accept {
-            if pattern == mime {
-                return true;
-            }
-            if let Some(prefix) = pattern.strip_suffix("/*")
-                && mime.starts_with(prefix)
-                && mime.chars().nth(prefix.len()) == Some('/')
-            {
-                return true;
-            }
-        }
-        false
+        self.accept.iter().any(|pattern| {
+            pattern == mime
+                || pattern
+                    .strip_suffix("/*")
+                    .is_some_and(|prefix| {
+                        mime.starts_with(prefix) && mime.chars().nth(prefix.len()) == Some('/')
+                    })
+        })
     }
 }
 
@@ -170,19 +166,20 @@ pub fn parse_scope(scope: &str) -> ParsedScope {
             Some(rest.to_string())
         };
 
-        let mut actions = HashSet::new();
-        if let Some(action_values) = params.get("action") {
-            for action_str in action_values {
-                if let Some(action) = RepoAction::parse_str(action_str) {
-                    actions.insert(action);
-                }
-            }
-        }
-        if actions.is_empty() {
-            actions.insert(RepoAction::Create);
-            actions.insert(RepoAction::Update);
-            actions.insert(RepoAction::Delete);
-        }
+        let actions: HashSet<RepoAction> = params
+            .get("action")
+            .map(|action_values| {
+                action_values
+                    .iter()
+                    .filter_map(|s| RepoAction::parse_str(s))
+                    .collect()
+            })
+            .filter(|set: &HashSet<RepoAction>| !set.is_empty())
+            .unwrap_or_else(|| {
+                [RepoAction::Create, RepoAction::Update, RepoAction::Delete]
+                    .into_iter()
+                    .collect()
+            });
 
         return ParsedScope::Repo(RepoScope {
             collection,
@@ -191,19 +188,20 @@ pub fn parse_scope(scope: &str) -> ParsedScope {
     }
 
     if base == "repo" {
-        let mut actions = HashSet::new();
-        if let Some(action_values) = params.get("action") {
-            for action_str in action_values {
-                if let Some(action) = RepoAction::parse_str(action_str) {
-                    actions.insert(action);
-                }
-            }
-        }
-        if actions.is_empty() {
-            actions.insert(RepoAction::Create);
-            actions.insert(RepoAction::Update);
-            actions.insert(RepoAction::Delete);
-        }
+        let actions: HashSet<RepoAction> = params
+            .get("action")
+            .map(|action_values| {
+                action_values
+                    .iter()
+                    .filter_map(|s| RepoAction::parse_str(s))
+                    .collect()
+            })
+            .filter(|set: &HashSet<RepoAction>| !set.is_empty())
+            .unwrap_or_else(|| {
+                [RepoAction::Create, RepoAction::Update, RepoAction::Delete]
+                    .into_iter()
+                    .collect()
+            });
         return ParsedScope::Repo(RepoScope {
             collection: None,
             actions,
@@ -212,16 +210,17 @@ pub fn parse_scope(scope: &str) -> ParsedScope {
 
     if base.starts_with("blob") {
         let positional = base.strip_prefix("blob:").unwrap_or("");
-        let mut accept = HashSet::new();
-
-        if !positional.is_empty() {
-            accept.insert(positional.to_string());
-        }
-        if let Some(accept_values) = params.get("accept") {
-            for v in accept_values {
-                accept.insert(v.to_string());
-            }
-        }
+        let accept: HashSet<String> = std::iter::once(positional)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .chain(
+                params
+                    .get("accept")
+                    .into_iter()
+                    .flatten()
+                    .map(String::clone),
+            )
+            .collect();
 
         return ParsedScope::Blob(BlobScope { accept });
     }

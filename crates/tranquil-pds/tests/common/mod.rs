@@ -437,7 +437,7 @@ async fn setup_mock_plc_directory() -> String {
 async fn spawn_app(database_url: String) -> String {
     use tranquil_pds::rate_limit::RateLimiters;
     let pool = PgPoolOptions::new()
-        .max_connections(3)
+        .max_connections(10)
         .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&database_url)
         .await

@@ -113,34 +113,32 @@ impl ScopePermissions {
             return Ok(());
         }
 
-        for repo_scope in self.find_repo_scopes() {
-            if !repo_scope.actions.contains(&action) {
-                continue;
-            }
-
-            match &repo_scope.collection {
-                None => return Ok(()),
-                Some(coll) if coll == collection => return Ok(()),
-                Some(coll) if coll.ends_with(".*") => {
-                    let prefix = coll.strip_suffix(".*").unwrap();
-                    if collection.starts_with(prefix)
-                        && collection.chars().nth(prefix.len()) == Some('.')
-                    {
-                        return Ok(());
+        let has_permission = self.find_repo_scopes().any(|repo_scope| {
+            repo_scope.actions.contains(&action)
+                && match &repo_scope.collection {
+                    None => true,
+                    Some(coll) if coll == collection => true,
+                    Some(coll) if coll.ends_with(".*") => {
+                        let prefix = coll.strip_suffix(".*").unwrap();
+                        collection.starts_with(prefix)
+                            && collection.chars().nth(prefix.len()) == Some('.')
                     }
+                    _ => false,
                 }
-                _ => {}
-            }
-        }
+        });
 
-        Err(ScopeError::InsufficientScope {
-            required: format!("repo:{}?action={}", collection, action_str(action)),
-            message: format!(
-                "Insufficient scope to {} records in {}",
-                action_str(action),
-                collection
-            ),
-        })
+        if has_permission {
+            Ok(())
+        } else {
+            Err(ScopeError::InsufficientScope {
+                required: format!("repo:{}?action={}", collection, action_str(action)),
+                message: format!(
+                    "Insufficient scope to {} records in {}",
+                    action_str(action),
+                    collection
+                ),
+            })
+        }
     }
 
     pub fn assert_blob(&self, mime: &str) -> Result<(), ScopeError> {
@@ -148,16 +146,14 @@ impl ScopePermissions {
             return Ok(());
         }
 
-        for blob_scope in self.find_blob_scopes() {
-            if blob_scope.matches_mime(mime) {
-                return Ok(());
-            }
+        if self.find_blob_scopes().any(|blob_scope| blob_scope.matches_mime(mime)) {
+            Ok(())
+        } else {
+            Err(ScopeError::InsufficientScope {
+                required: format!("blob:{}", mime),
+                message: format!("Insufficient scope to upload blob with mime type {}", mime),
+            })
         }
-
-        Err(ScopeError::InsufficientScope {
-            required: format!("blob:{}", mime),
-            message: format!("Insufficient scope to upload blob with mime type {}", mime),
-        })
     }
 
     pub fn assert_rpc(&self, aud: &str, lxm: &str) -> Result<(), ScopeError> {
@@ -169,7 +165,7 @@ impl ScopePermissions {
             return Ok(());
         }
 
-        for rpc_scope in self.find_rpc_scopes() {
+        let has_permission = self.find_rpc_scopes().any(|rpc_scope| {
             let lxm_matches = match &rpc_scope.lxm {
                 None => true,
                 Some(scope_lxm) if scope_lxm == lxm => true,
@@ -186,15 +182,17 @@ impl ScopePermissions {
                 Some(scope_aud) => scope_aud == aud,
             };
 
-            if lxm_matches && aud_matches {
-                return Ok(());
-            }
-        }
+            lxm_matches && aud_matches
+        });
 
-        Err(ScopeError::InsufficientScope {
-            required: format!("rpc:{}?aud={}", lxm, aud),
-            message: format!("Insufficient scope to call {} on {}", lxm, aud),
-        })
+        if has_permission {
+            Ok(())
+        } else {
+            Err(ScopeError::InsufficientScope {
+                required: format!("rpc:{}?aud={}", lxm, aud),
+                message: format!("Insufficient scope to call {} on {}", lxm, aud),
+            })
+        }
     }
 
     pub fn assert_account(
@@ -211,27 +209,28 @@ impl ScopePermissions {
             return Ok(());
         }
 
-        for account_scope in self.find_account_scopes() {
-            if account_scope.attr == attr && account_scope.action == action {
-                return Ok(());
-            }
-            if account_scope.attr == attr && account_scope.action == AccountAction::Manage {
-                return Ok(());
-            }
-        }
+        let has_permission = self.find_account_scopes().any(|account_scope| {
+            account_scope.attr == attr
+                && (account_scope.action == action
+                    || account_scope.action == AccountAction::Manage)
+        });
 
-        Err(ScopeError::InsufficientScope {
-            required: format!(
-                "account:{}?action={}",
-                attr_str(attr),
-                action_str_account(action)
-            ),
-            message: format!(
-                "Insufficient scope to {} account {}",
-                action_str_account(action),
-                attr_str(attr)
-            ),
-        })
+        if has_permission {
+            Ok(())
+        } else {
+            Err(ScopeError::InsufficientScope {
+                required: format!(
+                    "account:{}?action={}",
+                    attr_str(attr),
+                    action_str_account(action)
+                ),
+                message: format!(
+                    "Insufficient scope to {} account {}",
+                    action_str_account(action),
+                    attr_str(attr)
+                ),
+            })
+        }
     }
 
     pub fn allows_email_read(&self) -> bool {
@@ -264,22 +263,23 @@ impl ScopePermissions {
             return Ok(());
         }
 
-        for identity_scope in self.find_identity_scopes() {
-            if identity_scope.attr == IdentityAttr::Wildcard {
-                return Ok(());
-            }
-            if identity_scope.attr == attr {
-                return Ok(());
-            }
-        }
+        let has_permission = self
+            .find_identity_scopes()
+            .any(|identity_scope| {
+                identity_scope.attr == IdentityAttr::Wildcard || identity_scope.attr == attr
+            });
 
-        Err(ScopeError::InsufficientScope {
-            required: format!("identity:{}", identity_attr_str(attr)),
-            message: format!(
-                "Insufficient scope to modify identity {}",
-                identity_attr_str(attr)
-            ),
-        })
+        if has_permission {
+            Ok(())
+        } else {
+            Err(ScopeError::InsufficientScope {
+                required: format!("identity:{}", identity_attr_str(attr)),
+                message: format!(
+                    "Insufficient scope to modify identity {}",
+                    identity_attr_str(attr)
+                ),
+            })
+        }
     }
 
     pub fn allows_identity(&self, attr: IdentityAttr) -> bool {

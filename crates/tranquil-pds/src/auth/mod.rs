@@ -61,6 +61,7 @@ pub enum TokenValidationError {
     KeyDecryptionFailed,
     AuthenticationFailed,
     TokenExpired,
+    OAuthTokenExpired,
 }
 
 impl fmt::Display for TokenValidationError {
@@ -70,7 +71,7 @@ impl fmt::Display for TokenValidationError {
             Self::AccountTakedown => write!(f, "AccountTakedown"),
             Self::KeyDecryptionFailed => write!(f, "KeyDecryptionFailed"),
             Self::AuthenticationFailed => write!(f, "AuthenticationFailed"),
-            Self::TokenExpired => write!(f, "ExpiredToken"),
+            Self::TokenExpired | Self::OAuthTokenExpired => write!(f, "ExpiredToken"),
         }
     }
 }
@@ -497,7 +498,9 @@ pub async fn validate_token_with_dpop(
                 controller_did: None,
             })
         }
-        Err(crate::oauth::OAuthError::ExpiredToken(_)) => Err(TokenValidationError::TokenExpired),
+        Err(crate::oauth::OAuthError::ExpiredToken(_)) => {
+            Err(TokenValidationError::OAuthTokenExpired)
+        }
         Err(_) => Err(TokenValidationError::AuthenticationFailed),
     }
 }

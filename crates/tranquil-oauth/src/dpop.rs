@@ -218,25 +218,30 @@ fn verify_es256(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
             crv
         )));
     }
-    let x_bytes = URL_SAFE_NO_PAD
+    let x_decoded = URL_SAFE_NO_PAD
         .decode(
             jwk.x
                 .as_ref()
                 .ok_or_else(|| OAuthError::InvalidDpopProof("Missing x coordinate".to_string()))?,
         )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid x encoding".to_string()))?;
-    let y_bytes = URL_SAFE_NO_PAD
+    let y_decoded = URL_SAFE_NO_PAD
         .decode(
             jwk.y
                 .as_ref()
                 .ok_or_else(|| OAuthError::InvalidDpopProof("Missing y coordinate".to_string()))?,
         )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid y encoding".to_string()))?;
-    let point = EncodedPoint::from_affine_coordinates(
-        x_bytes.as_slice().into(),
-        y_bytes.as_slice().into(),
-        false,
-    );
+    let mut x_bytes = [0u8; 32];
+    let mut y_bytes = [0u8; 32];
+    if x_decoded.len() > 32 || y_decoded.len() > 32 {
+        return Err(OAuthError::InvalidDpopProof(
+            "EC coordinate too long".to_string(),
+        ));
+    }
+    x_bytes[32 - x_decoded.len()..].copy_from_slice(&x_decoded);
+    y_bytes[32 - y_decoded.len()..].copy_from_slice(&y_decoded);
+    let point = EncodedPoint::from_affine_coordinates((&x_bytes).into(), (&y_bytes).into(), false);
     let affine_opt: Option<AffinePoint> = AffinePoint::from_encoded_point(&point).into();
     let affine =
         affine_opt.ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
@@ -264,25 +269,30 @@ fn verify_es384(jwk: &DPoPJwk, message: &[u8], signature: &[u8]) -> Result<(), O
             crv
         )));
     }
-    let x_bytes = URL_SAFE_NO_PAD
+    let x_decoded = URL_SAFE_NO_PAD
         .decode(
             jwk.x
                 .as_ref()
                 .ok_or_else(|| OAuthError::InvalidDpopProof("Missing x coordinate".to_string()))?,
         )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid x encoding".to_string()))?;
-    let y_bytes = URL_SAFE_NO_PAD
+    let y_decoded = URL_SAFE_NO_PAD
         .decode(
             jwk.y
                 .as_ref()
                 .ok_or_else(|| OAuthError::InvalidDpopProof("Missing y coordinate".to_string()))?,
         )
         .map_err(|_| OAuthError::InvalidDpopProof("Invalid y encoding".to_string()))?;
-    let point = EncodedPoint::from_affine_coordinates(
-        x_bytes.as_slice().into(),
-        y_bytes.as_slice().into(),
-        false,
-    );
+    let mut x_bytes = [0u8; 48];
+    let mut y_bytes = [0u8; 48];
+    if x_decoded.len() > 48 || y_decoded.len() > 48 {
+        return Err(OAuthError::InvalidDpopProof(
+            "EC coordinate too long".to_string(),
+        ));
+    }
+    x_bytes[48 - x_decoded.len()..].copy_from_slice(&x_decoded);
+    y_bytes[48 - y_decoded.len()..].copy_from_slice(&y_decoded);
+    let point = EncodedPoint::from_affine_coordinates((&x_bytes).into(), (&y_bytes).into(), false);
     let affine_opt: Option<AffinePoint> = AffinePoint::from_encoded_point(&point).into();
     let affine =
         affine_opt.ok_or_else(|| OAuthError::InvalidDpopProof("Invalid EC point".to_string()))?;
@@ -397,5 +407,53 @@ mod tests {
         };
         let thumbprint = compute_jwk_thumbprint(&jwk).unwrap();
         assert!(!thumbprint.is_empty());
+    }
+
+    #[test]
+    fn test_es256_short_coordinate_no_panic() {
+        let short_31_bytes = vec![0x42u8; 31];
+        let short_30_bytes = vec![0x42u8; 30];
+        let x_b64 = URL_SAFE_NO_PAD.encode(&short_31_bytes);
+        let y_b64 = URL_SAFE_NO_PAD.encode(&short_30_bytes);
+        let jwk = DPoPJwk {
+            kty: "EC".to_string(),
+            crv: Some("P-256".to_string()),
+            x: Some(x_b64),
+            y: Some(y_b64),
+        };
+        let result = verify_es256(&jwk, b"test", &[0u8; 64]);
+        assert!(result.is_err(), "Invalid coordinates should return error, not panic");
+    }
+
+    #[test]
+    fn test_es256_valid_key_with_trimmed_coordinates() {
+        use p256::ecdsa::{SigningKey, signature::Signer};
+        use p256::elliptic_curve::rand_core::OsRng;
+
+        let signing_key = SigningKey::random(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let point = verifying_key.to_encoded_point(false);
+        let x_bytes = point.x().unwrap();
+        let y_bytes = point.y().unwrap();
+        let x_trimmed: Vec<u8> = x_bytes.iter().copied().skip_while(|&b| b == 0).collect();
+        let y_trimmed: Vec<u8> = y_bytes.iter().copied().skip_while(|&b| b == 0).collect();
+        let x_b64 = URL_SAFE_NO_PAD.encode(&x_trimmed);
+        let y_b64 = URL_SAFE_NO_PAD.encode(&y_trimmed);
+        let jwk = DPoPJwk {
+            kty: "EC".to_string(),
+            crv: Some("P-256".to_string()),
+            x: Some(x_b64),
+            y: Some(y_b64),
+        };
+        let message = b"test message for signature verification";
+        let signature: p256::ecdsa::Signature = signing_key.sign(message);
+        let result = verify_es256(&jwk, message, signature.to_bytes().as_slice());
+        assert!(
+            result.is_ok(),
+            "Should verify signature with trimmed coordinates (x={}, y={}): {:?}",
+            x_trimmed.len(),
+            y_trimmed.len(),
+            result
+        );
     }
 }

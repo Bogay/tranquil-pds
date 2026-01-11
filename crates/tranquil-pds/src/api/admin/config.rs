@@ -48,32 +48,19 @@ pub async fn get_server_config(
     .fetch_all(&state.db)
     .await?;
 
-    let mut server_name = "Tranquil PDS".to_string();
-    let mut primary_color = None;
-    let mut primary_color_dark = None;
-    let mut secondary_color = None;
-    let mut secondary_color_dark = None;
-    let mut logo_cid = None;
-
-    for (key, value) in rows {
-        match key.as_str() {
-            "server_name" => server_name = value,
-            "primary_color" => primary_color = Some(value),
-            "primary_color_dark" => primary_color_dark = Some(value),
-            "secondary_color" => secondary_color = Some(value),
-            "secondary_color_dark" => secondary_color_dark = Some(value),
-            "logo_cid" => logo_cid = Some(value),
-            _ => {}
-        }
-    }
+    let config_map: std::collections::HashMap<String, String> =
+        rows.into_iter().collect();
 
     Ok(Json(ServerConfigResponse {
-        server_name,
-        primary_color,
-        primary_color_dark,
-        secondary_color,
-        secondary_color_dark,
-        logo_cid,
+        server_name: config_map
+            .get("server_name")
+            .cloned()
+            .unwrap_or_else(|| "Tranquil PDS".to_string()),
+        primary_color: config_map.get("primary_color").cloned(),
+        primary_color_dark: config_map.get("primary_color_dark").cloned(),
+        secondary_color: config_map.get("secondary_color").cloned(),
+        secondary_color_dark: config_map.get("secondary_color_dark").cloned(),
+        logo_cid: config_map.get("logo_cid").cloned(),
     }))
 }
 

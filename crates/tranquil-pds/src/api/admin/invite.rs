@@ -24,29 +24,20 @@ pub async fn disable_invite_codes(
     Json(input): Json<DisableInviteCodesInput>,
 ) -> Response {
     if let Some(codes) = &input.codes {
-        for code in codes {
-            let _ = sqlx::query!(
-                "UPDATE invite_codes SET disabled = TRUE WHERE code = $1",
-                code
-            )
-            .execute(&state.db)
-            .await;
-        }
+        let _ = sqlx::query!(
+            "UPDATE invite_codes SET disabled = TRUE WHERE code = ANY($1)",
+            codes as &[String]
+        )
+        .execute(&state.db)
+        .await;
     }
     if let Some(accounts) = &input.accounts {
-        for account in accounts {
-            let user = sqlx::query!("SELECT id FROM users WHERE did = $1", account)
-                .fetch_optional(&state.db)
-                .await;
-            if let Ok(Some(user_row)) = user {
-                let _ = sqlx::query!(
-                    "UPDATE invite_codes SET disabled = TRUE WHERE created_by_user = $1",
-                    user_row.id
-                )
-                .execute(&state.db)
-                .await;
-            }
-        }
+        let _ = sqlx::query!(
+            "UPDATE invite_codes SET disabled = TRUE WHERE created_by_user IN (SELECT id FROM users WHERE did = ANY($1))",
+            accounts as &[String]
+        )
+        .execute(&state.db)
+        .await;
     }
     EmptyResponse::ok().into_response()
 }
@@ -70,7 +61,7 @@ pub struct InviteCodeInfo {
     pub uses: Vec<InviteCodeUseInfo>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InviteCodeUseInfo {
     pub used_by: String,
@@ -149,47 +140,71 @@ pub async fn get_invite_codes(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let mut codes = Vec::new();
-    for (code, available_uses, disabled, created_by_user, created_at) in &codes_rows {
-        let creator_did =
-            sqlx::query_scalar!("SELECT did FROM users WHERE id = $1", created_by_user)
-                .fetch_optional(&state.db)
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "unknown".to_string());
-        let uses_result = sqlx::query!(
+
+    let user_ids: Vec<uuid::Uuid> = codes_rows.iter().map(|(_, _, _, uid, _)| *uid).collect();
+    let code_strings: Vec<String> = codes_rows.iter().map(|(c, _, _, _, _)| c.clone()).collect();
+
+    let mut creator_dids: std::collections::HashMap<uuid::Uuid, String> =
+        std::collections::HashMap::new();
+    sqlx::query!(
+        "SELECT id, did FROM users WHERE id = ANY($1)",
+        &user_ids
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .for_each(|r| {
+        creator_dids.insert(r.id, r.did);
+    });
+
+    let mut uses_by_code: std::collections::HashMap<String, Vec<InviteCodeUseInfo>> =
+        std::collections::HashMap::new();
+    if !code_strings.is_empty() {
+        sqlx::query!(
             r#"
-            SELECT u.did, icu.used_at
+            SELECT icu.code, u.did, icu.used_at
             FROM invite_code_uses icu
             JOIN users u ON icu.used_by_user = u.id
-            WHERE icu.code = $1
+            WHERE icu.code = ANY($1)
             ORDER BY icu.used_at DESC
             "#,
-            code
+            &code_strings
         )
         .fetch_all(&state.db)
-        .await;
-        let uses = match uses_result {
-            Ok(use_rows) => use_rows
-                .iter()
-                .map(|u| InviteCodeUseInfo {
-                    used_by: u.did.clone(),
-                    used_at: u.used_at.to_rfc3339(),
-                })
-                .collect(),
-            Err(_) => Vec::new(),
-        };
-        codes.push(InviteCodeInfo {
-            code: code.clone(),
-            available: *available_uses,
-            disabled: disabled.unwrap_or(false),
-            for_account: creator_did.clone(),
-            created_by: creator_did,
-            created_at: created_at.to_rfc3339(),
-            uses,
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .for_each(|r| {
+            uses_by_code
+                .entry(r.code)
+                .or_default()
+                .push(InviteCodeUseInfo {
+                    used_by: r.did,
+                    used_at: r.used_at.to_rfc3339(),
+                });
         });
     }
+
+    let codes: Vec<InviteCodeInfo> = codes_rows
+        .iter()
+        .map(|(code, available_uses, disabled, created_by_user, created_at)| {
+            let creator_did = creator_dids
+                .get(created_by_user)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string());
+            InviteCodeInfo {
+                code: code.clone(),
+                available: *available_uses,
+                disabled: disabled.unwrap_or(false),
+                for_account: creator_did.clone(),
+                created_by: creator_did,
+                created_at: created_at.to_rfc3339(),
+                uses: uses_by_code.get(code).cloned().unwrap_or_default(),
+            }
+        })
+        .collect();
+
     let next_cursor = if codes_rows.len() == limit as usize {
         codes_rows.last().map(|(code, _, _, _, _)| code.clone())
     } else {

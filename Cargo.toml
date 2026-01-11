@@ -92,7 +92,7 @@ tower-layer = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 urlencoding = "2.1"
-uuid = { version = "1.19", features = ["v4", "v5", "fast-rng"] }
+uuid = { version = "1.19", features = ["v4", "v5", "v7", "fast-rng"] }
 webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
 webauthn-rs-proto = "0.5"
 zip = { version = "7.0", default-features = false, features = ["deflate"] }

@@ -106,26 +106,29 @@ pub async fn is_account_migrated(db: &PgPool, did: &str) -> Result<bool, sqlx::E
 pub fn parse_repeated_query_param(query: Option<&str>, key: &str) -> Vec<String> {
     query
         .map(|q| {
-            let mut values = Vec::new();
-            for pair in q.split('&') {
-                if let Some((k, v)) = pair.split_once('=')
-                    && k == key
-                    && let Ok(decoded) = urlencoding::decode(v)
-                {
-                    let decoded = decoded.into_owned();
+            q.split('&')
+                .filter_map(|pair| {
+                    pair.split_once('=')
+                        .filter(|(k, _)| *k == key)
+                        .and_then(|(_, v)| urlencoding::decode(v).ok())
+                        .map(|decoded| decoded.into_owned())
+                })
+                .flat_map(|decoded| {
                     if decoded.contains(',') {
-                        for part in decoded.split(',') {
-                            let trimmed = part.trim();
-                            if !trimmed.is_empty() {
-                                values.push(trimmed.to_string());
-                            }
-                        }
-                    } else if !decoded.is_empty() {
-                        values.push(decoded);
+                        decoded
+                            .split(',')
+                            .filter_map(|part| {
+                                let trimmed = part.trim();
+                                (!trimmed.is_empty()).then(|| trimmed.to_string())
+                            })
+                            .collect::<Vec<_>>()
+                    } else if decoded.is_empty() {
+                        vec![]
+                    } else {
+                        vec![decoded]
                     }
-                }
-            }
-            values
+                })
+                .collect()
         })
         .unwrap_or_default()
 }
