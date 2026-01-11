@@ -239,15 +239,19 @@ pub async fn reset_password(
         error!("Failed to commit password reset transaction: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
-    for jti in session_jtis {
+    futures::future::join_all(session_jtis.into_iter().map(|jti| {
         let cache_key = format!("auth:session:{}:{}", user_did, jti);
-        if let Err(e) = state.cache.delete(&cache_key).await {
-            warn!(
-                "Failed to invalidate session cache for {}: {:?}",
-                cache_key, e
-            );
+        let cache = state.cache.clone();
+        async move {
+            if let Err(e) = cache.delete(&cache_key).await {
+                warn!(
+                    "Failed to invalidate session cache for {}: {:?}",
+                    cache_key, e
+                );
+            }
         }
-    }
+    }))
+    .await;
     info!("Password reset completed for user {}", user_id);
     EmptyResponse::ok().into_response()
 }

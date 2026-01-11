@@ -222,7 +222,7 @@ async fn proxy_handler(
     ) {
         let token = extracted.token;
         let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-        let http_uri = uri.to_string();
+        let http_uri = crate::util::build_full_url(&uri.to_string());
 
         match crate::auth::validate_token_with_dpop(
             &state.db,

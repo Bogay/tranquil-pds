@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE oauth_token\n        SET current_refresh_token = $2, expires_at = $3, updated_at = NOW(),\n            previous_refresh_token = $4, rotated_at = NOW()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ab5e6c5bc904ae54f8c559f6e1c26f8293851815a1b4666a093750fe249626b6"
+}

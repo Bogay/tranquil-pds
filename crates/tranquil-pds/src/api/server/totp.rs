@@ -195,26 +195,28 @@ pub async fn enable_totp(
         return ApiError::InternalError(None).into_response();
     }
 
-    for code in &backup_codes {
-        let hash = match hash_backup_code(code) {
-            Ok(h) => h,
-            Err(e) => {
-                error!("Failed to hash backup code: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-
-        if let Err(e) = sqlx::query!(
-            "INSERT INTO backup_codes (did, code_hash, created_at) VALUES ($1, $2, NOW())",
-            &auth.0.did,
-            hash
-        )
-        .execute(&mut *tx)
-        .await
-        {
-            error!("Failed to store backup code: {:?}", e);
+    let backup_hashes: Result<Vec<_>, _> = backup_codes.iter().map(|c| hash_backup_code(c)).collect();
+    let backup_hashes = match backup_hashes {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            error!("Failed to hash backup code: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
+    };
+
+    if let Err(e) = sqlx::query!(
+        r#"
+        INSERT INTO backup_codes (did, code_hash, created_at)
+        SELECT $1, hash, NOW() FROM UNNEST($2::text[]) AS t(hash)
+        "#,
+        &auth.0.did,
+        &backup_hashes[..]
+    )
+    .execute(&mut *tx)
+    .await
+    {
+        error!("Failed to store backup codes: {:?}", e);
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Err(e) = tx.commit().await {
@@ -482,26 +484,28 @@ pub async fn regenerate_backup_codes(
         return ApiError::InternalError(None).into_response();
     }
 
-    for code in &backup_codes {
-        let hash = match hash_backup_code(code) {
-            Ok(h) => h,
-            Err(e) => {
-                error!("Failed to hash backup code: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-
-        if let Err(e) = sqlx::query!(
-            "INSERT INTO backup_codes (did, code_hash, created_at) VALUES ($1, $2, NOW())",
-            &auth.0.did,
-            hash
-        )
-        .execute(&mut *tx)
-        .await
-        {
-            error!("Failed to store backup code: {:?}", e);
+    let backup_hashes: Result<Vec<_>, _> = backup_codes.iter().map(|c| hash_backup_code(c)).collect();
+    let backup_hashes = match backup_hashes {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            error!("Failed to hash backup code: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
+    };
+
+    if let Err(e) = sqlx::query!(
+        r#"
+        INSERT INTO backup_codes (did, code_hash, created_at)
+        SELECT $1, hash, NOW() FROM UNNEST($2::text[]) AS t(hash)
+        "#,
+        &auth.0.did,
+        &backup_hashes[..]
+    )
+    .execute(&mut *tx)
+    .await
+    {
+        error!("Failed to store backup codes: {:?}", e);
+        return ApiError::InternalError(None).into_response();
     }
 
     if let Err(e) = tx.commit().await {
@@ -532,8 +536,12 @@ async fn verify_backup_code_for_user(state: &AppState, did: &str, code: &str) ->
         }
     };
 
-    for row in backup_codes {
-        if verify_backup_code(&code, &row.code_hash) {
+    let matched = backup_codes
+        .iter()
+        .find(|row| verify_backup_code(&code, &row.code_hash));
+
+    match matched {
+        Some(row) => {
             let _ = sqlx::query!(
                 "UPDATE backup_codes SET used_at = $1 WHERE id = $2",
                 Utc::now(),
@@ -541,11 +549,10 @@ async fn verify_backup_code_for_user(state: &AppState, did: &str, code: &str) ->
             )
             .execute(&state.db)
             .await;
-            return true;
+            true
         }
+        None => false,
     }
-
-    false
 }
 
 pub async fn verify_totp_or_backup_for_user(state: &AppState, did: &str, code: &str) -> bool {

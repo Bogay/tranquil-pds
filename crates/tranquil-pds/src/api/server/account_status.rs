@@ -10,6 +10,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use backon::{ExponentialBuilder, Retryable};
 use bcrypt::verify;
 use chrono::{Duration, Utc};
 use cid::Cid;
@@ -19,6 +20,7 @@ use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -177,63 +179,69 @@ async fn assert_valid_did_document_for_service(
     let expected_endpoint = format!("https://{}", hostname);
 
     if did.starts_with("did:plc:") {
-        let plc_client = PlcClient::with_cache(None, Some(cache.clone()));
-
         let max_attempts = if with_retry { 5 } else { 1 };
-        let mut last_error = None;
-        let mut doc_data = None;
-        for attempt in 0..max_attempts {
-            if attempt > 0 {
-                let delay_ms = 500 * (1 << (attempt - 1));
-                info!(
-                    "Waiting {}ms before retry {} for DID document validation ({})",
-                    delay_ms, attempt, did
-                );
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-            }
+        let cache_for_retry = cache.clone();
+        let did_owned = did.to_string();
+        let expected_owned = expected_endpoint.clone();
+        let attempt_counter = Arc::new(AtomicUsize::new(0));
 
-            match plc_client.get_document_data(did).await {
-                Ok(data) => {
-                    let pds_endpoint = data
-                        .get("services")
-                        .and_then(|s| s.get("atproto_pds").or_else(|| s.get("atprotoPds")))
-                        .and_then(|p| p.get("endpoint"))
-                        .and_then(|e| e.as_str());
+        let doc_data: serde_json::Value = (|| {
+            let cache_ref = cache_for_retry.clone();
+            let did_ref = did_owned.clone();
+            let expected_ref = expected_owned.clone();
+            let counter = attempt_counter.clone();
+            async move {
+                let attempt = counter.fetch_add(1, Ordering::SeqCst);
+                if attempt > 0 {
+                    info!(
+                        "Retry {} for DID document validation ({})",
+                        attempt, did_ref
+                    );
+                }
+                let plc_client = PlcClient::with_cache(None, Some(cache_ref));
+                match plc_client.get_document_data(&did_ref).await {
+                    Ok(data) => {
+                        let pds_endpoint = data
+                            .get("services")
+                            .and_then(|s: &serde_json::Value| s.get("atproto_pds").or_else(|| s.get("atprotoPds")))
+                            .and_then(|p: &serde_json::Value| p.get("endpoint"))
+                            .and_then(|e: &serde_json::Value| e.as_str());
 
-                    if pds_endpoint == Some(&expected_endpoint) {
-                        doc_data = Some(data);
-                        break;
-                    } else {
-                        info!(
-                            "Attempt {}: DID {} has endpoint {:?}, expected {} - retrying",
+                        if pds_endpoint == Some(expected_ref.as_str()) {
+                            Ok(data)
+                        } else {
+                            info!(
+                                "Attempt {}: DID {} has endpoint {:?}, expected {}",
+                                attempt + 1,
+                                did_ref,
+                                pds_endpoint,
+                                expected_ref
+                            );
+                            Err(format!(
+                                "DID document endpoint {:?} does not match expected {}",
+                                pds_endpoint, expected_ref
+                            ))
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Attempt {}: Failed to fetch PLC document for {}: {:?}",
                             attempt + 1,
-                            did,
-                            pds_endpoint,
-                            expected_endpoint
+                            did_ref,
+                            e
                         );
-                        last_error = Some(format!(
-                            "DID document endpoint {:?} does not match expected {}",
-                            pds_endpoint, expected_endpoint
-                        ));
+                        Err(format!("Could not resolve DID document: {}", e))
                     }
                 }
-                Err(e) => {
-                    warn!(
-                        "Attempt {}: Failed to fetch PLC document for {}: {:?}",
-                        attempt + 1,
-                        did,
-                        e
-                    );
-                    last_error = Some(format!("Could not resolve DID document: {}", e));
-                }
             }
-        }
-
-        let Some(doc_data) = doc_data else {
-            return Err(ApiError::InvalidRequest(
-                last_error.unwrap_or_else(|| "DID document validation failed".to_string()),
-            ));
-        };
+        })
+        .retry(
+            ExponentialBuilder::default()
+                .with_min_delay(std::time::Duration::from_millis(500))
+                .with_max_times(max_attempts),
+        )
+        .await
+        .map_err(ApiError::InvalidRequest)?;
 
         let server_rotation_key = std::env::var("PLC_ROTATION_KEY").ok();
         if let Some(ref expected_rotation_key) = server_rotation_key {

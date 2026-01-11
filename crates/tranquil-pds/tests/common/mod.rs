@@ -5,19 +5,19 @@ use chrono::Utc;
 use reqwest::{Client, StatusCode, header};
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-#[allow(unused_imports)]
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock, RwLock};
 #[allow(unused_imports)]
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tranquil_pds::state::AppState;
 use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static APP_PORT: OnceLock<u16> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
+static MOCK_PLC: OnceLock<MockServer> = OnceLock::new();
 static TEST_DB_POOL: OnceLock<sqlx::PgPool> = OnceLock::new();
 
 #[cfg(not(feature = "external-infra"))]
@@ -117,6 +117,7 @@ async fn setup_with_external_infra() -> String {
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
     let s3_endpoint =
         std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT must be set when using external infra");
+    let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var(
             "S3_BUCKET",
@@ -137,6 +138,7 @@ async fn setup_with_external_infra() -> String {
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+        std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
     }
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
@@ -164,6 +166,7 @@ async fn setup_with_testcontainers() -> String {
         .await
         .expect("Failed to get S3 port");
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
+    let plc_url = setup_mock_plc_directory().await;
     unsafe {
         std::env::set_var("S3_BUCKET", "test-bucket");
         std::env::set_var("AWS_ACCESS_KEY_ID", "minioadmin");
@@ -172,6 +175,7 @@ async fn setup_with_testcontainers() -> String {
         std::env::set_var("S3_ENDPOINT", &s3_endpoint);
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+        std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
     }
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region("us-east-1")
@@ -238,6 +242,199 @@ async fn setup_mock_did_document(mock_server: &MockServer, did: &str, service_en
 }
 
 async fn setup_mock_appview(_mock_server: &MockServer) {}
+
+type PlcOperationStore = Arc<RwLock<HashMap<String, Value>>>;
+
+struct PlcPostResponder {
+    store: PlcOperationStore,
+}
+
+impl Respond for PlcPostResponder {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let path = request.url.path();
+        let did = urlencoding::decode(path.trim_start_matches('/'))
+            .unwrap_or_default()
+            .to_string();
+
+        if let Ok(body) = serde_json::from_slice::<Value>(request.body.as_slice()) {
+            if let Ok(mut store) = self.store.write() {
+                store.insert(did, body);
+            }
+        }
+        ResponseTemplate::new(200)
+    }
+}
+
+struct PlcGetResponder {
+    store: PlcOperationStore,
+}
+
+impl Respond for PlcGetResponder {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let path = request.url.path();
+        let path_clean = path.trim_start_matches('/');
+
+        let (did, endpoint) = path_clean
+            .find("/log/")
+            .or_else(|| path_clean.find("/data"))
+            .map(|idx| {
+                let did = urlencoding::decode(&path_clean[..idx])
+                    .unwrap_or_default()
+                    .to_string();
+                let endpoint = &path_clean[idx..];
+                (did, endpoint)
+            })
+            .unwrap_or_else(|| {
+                (
+                    urlencoding::decode(path_clean)
+                        .unwrap_or_default()
+                        .to_string(),
+                    "",
+                )
+            });
+
+        let store = self.store.read().unwrap();
+        let operation = store.get(&did);
+
+        match endpoint {
+            "/log/last" => {
+                let response = operation
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        json!({
+                            "type": "plc_operation",
+                            "rotationKeys": [],
+                            "verificationMethods": {},
+                            "alsoKnownAs": [],
+                            "services": {},
+                            "prev": null
+                        })
+                    });
+                ResponseTemplate::new(200).set_body_json(response)
+            }
+            "/log/audit" => ResponseTemplate::new(200).set_body_json(json!([])),
+            "/data" => {
+                let response = operation
+                    .map(|op| {
+                        json!({
+                            "rotationKeys": op.get("rotationKeys").cloned().unwrap_or(json!([])),
+                            "verificationMethods": op.get("verificationMethods").cloned().unwrap_or(json!({})),
+                            "alsoKnownAs": op.get("alsoKnownAs").cloned().unwrap_or(json!([])),
+                            "services": op.get("services").cloned().unwrap_or(json!({}))
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        json!({
+                            "rotationKeys": [],
+                            "verificationMethods": {},
+                            "alsoKnownAs": [],
+                            "services": {}
+                        })
+                    });
+                ResponseTemplate::new(200).set_body_json(response)
+            }
+            _ => {
+                let did_doc = operation
+                    .map(|op| operation_to_did_document(&did, op))
+                    .unwrap_or_else(|| {
+                        json!({
+                            "@context": ["https://www.w3.org/ns/did/v1"],
+                            "id": did,
+                            "alsoKnownAs": [],
+                            "verificationMethod": [],
+                            "service": []
+                        })
+                    });
+                ResponseTemplate::new(200).set_body_json(did_doc)
+            }
+        }
+    }
+}
+
+fn operation_to_did_document(did: &str, op: &Value) -> Value {
+    let also_known_as = op
+        .get("alsoKnownAs")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let verification_methods: Vec<Value> = op
+        .get("verificationMethods")
+        .and_then(|v| v.as_object())
+        .map(|methods| {
+            methods
+                .iter()
+                .map(|(key, value)| {
+                    let did_key = value.as_str().unwrap_or("");
+                    let multikey = did_key_to_multikey(did_key);
+                    json!({
+                        "id": format!("{}#{}", did, key),
+                        "type": "Multikey",
+                        "controller": did,
+                        "publicKeyMultibase": multikey
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let services: Vec<Value> = op
+        .get("services")
+        .and_then(|v| v.as_object())
+        .map(|svcs| {
+            svcs.iter()
+                .map(|(key, value)| {
+                    json!({
+                        "id": format!("#{}", key),
+                        "type": value.get("type").and_then(|t| t.as_str()).unwrap_or(""),
+                        "serviceEndpoint": value.get("endpoint").and_then(|e| e.as_str()).unwrap_or("")
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    json!({
+        "@context": [
+            "https://www.w3.org/ns/did/v1",
+            "https://w3id.org/security/multikey/v1"
+        ],
+        "id": did,
+        "alsoKnownAs": also_known_as,
+        "verificationMethod": verification_methods,
+        "service": services
+    })
+}
+
+fn did_key_to_multikey(did_key: &str) -> String {
+    if !did_key.starts_with("did:key:z") {
+        return String::new();
+    }
+    did_key[8..].to_string()
+}
+
+async fn setup_mock_plc_directory() -> String {
+    let mock_plc = MockServer::start().await;
+    let store: PlcOperationStore = Arc::new(RwLock::new(HashMap::new()));
+
+    Mock::given(method("POST"))
+        .respond_with(PlcPostResponder {
+            store: store.clone(),
+        })
+        .mount(&mock_plc)
+        .await;
+
+    Mock::given(method("GET"))
+        .respond_with(PlcGetResponder {
+            store: store.clone(),
+        })
+        .mount(&mock_plc)
+        .await;
+
+    let plc_url = mock_plc.uri();
+    MOCK_PLC.set(mock_plc).ok();
+    plc_url
+}
 
 async fn spawn_app(database_url: String) -> String {
     use tranquil_pds::rate_limit::RateLimiters;

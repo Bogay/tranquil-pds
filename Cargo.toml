@@ -32,6 +32,7 @@ tranquil-oauth = { path = "crates/tranquil-oauth" }
 tranquil-comms = { path = "crates/tranquil-comms" }
 
 aes-gcm = "0.10"
+backon = "1"
 anyhow = "1.0"
 async-trait = "0.1"
 aws-config = "1.8"

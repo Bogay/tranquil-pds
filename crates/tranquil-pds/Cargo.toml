@@ -17,6 +17,7 @@ tranquil-oauth = { workspace = true }
 tranquil-comms = { workspace = true }
 
 aes-gcm = { workspace = true }
+backon = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 aws-config = { workspace = true }

@@ -48,7 +48,7 @@ impl RateLimiters {
                 NonZeroU32::new(10).unwrap(),
             ))),
             oauth_token: Arc::new(RateLimiter::keyed(Quota::per_minute(
-                NonZeroU32::new(30).unwrap(),
+                NonZeroU32::new(300).unwrap(),
             ))),
             oauth_authorize: Arc::new(RateLimiter::keyed(Quota::per_minute(
                 NonZeroU32::new(10).unwrap(),

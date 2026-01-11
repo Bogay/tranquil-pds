@@ -15,15 +15,12 @@ const BASE32_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
 
 fn gen_random_token() -> String {
     let mut rng = rand::thread_rng();
-    let mut token = String::with_capacity(11);
-    for i in 0..10 {
-        if i == 5 {
-            token.push('-');
-        }
-        let idx = rng.gen_range(0..32);
-        token.push(BASE32_ALPHABET[idx] as char);
-    }
-    token
+    let gen_segment = |rng: &mut rand::rngs::ThreadRng, len: usize| -> String {
+        (0..len)
+            .map(|_| BASE32_ALPHABET[rng.gen_range(0..32)] as char)
+            .collect()
+    };
+    format!("{}-{}", gen_segment(&mut rng, 5), gen_segment(&mut rng, 5))
 }
 
 fn gen_invite_code() -> String {
@@ -132,34 +129,38 @@ pub async fn create_invite_codes(
             }
         };
 
-    let mut result_codes = Vec::new();
-
-    for account in for_accounts {
-        let mut codes = Vec::new();
-        for _ in 0..code_count {
-            let code = gen_invite_code();
-            if let Err(e) = sqlx::query!(
-                "INSERT INTO invite_codes (code, available_uses, created_by_user, for_account) VALUES ($1, $2, $3, $4)",
-                code,
-                input.use_count,
+    let result = futures::future::try_join_all(for_accounts.into_iter().map(|account| {
+        let db = state.db.clone();
+        let use_count = input.use_count;
+        async move {
+            let codes: Vec<String> = (0..code_count).map(|_| gen_invite_code()).collect();
+            sqlx::query!(
+                r#"
+                INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
+                SELECT code, $2, $3, $4 FROM UNNEST($1::text[]) AS t(code)
+                "#,
+                &codes[..],
+                use_count,
                 admin_user_id,
                 account
             )
-            .execute(&state.db)
+            .execute(&db)
             .await
-            {
-                error!("DB error creating invite code: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-            codes.push(code);
+            .map(|_| AccountCodes { account, codes })
         }
-        result_codes.push(AccountCodes { account, codes });
-    }
+    }))
+    .await;
 
-    Json(CreateInviteCodesOutput {
-        codes: result_codes,
-    })
-    .into_response()
+    match result {
+        Ok(result_codes) => Json(CreateInviteCodesOutput {
+            codes: result_codes,
+        })
+        .into_response(),
+        Err(e) => {
+            error!("DB error creating invite codes: {:?}", e);
+            ApiError::InternalError(None).into_response()
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -227,52 +228,53 @@ pub async fn get_account_invite_codes(
         }
     };
 
-    let mut codes = Vec::new();
-    for row in codes_rows {
-        let disabled = row.disabled.unwrap_or(false);
-        if disabled {
-            continue;
-        }
-
-        let use_count = row.use_count;
-        if !include_used && use_count >= row.available_uses {
-            continue;
-        }
-
-        let uses = sqlx::query!(
-            r#"
-            SELECT u.did, u.handle, icu.used_at
-            FROM invite_code_uses icu
-            JOIN users u ON icu.used_by_user = u.id
-            WHERE icu.code = $1
-            ORDER BY icu.used_at DESC
-            "#,
-            row.code
-        )
-        .fetch_all(&state.db)
-        .await
-        .map(|use_rows| {
-            use_rows
-                .iter()
-                .map(|u| InviteCodeUse {
-                    used_by: u.did.clone(),
-                    used_by_handle: Some(u.handle.clone()),
-                    used_at: u.used_at.to_rfc3339(),
-                })
-                .collect()
+    let filtered_rows: Vec<_> = codes_rows
+        .into_iter()
+        .filter(|row| {
+            let disabled = row.disabled.unwrap_or(false);
+            !disabled && (include_used || row.use_count < row.available_uses)
         })
-        .unwrap_or_default();
+        .collect();
 
-        codes.push(InviteCode {
-            code: row.code,
-            available: row.available_uses,
-            disabled,
-            for_account: row.for_account,
-            created_by: "admin".to_string(),
-            created_at: row.created_at.to_rfc3339(),
-            uses,
-        });
-    }
+    let codes = futures::future::join_all(filtered_rows.into_iter().map(|row| {
+        let db = state.db.clone();
+        async move {
+            let uses = sqlx::query!(
+                r#"
+                SELECT u.did, u.handle, icu.used_at
+                FROM invite_code_uses icu
+                JOIN users u ON icu.used_by_user = u.id
+                WHERE icu.code = $1
+                ORDER BY icu.used_at DESC
+                "#,
+                row.code
+            )
+            .fetch_all(&db)
+            .await
+            .map(|use_rows| {
+                use_rows
+                    .iter()
+                    .map(|u| InviteCodeUse {
+                        used_by: u.did.clone(),
+                        used_by_handle: Some(u.handle.clone()),
+                        used_at: u.used_at.to_rfc3339(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+            InviteCode {
+                code: row.code,
+                available: row.available_uses,
+                disabled: false,
+                for_account: row.for_account,
+                created_by: "admin".to_string(),
+                created_at: row.created_at.to_rfc3339(),
+                uses,
+            }
+        }
+    }))
+    .await;
 
     Json(GetAccountInviteCodesOutput { codes }).into_response()
 }

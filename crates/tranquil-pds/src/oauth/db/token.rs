@@ -179,7 +179,6 @@ pub async fn get_token_by_refresh_token(
 pub async fn rotate_token(
     pool: &PgPool,
     old_db_id: i32,
-    new_token_id: &str,
     new_refresh_token: &str,
     new_expires_at: DateTime<Utc>,
 ) -> Result<(), OAuthError> {
@@ -207,12 +206,11 @@ pub async fn rotate_token(
     sqlx::query!(
         r#"
         UPDATE oauth_token
-        SET token_id = $2, current_refresh_token = $3, expires_at = $4, updated_at = NOW(),
-            previous_refresh_token = $5, rotated_at = NOW()
+        SET current_refresh_token = $2, expires_at = $3, updated_at = NOW(),
+            previous_refresh_token = $4, rotated_at = NOW()
         WHERE id = $1
         "#,
         old_db_id,
-        new_token_id,
         new_refresh_token,
         new_expires_at,
         old_refresh

@@ -705,21 +705,6 @@ pub async fn confirm_signup(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let verified_column = match row.channel {
-        crate::comms::CommsChannel::Email => "email_verified",
-        crate::comms::CommsChannel::Discord => "discord_verified",
-        crate::comms::CommsChannel::Telegram => "telegram_verified",
-        crate::comms::CommsChannel::Signal => "signal_verified",
-    };
-    let update_query = format!("UPDATE users SET {} = TRUE WHERE did = $1", verified_column);
-    if let Err(e) = sqlx::query(&update_query)
-        .bind(input.did.as_str())
-        .execute(&state.db)
-        .await
-    {
-        error!("Failed to update verification status: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
 
     let access_meta = match crate::auth::create_access_token_with_metadata(&row.did, &key_bytes) {
         Ok(m) => m,
@@ -735,6 +720,31 @@ pub async fn confirm_signup(
             return ApiError::InternalError(None).into_response();
         }
     };
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Failed to begin transaction: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    let verified_column = match row.channel {
+        crate::comms::CommsChannel::Email => "email_verified",
+        crate::comms::CommsChannel::Discord => "discord_verified",
+        crate::comms::CommsChannel::Telegram => "telegram_verified",
+        crate::comms::CommsChannel::Signal => "signal_verified",
+    };
+    let update_query = format!("UPDATE users SET {} = TRUE WHERE did = $1", verified_column);
+    if let Err(e) = sqlx::query(&update_query)
+        .bind(input.did.as_str())
+        .execute(&mut *tx)
+        .await
+    {
+        error!("Failed to update verification status: {:?}", e);
+        return ApiError::InternalError(None).into_response();
+    }
+
     let no_scope: Option<String> = None;
     if let Err(e) = sqlx::query!(
         "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
@@ -747,12 +757,18 @@ pub async fn confirm_signup(
         false,
         no_scope
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
+
+    if let Err(e) = tx.commit().await {
+        error!("Failed to commit transaction: {:?}", e);
+        return ApiError::InternalError(None).into_response();
+    }
+
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) = crate::comms::enqueue_welcome(&state.db, row.id, &hostname).await {
         warn!("Failed to enqueue welcome notification: {:?}", e);
@@ -878,9 +894,7 @@ pub async fn list_sessions(
         .and_then(|v| v.strip_prefix("Bearer "))
         .and_then(|token| crate::auth::get_jti_from_token(token).ok());
 
-    let mut sessions: Vec<SessionInfo> = Vec::new();
-
-    let jwt_result = sqlx::query_as::<
+    let jwt_rows = match sqlx::query_as::<
         _,
         (
             i32,
@@ -898,28 +912,16 @@ pub async fn list_sessions(
     )
     .bind(&auth.0.did)
     .fetch_all(&state.db)
-    .await;
-
-    match jwt_result {
-        Ok(rows) => {
-            for (id, access_jti, created_at, expires_at) in rows {
-                sessions.push(SessionInfo {
-                    id: format!("jwt:{}", id),
-                    session_type: "legacy".to_string(),
-                    client_name: None,
-                    created_at: created_at.to_rfc3339(),
-                    expires_at: expires_at.to_rfc3339(),
-                    is_current: current_jti.as_ref() == Some(&access_jti),
-                });
-            }
-        }
+    .await
+    {
+        Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching JWT sessions: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
-    }
+    };
 
-    let oauth_result = sqlx::query_as::<
+    let oauth_rows = match sqlx::query_as::<
         _,
         (
             i32,
@@ -938,29 +940,44 @@ pub async fn list_sessions(
     )
     .bind(&auth.0.did)
     .fetch_all(&state.db)
-    .await;
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("DB error fetching OAuth sessions: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
-    match oauth_result {
-        Ok(rows) => {
-            for (id, token_id, created_at, expires_at, client_id) in rows {
+    let jwt_sessions = jwt_rows.into_iter().map(|(id, access_jti, created_at, expires_at)| {
+        SessionInfo {
+            id: format!("jwt:{}", id),
+            session_type: "legacy".to_string(),
+            client_name: None,
+            created_at: created_at.to_rfc3339(),
+            expires_at: expires_at.to_rfc3339(),
+            is_current: current_jti.as_ref() == Some(&access_jti),
+        }
+    });
+
+    let is_oauth = auth.0.is_oauth;
+    let oauth_sessions =
+        oauth_rows
+            .into_iter()
+            .map(|(id, token_id, created_at, expires_at, client_id)| {
                 let client_name = extract_client_name(&client_id);
-                let is_current_oauth = auth.0.is_oauth && current_jti.as_ref() == Some(&token_id);
-                sessions.push(SessionInfo {
+                let is_current_oauth = is_oauth && current_jti.as_ref() == Some(&token_id);
+                SessionInfo {
                     id: format!("oauth:{}", id),
                     session_type: "oauth".to_string(),
                     client_name: Some(client_name),
                     created_at: created_at.to_rfc3339(),
                     expires_at: expires_at.to_rfc3339(),
                     is_current: is_current_oauth,
-                });
-            }
-        }
-        Err(e) => {
-            error!("DB error fetching OAuth sessions: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    }
+                }
+            });
 
+    let mut sessions: Vec<SessionInfo> = jwt_sessions.chain(oauth_sessions).collect();
     sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     (StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response()
@@ -1061,10 +1078,18 @@ pub async fn revoke_all_sessions(
         return ApiError::InvalidToken(None).into_response();
     };
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Failed to begin transaction: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
     if auth.0.is_oauth {
         if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE did = $1")
             .bind(&auth.0.did)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await
         {
             error!("DB error revoking JWT sessions: {:?}", e);
@@ -1073,7 +1098,7 @@ pub async fn revoke_all_sessions(
         if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1 AND token_id != $2")
             .bind(&auth.0.did)
             .bind(jti)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await
         {
             error!("DB error revoking OAuth sessions: {:?}", e);
@@ -1084,7 +1109,7 @@ pub async fn revoke_all_sessions(
             sqlx::query("DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2")
                 .bind(&auth.0.did)
                 .bind(jti)
-                .execute(&state.db)
+                .execute(&mut *tx)
                 .await
         {
             error!("DB error revoking JWT sessions: {:?}", e);
@@ -1092,12 +1117,17 @@ pub async fn revoke_all_sessions(
         }
         if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1")
             .bind(&auth.0.did)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await
         {
             error!("DB error revoking OAuth sessions: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
+    }
+
+    if let Err(e) = tx.commit().await {
+        error!("Failed to commit transaction: {:?}", e);
+        return ApiError::InternalError(None).into_response();
     }
 
     info!(did = %&auth.0.did, "All other sessions revoked");

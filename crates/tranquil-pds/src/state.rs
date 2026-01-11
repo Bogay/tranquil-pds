@@ -71,7 +71,7 @@ impl RateLimitKind {
             Self::PasswordReset => (5, 3_600_000),
             Self::ResetPassword => (10, 60_000),
             Self::RefreshSession => (60, 60_000),
-            Self::OAuthToken => (30, 60_000),
+            Self::OAuthToken => (300, 60_000),
             Self::OAuthAuthorize => (10, 60_000),
             Self::OAuthPar => (30, 60_000),
             Self::OAuthIntrospect => (30, 60_000),

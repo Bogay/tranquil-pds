@@ -97,38 +97,28 @@ pub async fn update_did_document(
             return ApiError::InvalidRequest("verification_methods cannot be empty".into())
                 .into_response();
         }
-        for method in methods {
+        let validation_error = methods.iter().find_map(|method| {
             if method.id.is_empty() {
-                return ApiError::InvalidRequest("verification method id is required".into())
-                    .into_response();
+                Some("verification method id is required")
+            } else if method.method_type != "Multikey" {
+                Some("verification method type must be 'Multikey'")
+            } else if !method.public_key_multibase.starts_with('z') {
+                Some("publicKeyMultibase must start with 'z' (base58btc)")
+            } else if method.public_key_multibase.len() < 40 {
+                Some("publicKeyMultibase appears too short for a valid key")
+            } else {
+                None
             }
-            if method.method_type != "Multikey" {
-                return ApiError::InvalidRequest(
-                    "verification method type must be 'Multikey'".into(),
-                )
-                .into_response();
-            }
-            if !method.public_key_multibase.starts_with('z') {
-                return ApiError::InvalidRequest(
-                    "publicKeyMultibase must start with 'z' (base58btc)".into(),
-                )
-                .into_response();
-            }
-            if method.public_key_multibase.len() < 40 {
-                return ApiError::InvalidRequest(
-                    "publicKeyMultibase appears too short for a valid key".into(),
-                )
-                .into_response();
-            }
+        });
+        if let Some(err) = validation_error {
+            return ApiError::InvalidRequest(err.into()).into_response();
         }
     }
 
     if let Some(ref handles) = input.also_known_as {
-        for handle in handles {
-            if !handle.starts_with("at://") {
-                return ApiError::InvalidRequest("alsoKnownAs entries must be at:// URIs".into())
-                    .into_response();
-            }
+        if handles.iter().any(|h| !h.starts_with("at://")) {
+            return ApiError::InvalidRequest("alsoKnownAs entries must be at:// URIs".into())
+                .into_response();
         }
     }
 

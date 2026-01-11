@@ -24,6 +24,11 @@ pub async fn handle_authorization_code_grant(
     request: ValidatedTokenRequest,
     dpop_proof: Option<String>,
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
+    tracing::info!(
+        has_dpop = dpop_proof.is_some(),
+        client_id = ?request.client_auth.client_id,
+        "Authorization code grant requested"
+    );
     let (code, code_verifier, redirect_uri) = match request.grant {
         TokenGrant::AuthorizationCode {
             code,
@@ -178,6 +183,12 @@ pub async fn handle_authorization_code_grant(
         controller_did: controller_did.clone(),
     };
     db::create_token(&state.db, &token_data).await?;
+    tracing::info!(
+        did = %did,
+        token_id = %token_id.0,
+        client_id = %auth_request.client_id,
+        "Authorization code grant completed, token created"
+    );
     tokio::spawn({
         let pool = state.db.clone();
         let did_clone = did.clone();
@@ -316,7 +327,6 @@ pub async fn handle_refresh_token_grant(
     } else {
         None
     };
-    let new_token_id = TokenId::generate();
     let new_refresh_token = RefreshToken::generate();
     let refresh_expiry_days = if matches!(token_data.client_auth, ClientAuth::None) {
         REFRESH_TOKEN_EXPIRY_DAYS_PUBLIC
@@ -327,7 +337,6 @@ pub async fn handle_refresh_token_grant(
     db::rotate_token(
         &state.db,
         db_id,
-        &new_token_id.0,
         &new_refresh_token.0,
         new_expires_at,
     )
@@ -338,7 +347,7 @@ pub async fn handle_refresh_token_grant(
         "Refresh token rotated successfully"
     );
     let access_token = create_access_token_with_delegation(
-        &new_token_id.0,
+        &token_data.token_id,
         &token_data.did,
         dpop_jkt.as_deref(),
         token_data.scope.as_deref(),

@@ -5,6 +5,7 @@ use crate::auth::BearerAuthAllowDeactivated;
 use crate::state::AppState;
 use crate::sync::import::{ImportError, apply_import, parse_car};
 use crate::sync::verify::CarVerifier;
+use crate::types::Did;
 use axum::{
     body::Bytes,
     extract::State,
@@ -196,34 +197,45 @@ pub async fn import_repo(
                 import_result.records.len(),
                 did
             );
-            let mut blob_ref_count = 0;
-            for record in &import_result.records {
-                for blob_ref in &record.blob_refs {
+            let blob_refs: Vec<(String, String)> = import_result
+                .records
+                .iter()
+                .flat_map(|record| {
                     let record_uri = format!("at://{}/{}/{}", did, record.collection, record.rkey);
-                    if let Err(e) = sqlx::query!(
-                        r#"
-                        INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
-                        "#,
-                        user_id,
-                        record_uri,
-                        blob_ref.cid
-                    )
-                    .execute(&state.db)
-                    .await
-                    {
-                        warn!("Failed to insert record_blob for {}: {:?}", record_uri, e);
-                    } else {
-                        blob_ref_count += 1;
+                    record
+                        .blob_refs
+                        .iter()
+                        .map(move |blob_ref| (record_uri.clone(), blob_ref.cid.clone()))
+                })
+                .collect();
+
+            if !blob_refs.is_empty() {
+                let (record_uris, blob_cids): (Vec<String>, Vec<String>) =
+                    blob_refs.into_iter().unzip();
+
+                match sqlx::query!(
+                    r#"
+                    INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
+                    SELECT $1, * FROM UNNEST($2::text[], $3::text[])
+                    ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
+                    "#,
+                    user_id,
+                    &record_uris,
+                    &blob_cids
+                )
+                .execute(&state.db)
+                .await
+                {
+                    Ok(result) => {
+                        info!(
+                            "Recorded {} blob references for imported repo",
+                            result.rows_affected()
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to insert record_blobs: {:?}", e);
                     }
                 }
-            }
-            if blob_ref_count > 0 {
-                info!(
-                    "Recorded {} blob references for imported repo",
-                    blob_ref_count
-                );
             }
             let key_row = match sqlx::query!(
                 r#"SELECT uk.key_bytes, uk.encryption_version
@@ -383,7 +395,7 @@ pub async fn import_repo(
 
 async fn sequence_import_event(
     state: &AppState,
-    did: &str,
+    did: &Did,
     commit_cid: &str,
 ) -> Result<(), sqlx::Error> {
     let prev_cid: Option<String> = None;
@@ -391,13 +403,17 @@ async fn sequence_import_event(
     let ops = serde_json::json!([]);
     let blobs: Vec<String> = vec![];
     let blocks_cids: Vec<String> = vec![];
+    let did_str = did.as_str();
+
+    let mut tx = state.db.begin().await?;
+
     let seq_row = sqlx::query!(
         r#"
         INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids)
         VALUES ($1, 'commit', $2, $3, $4, $5, $6, $7)
         RETURNING seq
         "#,
-        did,
+        did_str,
         commit_cid,
         prev_cid,
         prev_data_cid,
@@ -405,10 +421,13 @@ async fn sequence_import_event(
         &blobs,
         &blocks_cids
     )
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
+
     sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
     Ok(())
 }

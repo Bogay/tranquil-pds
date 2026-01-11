@@ -813,8 +813,6 @@ pub async fn complete_passkey_setup(
         return ApiError::InternalError(None).into_response();
     }
 
-    let _ = crate::auth::webauthn::delete_registration_state(&state.db, &input.did).await;
-
     let app_password = generate_app_password();
     let app_password_name = "bsky.app".to_string();
     let password_hash = match hash(&app_password, DEFAULT_COST) {
@@ -825,13 +823,21 @@ pub async fn complete_passkey_setup(
         }
     };
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Failed to begin transaction: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
     if let Err(e) = sqlx::query!(
         "INSERT INTO app_passwords (user_id, name, password_hash, privileged) VALUES ($1, $2, $3, FALSE)",
         user.id,
         app_password_name,
         password_hash
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
         error!("Error creating app password: {:?}", e);
@@ -842,11 +848,19 @@ pub async fn complete_passkey_setup(
         "UPDATE users SET recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $1",
         input.did.as_str()
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
         error!("Error clearing setup token: {:?}", e);
+        return ApiError::InternalError(None).into_response();
     }
+
+    if let Err(e) = tx.commit().await {
+        error!("Failed to commit setup transaction: {:?}", e);
+        return ApiError::InternalError(None).into_response();
+    }
+
+    let _ = crate::auth::webauthn::delete_registration_state(&state.db, &input.did).await;
 
     info!(did = %input.did, "Passkey-only account setup completed");
 
@@ -1090,12 +1104,20 @@ pub async fn recover_passkey_account(
         }
     };
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            error!("Failed to begin transaction: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
     if let Err(e) = sqlx::query!(
         "UPDATE users SET password_hash = $1, password_required = TRUE, recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $2",
         password_hash,
         input.did.as_str()
     )
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
         error!("Error updating password: {:?}", e);
@@ -1103,19 +1125,24 @@ pub async fn recover_passkey_account(
     }
 
     let deleted = sqlx::query!("DELETE FROM passkeys WHERE did = $1", input.did.as_str())
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await;
-    match deleted {
-        Ok(result) => {
-            if result.rows_affected() > 0 {
-                info!(did = %input.did, count = result.rows_affected(), "Deleted lost passkeys during account recovery");
-            }
-        }
+    let passkeys_deleted = match deleted {
+        Ok(result) => result.rows_affected(),
         Err(e) => {
-            warn!(did = %input.did, "Failed to delete passkeys during recovery: {:?}", e);
+            error!(did = %input.did, "Failed to delete passkeys during recovery: {:?}", e);
+            return ApiError::InternalError(None).into_response();
         }
+    };
+
+    if let Err(e) = tx.commit().await {
+        error!("Failed to commit recovery transaction: {:?}", e);
+        return ApiError::InternalError(None).into_response();
     }
 
+    if passkeys_deleted > 0 {
+        info!(did = %input.did, count = passkeys_deleted, "Deleted lost passkeys during account recovery");
+    }
     info!(did = %input.did, "Passkey-only account recovered with temporary password");
     SuccessResponse::ok().into_response()
 }

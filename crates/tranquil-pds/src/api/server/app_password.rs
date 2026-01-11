@@ -254,10 +254,14 @@ pub async fn revoke_app_password(
         error!("DB error revoking sessions for app password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
-    for jti in &sessions_to_invalidate {
+    futures::future::join_all(sessions_to_invalidate.iter().map(|jti| {
         let cache_key = format!("auth:session:{}:{}", &auth_user.did, jti);
-        let _ = state.cache.delete(&cache_key).await;
-    }
+        let cache = state.cache.clone();
+        async move {
+            let _ = cache.delete(&cache_key).await;
+        }
+    }))
+    .await;
     if let Err(e) = sqlx::query!(
         "DELETE FROM app_passwords WHERE user_id = $1 AND name = $2",
         user_id,
