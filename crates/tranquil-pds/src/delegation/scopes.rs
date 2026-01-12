@@ -57,18 +57,16 @@ pub fn intersect_scopes(requested: &str, granted: &str) -> String {
         return granted_set.into_iter().collect::<Vec<_>>().join(" ");
     }
 
-    let mut result: Vec<&str> = Vec::new();
-
-    for requested_scope in &requested_set {
-        if granted_set.contains(requested_scope) {
-            result.push(requested_scope);
-            continue;
-        }
-
-        if let Some(match_result) = find_matching_scope(requested_scope, &granted_set) {
-            result.push(match_result);
-        }
-    }
+    let mut result: Vec<&str> = requested_set
+        .iter()
+        .filter_map(|requested_scope| {
+            if granted_set.contains(requested_scope) {
+                Some(*requested_scope)
+            } else {
+                find_matching_scope(requested_scope, &granted_set)
+            }
+        })
+        .collect();
 
     result.sort();
     result.join(" ")
@@ -118,19 +116,20 @@ pub fn validate_delegation_scopes(scopes: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    for scope in scopes.split_whitespace() {
-        let (base, _) = split_scope(scope);
-
-        if !is_valid_scope_prefix(base) {
-            return Err(format!("Invalid scope: {}", scope));
-        }
-    }
-
-    Ok(())
+    scopes
+        .split_whitespace()
+        .try_for_each(|scope| {
+            let (base, _) = split_scope(scope);
+            if is_valid_scope_prefix(base) {
+                Ok(())
+            } else {
+                Err(format!("Invalid scope: {}", scope))
+            }
+        })
 }
 
 fn is_valid_scope_prefix(base: &str) -> bool {
-    let valid_prefixes = [
+    const VALID_PREFIXES: [&str; 7] = [
         "atproto",
         "repo:",
         "blob:",
@@ -140,13 +139,9 @@ fn is_valid_scope_prefix(base: &str) -> bool {
         "transition:",
     ];
 
-    for prefix in valid_prefixes {
-        if base == prefix.trim_end_matches(':') || base.starts_with(prefix) {
-            return true;
-        }
-    }
-
-    false
+    VALID_PREFIXES
+        .iter()
+        .any(|prefix| base == prefix.trim_end_matches(':') || base.starts_with(prefix))
 }
 
 #[cfg(test)]

@@ -343,35 +343,33 @@ pub async fn apply_writes(
             })
             .collect();
 
-        for collection in create_collections {
-            if let Err(e) = crate::auth::scope_check::check_repo_scope(
-                is_oauth,
-                scope.as_deref(),
-                crate::oauth::RepoAction::Create,
-                collection,
-            ) {
-                return e;
-            }
-        }
-        for collection in update_collections {
-            if let Err(e) = crate::auth::scope_check::check_repo_scope(
-                is_oauth,
-                scope.as_deref(),
-                crate::oauth::RepoAction::Update,
-                collection,
-            ) {
-                return e;
-            }
-        }
-        for collection in delete_collections {
-            if let Err(e) = crate::auth::scope_check::check_repo_scope(
-                is_oauth,
-                scope.as_deref(),
-                crate::oauth::RepoAction::Delete,
-                collection,
-            ) {
-                return e;
-            }
+        let scope_checks = create_collections
+            .iter()
+            .map(|c| (crate::oauth::RepoAction::Create, c))
+            .chain(
+                update_collections
+                    .iter()
+                    .map(|c| (crate::oauth::RepoAction::Update, c)),
+            )
+            .chain(
+                delete_collections
+                    .iter()
+                    .map(|c| (crate::oauth::RepoAction::Delete, c)),
+            );
+
+        if let Some(err) = scope_checks
+            .filter_map(|(action, collection)| {
+                crate::auth::scope_check::check_repo_scope(
+                    is_oauth,
+                    scope.as_deref(),
+                    action,
+                    collection,
+                )
+                .err()
+            })
+            .next()
+        {
+            return err;
         }
     }
 
@@ -439,22 +437,29 @@ pub async fn apply_writes(
             return ApiError::InternalError(Some("Failed to persist MST".into())).into_response();
         }
     };
-    let mut new_mst_blocks = std::collections::BTreeMap::new();
-    let mut old_mst_blocks = std::collections::BTreeMap::new();
-    for key in &modified_keys {
-        if mst.blocks_for_path(key, &mut new_mst_blocks).await.is_err() {
-            return ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
+    let (new_mst_blocks, old_mst_blocks) = {
+        let mut new_blocks = std::collections::BTreeMap::new();
+        let mut old_blocks = std::collections::BTreeMap::new();
+        for key in &modified_keys {
+            if mst.blocks_for_path(key, &mut new_blocks).await.is_err() {
+                return ApiError::InternalError(Some(
+                    "Failed to get new MST blocks for path".into(),
+                ))
                 .into_response();
-        }
-        if original_mst
-            .blocks_for_path(key, &mut old_mst_blocks)
-            .await
-            .is_err()
-        {
-            return ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
+            }
+            if original_mst
+                .blocks_for_path(key, &mut old_blocks)
+                .await
+                .is_err()
+            {
+                return ApiError::InternalError(Some(
+                    "Failed to get old MST blocks for path".into(),
+                ))
                 .into_response();
+            }
         }
-    }
+        (new_blocks, old_blocks)
+    };
     let mut relevant_blocks = new_mst_blocks.clone();
     relevant_blocks.extend(old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));
     let written_cids: Vec<Cid> = tracking_store

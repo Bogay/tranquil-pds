@@ -257,11 +257,10 @@ mod tests {
         assert_eq!(parts[0].len(), 5);
         assert_eq!(parts[1].len(), 5);
 
-        for c in code.chars() {
-            if c != '-' {
-                assert!(BASE32_ALPHABET.contains(c));
-            }
-        }
+        assert!(code
+            .chars()
+            .filter(|&c| c != '-')
+            .all(|c| BASE32_ALPHABET.contains(c)));
     }
 
     #[test]
@@ -270,9 +269,7 @@ mod tests {
         let parts: Vec<&str> = code.split('-').collect();
         assert_eq!(parts.len(), 3);
 
-        for part in parts {
-            assert_eq!(part.len(), 4);
-        }
+        assert!(parts.iter().all(|part| part.len() == 4));
     }
 
     #[test]

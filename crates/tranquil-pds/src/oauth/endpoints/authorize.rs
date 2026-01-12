@@ -1352,41 +1352,43 @@ pub async fn consent_get(
     )
     .await
     .unwrap_or(true);
-    let mut scopes = Vec::new();
-    for scope in &requested_scopes {
-        let (category, required, description, display_name) =
-            if let Some(def) = crate::oauth::scopes::SCOPE_DEFINITIONS.get(*scope) {
-                (
-                    def.category.display_name().to_string(),
-                    def.required,
-                    def.description.to_string(),
-                    def.display_name.to_string(),
-                )
-            } else if scope.starts_with("ref:") {
-                (
-                    "Reference".to_string(),
-                    false,
-                    "Referenced scope".to_string(),
-                    scope.to_string(),
-                )
-            } else {
-                (
-                    "Other".to_string(),
-                    false,
-                    format!("Access to {}", scope),
-                    scope.to_string(),
-                )
-            };
-        let granted = pref_map.get(*scope).copied();
-        scopes.push(ScopeInfo {
-            scope: scope.to_string(),
-            category,
-            required,
-            description,
-            display_name,
-            granted,
-        });
-    }
+    let scopes: Vec<ScopeInfo> = requested_scopes
+        .iter()
+        .map(|scope| {
+            let (category, required, description, display_name) =
+                if let Some(def) = crate::oauth::scopes::SCOPE_DEFINITIONS.get(*scope) {
+                    (
+                        def.category.display_name().to_string(),
+                        def.required,
+                        def.description.to_string(),
+                        def.display_name.to_string(),
+                    )
+                } else if scope.starts_with("ref:") {
+                    (
+                        "Reference".to_string(),
+                        false,
+                        "Referenced scope".to_string(),
+                        scope.to_string(),
+                    )
+                } else {
+                    (
+                        "Other".to_string(),
+                        false,
+                        format!("Access to {}", scope),
+                        scope.to_string(),
+                    )
+                };
+            let granted = pref_map.get(*scope).copied();
+            ScopeInfo {
+                scope: scope.to_string(),
+                category,
+                required,
+                description,
+                display_name,
+                granted,
+            }
+        })
+        .collect();
     let (is_delegation, controller_did, controller_handle, delegation_level) =
         if let Some(ref ctrl_did) = request_data.controller_did {
             let ctrl_handle =

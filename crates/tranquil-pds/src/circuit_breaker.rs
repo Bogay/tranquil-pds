@@ -265,9 +265,7 @@ mod tests {
     async fn test_circuit_breaker_half_open_closes_after_successes() {
         let cb = CircuitBreaker::new("test", 3, 2, 0);
 
-        for _ in 0..3 {
-            cb.record_failure().await;
-        }
+        futures::future::join_all((0..3).map(|_| cb.record_failure())).await;
         assert_eq!(cb.state().await, CircuitState::Open);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -285,9 +283,7 @@ mod tests {
     async fn test_circuit_breaker_half_open_reopens_on_failure() {
         let cb = CircuitBreaker::new("test", 3, 2, 0);
 
-        for _ in 0..3 {
-            cb.record_failure().await;
-        }
+        futures::future::join_all((0..3).map(|_| cb.record_failure())).await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         cb.can_execute().await;

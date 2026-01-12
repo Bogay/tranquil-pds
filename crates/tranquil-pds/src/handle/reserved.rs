@@ -1029,19 +1029,12 @@ const FAMOUS_ACCOUNTS: &[&str] = &[
 ];
 
 pub static RESERVED_SUBDOMAINS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    let mut set = HashSet::with_capacity(
-        ATP_SPECIFIC.len() + COMMONLY_RESERVED.len() + FAMOUS_ACCOUNTS.len(),
-    );
-    for s in ATP_SPECIFIC {
-        set.insert(*s);
-    }
-    for s in COMMONLY_RESERVED {
-        set.insert(*s);
-    }
-    for s in FAMOUS_ACCOUNTS {
-        set.insert(*s);
-    }
-    set
+    ATP_SPECIFIC
+        .iter()
+        .chain(COMMONLY_RESERVED.iter())
+        .chain(FAMOUS_ACCOUNTS.iter())
+        .copied()
+        .collect()
 });
 
 pub fn is_reserved_subdomain(subdomain: &str) -> bool {

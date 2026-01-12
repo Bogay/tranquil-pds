@@ -494,3 +494,30 @@ hr {
 .info-panel p:last-child {
   margin-bottom: 0;
 }
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.spinner.sm {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+
+.spinner.lg {
+  width: 60px;
+  height: 60px;
+  border-width: 4px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

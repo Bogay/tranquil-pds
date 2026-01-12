@@ -25,18 +25,17 @@ pub async fn resolve_handle_dns(handle: &str) -> Result<String, HandleResolution
         .txt_lookup(&query_name)
         .await
         .map_err(|e| HandleResolutionError::DnsError(e.to_string()))?;
-    for record in txt_lookup.iter() {
-        for txt in record.txt_data() {
+    txt_lookup
+        .iter()
+        .flat_map(|record| record.txt_data())
+        .find_map(|txt| {
             let txt_str = String::from_utf8_lossy(txt);
-            if let Some(did) = txt_str.strip_prefix("did=") {
+            txt_str.strip_prefix("did=").and_then(|did| {
                 let did = did.trim();
-                if did.starts_with("did:") {
-                    return Ok(did.to_string());
-                }
-            }
-        }
-    }
-    Err(HandleResolutionError::NotFound)
+                did.starts_with("did:").then(|| did.to_string())
+            })
+        })
+        .ok_or(HandleResolutionError::NotFound)
 }
 
 pub async fn resolve_handle_http(handle: &str) -> Result<String, HandleResolutionError> {
@@ -95,15 +94,9 @@ pub fn is_service_domain_handle(handle: &str, hostname: &str) -> bool {
     let service_domains: Vec<String> = std::env::var("PDS_SERVICE_HANDLE_DOMAINS")
         .map(|s| s.split(',').map(|d| d.trim().to_string()).collect())
         .unwrap_or_else(|_| vec![hostname.to_string()]);
-    for domain in service_domains {
-        if handle.ends_with(&format!(".{}", domain)) {
-            return true;
-        }
-        if handle == domain {
-            return true;
-        }
-    }
-    false
+    service_domains
+        .iter()
+        .any(|domain| handle.ends_with(&format!(".{}", domain)) || handle == domain)
 }
 
 #[cfg(test)]

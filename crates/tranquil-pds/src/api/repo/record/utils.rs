@@ -25,14 +25,12 @@ fn extract_blob_cids_recursive(value: &Value, blobs: &mut Vec<String>) {
             {
                 blobs.push(link.to_string());
             }
-            for v in map.values() {
-                extract_blob_cids_recursive(v, blobs);
-            }
+            map.values()
+                .for_each(|v| extract_blob_cids_recursive(v, blobs));
         }
         Value::Array(arr) => {
-            for v in arr {
-                extract_blob_cids_recursive(v, blobs);
-            }
+            arr.iter()
+                .for_each(|v| extract_blob_cids_recursive(v, blobs));
         }
         _ => {}
     }

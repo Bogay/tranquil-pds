@@ -35,11 +35,14 @@
   import ActAs from './routes/ActAs.svelte'
   import Migration from './routes/Migration.svelte'
   import DidDocumentEditor from './routes/DidDocumentEditor.svelte'
+  import { _ } from './lib/i18n'
   initI18n()
 
   const auth = $derived(getAuthState())
 
   let oauthCallbackPending = $state(hasOAuthCallback())
+  let showSpinner = $state(false)
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null
 
   function hasOAuthCallback(): boolean {
     if (window.location.pathname === '/app/migrate') {
@@ -50,14 +53,32 @@
   }
 
   $effect(() => {
+    loadingTimer = setTimeout(() => {
+      showSpinner = true
+    }, 5000)
+
     initServerConfig()
     initAuth().then(({ oauthLoginCompleted }) => {
       if (oauthLoginCompleted) {
         navigate('/dashboard', { replace: true })
       }
       oauthCallbackPending = false
+      if (loadingTimer) {
+        clearTimeout(loadingTimer)
+        loadingTimer = null
+      }
     })
+
+    return () => {
+      if (loadingTimer) {
+        clearTimeout(loadingTimer)
+      }
+    }
   })
+
+  const isLoading = $derived(
+    auth.kind === 'loading' || $i18nLoading || oauthCallbackPending
+  )
 
   $effect(() => {
     if (auth.kind === 'loading') return
@@ -143,8 +164,15 @@
 </script>
 
 <main>
-  {#if auth.kind === 'loading' || $i18nLoading || oauthCallbackPending}
-    <div class="loading"></div>
+  {#if isLoading}
+    <div class="loading">
+      {#if showSpinner}
+        <div class="loading-content">
+          <div class="spinner"></div>
+          <p>{$_('common.loading')}</p>
+        </div>
+      {/if}
+    </div>
   {:else}
     <CurrentComponent />
   {/if}
@@ -158,5 +186,20 @@
 
   .loading {
     min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .loading-content p {
+    margin: 0;
+    color: var(--text-secondary);
   }
 </style>

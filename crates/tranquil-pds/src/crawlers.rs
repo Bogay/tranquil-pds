@@ -91,7 +91,7 @@ impl Crawlers {
         self.mark_notified();
         let circuit_breaker = self.circuit_breaker.clone();
 
-        for crawler_url in &self.crawler_urls {
+        self.crawler_urls.iter().for_each(|crawler_url| {
             let url = format!(
                 "{}/xrpc/com.atproto.sync.requestCrawl",
                 crawler_url.trim_end_matches('/')
@@ -136,7 +136,7 @@ impl Crawlers {
                     }
                 }
             });
-        }
+        });
     }
 }
 

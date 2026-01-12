@@ -231,25 +231,26 @@ impl DidResolver {
     }
 
     fn extract_service_endpoint(&self, doc: &DidDocument) -> Option<ResolvedService> {
-        for service in &doc.service {
-            if service.service_type == "AtprotoAppView"
-                || service.id.contains("atproto_appview")
-                || service.id.ends_with("#bsky_appview")
-            {
-                return Some(ResolvedService {
-                    url: service.service_endpoint.clone(),
-                    did: doc.id.clone(),
-                });
-            }
+        if let Some(service) = doc.service.iter().find(|s| {
+            s.service_type == "AtprotoAppView"
+                || s.id.contains("atproto_appview")
+                || s.id.ends_with("#bsky_appview")
+        }) {
+            return Some(ResolvedService {
+                url: service.service_endpoint.clone(),
+                did: doc.id.clone(),
+            });
         }
 
-        for service in &doc.service {
-            if service.service_type.contains("AppView") || service.id.contains("appview") {
-                return Some(ResolvedService {
-                    url: service.service_endpoint.clone(),
-                    did: doc.id.clone(),
-                });
-            }
+        if let Some(service) = doc
+            .service
+            .iter()
+            .find(|s| s.service_type.contains("AppView") || s.id.contains("appview"))
+        {
+            return Some(ResolvedService {
+                url: service.service_endpoint.clone(),
+                did: doc.id.clone(),
+            });
         }
 
         if let Some(service) = doc.service.first()

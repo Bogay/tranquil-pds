@@ -534,7 +534,7 @@ pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError>
             "Collection NSID must have at least 3 segments".to_string(),
         ));
     }
-    for part in &parts {
+    parts.iter().try_for_each(|part| {
         if part.is_empty() {
             return Err(ValidationError::InvalidRecord(
                 "Collection NSID segments cannot be empty".to_string(),
@@ -545,7 +545,8 @@ pub fn validate_collection_nsid(collection: &str) -> Result<(), ValidationError>
                 "Collection NSID segments must be alphanumeric or hyphens".to_string(),
             ));
         }
-    }
+        Ok(())
+    })?;
     Ok(())
 }
 

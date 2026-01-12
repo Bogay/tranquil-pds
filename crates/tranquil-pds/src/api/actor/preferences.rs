@@ -127,35 +127,67 @@ pub async fn put_preferences(
         ))
         .into_response();
     }
-    let mut forbidden_prefs: Vec<String> = Vec::new();
-    for pref in &input.preferences {
-        let pref_str = serde_json::to_string(pref).unwrap_or_default();
-        if pref_str.len() > MAX_PREFERENCE_SIZE {
-            return ApiError::InvalidRequest(format!(
-                "Preference too large: {} bytes exceeds limit of {}",
-                pref_str.len(),
-                MAX_PREFERENCE_SIZE
-            ))
-            .into_response();
-        }
-        let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
-            Some(t) => t,
-            None => {
-                return ApiError::InvalidRequest("Preference is missing a $type".into())
-                    .into_response();
+    enum PrefValidation {
+        Ok(Option<String>),
+        TooLarge(usize),
+        MissingType,
+        WrongNamespace,
+    }
+
+    let validation_results: Vec<PrefValidation> = input
+        .preferences
+        .iter()
+        .map(|pref| {
+            let pref_str = serde_json::to_string(pref).unwrap_or_default();
+            if pref_str.len() > MAX_PREFERENCE_SIZE {
+                return PrefValidation::TooLarge(pref_str.len());
             }
-        };
-        if !pref_type.starts_with(APP_BSKY_NAMESPACE) {
-            return ApiError::InvalidRequest(format!(
+            let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
+                Some(t) => t,
+                None => return PrefValidation::MissingType,
+            };
+            if !pref_type.starts_with(APP_BSKY_NAMESPACE) {
+                return PrefValidation::WrongNamespace;
+            }
+            if pref_type == PERSONAL_DETAILS_PREF && !has_full_access {
+                PrefValidation::Ok(Some(pref_type.to_string()))
+            } else {
+                PrefValidation::Ok(None)
+            }
+        })
+        .collect();
+
+    if let Some(err) = validation_results.iter().find_map(|v| match v {
+        PrefValidation::TooLarge(size) => Some(
+            ApiError::InvalidRequest(format!(
+                "Preference too large: {} bytes exceeds limit of {}",
+                size, MAX_PREFERENCE_SIZE
+            ))
+            .into_response(),
+        ),
+        PrefValidation::MissingType => Some(
+            ApiError::InvalidRequest("Preference is missing a $type".into()).into_response(),
+        ),
+        PrefValidation::WrongNamespace => Some(
+            ApiError::InvalidRequest(format!(
                 "Some preferences are not in the {} namespace",
                 APP_BSKY_NAMESPACE
             ))
-            .into_response();
-        }
-        if pref_type == PERSONAL_DETAILS_PREF && !has_full_access {
-            forbidden_prefs.push(pref_type.to_string());
-        }
+            .into_response(),
+        ),
+        PrefValidation::Ok(_) => None,
+    }) {
+        return err;
     }
+
+    let forbidden_prefs: Vec<String> = validation_results
+        .into_iter()
+        .filter_map(|v| match v {
+            PrefValidation::Ok(Some(s)) => Some(s),
+            _ => None,
+        })
+        .collect();
+
     if !forbidden_prefs.is_empty() {
         return ApiError::InvalidRequest(format!(
             "Do not have authorization to set preferences: {}",

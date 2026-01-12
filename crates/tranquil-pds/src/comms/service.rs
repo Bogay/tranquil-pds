@@ -115,9 +115,7 @@ impl CommsService {
             return Ok(());
         }
         debug!(count = items.len(), "Processing comms batch");
-        for item in items {
-            self.process_item(item).await;
-        }
+        futures::future::join_all(items.into_iter().map(|item| self.process_item(item))).await;
         Ok(())
     }
 

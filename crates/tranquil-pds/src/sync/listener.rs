@@ -48,11 +48,11 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
             from_seq = catchup_start,
             "Broadcasting catch-up events"
         );
-        for event in events {
+        events.into_iter().for_each(|event| {
             let seq = event.seq;
             let _ = state.firehose_tx.send(event);
             LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
-        }
+        });
     }
     loop {
         let notification = listener.recv().await?;
@@ -93,11 +93,11 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
             .await?;
             if !gap_events.is_empty() {
                 debug!(count = gap_events.len(), "Filling sequence gap");
-                for event in gap_events {
+                gap_events.into_iter().for_each(|event| {
                     let seq = event.seq;
                     let _ = state.firehose_tx.send(event);
                     LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
-                }
+                });
             }
         }
         let event = sqlx::query_as!(

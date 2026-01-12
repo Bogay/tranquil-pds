@@ -27,6 +27,8 @@
   }
 
   let loading = $state(true)
+  let showSpinner = $state(false)
+  let loadingTimer: ReturnType<typeof setTimeout> | null = null
   let error = $state<string | null>(null)
   let submitting = $state(false)
   let consentData = $state<ConsentData | null>(null)
@@ -71,6 +73,11 @@
       error = $_('oauth.error.genericError')
     } finally {
       loading = false
+      showSpinner = false
+      if (loadingTimer) {
+        clearTimeout(loadingTimer)
+        loadingTimer = null
+      }
     }
   }
 
@@ -151,7 +158,17 @@
   }
 
   $effect(() => {
+    loadingTimer = setTimeout(() => {
+      if (loading) {
+        showSpinner = true
+      }
+    }, 5000)
     fetchConsentData()
+    return () => {
+      if (loadingTimer) {
+        clearTimeout(loadingTimer)
+      }
+    }
   })
 
   let scopeGroups = $derived(consentData ? groupScopesByCategory(consentData.scopes) : {})
@@ -159,7 +176,14 @@
 
 <div class="consent-container">
   {#if loading}
-    <div class="loading"></div>
+    <div class="loading">
+      {#if showSpinner}
+        <div class="loading-content">
+          <div class="spinner"></div>
+          <p>{$_('common.loading')}</p>
+        </div>
+      {/if}
+    </div>
   {:else if error}
     <div class="error-container">
       <h1>{$_('oauth.error.title')}</h1>
@@ -293,6 +317,18 @@
     align-items: center;
     justify-content: center;
     min-height: 200px;
+    color: var(--text-secondary);
+  }
+
+  .loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  .loading-content p {
+    margin: 0;
     color: var(--text-secondary);
   }
 
