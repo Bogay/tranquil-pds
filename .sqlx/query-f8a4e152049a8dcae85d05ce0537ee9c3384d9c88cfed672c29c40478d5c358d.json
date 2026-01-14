@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, private_key_bytes\n               FROM reserved_signing_keys\n               WHERE public_key_did_key = $1\n                 AND used_at IS NULL\n                 AND expires_at > NOW()\n               FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "private_key_bytes",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f8a4e152049a8dcae85d05ce0537ee9c3384d9c88cfed672c29c40478d5c358d"
+}

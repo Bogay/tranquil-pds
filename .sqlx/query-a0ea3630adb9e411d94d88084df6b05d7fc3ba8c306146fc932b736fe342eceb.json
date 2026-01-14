@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO repo_seq (did, event_type, active, status)\n            VALUES ($1, 'account', false, 'deleted')\n            RETURNING seq\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "seq",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a0ea3630adb9e411d94d88084df6b05d7fc3ba8c306146fc932b736fe342eceb"
+}

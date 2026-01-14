@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ic.code, ic.available_uses, ic.disabled, ic.for_account, ic.created_at, u.did as created_by\n               FROM invite_codes ic\n               JOIN users u ON ic.created_by_user = u.id\n               WHERE ic.created_by_user = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "available_uses",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "disabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "for_account",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_by",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "568fe455ed9146be603f8fe011a31f606cc8813cffed75e253766c8323373703"
+}

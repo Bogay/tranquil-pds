@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (available_uses > 0 AND NOT COALESCE(disabled, false)) as \"valid!\" FROM invite_codes WHERE code = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "valid!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "36441073d3fb87230f88ddce4e597c248fbf7360e510d703b9eec42efe9e049e"
+}

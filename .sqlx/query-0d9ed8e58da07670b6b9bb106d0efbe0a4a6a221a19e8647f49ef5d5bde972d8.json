@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, did, access_jti, refresh_jti, access_expires_at, refresh_expires_at,\n                   legacy_login, mfa_verified, scope, controller_did, app_password_name,\n                   created_at, updated_at\n            FROM session_tokens\n            WHERE access_jti = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "access_jti",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "refresh_jti",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "access_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "refresh_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "legacy_login",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "mfa_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "scope",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "controller_did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "app_password_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0d9ed8e58da07670b6b9bb106d0efbe0a4a6a221a19e8647f49ef5d5bde972d8"
+}

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT legacy_login, mfa_verified, last_reauth_at FROM session_tokens\n               WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "legacy_login",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "mfa_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_reauth_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "372e54c2698dd5e0c3eaf1e8f3af3c4095df476b7d283f3d20dd798311c71706"
+}

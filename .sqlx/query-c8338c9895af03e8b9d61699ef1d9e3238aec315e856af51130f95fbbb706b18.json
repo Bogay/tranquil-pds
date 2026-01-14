@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO record_blobs (repo_id, record_uri, blob_cid)\n            SELECT $1, record_uri, blob_cid\n            FROM UNNEST($2::text[], $3::text[]) AS t(record_uri, blob_cid)\n            ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c8338c9895af03e8b9d61699ef1d9e3238aec315e856af51130f95fbbb706b18"
+}

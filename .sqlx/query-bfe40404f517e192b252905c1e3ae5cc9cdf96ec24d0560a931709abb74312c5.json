@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO backup_codes (did, code_hash, created_at)\n            SELECT $1, hash, NOW() FROM UNNEST($2::text[]) AS t(hash)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bfe40404f517e192b252905c1e3ae5cc9cdf96ec24d0560a931709abb74312c5"
+}

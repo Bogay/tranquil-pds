@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ap.password_hash FROM app_passwords ap\n               JOIN users u ON ap.user_id = u.id\n               WHERE u.did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "password_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "526db4a4b3bbccc53dc7628ab4a6f9c897b427010a776a44e6d6fec66e39f841"
+}

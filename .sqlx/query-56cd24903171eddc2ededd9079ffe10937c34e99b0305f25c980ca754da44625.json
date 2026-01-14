@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM oauth_token\n            WHERE id IN (\n                SELECT id FROM oauth_token\n                WHERE did = $1\n                ORDER BY updated_at ASC\n                OFFSET $2\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "56cd24903171eddc2ededd9079ffe10937c34e99b0305f25c980ca754da44625"
+}

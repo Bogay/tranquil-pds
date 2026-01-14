@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM app_passwords\n               WHERE user_id = (SELECT id FROM users WHERE did = $1)\n               AND created_by_controller_did = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43bdb0f9566822ba9fbde4d3ee67290d36e995e68bda3bb4bb75618c67f56a3e"
+}

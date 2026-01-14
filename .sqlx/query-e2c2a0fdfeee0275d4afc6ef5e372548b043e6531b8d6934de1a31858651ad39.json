@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT rkey, record_cid FROM records\n                           WHERE repo_id = $1 AND collection = $2 AND rkey >= $3 AND rkey <= $4\n                           ORDER BY rkey DESC LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rkey",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "record_cid",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "e2c2a0fdfeee0275d4afc6ef5e372548b043e6531b8d6934de1a31858651ad39"
+}

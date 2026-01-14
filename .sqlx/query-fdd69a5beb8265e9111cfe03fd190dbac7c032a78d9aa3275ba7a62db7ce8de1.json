@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE account_delegations\n            SET granted_scopes = $1\n            WHERE delegated_did = $2 AND controller_did = $3 AND revoked_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fdd69a5beb8265e9111cfe03fd190dbac7c032a78d9aa3275ba7a62db7ce8de1"
+}

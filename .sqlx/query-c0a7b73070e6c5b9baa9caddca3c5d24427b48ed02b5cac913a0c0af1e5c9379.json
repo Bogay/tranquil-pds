@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO used_refresh_tokens (refresh_jti, session_id)\n            VALUES ($1, $2)\n            ON CONFLICT (refresh_jti) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c0a7b73070e6c5b9baa9caddca3c5d24427b48ed02b5cac913a0c0af1e5c9379"
+}

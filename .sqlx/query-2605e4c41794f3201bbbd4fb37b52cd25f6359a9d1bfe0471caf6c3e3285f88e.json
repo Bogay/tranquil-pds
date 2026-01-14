@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT handle, email, email_verified, is_admin, deactivated_at, takedown_ref,\n                   preferred_locale,\n                   preferred_comms_channel as \"preferred_comms_channel!: CommsChannel\",\n                   discord_verified, telegram_verified, signal_verified,\n                   migrated_to_pds, migrated_at\n            FROM users\n            WHERE did = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "takedown_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "preferred_locale",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "preferred_comms_channel!: CommsChannel",
+        "type_info": {
+          "Custom": {
+            "name": "comms_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "discord_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "telegram_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "signal_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "migrated_to_pds",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "migrated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "2605e4c41794f3201bbbd4fb37b52cd25f6359a9d1bfe0471caf6c3e3285f88e"
+}

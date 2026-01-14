@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM plc_operation_tokens WHERE user_id = $1 AND token = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7dc5eca04f46a97c1bd9d1c8aca629923467d608e9aeeda5f4e73cb7fa88819c"
+}

@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                u.did,\n                u.handle,\n                d.granted_scopes,\n                d.granted_at,\n                true as \"is_active!\"\n            FROM account_delegations d\n            JOIN users u ON u.did = d.controller_did\n            WHERE d.delegated_did = $1\n              AND d.revoked_at IS NULL\n              AND u.deactivated_at IS NULL\n              AND u.takedown_ref IS NULL\n            ORDER BY d.granted_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "granted_scopes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "granted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "c69577bc8e88e2f2cc516d6bec3d201419b589b6088ceb933cb182265b14e363"
+}

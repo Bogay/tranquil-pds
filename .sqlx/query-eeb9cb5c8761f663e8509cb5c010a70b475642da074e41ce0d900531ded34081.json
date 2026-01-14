@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "access_jti",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "eeb9cb5c8761f663e8509cb5c010a70b475642da074e41ce0d900531ded34081"
+}

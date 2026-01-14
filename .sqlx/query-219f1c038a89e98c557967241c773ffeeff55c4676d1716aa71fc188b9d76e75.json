@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT st.id, st.did, st.scope, st.controller_did, k.key_bytes, k.encryption_version\n            FROM session_tokens st\n            JOIN users u ON st.did = u.did\n            JOIN user_keys k ON u.id = k.user_id\n            WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "controller_did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "key_bytes",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "encryption_version",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "219f1c038a89e98c557967241c773ffeeff55c4676d1716aa71fc188b9d76e75"
+}

@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, did, email, password_hash, password_required, two_factor_enabled,\n                   preferred_comms_channel as \"preferred_comms_channel!: CommsChannel\",\n                   deactivated_at, takedown_ref,\n                   email_verified, discord_verified, telegram_verified, signal_verified,\n                   account_type::text as \"account_type!\"\n            FROM users\n            WHERE handle = $1 OR email = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "password_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "password_required",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "two_factor_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "preferred_comms_channel!: CommsChannel",
+        "type_info": {
+          "Custom": {
+            "name": "comms_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "takedown_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "discord_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "telegram_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "signal_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "account_type!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "445c2ebb72f3833119f32284b9e721cf34c8ae581e6ae58a392fc93e77a7a015"
+}

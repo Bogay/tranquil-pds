@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_2fa_challenge\n            SET attempts = attempts + 1\n            WHERE id = $1\n            RETURNING attempts\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempts",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "eaebb9c33b3adbbd664f815a233852fbbf57e5613637615460d7586af00701a4"
+}

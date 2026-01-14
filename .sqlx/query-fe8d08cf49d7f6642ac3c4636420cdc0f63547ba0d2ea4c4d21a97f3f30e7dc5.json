@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM oauth_dpop_jti\n            WHERE created_at < NOW() - INTERVAL '1 second' * $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe8d08cf49d7f6642ac3c4636420cdc0f63547ba0d2ea4c4d21a97f3f30e7dc5"
+}

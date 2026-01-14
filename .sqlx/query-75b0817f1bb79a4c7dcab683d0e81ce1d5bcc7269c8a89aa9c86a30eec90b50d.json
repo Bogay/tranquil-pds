@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)\n                 ON CONFLICT (user_id, name) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "75b0817f1bb79a4c7dcab683d0e81ce1d5bcc7269c8a89aa9c86a30eec90b50d"
+}

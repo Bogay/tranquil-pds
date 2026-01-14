@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT icu.code, u.did, icu.used_at\n               FROM invite_code_uses icu\n               JOIN users u ON icu.used_by_user = u.id\n               WHERE icu.code = ANY($1)\n               ORDER BY icu.used_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "used_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6cd8a985907e5948cce8eaf919a4d3d11fc8647df6531d9890cb9b97517dc4c4"
+}

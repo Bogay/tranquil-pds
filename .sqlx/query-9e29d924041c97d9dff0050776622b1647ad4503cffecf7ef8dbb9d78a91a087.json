@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_authorization_request\n            SET parameters = jsonb_set(parameters, '{scope}', to_jsonb($2::text))\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e29d924041c97d9dff0050776622b1647ad4503cffecf7ef8dbb9d78a91a087"
+}

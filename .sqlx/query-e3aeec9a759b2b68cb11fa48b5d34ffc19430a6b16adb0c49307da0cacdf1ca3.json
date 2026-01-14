@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT email, handle, preferred_comms_channel::text as \"preferred_channel!\", preferred_locale\n               FROM users WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "preferred_channel!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "preferred_locale",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      null,
+      true
+    ]
+  },
+  "hash": "e3aeec9a759b2b68cb11fa48b5d34ffc19430a6b16adb0c49307da0cacdf1ca3"
+}

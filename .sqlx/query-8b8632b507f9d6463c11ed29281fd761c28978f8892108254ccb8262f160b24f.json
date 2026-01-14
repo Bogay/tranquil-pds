@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT u.deactivated_at, u.takedown_ref, u.is_admin,\n                      k.key_bytes as \"key_bytes?\", k.encryption_version as \"encryption_version?\"\n               FROM users u\n               LEFT JOIN user_keys k ON u.id = k.user_id\n               WHERE u.did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "takedown_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "key_bytes?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "encryption_version?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8b8632b507f9d6463c11ed29281fd761c28978f8892108254ccb8262f160b24f"
+}

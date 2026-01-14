@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at\n                       FROM invite_codes ic\n                       ORDER BY created_at DESC\n                       LIMIT $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "available_uses",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "disabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_by_user",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "01e56fffc3ca615c5da3cc8edd363700bd2f8c05167fa1100dd504d01f9f1d23"
+}

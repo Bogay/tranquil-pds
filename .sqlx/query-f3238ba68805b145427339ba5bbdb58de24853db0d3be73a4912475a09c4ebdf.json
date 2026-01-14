@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE session_tokens\n            SET access_jti = $1, refresh_jti = $2, access_expires_at = $3,\n                refresh_expires_at = $4, updated_at = NOW()\n            WHERE id = $5\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3238ba68805b145427339ba5bbdb58de24853db0d3be73a4912475a09c4ebdf"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)\n               SELECT code, $2, $3, $4 FROM UNNEST($1::text[]) AS t(code)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Int4",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d14a9a31e7c765a205b9c96877b547c67bc2625a2721a7f87302ece2bbbe1e76"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM passkeys WHERE id = $1 AND did = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f5ab0af1700ed60ea3f6ad9e49d45bf1198d3c3371640b6d3e5ebda23459cbd1"
+}

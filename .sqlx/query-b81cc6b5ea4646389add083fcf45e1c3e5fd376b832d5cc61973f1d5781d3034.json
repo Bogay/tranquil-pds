@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE invite_codes SET disabled = TRUE\n               WHERE created_by_user IN (SELECT id FROM users WHERE did = ANY($1))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b81cc6b5ea4646389add083fcf45e1c3e5fd376b832d5cc61973f1d5781d3034"
+}

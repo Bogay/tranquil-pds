@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO oauth_authorized_client (did, client_id, created_at, updated_at, data)\n            VALUES ($1, $2, NOW(), NOW(), $3)\n            ON CONFLICT (did, client_id) DO UPDATE SET updated_at = NOW(), data = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "29cf13b43caae6bfb56b6cc678c7aca8dfec35ca27a3c7097c1c9fe80771bcb4"
+}

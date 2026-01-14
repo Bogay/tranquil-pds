@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                   ic.code,\n                   ic.available_uses,\n                   ic.created_at,\n                   ic.disabled,\n                   ic.for_account,\n                   (SELECT COUNT(*) FROM invite_code_uses icu WHERE icu.code = ic.code)::int as \"use_count!\"\n               FROM invite_codes ic\n               WHERE ic.for_account = $1\n               ORDER BY ic.created_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "available_uses",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "disabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "for_account",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "use_count!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "0d6fc740f9e18aa4310309c27676899a3651a4e6b95a424bf522eb72b4a0b7ba"
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT u.did, u.handle, u.email, ad.updated_at as last_used_at\n            FROM oauth_account_device ad\n            JOIN users u ON u.did = ad.did\n            WHERE ad.device_id = $1\n              AND u.deactivated_at IS NULL\n              AND u.takedown_ref IS NULL\n            ORDER BY ad.updated_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_used_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "c6828d5b97bbe15bcf1b0cb2288a279966922a231158a3087ccc887ebbc3a477"
+}

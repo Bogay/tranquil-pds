@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE account_delegations\n            SET revoked_at = NOW(), revoked_by = $1\n            WHERE delegated_did = $2 AND controller_did = $3 AND revoked_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "870fa0b2be98c66581bf83fa1feded284425a0981f682afb4886ce2552df983f"
+}
