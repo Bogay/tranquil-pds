@@ -6375,6 +6375,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.17",
  "tokio",
+ "tranquil-db-traits",
  "urlencoding",
  "uuid",
 ]
@@ -6394,6 +6395,40 @@ dependencies = [
  "sha2",
  "subtle",
  "thiserror 2.0.17",
+]
+
+[[package]]
+name = "tranquil-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.17",
+ "tracing",
+ "tranquil-db-traits",
+ "tranquil-oauth",
+ "tranquil-types",
+ "uuid",
+]
+
+[[package]]
+name = "tranquil-db-traits"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.17",
+ "tranquil-oauth",
+ "tranquil-types",
+ "uuid",
 ]
 
 [[package]]
@@ -6503,6 +6538,8 @@ dependencies = [
  "tranquil-cache",
  "tranquil-comms",
  "tranquil-crypto",
+ "tranquil-db",
+ "tranquil-db-traits",
  "tranquil-infra",
  "tranquil-oauth",
  "tranquil-repo",

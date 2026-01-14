@@ -11,6 +11,8 @@ members = [
     "crates/tranquil-auth",
     "crates/tranquil-oauth",
     "crates/tranquil-comms",
+    "crates/tranquil-db-traits",
+    "crates/tranquil-db",
     "crates/tranquil-pds",
 ]
 
@@ -30,6 +32,8 @@ tranquil-scopes = { path = "crates/tranquil-scopes" }
 tranquil-auth = { path = "crates/tranquil-auth" }
 tranquil-oauth = { path = "crates/tranquil-oauth" }
 tranquil-comms = { path = "crates/tranquil-comms" }
+tranquil-db-traits = { path = "crates/tranquil-db-traits" }
+tranquil-db = { path = "crates/tranquil-db" }
 
 aes-gcm = "0.10"
 backon = "1"
@@ -92,7 +96,7 @@ tower-layer = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 urlencoding = "2.1"
-uuid = { version = "1.19", features = ["v4", "v5", "v7", "fast-rng"] }
+uuid = { version = "1.19", features = ["v4", "v5", "v7", "fast-rng", "serde"] }
 webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation", "danger-user-presence-only-security-keys"] }
 webauthn-rs-proto = "0.5"
 zip = { version = "7.0", default-features = false, features = ["deflate"] }

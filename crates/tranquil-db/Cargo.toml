@@ -1,0 +1,25 @@
+[package]
+name = "tranquil-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["postgres"]
+postgres = []
+sqlite = []
+
+[dependencies]
+tranquil-db-traits = { workspace = true }
+tranquil-oauth = { workspace = true }
+tranquil-types = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+sqlx = { workspace = true }
