@@ -132,8 +132,8 @@ async fn test_record_crud_lifecycle() {
         .expect("Failed to send stale update");
     assert_eq!(
         stale_res.status(),
-        StatusCode::CONFLICT,
-        "Stale update should cause 409"
+        StatusCode::BAD_REQUEST,
+        "Stale update should cause 400 InvalidSwap"
     );
     let good_update_payload = json!({
         "repo": did,

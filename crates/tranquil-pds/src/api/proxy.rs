@@ -225,7 +225,8 @@ async fn proxy_handler(
         let http_uri = crate::util::build_full_url(&uri.to_string());
 
         match crate::auth::validate_token_with_dpop(
-            &state.db,
+            state.user_repo.as_ref(),
+            state.oauth_repo.as_ref(),
             &token,
             extracted.is_dpop,
             dpop_proof,

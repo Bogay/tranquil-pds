@@ -34,17 +34,19 @@ pub async fn resolve_handle(
     State(state): State<AppState>,
     Query(params): Query<ResolveHandleParams>,
 ) -> Response {
-    let handle = params.handle.trim();
-    if handle.is_empty() {
+    let handle_str = params.handle.trim();
+    if handle_str.is_empty() {
         return ApiError::InvalidRequest("handle is required".into()).into_response();
     }
-    let cache_key = format!("handle:{}", handle);
+    let cache_key = format!("handle:{}", handle_str);
     if let Some(did) = state.cache.get(&cache_key).await {
         return DidResponse::response(did).into_response();
     }
-    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
-        .fetch_optional(&state.db)
-        .await;
+    let handle: Handle = match handle_str.parse() {
+        Ok(h) => h,
+        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+    };
+    let user = state.user_repo.get_by_handle(&handle).await;
     match user {
         Ok(Some(row)) => {
             let _ = state
@@ -53,7 +55,7 @@ pub async fn resolve_handle(
                 .await;
             DidResponse::response(row.did).into_response()
         }
-        Ok(None) => match crate::handle::resolve_handle(handle).await {
+        Ok(None) => match crate::handle::resolve_handle(handle.as_str()).await {
             Ok(did) => {
                 let _ = state
                     .cache
@@ -130,15 +132,14 @@ pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -
 }
 
 async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str) -> Response {
-    let full_handle = format!("{}.{}", handle, hostname);
-    let user = sqlx::query!(
-        "SELECT id, did, migrated_to_pds FROM users WHERE handle = $1",
-        full_handle
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let (user_id, did, migrated_to_pds) = match user {
-        Ok(Some(row)) => (row.id, row.did, row.migrated_to_pds),
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(hostname);
+    let full_handle = format!("{}.{}", handle, hostname_for_handles);
+    let full_handle_typed: Handle = match full_handle.parse() {
+        Ok(h) => h,
+        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+    };
+    let user = match state.user_repo.get_did_web_info_by_handle(&full_handle_typed).await {
+        Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::NotFoundMsg("User not found".into()).into_response();
         }
@@ -147,10 +148,11 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
             return ApiError::InternalError(None).into_response();
         }
     };
+    let (user_id, did, migrated_to_pds) = (user.id, user.did, user.migrated_to_pds);
     if !did.starts_with("did:web:") {
         return ApiError::NotFoundMsg("User is not did:web".into()).into_response();
     }
-    let subdomain_host = format!("{}.{}", handle, hostname);
+    let subdomain_host = format!("{}.{}", handle, hostname_for_handles);
     let encoded_subdomain = subdomain_host.replace(':', "%3A");
     let expected_self_hosted = format!("did:web:{}", encoded_subdomain);
     if did != expected_self_hosted {
@@ -158,14 +160,12 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
             .into_response();
     }
 
-    let overrides = sqlx::query!(
-        "SELECT verification_methods, also_known_as FROM did_web_overrides WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
+    let overrides = state
+        .user_repo
+        .get_did_web_overrides(user_id)
+        .await
+        .ok()
+        .flatten();
 
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
 
@@ -204,20 +204,14 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
         .into_response();
     }
 
-    let key_row = sqlx::query!(
-        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let key_bytes: Vec<u8> = match key_row {
-        Ok(Some(row)) => match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
-            Ok(k) => k,
-            Err(_) => {
-                return ApiError::InternalError(None).into_response();
-            }
-        },
-        _ => {
+    let key_info = match state.user_repo.get_user_key_by_id(user_id).await {
+        Ok(Some(k)) => k,
+        Ok(None) => return ApiError::InternalError(None).into_response(),
+        Err(_) => return ApiError::InternalError(None).into_response(),
+    };
+    let key_bytes: Vec<u8> = match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
+        Ok(k) => k,
+        Err(_) => {
             return ApiError::InternalError(None).into_response();
         }
     };
@@ -264,15 +258,14 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
 
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let full_handle = format!("{}.{}", handle, hostname);
-    let user = sqlx::query!(
-        "SELECT id, did, migrated_to_pds FROM users WHERE handle = $1",
-        full_handle
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let (user_id, did, migrated_to_pds) = match user {
-        Ok(Some(row)) => (row.id, row.did, row.migrated_to_pds),
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let full_handle = format!("{}.{}", handle, hostname_for_handles);
+    let full_handle_typed: Handle = match full_handle.parse() {
+        Ok(h) => h,
+        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+    };
+    let user = match state.user_repo.get_did_web_info_by_handle(&full_handle_typed).await {
+        Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::NotFoundMsg("User not found".into()).into_response();
         }
@@ -281,12 +274,13 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
             return ApiError::InternalError(None).into_response();
         }
     };
+    let (user_id, did, migrated_to_pds) = (user.id, user.did, user.migrated_to_pds);
     if !did.starts_with("did:web:") {
         return ApiError::NotFoundMsg("User is not did:web".into()).into_response();
     }
     let encoded_hostname = hostname.replace(':', "%3A");
     let old_path_format = format!("did:web:{}:u:{}", encoded_hostname, handle);
-    let subdomain_host = format!("{}.{}", handle, hostname);
+    let subdomain_host = format!("{}.{}", handle, hostname_for_handles);
     let encoded_subdomain = subdomain_host.replace(':', "%3A");
     let new_subdomain_format = format!("did:web:{}", encoded_subdomain);
     if did != old_path_format && did != new_subdomain_format {
@@ -294,14 +288,12 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
             .into_response();
     }
 
-    let overrides = sqlx::query!(
-        "SELECT verification_methods, also_known_as FROM did_web_overrides WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
+    let overrides = state
+        .user_repo
+        .get_did_web_overrides(user_id)
+        .await
+        .ok()
+        .flatten();
 
     let service_endpoint = migrated_to_pds.unwrap_or_else(|| format!("https://{}", hostname));
 
@@ -340,20 +332,14 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         .into_response();
     }
 
-    let key_row = sqlx::query!(
-        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let key_bytes: Vec<u8> = match key_row {
-        Ok(Some(row)) => match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
-            Ok(k) => k,
-            Err(_) => {
-                return ApiError::InternalError(None).into_response();
-            }
-        },
-        _ => {
+    let key_info = match state.user_repo.get_user_key_by_id(user_id).await {
+        Ok(Some(k)) => k,
+        Ok(None) => return ApiError::InternalError(None).into_response(),
+        Err(_) => return ApiError::InternalError(None).into_response(),
+    };
+    let key_bytes: Vec<u8> = match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
+        Ok(k) => k,
+        Err(_) => {
             return ApiError::InternalError(None).into_response();
         }
     };
@@ -404,7 +390,8 @@ pub async fn verify_did_web(
     handle: &str,
     expected_signing_key: Option<&str>,
 ) -> Result<(), String> {
-    let subdomain_host = format!("{}.{}", handle, hostname);
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(hostname);
+    let subdomain_host = format!("{}.{}", handle, hostname_for_handles);
     let encoded_subdomain = subdomain_host.replace(':', "%3A");
     let expected_subdomain_did = format!("did:web:{}", encoded_subdomain);
     if did == expected_subdomain_did {
@@ -527,15 +514,10 @@ pub async fn get_recommended_did_credentials(
     auth: BearerAuthAllowDeactivated,
 ) -> Response {
     let auth_user = auth.0;
-    let user = match sqlx::query!(
-        "SELECT handle FROM users u JOIN user_keys k ON u.id = k.user_id WHERE u.did = $1",
-        &auth_user.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
-        _ => return ApiError::InternalError(None).into_response(),
+    let handle = match state.user_repo.get_handle_by_did(&auth_user.did).await {
+        Ok(Some(h)) => h,
+        Ok(None) => return ApiError::InternalError(None).into_response(),
+        Err(_) => return ApiError::InternalError(None).into_response(),
     };
     let key_bytes = match auth_user.key_bytes {
         Some(kb) => kb,
@@ -571,7 +553,7 @@ pub async fn get_recommended_did_credentials(
         StatusCode::OK,
         Json(GetRecommendedDidCredentialsOutput {
             rotation_keys,
-            also_known_as: vec![format!("at://{}", user.handle)],
+            also_known_as: vec![format!("at://{}", handle)],
             verification_methods: VerificationMethods { atproto: did_key },
             services: Services {
                 atproto_pds: AtprotoPds {
@@ -619,12 +601,10 @@ pub async fn update_handle(
         return ApiError::RateLimitExceeded(Some("Daily handle update limit exceeded.".into()))
             .into_response();
     }
-    let user_row = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
-        .await
-    {
+    let user_row = match state.user_repo.get_id_and_handle_by_did(&did).await {
         Ok(Some(row)) => row,
-        _ => return ApiError::InternalError(None).into_response(),
+        Ok(None) => return ApiError::InternalError(None).into_response(),
+        Err(_) => return ApiError::InternalError(None).into_response(),
     };
     let user_id = user_row.id;
     let current_handle = user_row.handle;
@@ -657,8 +637,9 @@ pub async fn update_handle(
             .into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let suffix = format!(".{}", hostname);
-    let is_service_domain = crate::handle::is_service_domain_handle(&new_handle, &hostname);
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let suffix = format!(".{}", hostname_for_handles);
+    let is_service_domain = crate::handle::is_service_domain_handle(&new_handle, hostname_for_handles);
     let handle = if is_service_domain {
         let short_part = if new_handle.ends_with(&suffix) {
             new_handle.strip_suffix(&suffix).unwrap_or(&new_handle)
@@ -668,7 +649,7 @@ pub async fn update_handle(
         let full_handle = if new_handle.ends_with(&suffix) {
             new_handle.clone()
         } else {
-            format!("{}.{}", new_handle, hostname)
+            format!("{}.{}", new_handle, hostname_for_handles)
         };
         if full_handle == current_handle {
             let handle_typed = Handle::new_unchecked(&full_handle);
@@ -727,23 +708,18 @@ pub async fn update_handle(
         }
         new_handle.clone()
     };
-    let existing = sqlx::query!(
-        "SELECT id FROM users WHERE handle = $1 AND id != $2",
-        handle,
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await;
-    if let Ok(Some(_)) = existing {
+    let handle_typed: Handle = match handle.parse() {
+        Ok(h) => h,
+        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+    };
+    let handle_exists = match state.user_repo.check_handle_exists(&handle_typed, user_id).await {
+        Ok(exists) => exists,
+        Err(_) => return ApiError::InternalError(None).into_response(),
+    };
+    if handle_exists {
         return ApiError::HandleTaken.into_response();
     }
-    let result = sqlx::query!(
-        "UPDATE users SET handle = $1 WHERE id = $2",
-        handle,
-        user_id
-    )
-    .execute(&state.db)
-    .await;
+    let result = state.user_repo.update_handle(user_id, &handle_typed).await;
     match result {
         Ok(_) => {
             if !current_handle.is_empty() {
@@ -753,14 +729,13 @@ pub async fn update_handle(
                     .await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
-            let handle_typed = Handle::new_unchecked(&handle);
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
                     .await
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            if let Err(e) = update_plc_handle(&state, &did, &handle).await {
+            if let Err(e) = update_plc_handle(&state, &did, &handle_typed).await {
                 warn!("Failed to update PLC handle: {}", e);
             }
             EmptyResponse::ok().into_response()
@@ -774,22 +749,13 @@ pub async fn update_handle(
 
 pub async fn update_plc_handle(
     state: &AppState,
-    did: &str,
-    new_handle: &str,
+    did: &crate::types::Did,
+    new_handle: &Handle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if !did.starts_with("did:plc:") {
+    if !did.as_str().starts_with("did:plc:") {
         return Ok(());
     }
-    let user_row = sqlx::query!(
-        r#"SELECT u.id, uk.key_bytes, uk.encryption_version
-           FROM users u
-           JOIN user_keys uk ON u.id = uk.user_id
-           WHERE u.did = $1"#,
-        did
-    )
-    .fetch_optional(&state.db)
-    .await?;
-    let user_row = match user_row {
+    let user_row = match state.user_repo.get_user_with_key_by_did(did).await? {
         Some(r) => r,
         None => return Ok(()),
     };
@@ -810,12 +776,14 @@ pub async fn well_known_atproto_did(State(state): State<AppState>, headers: Head
         Some(h) => h,
         None => return (StatusCode::BAD_REQUEST, "Missing host header").into_response(),
     };
-    let handle = host.split(':').next().unwrap_or(host);
-    let user = sqlx::query!("SELECT did FROM users WHERE handle = $1", handle)
-        .fetch_optional(&state.db)
-        .await;
+    let handle_str = host.split(':').next().unwrap_or(host);
+    let handle: Handle = match handle_str.parse() {
+        Ok(h) => h,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid handle format").into_response(),
+    };
+    let user = state.user_repo.get_by_handle(&handle).await;
     match user {
-        Ok(Some(row)) => row.did.into_response(),
+        Ok(Some(row)) => row.did.to_string().into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Handle not found").into_response(),
         Err(e) => {
             error!("DB error in well-known atproto-did: {:?}", e);

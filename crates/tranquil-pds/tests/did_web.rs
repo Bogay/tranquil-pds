@@ -94,17 +94,18 @@ async fn test_create_self_hosted_did_web() {
 #[tokio::test]
 async fn test_external_did_web_no_local_doc() {
     let client = client();
+    let base = base_url().await;
     let mock_server = MockServer::start().await;
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
     let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
     let handle = format!("xw{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    let pds_endpoint = base_url().await.replace("http://", "https://");
+    let pds_endpoint = common::pds_endpoint();
 
     let reserve_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.reserveSigningKey",
-            base_url().await
+            base
         ))
         .json(&json!({ "did": did }))
         .send()
@@ -150,7 +151,7 @@ async fn test_external_did_web_no_local_doc() {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
-            base_url().await
+            base
         ))
         .json(&payload)
         .send()
@@ -161,7 +162,7 @@ async fn test_external_did_web_no_local_doc() {
         panic!("createAccount failed: {:?}", body);
     }
     let res = client
-        .get(format!("{}/u/{}/did.json", base_url().await, handle))
+        .get(format!("{}/u/{}/did.json", base, handle))
         .send()
         .await
         .expect("Failed to fetch DID doc");
@@ -383,6 +384,7 @@ fn create_service_jwt(signing_key: &SigningKey, did: &str, aud: &str) -> String 
 #[tokio::test]
 async fn test_did_web_byod_flow() {
     let client = client();
+    let base = base_url().await;
     let mock_server = MockServer::start().await;
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
@@ -393,8 +395,9 @@ async fn test_did_web_byod_flow() {
         unique_id
     );
     let handle = format!("by{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    let pds_endpoint = base_url().await.replace("http://", "https://");
-    let pds_did = format!("did:web:{}", pds_endpoint.trim_start_matches("https://"));
+    let pds_endpoint = common::pds_endpoint();
+    let pds_hostname = common::pds_hostname();
+    let pds_did = format!("did:web:{}", pds_hostname);
 
     let temp_key = SigningKey::random(&mut rand::thread_rng());
     let public_key_multibase = signing_key_to_multibase(&temp_key);
@@ -430,7 +433,7 @@ async fn test_did_web_byod_flow() {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
-            base_url().await
+            base
         ))
         .header("Authorization", format!("Bearer {}", service_jwt))
         .json(&payload)
@@ -454,7 +457,7 @@ async fn test_did_web_byod_flow() {
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.server.checkAccountStatus",
-            base_url().await
+            base
         ))
         .bearer_auth(&access_jwt)
         .send()
@@ -470,7 +473,7 @@ async fn test_did_web_byod_flow() {
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.identity.getRecommendedDidCredentials",
-            base_url().await
+            base
         ))
         .bearer_auth(&access_jwt)
         .send()
@@ -493,7 +496,7 @@ async fn test_did_web_byod_flow() {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.activateAccount",
-            base_url().await
+            base
         ))
         .bearer_auth(&access_jwt)
         .send()
@@ -508,7 +511,7 @@ async fn test_did_web_byod_flow() {
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.server.checkAccountStatus",
-            base_url().await
+            base
         ))
         .bearer_auth(&access_jwt)
         .send()
@@ -524,7 +527,7 @@ async fn test_did_web_byod_flow() {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.createRecord",
-            base_url().await
+            base
         ))
         .bearer_auth(&access_jwt)
         .json(&json!({

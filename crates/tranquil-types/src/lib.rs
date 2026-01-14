@@ -639,6 +639,24 @@ impl AtUri {
     pub fn into_inner(self) -> String {
         self.0
     }
+
+    pub fn did(&self) -> Option<&str> {
+        self.0
+            .strip_prefix("at://")
+            .and_then(|s| s.split('/').next())
+    }
+
+    pub fn collection(&self) -> Option<&str> {
+        self.0
+            .strip_prefix("at://")
+            .and_then(|s| s.split('/').nth(1))
+    }
+
+    pub fn rkey(&self) -> Option<&str> {
+        self.0
+            .strip_prefix("at://")
+            .and_then(|s| s.split('/').nth(2))
+    }
 }
 
 impl AsRef<str> for AtUri {
@@ -1439,6 +1457,366 @@ impl From<String> for DPoPProofId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct TokenId(String);
+
+impl TokenId {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for TokenId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for TokenId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for TokenId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for TokenId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct ClientId(String);
+
+impl ClientId {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for ClientId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for ClientId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for ClientId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for ClientId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct DeviceId(String);
+
+impl DeviceId {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for DeviceId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for DeviceId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for DeviceId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for DeviceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct RequestId(String);
+
+impl RequestId {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for RequestId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for RequestId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for RequestId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for RequestId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct Jti(String);
+
+impl Jti {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for Jti {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for Jti {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for Jti {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for Jti {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct AuthorizationCode(String);
+
+impl AuthorizationCode {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for AuthorizationCode {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for AuthorizationCode {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for AuthorizationCode {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for AuthorizationCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct RefreshToken(String);
+
+impl RefreshToken {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for RefreshToken {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for RefreshToken {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for RefreshToken {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for RefreshToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct InviteCode(String);
+
+impl InviteCode {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for InviteCode {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for InviteCode {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for InviteCode {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl fmt::Display for InviteCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1486,6 +1864,7 @@ mod tests {
         assert!(Handle::new("user.bsky.social").is_ok());
         assert!(Handle::new("test.example.com").is_ok());
         assert!(Handle::new("invalid handle with spaces").is_err());
+        assert!(Handle::new("alice.pds.test").is_ok());
     }
 
     #[test]

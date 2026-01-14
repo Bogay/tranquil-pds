@@ -1,17 +1,12 @@
 use crate::state::AppState;
 use crate::sync::firehose::SequencedEvent;
-use sqlx::postgres::PgListener;
 use std::sync::atomic::{AtomicI64, Ordering};
 use tracing::{debug, error, info, warn};
 
 static LAST_BROADCAST_SEQ: AtomicI64 = AtomicI64::new(0);
 
 pub async fn start_sequencer_listener(state: AppState) {
-    let initial_seq = sqlx::query_scalar!("SELECT COALESCE(MAX(seq), 0) as max FROM repo_seq")
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(Some(0))
-        .unwrap_or(0);
+    let initial_seq = state.repo_repo.get_max_seq().await.unwrap_or(0);
     LAST_BROADCAST_SEQ.store(initial_seq, Ordering::SeqCst);
     info!(initial_seq = initial_seq, "Initialized sequencer listener");
     tokio::spawn(async move {
@@ -26,22 +21,18 @@ pub async fn start_sequencer_listener(state: AppState) {
 }
 
 async fn listen_loop(state: AppState) -> anyhow::Result<()> {
-    let mut listener = PgListener::connect_with(&state.db).await?;
-    listener.listen("repo_updates").await?;
-    info!("Connected to Postgres and listening for 'repo_updates'");
+    let mut receiver = state
+        .event_notifier
+        .subscribe()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to subscribe to events: {:?}", e))?;
+    info!("Connected to database and listening for repo updates");
     let catchup_start = LAST_BROADCAST_SEQ.load(Ordering::SeqCst);
-    let events = sqlx::query_as!(
-        SequencedEvent,
-        r#"
-        SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
-        FROM repo_seq
-        WHERE seq > $1
-        ORDER BY seq ASC
-        "#,
-        catchup_start
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let events = state
+        .repo_repo
+        .get_events_since_seq(catchup_start, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch catchup events: {:?}", e))?;
     if !events.is_empty() {
         info!(
             count = events.len(),
@@ -50,24 +41,16 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         );
         events.into_iter().for_each(|event| {
             let seq = event.seq;
-            let _ = state.firehose_tx.send(event);
+            let firehose_event = to_firehose_event(event);
+            let _ = state.firehose_tx.send(firehose_event);
             LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
         });
     }
     loop {
-        let notification = listener.recv().await?;
-        let payload = notification.payload();
-        debug!(payload = %payload, "Received postgres notification");
-        let seq_id: i64 = match payload.parse() {
-            Ok(id) => id,
-            Err(e) => {
-                warn!(
-                    "Received invalid payload in repo_updates: '{}'. Error: {}",
-                    payload, e
-                );
-                continue;
-            }
+        let Some(seq_id) = receiver.recv().await else {
+            return Err(anyhow::anyhow!("Event receiver disconnected"));
         };
+        debug!(seq = seq_id, "Received event notification");
         let last_seq = LAST_BROADCAST_SEQ.load(Ordering::SeqCst);
         if seq_id <= last_seq {
             debug!(
@@ -78,41 +61,26 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
             continue;
         }
         if seq_id > last_seq + 1 {
-            let gap_events = sqlx::query_as!(
-                SequencedEvent,
-                r#"
-                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
-                FROM repo_seq
-                WHERE seq > $1 AND seq < $2
-                ORDER BY seq ASC
-                "#,
-                last_seq,
-                seq_id
-            )
-            .fetch_all(&state.db)
-            .await?;
+            let gap_events = state
+                .repo_repo
+                .get_events_in_seq_range(last_seq, seq_id)
+                .await
+                .unwrap_or_default();
             if !gap_events.is_empty() {
                 debug!(count = gap_events.len(), "Filling sequence gap");
                 gap_events.into_iter().for_each(|event| {
                     let seq = event.seq;
-                    let _ = state.firehose_tx.send(event);
+                    let firehose_event = to_firehose_event(event);
+                    let _ = state.firehose_tx.send(firehose_event);
                     LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
                 });
             }
         }
-        let event = sqlx::query_as!(
-            SequencedEvent,
-            r#"
-            SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
-            FROM repo_seq
-            WHERE seq = $1
-            "#,
-            seq_id
-        )
-        .fetch_optional(&state.db)
-        .await?;
+        let event = state.repo_repo.get_event_by_seq(seq_id).await.ok().flatten();
         if let Some(event) = event {
-            match state.firehose_tx.send(event) {
+            let seq = event.seq;
+            let firehose_event = to_firehose_event(event);
+            match state.firehose_tx.send(firehose_event) {
                 Ok(receiver_count) => {
                     debug!(
                         seq = seq_id,
@@ -124,12 +92,31 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
                     warn!(seq = seq_id, error = %e, "Failed to broadcast event (no receivers?)");
                 }
             }
-            LAST_BROADCAST_SEQ.store(seq_id, Ordering::SeqCst);
+            LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
         } else {
             warn!(
                 seq = seq_id,
                 "Received notification but could not find row in repo_seq"
             );
         }
+    }
+}
+
+fn to_firehose_event(event: tranquil_db_traits::SequencedEvent) -> SequencedEvent {
+    SequencedEvent {
+        seq: event.seq,
+        did: event.did,
+        created_at: event.created_at,
+        event_type: event.event_type,
+        commit_cid: event.commit_cid,
+        prev_cid: event.prev_cid,
+        prev_data_cid: event.prev_data_cid,
+        ops: event.ops,
+        blobs: event.blobs,
+        blocks_cids: event.blocks_cids,
+        handle: event.handle,
+        active: event.active,
+        status: event.status,
+        rev: event.rev,
     }
 }

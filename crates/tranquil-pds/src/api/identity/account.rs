@@ -243,32 +243,20 @@ pub async fn create_account(
         })
     };
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
     let pds_endpoint = format!("https://{}", hostname);
-    let suffix = format!(".{}", hostname);
+    let suffix = format!(".{}", hostname_for_handles);
     let handle = if input.handle.ends_with(&suffix) {
-        format!("{}.{}", validated_short_handle, hostname)
+        format!("{}.{}", validated_short_handle, hostname_for_handles)
     } else if input.handle.contains('.') {
         validated_short_handle.clone()
     } else {
-        format!("{}.{}", validated_short_handle, hostname)
+        format!("{}.{}", validated_short_handle, hostname_for_handles)
     };
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
-            let reserved = sqlx::query!(
-                r#"
-                SELECT id, private_key_bytes
-                FROM reserved_signing_keys
-                WHERE public_key_did_key = $1
-                  AND used_at IS NULL
-                  AND expires_at > NOW()
-                FOR UPDATE
-                "#,
-                signing_key_did
-            )
-            .fetch_optional(&state.db)
-            .await;
-            match reserved {
-                Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
+            match state.infra_repo.get_reserved_signing_key(signing_key_did).await {
+                Ok(Some(key)) => (key.private_key_bytes, Some(key.id)),
                 Ok(None) => {
                     return ApiError::InvalidSigningKey.into_response();
                 }
@@ -294,7 +282,7 @@ pub async fn create_account(
             if !crate::api::server::meta::is_self_hosted_did_web_enabled() {
                 return ApiError::SelfHostedDidWebDisabled.into_response();
             }
-            let subdomain_host = format!("{}.{}", input.handle, hostname);
+            let subdomain_host = format!("{}.{}", input.handle, hostname_for_handles);
             let encoded_subdomain = subdomain_host.replace(':', "%3A");
             let self_hosted_did = format!("did:web:{}", encoded_subdomain);
             info!(did = %self_hosted_did, "Creating self-hosted did:web account (subdomain)");
@@ -414,55 +402,17 @@ pub async fn create_account(
             }
         }
     };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Error starting transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
     if is_migration {
-        let existing_account: Option<(uuid::Uuid, String, Option<chrono::DateTime<chrono::Utc>>)> =
-            sqlx::query_as("SELECT id, handle, deactivated_at FROM users WHERE did = $1 FOR UPDATE")
-                .bind(&did)
-                .fetch_optional(&mut *tx)
-                .await
-                .unwrap_or(None);
-        if let Some((account_id, old_handle, deactivated_at)) = existing_account {
-            if deactivated_at.is_some() {
-                info!(did = %did, old_handle = %old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
-                let update_result: Result<_, sqlx::Error> =
-                    sqlx::query("UPDATE users SET handle = $1 WHERE id = $2")
-                        .bind(&handle)
-                        .bind(account_id)
-                        .execute(&mut *tx)
-                        .await;
-                if let Err(e) = update_result {
-                    if let Some(db_err) = e.as_database_error()
-                        && db_err
-                            .constraint()
-                            .map(|c| c.contains("handle"))
-                            .unwrap_or(false)
-                    {
-                        return ApiError::HandleTaken.into_response();
-                    }
-                    error!("Error reactivating account: {:?}", e);
-                    return ApiError::InternalError(None).into_response();
-                }
-                if let Err(e) = tx.commit().await {
-                    error!("Error committing reactivation: {:?}", e);
-                    return ApiError::InternalError(None).into_response();
-                }
-                let key_row: Option<(Vec<u8>, i32)> = sqlx::query_as(
-                    "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
-                )
-                .bind(account_id)
-                .fetch_optional(&state.db)
-                .await
-                .unwrap_or(None);
-                let secret_key_bytes = match key_row {
-                    Some((key_bytes, encryption_version)) => {
-                        match crate::config::decrypt_key(&key_bytes, Some(encryption_version)) {
+        let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
+            did: Did::new_unchecked(&did),
+            new_handle: Handle::new_unchecked(&handle),
+        };
+        match state.user_repo.reactivate_migration_account(&reactivate_input).await {
+            Ok(reactivated) => {
+                info!(did = %did, old_handle = %reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
+                let secret_key_bytes = match state.user_repo.get_user_key_by_id(reactivated.user_id).await {
+                    Ok(Some(key_info)) => {
+                        match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
                             Ok(k) => k,
                             Err(e) => {
                                 error!("Error decrypting key for reactivated account: {:?}", e);
@@ -470,7 +420,7 @@ pub async fn create_account(
                             }
                         }
                     }
-                    None => {
+                    _ => {
                         error!("No signing key found for reactivated account");
                         return ApiError::InternalError(Some(
                             "Account signing key not found".into(),
@@ -496,17 +446,19 @@ pub async fn create_account(
                         return ApiError::InternalError(None).into_response();
                     }
                 };
-                let session_result: Result<_, sqlx::Error> = sqlx::query(
-                    "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
-                )
-                .bind(&did)
-                .bind(&access_meta.jti)
-                .bind(&refresh_meta.jti)
-                .bind(access_meta.expires_at)
-                .bind(refresh_meta.expires_at)
-                .execute(&state.db)
-                .await;
-                if let Err(e) = session_result {
+                let session_data = tranquil_db_traits::SessionTokenCreate {
+                    did: Did::new_unchecked(&did),
+                    access_jti: access_meta.jti.clone(),
+                    refresh_jti: refresh_meta.jti.clone(),
+                    access_expires_at: access_meta.expires_at,
+                    refresh_expires_at: refresh_meta.expires_at,
+                    legacy_login: false,
+                    mfa_verified: false,
+                    scope: None,
+                    controller_did: None,
+                    app_password_name: None,
+                };
+                if let Err(e) = state.session_repo.create_session(&session_data).await {
                     error!("Error creating session: {:?}", e);
                     return ApiError::InternalError(None).into_response();
                 }
@@ -514,7 +466,7 @@ pub async fn create_account(
                     axum::http::StatusCode::OK,
                     Json(CreateAccountOutput {
                         handle: handle.clone().into(),
-                        did: did.clone().into(),
+                        did: Did::new_unchecked(&did),
                         did_doc: state.did_resolver.resolve_did_document(&did).await,
                         access_jwt: access_meta.token,
                         refresh_jwt: refresh_meta.token,
@@ -523,20 +475,34 @@ pub async fn create_account(
                     }),
                 )
                     .into_response();
-            } else {
+            }
+            Err(tranquil_db_traits::MigrationReactivationError::NotFound) => {
+            }
+            Err(tranquil_db_traits::MigrationReactivationError::NotDeactivated) => {
                 return ApiError::AccountAlreadyExists.into_response();
+            }
+            Err(tranquil_db_traits::MigrationReactivationError::HandleTaken) => {
+                return ApiError::HandleTaken.into_response();
+            }
+            Err(e) => {
+                error!("Error reactivating migration account: {:?}", e);
+                return ApiError::InternalError(None).into_response();
             }
         }
     }
-    let exists_result: Option<(i32,)> =
-        sqlx::query_as("SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL")
-            .bind(&handle)
-            .fetch_optional(&mut *tx)
-            .await
-            .unwrap_or(None);
-    if exists_result.is_some() {
+
+    let handle_typed = Handle::new_unchecked(&handle);
+    let handle_available = match state.user_repo.check_handle_available_for_new_account(&handle_typed).await {
+        Ok(available) => available,
+        Err(e) => {
+            error!("Error checking handle availability: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+    if !handle_available {
         return ApiError::HandleTaken.into_response();
     }
+
     let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
@@ -552,37 +518,18 @@ pub async fn create_account(
     if let Some(code) = &input.invite_code
         && !code.trim().is_empty()
     {
-        let invite_query = sqlx::query!(
-            "SELECT available_uses FROM invite_codes WHERE code = $1 FOR UPDATE",
-            code
-        )
-        .fetch_optional(&mut *tx)
-        .await;
-        match invite_query {
-            Ok(Some(row)) => {
-                if row.available_uses <= 0 {
-                    return ApiError::InvalidInviteCode.into_response();
-                }
-                let update_invite = sqlx::query!(
-                    "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
-                    code
-                )
-                .execute(&mut *tx)
-                .await;
-                if let Err(e) = update_invite {
-                    error!("Error updating invite code: {:?}", e);
-                    return ApiError::InternalError(None).into_response();
-                }
-            }
-            Ok(None) => {
-                return ApiError::InvalidInviteCode.into_response();
-            }
+        let valid = match state.user_repo.check_and_consume_invite_code(code).await {
+            Ok(v) => v,
             Err(e) => {
                 error!("Error checking invite code: {:?}", e);
                 return ApiError::InternalError(None).into_response();
             }
+        };
+        if !valid {
+            return ApiError::InvalidInviteCode.into_response();
         }
     }
+
     if let Err(e) = validate_password(&input.password) {
         return ApiError::InvalidRequest(e.to_string()).into_response();
     }
@@ -600,73 +547,11 @@ pub async fn create_account(
                 return ApiError::InternalError(None).into_response();
             }
         };
-    let is_first_user = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
-        .fetch_one(&mut *tx)
-        .await
-        .map(|c| c.unwrap_or(0) == 0)
-        .unwrap_or(false);
+
     let deactivated_at: Option<chrono::DateTime<chrono::Utc>> = if is_migration || is_did_web_byod {
         Some(chrono::Utc::now())
     } else {
         None
-    };
-    let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
-        r#"INSERT INTO users (
-            handle, email, did, password_hash,
-            preferred_comms_channel,
-            discord_id, telegram_username, signal_number,
-            is_admin, deactivated_at, email_verified
-        ) VALUES ($1, $2, $3, $4, $5::comms_channel, $6, $7, $8, $9, $10, $11) RETURNING id"#,
-    )
-    .bind(&handle)
-    .bind(&email)
-    .bind(&did)
-    .bind(&password_hash)
-    .bind(verification_channel)
-    .bind(
-        input
-            .discord_id
-            .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty()),
-    )
-    .bind(
-        input
-            .telegram_username
-            .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty()),
-    )
-    .bind(
-        input
-            .signal_number
-            .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty()),
-    )
-    .bind(is_first_user)
-    .bind(deactivated_at)
-    .bind(false)
-    .fetch_one(&mut *tx)
-    .await;
-    let user_id = match user_insert {
-        Ok((id,)) => id,
-        Err(e) => {
-            if let Some(db_err) = e.as_database_error()
-                && db_err.code().as_deref() == Some("23505")
-            {
-                let constraint = db_err.constraint().unwrap_or("");
-                if constraint.contains("handle") || constraint.contains("users_handle") {
-                    return ApiError::HandleNotAvailable(None).into_response();
-                } else if constraint.contains("email") || constraint.contains("users_email") {
-                    return ApiError::EmailTaken.into_response();
-                } else if constraint.contains("did") || constraint.contains("users_did") {
-                    return ApiError::AccountAlreadyExists.into_response();
-                }
-            }
-            error!("Error inserting user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
     };
 
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
@@ -676,30 +561,7 @@ pub async fn create_account(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let key_insert = sqlx::query!(
-        "INSERT INTO user_keys (user_id, key_bytes, encryption_version, encrypted_at) VALUES ($1, $2, $3, NOW())",
-        user_id,
-        &encrypted_key_bytes[..],
-        crate::config::ENCRYPTION_VERSION
-    )
-    .execute(&mut *tx)
-    .await;
-    if let Err(e) = key_insert {
-        error!("Error inserting user key: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-    if let Some(key_id) = reserved_key_id {
-        let mark_used = sqlx::query!(
-            "UPDATE reserved_signing_keys SET used_at = NOW() WHERE id = $1",
-            key_id
-        )
-        .execute(&mut *tx)
-        .await;
-        if let Err(e) = mark_used {
-            error!("Error marking reserved key as used: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    }
+
     let mst = Mst::new(Arc::new(state.block_store.clone()));
     let mst_root = match mst.persist().await {
         Ok(c) => c,
@@ -727,71 +589,60 @@ pub async fn create_account(
     };
     let commit_cid_str = commit_cid.to_string();
     let rev_str = rev.as_ref().to_string();
-    let repo_insert = sqlx::query!(
-        "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
-        user_id,
-        commit_cid_str,
-        rev_str
-    )
-    .execute(&mut *tx)
-    .await;
-    if let Err(e) = repo_insert {
-        error!("Error initializing repo: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
-    if let Err(e) = sqlx::query!(
-        r#"
-        INSERT INTO user_blocks (user_id, block_cid)
-        SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
-        ON CONFLICT (user_id, block_cid) DO NOTHING
-        "#,
-        user_id,
-        &genesis_block_cids
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting user_blocks: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-    if let Some(code) = &input.invite_code
-        && !code.trim().is_empty()
-    {
-        let use_insert = sqlx::query!(
-            "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
-            code,
-            user_id
-        )
-        .execute(&mut *tx)
-        .await;
-        if let Err(e) = use_insert {
-            error!("Error recording invite usage: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    }
-    if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok() {
-        let birthdate_pref = json!({
+
+    let birthdate_pref = std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").ok().map(|_| {
+        json!({
             "$type": "app.bsky.actor.defs#personalDetailsPref",
             "birthDate": "1998-05-06T00:00:00.000Z"
-        });
-        if let Err(e) = sqlx::query!(
-            "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
-             ON CONFLICT (user_id, name) DO NOTHING",
-            user_id,
-            "app.bsky.actor.defs#personalDetailsPref",
-            birthdate_pref
-        )
-        .execute(&mut *tx)
-        .await
-        {
-            warn!("Failed to set default birthdate preference: {:?}", e);
+        })
+    });
+
+    let preferred_comms_channel = match verification_channel {
+        "email" => tranquil_db_traits::CommsChannel::Email,
+        "discord" => tranquil_db_traits::CommsChannel::Discord,
+        "telegram" => tranquil_db_traits::CommsChannel::Telegram,
+        "signal" => tranquil_db_traits::CommsChannel::Signal,
+        _ => tranquil_db_traits::CommsChannel::Email,
+    };
+
+    let create_input = tranquil_db_traits::CreatePasswordAccountInput {
+        handle: Handle::new_unchecked(&handle),
+        email: email.clone(),
+        did: Did::new_unchecked(&did),
+        password_hash,
+        preferred_comms_channel,
+        discord_id: input.discord_id.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        telegram_username: input.telegram_username.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        signal_number: input.signal_number.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        deactivated_at,
+        encrypted_key_bytes,
+        encryption_version: crate::config::ENCRYPTION_VERSION,
+        reserved_key_id,
+        commit_cid: commit_cid_str.clone(),
+        repo_rev: rev_str.clone(),
+        genesis_block_cids,
+        invite_code: input.invite_code.clone(),
+        birthdate_pref,
+    };
+
+    let create_result = match state.user_repo.create_password_account(&create_input).await {
+        Ok(r) => r,
+        Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
+            return ApiError::HandleNotAvailable(None).into_response();
         }
-    }
-    if let Err(e) = tx.commit().await {
-        error!("Error committing transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        Err(tranquil_db_traits::CreateAccountError::EmailTaken) => {
+            return ApiError::EmailTaken.into_response();
+        }
+        Err(tranquil_db_traits::CreateAccountError::DidExists) => {
+            return ApiError::AccountAlreadyExists.into_response();
+        }
+        Err(e) => {
+            error!("Error creating password account: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+    let user_id = create_result.user_id;
     if !is_migration && !is_did_web_byod {
         let did_typed = Did::new_unchecked(&did);
         let handle_typed = Handle::new_unchecked(&handle);
@@ -858,13 +709,13 @@ pub async fn create_account(
             );
             let formatted_token =
                 crate::auth::verification_token::format_token_for_display(&verification_token);
-            if let Err(e) = crate::comms::enqueue_signup_verification(
-                &state.db,
+            if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+                state.infra_repo.as_ref(),
                 user_id,
                 verification_channel,
                 recipient,
                 &formatted_token,
-                None,
+                &hostname,
             )
             .await
             {
@@ -877,8 +728,9 @@ pub async fn create_account(
     } else if let Some(ref user_email) = email {
         let token = crate::auth::verification_token::generate_migration_token(&did, user_email);
         let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
-        if let Err(e) = crate::comms::enqueue_migration_verification(
-            &state.db,
+        if let Err(e) = crate::comms::comms_repo::enqueue_migration_verification(
+            state.user_repo.as_ref(),
+            state.infra_repo.as_ref(),
             user_id,
             user_email,
             &formatted_token,
@@ -906,17 +758,19 @@ pub async fn create_account(
                 return ApiError::InternalError(None).into_response();
             }
         };
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at) VALUES ($1, $2, $3, $4, $5)",
-        did,
-        access_meta.jti,
-        refresh_meta.jti,
-        access_meta.expires_at,
-        refresh_meta.expires_at
-    )
-    .execute(&state.db)
-    .await
-    {
+    let session_data = tranquil_db_traits::SessionTokenCreate {
+        did: Did::new_unchecked(&did),
+        access_jti: access_meta.jti.clone(),
+        refresh_jti: refresh_meta.jti.clone(),
+        access_expires_at: access_meta.expires_at,
+        refresh_expires_at: refresh_meta.expires_at,
+        legacy_login: false,
+        mfa_verified: false,
+        scope: None,
+        controller_did: None,
+        app_password_name: None,
+    };
+    if let Err(e) = state.session_repo.create_session(&session_data).await {
         error!("createAccount: Error creating session: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -934,7 +788,7 @@ pub async fn create_account(
         StatusCode::OK,
         Json(CreateAccountOutput {
             handle: handle.clone().into(),
-            did: did.into(),
+            did: Did::new_unchecked(&did),
             did_doc,
             access_jwt: access_meta.token,
             refresh_jwt: refresh_meta.token,

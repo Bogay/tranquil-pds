@@ -6,7 +6,7 @@ pub mod validation;
 pub mod write;
 
 pub use batch::apply_writes;
-pub use delete::{DeleteRecordInput, delete_record};
+pub use delete::{DeleteRecordInput, delete_record, delete_record_internal};
 pub use read::{GetRecordInput, ListRecordsInput, ListRecordsOutput, get_record, list_records};
 pub use utils::*;
 pub use write::{

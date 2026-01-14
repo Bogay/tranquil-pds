@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use std::fmt;
 use std::time::Duration;
 
@@ -7,6 +6,8 @@ use crate::AccountStatus;
 use crate::cache::Cache;
 use crate::oauth::scopes::ScopePermissions;
 use crate::types::Did;
+use tranquil_db::UserRepository;
+use tranquil_db_traits::OAuthRepository;
 
 pub mod extractor;
 pub mod scope_check;
@@ -62,6 +63,7 @@ pub enum TokenValidationError {
     AuthenticationFailed,
     TokenExpired,
     OAuthTokenExpired,
+    InvalidToken,
 }
 
 impl fmt::Display for TokenValidationError {
@@ -72,6 +74,7 @@ impl fmt::Display for TokenValidationError {
             Self::KeyDecryptionFailed => write!(f, "KeyDecryptionFailed"),
             Self::AuthenticationFailed => write!(f, "AuthenticationFailed"),
             Self::TokenExpired | Self::OAuthTokenExpired => write!(f, "ExpiredToken"),
+            Self::InvalidToken => write!(f, "InvalidToken"),
         }
     }
 }
@@ -105,51 +108,51 @@ impl AuthenticatedUser {
 }
 
 pub async fn validate_bearer_token(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, None, token, false, false).await
+    validate_bearer_token_with_options_internal(user_repo, None, token, false, false).await
 }
 
 pub async fn validate_bearer_token_allow_deactivated(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, None, token, true, false).await
+    validate_bearer_token_with_options_internal(user_repo, None, token, true, false).await
 }
 
 pub async fn validate_bearer_token_cached(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
     cache: &dyn Cache,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, Some(cache), token, false, false).await
+    validate_bearer_token_with_options_internal(user_repo, Some(cache), token, false, false).await
 }
 
 pub async fn validate_bearer_token_cached_allow_deactivated(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
     cache: &dyn Cache,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, Some(cache), token, true, false).await
+    validate_bearer_token_with_options_internal(user_repo, Some(cache), token, true, false).await
 }
 
 pub async fn validate_bearer_token_for_service_auth(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, None, token, true, true).await
+    validate_bearer_token_with_options_internal(user_repo, None, token, true, true).await
 }
 
 pub async fn validate_bearer_token_allow_takendown(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
     token: &str,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    validate_bearer_token_with_options_internal(db, None, token, false, true).await
+    validate_bearer_token_with_options_internal(user_repo, None, token, false, true).await
 }
 
 async fn validate_bearer_token_with_options_internal(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
     cache: Option<&dyn Cache>,
     token: &str,
     allow_deactivated: bool,
@@ -157,8 +160,12 @@ async fn validate_bearer_token_with_options_internal(
 ) -> Result<AuthenticatedUser, TokenValidationError> {
     let did_from_token = get_did_from_token(token).ok();
 
-    if let Some(ref did) = did_from_token {
-        let key_cache_key = format!("auth:key:{}", did);
+    if let Some(ref did_str) = did_from_token {
+        let did: tranquil_types::Did = match did_str.parse() {
+            Ok(d) => d,
+            Err(_) => return Err(TokenValidationError::InvalidToken),
+        };
+        let key_cache_key = format!("auth:key:{}", did_str);
         let mut cached_key: Option<Vec<u8>> = None;
 
         if let Some(c) = cache {
@@ -172,7 +179,7 @@ async fn validate_bearer_token_with_options_internal(
 
         let (decrypted_key, deactivated_at, takedown_ref, is_admin) = if let Some(key) = cached_key
         {
-            let status_cache_key = format!("auth:status:{}", did);
+            let status_cache_key = format!("auth:status:{}", did_str);
             let cached_status: Option<CachedUserStatus> = if let Some(c) = cache {
                 c.get(&status_cache_key)
                     .await
@@ -197,14 +204,7 @@ async fn validate_bearer_token_with_options_internal(
                     status.is_admin,
                 )
             } else {
-                let user_status = sqlx::query!(
-                    "SELECT deactivated_at, takedown_ref, is_admin FROM users WHERE did = $1",
-                    did
-                )
-                .fetch_optional(db)
-                .await
-                .ok()
-                .flatten();
+                let user_status = user_repo.get_status_by_did(&did).await.ok().flatten();
 
                 match user_status {
                     Some(status) => {
@@ -234,18 +234,7 @@ async fn validate_bearer_token_with_options_internal(
                     None => (None, None, None, false),
                 }
             }
-        } else if let Some(user) = sqlx::query!(
-            "SELECT k.key_bytes, k.encryption_version, u.deactivated_at, u.takedown_ref, u.is_admin
-             FROM users u
-             JOIN user_keys k ON u.id = k.user_id
-             WHERE u.did = $1",
-            did
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
-        {
+        } else if let Some(user) = user_repo.get_with_key_by_did(&did).await.ok().flatten() {
             let key = crate::config::decrypt_key(&user.key_bytes, user.encryption_version)
                 .map_err(|_| TokenValidationError::KeyDecryptionFailed)?;
 
@@ -310,18 +299,14 @@ async fn validate_bearer_token_with_options_internal(
                     }
 
                     if !session_valid {
-                        let session_row = sqlx::query!(
-                            "SELECT access_expires_at FROM session_tokens WHERE did = $1 AND access_jti = $2",
-                            did,
-                            jti
-                        )
-                        .fetch_optional(db)
-                        .await
-                        .ok()
-                        .flatten();
+                        let session_expiry = user_repo
+                            .get_session_access_expiry(&did, jti)
+                            .await
+                            .ok()
+                            .flatten();
 
-                        if let Some(row) = session_row {
-                            if row.access_expires_at > chrono::Utc::now() {
+                        if let Some(expires_at) = session_expiry {
+                            if expires_at > chrono::Utc::now() {
                                 session_valid = true;
                                 if let Some(c) = cache {
                                     let _ = c
@@ -347,7 +332,7 @@ async fn validate_bearer_token_with_options_internal(
                         let status =
                             AccountStatus::from_db_fields(takedown_ref.as_deref(), deactivated_at);
                         return Ok(AuthenticatedUser {
-                            did: Did::new_unchecked(did.clone()),
+                            did: did.clone(),
                             key_bytes: Some(decrypted_key),
                             is_oauth: false,
                             is_admin,
@@ -366,19 +351,11 @@ async fn validate_bearer_token_with_options_internal(
     }
 
     if let Ok(oauth_info) = crate::oauth::verify::extract_oauth_token_info(token)
-        && let Some(oauth_token) = sqlx::query!(
-            r#"SELECT t.did, t.expires_at, u.deactivated_at, u.takedown_ref, u.is_admin,
-                      k.key_bytes as "key_bytes?", k.encryption_version as "encryption_version?"
-               FROM oauth_token t
-               JOIN users u ON t.did = u.did
-               LEFT JOIN user_keys k ON u.id = k.user_id
-               WHERE t.token_id = $1"#,
-            oauth_info.token_id
-        )
-        .fetch_optional(db)
-        .await
-        .ok()
-        .flatten()
+        && let Some(oauth_token) = user_repo
+            .get_oauth_token_with_user(&oauth_info.token_id)
+            .await
+            .ok()
+            .flatten()
     {
         let status = AccountStatus::from_db_fields(
             oauth_token.takedown_ref.as_deref(),
@@ -428,7 +405,8 @@ pub async fn invalidate_auth_cache(cache: &dyn Cache, did: &str) {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn validate_token_with_dpop(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
+    oauth_repo: &dyn OAuthRepository,
     token: &str,
     is_dpop_token: bool,
     dpop_proof: Option<&str>,
@@ -439,15 +417,15 @@ pub async fn validate_token_with_dpop(
 ) -> Result<AuthenticatedUser, TokenValidationError> {
     if !is_dpop_token {
         if allow_takendown {
-            return validate_bearer_token_allow_takendown(db, token).await;
+            return validate_bearer_token_allow_takendown(user_repo, token).await;
         } else if allow_deactivated {
-            return validate_bearer_token_allow_deactivated(db, token).await;
+            return validate_bearer_token_allow_deactivated(user_repo, token).await;
         } else {
-            return validate_bearer_token(db, token).await;
+            return validate_bearer_token(user_repo, token).await;
         }
     }
     match crate::oauth::verify::verify_oauth_access_token(
-        db,
+        oauth_repo,
         token,
         dpop_proof,
         http_method,
@@ -456,18 +434,12 @@ pub async fn validate_token_with_dpop(
     .await
     {
         Ok(result) => {
-            let user_info = sqlx::query!(
-                r#"SELECT u.deactivated_at, u.takedown_ref, u.is_admin,
-                          k.key_bytes as "key_bytes?", k.encryption_version as "encryption_version?"
-                   FROM users u
-                   LEFT JOIN user_keys k ON u.id = k.user_id
-                   WHERE u.did = $1"#,
-                result.did
-            )
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten();
+            let result_did: Did = result.did.parse().map_err(|_| TokenValidationError::InvalidToken)?;
+            let user_info = user_repo
+                .get_user_info_by_did(&result_did)
+                .await
+                .ok()
+                .flatten();
             let Some(user_info) = user_info else {
                 return Err(TokenValidationError::AuthenticationFailed);
             };

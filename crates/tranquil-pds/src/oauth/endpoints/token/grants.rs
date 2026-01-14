@@ -1,15 +1,17 @@
 use super::helpers::{create_access_token_with_delegation, verify_pkce};
 use super::types::{TokenGrant, TokenResponse, ValidatedTokenRequest};
 use crate::config::AuthConfig;
-use crate::delegation;
+use crate::delegation::intersect_scopes;
 use crate::oauth::{
     AuthFlowState, ClientAuth, ClientMetadataCache, DPoPVerifier, OAuthError, RefreshToken,
     TokenData, TokenId,
-    db::{self, RefreshTokenLookup},
+    db::{lookup_refresh_token, enforce_token_limit_for_user},
     scopes::expand_include_scopes,
     verify_client_auth,
 };
 use crate::state::AppState;
+use tranquil_db_traits::RefreshTokenLookup;
+use tranquil_types::{AuthorizationCode, Did, RefreshToken as RefreshTokenType};
 use axum::Json;
 use axum::http::HeaderMap;
 use chrono::{Duration, Utc};
@@ -41,8 +43,12 @@ pub async fn handle_authorization_code_grant(
             ));
         }
     };
-    let auth_request = db::consume_authorization_request_by_code(&state.db, &code)
-        .await?
+    let auth_code = AuthorizationCode::from(code);
+    let auth_request = state
+        .oauth_repo
+        .consume_authorization_request_by_code(&auth_code)
+        .await
+        .map_err(crate::oauth::db_err_to_oauth)?
         .ok_or_else(|| OAuthError::InvalidGrant("Invalid or expired code".to_string()))?;
 
     let flow_state = AuthFlowState::from_request_data(&auth_request);
@@ -100,7 +106,12 @@ pub async fn handle_authorization_code_grant(
             std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
-        if !db::check_and_record_dpop_jti(&state.db, &result.jti).await? {
+        if !state
+            .oauth_repo
+            .check_and_record_dpop_jti(&result.jti)
+            .await
+            .map_err(crate::oauth::db_err_to_oauth)?
+        {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP proof has already been used".to_string(),
             ));
@@ -125,7 +136,15 @@ pub async fn handle_authorization_code_grant(
     let now = Utc::now();
 
     let (raw_scope, controller_did) = if let Some(ref controller) = auth_request.controller_did {
-        let grant = delegation::get_delegation(&state.db, &did, controller)
+        let did_parsed: Did = did.parse().map_err(|_| {
+            OAuthError::InvalidRequest("Invalid DID format".to_string())
+        })?;
+        let controller_parsed: Did = controller.parse().map_err(|_| {
+            OAuthError::InvalidRequest("Invalid controller DID format".to_string())
+        })?;
+        let grant = state
+            .delegation_repo
+            .get_delegation(&did_parsed, &controller_parsed)
             .await
             .ok()
             .flatten();
@@ -135,7 +154,7 @@ pub async fn handle_authorization_code_grant(
             .scope
             .as_deref()
             .unwrap_or("atproto");
-        let intersected = delegation::intersect_scopes(requested, &granted_scopes);
+        let intersected = intersect_scopes(requested, &granted_scopes);
         (Some(intersected), Some(controller.clone()))
     } else {
         (auth_request.parameters.scope.clone(), None)
@@ -182,7 +201,11 @@ pub async fn handle_authorization_code_grant(
         scope: final_scope.clone(),
         controller_did: controller_did.clone(),
     };
-    db::create_token(&state.db, &token_data).await?;
+    state
+        .oauth_repo
+        .create_token(&token_data)
+        .await
+        .map_err(crate::oauth::db_err_to_oauth)?;
     tracing::info!(
         did = %did,
         token_id = %token_id.0,
@@ -190,11 +213,13 @@ pub async fn handle_authorization_code_grant(
         "Authorization code grant completed, token created"
     );
     tokio::spawn({
-        let pool = state.db.clone();
+        let oauth_repo = state.oauth_repo.clone();
         let did_clone = did.clone();
         async move {
-            if let Err(e) = db::enforce_token_limit_for_user(&pool, &did_clone).await {
-                tracing::warn!("Failed to enforce token limit for user: {:?}", e);
+            if let Ok(did_typed) = did_clone.parse::<tranquil_types::Did>() {
+                if let Err(e) = enforce_token_limit_for_user(oauth_repo.as_ref(), &did_typed).await {
+                    tracing::warn!("Failed to enforce token limit for user: {:?}", e);
+                }
             }
         }
     });
@@ -236,7 +261,8 @@ pub async fn handle_refresh_token_grant(
         "Refresh token grant requested"
     );
 
-    let lookup = db::lookup_refresh_token(&state.db, &refresh_token_str).await?;
+    let refresh_token_typed = RefreshTokenType::from(refresh_token_str.clone());
+    let lookup = lookup_refresh_token(state.oauth_repo.as_ref(), &refresh_token_typed).await?;
     let token_state = lookup.state();
     tracing::debug!(state = %token_state, "Refresh token state");
 
@@ -281,14 +307,22 @@ pub async fn handle_refresh_token_grant(
                 refresh_token_prefix = %token_prefix,
                 "Refresh token reuse detected, revoking token family"
             );
-            db::delete_token_family(&state.db, original_token_id).await?;
+            state
+                .oauth_repo
+                .delete_token_family(original_token_id)
+                .await
+                .map_err(crate::oauth::db_err_to_oauth)?;
             return Err(OAuthError::InvalidGrant(
                 "Refresh token reuse detected, token family revoked".to_string(),
             ));
         }
         RefreshTokenLookup::Expired { db_id } => {
             tracing::warn!(refresh_token_prefix = %token_prefix, "Refresh token has expired");
-            db::delete_token_family(&state.db, db_id).await?;
+            state
+                .oauth_repo
+                .delete_token_family(db_id)
+                .await
+                .map_err(crate::oauth::db_err_to_oauth)?;
             return Err(OAuthError::InvalidGrant(
                 "Refresh token has expired".to_string(),
             ));
@@ -307,7 +341,12 @@ pub async fn handle_refresh_token_grant(
             std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
-        if !db::check_and_record_dpop_jti(&state.db, &result.jti).await? {
+        if !state
+            .oauth_repo
+            .check_and_record_dpop_jti(&result.jti)
+            .await
+            .map_err(crate::oauth::db_err_to_oauth)?
+        {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP proof has already been used".to_string(),
             ));
@@ -334,7 +373,12 @@ pub async fn handle_refresh_token_grant(
         REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL
     };
     let new_expires_at = Utc::now() + Duration::days(refresh_expiry_days);
-    db::rotate_token(&state.db, db_id, &new_refresh_token.0, new_expires_at).await?;
+    let new_refresh_typed = RefreshTokenType::from(new_refresh_token.0.clone());
+    state
+        .oauth_repo
+        .rotate_token(db_id, &new_refresh_typed, new_expires_at)
+        .await
+        .map_err(crate::oauth::db_err_to_oauth)?;
     tracing::info!(
         did = %token_data.did,
         new_expires_at = %new_expires_at,

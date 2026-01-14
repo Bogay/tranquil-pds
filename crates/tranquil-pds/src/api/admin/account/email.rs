@@ -35,22 +35,8 @@ pub async fn send_email(
     if content.is_empty() {
         return ApiError::InvalidRequest("content is required".into()).into_response();
     }
-    let user = sqlx::query!(
-        "SELECT id, email, handle FROM users WHERE did = $1",
-        input.recipient_did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let (user_id, email, handle) = match user {
-        Ok(Some(row)) => {
-            let email = match row.email {
-                Some(e) => e,
-                None => {
-                    return ApiError::NoEmail.into_response();
-                }
-            };
-            (row.id, email, row.handle)
-        }
+    let user = match state.user_repo.get_by_did(&input.recipient_did).await {
+        Ok(Some(row)) => row,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
         }
@@ -59,19 +45,30 @@ pub async fn send_email(
             return ApiError::InternalError(None).into_response();
         }
     };
+    let email = match user.email {
+        Some(e) => e,
+        None => {
+            return ApiError::NoEmail.into_response();
+        }
+    };
+    let (user_id, handle) = (user.id, user.handle);
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let subject = input
         .subject
         .clone()
         .unwrap_or_else(|| format!("Message from {}", hostname));
-    let item = crate::comms::NewComms::email(
-        user_id,
-        crate::comms::CommsType::AdminEmail,
-        email,
-        subject,
-        content.to_string(),
-    );
-    let result = crate::comms::enqueue_comms(&state.db, item).await;
+    let result = state
+        .infra_repo
+        .enqueue_comms(
+            Some(user_id),
+            tranquil_db_traits::CommsChannel::Email,
+            tranquil_db_traits::CommsType::AdminEmail,
+            &email,
+            Some(&subject),
+            content,
+            None,
+        )
+        .await;
     match result {
         Ok(_) => {
             tracing::info!(

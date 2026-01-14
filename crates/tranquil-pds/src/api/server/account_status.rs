@@ -3,7 +3,7 @@ use crate::api::error::ApiError;
 use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
-use crate::types::{Handle, PlainPassword};
+use crate::types::PlainPassword;
 use axum::{
     Json,
     extract::State,
@@ -54,7 +54,8 @@ pub async fn check_account_status(
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
     let did = match crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -68,43 +69,28 @@ pub async fn check_account_status(
         Ok(user) => user.did,
         Err(e) => return ApiError::from(e).into_response(),
     };
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
-        .await
-    {
+    let user_id = match state.user_repo.get_id_by_did(&did).await {
         Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(None).into_response();
         }
     };
-    let user_status = sqlx::query!(
-        "SELECT deactivated_at FROM users WHERE did = $1",
-        did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let deactivated_at = match user_status {
-        Ok(Some(row)) => row.deactivated_at,
-        _ => None,
-    };
-    let repo_result = sqlx::query!(
-        "SELECT repo_root_cid, repo_rev FROM repos WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let (repo_commit, repo_rev_from_db) = match repo_result {
-        Ok(Some(row)) => (row.repo_root_cid, row.repo_rev),
-        _ => (String::new(), None),
-    };
-    let block_count: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM user_blocks WHERE user_id = $1",
-        user_id
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(Some(0))
-    .unwrap_or(0);
+    let is_active = state
+        .user_repo
+        .is_account_active_by_did(&did)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    let repo_info = state.repo_repo.get_repo(user_id).await.ok().flatten();
+    let (repo_commit, repo_rev_from_db) = repo_info
+        .map(|r| (r.repo_root_cid.to_string(), r.repo_rev))
+        .unwrap_or_else(|| (String::new(), None));
+    let block_count: i64 = state
+        .repo_repo
+        .count_user_blocks(user_id)
+        .await
+        .unwrap_or(0);
     let repo_rev = if let Some(rev) = repo_rev_from_db {
         rev
     } else if !repo_commit.is_empty() {
@@ -123,37 +109,22 @@ pub async fn check_account_status(
     } else {
         String::new()
     };
-    let record_count: i64 =
-        sqlx::query_scalar!("SELECT COUNT(*) FROM records WHERE repo_id = $1", user_id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(Some(0))
-            .unwrap_or(0);
-    let imported_blobs: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM blobs WHERE created_by_user = $1",
-        user_id
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(Some(0))
-    .unwrap_or(0);
-    let expected_blobs: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(DISTINCT blob_cid) FROM record_blobs WHERE repo_id = $1",
-        user_id
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(Some(0))
-    .unwrap_or(0);
-    let valid_did = is_valid_did_for_service(&state.db, state.cache.clone(), did.as_str()).await;
+    let record_count: i64 = state.repo_repo.count_records(user_id).await.unwrap_or(0);
+    let imported_blobs: i64 = state.blob_repo.count_blobs_by_user(user_id).await.unwrap_or(0);
+    let expected_blobs: i64 = state
+        .blob_repo
+        .count_distinct_record_blobs(user_id)
+        .await
+        .unwrap_or(0);
+    let valid_did = is_valid_did_for_service(state.user_repo.as_ref(), state.cache.clone(), &did).await;
     (
         StatusCode::OK,
         Json(CheckAccountStatusOutput {
-            activated: deactivated_at.is_none(),
+            activated: is_active,
             valid_did,
             repo_commit: repo_commit.clone(),
             repo_rev,
-            repo_blocks: block_count as i64,
+            repo_blocks: block_count,
             indexed_records: record_count,
             private_state_values: 0,
             expected_blobs,
@@ -163,25 +134,25 @@ pub async fn check_account_status(
         .into_response()
 }
 
-async fn is_valid_did_for_service(db: &sqlx::PgPool, cache: Arc<dyn Cache>, did: &str) -> bool {
-    assert_valid_did_document_for_service(db, cache, did, false)
+async fn is_valid_did_for_service(user_repo: &dyn tranquil_db_traits::UserRepository, cache: Arc<dyn Cache>, did: &crate::types::Did) -> bool {
+    assert_valid_did_document_for_service(user_repo, cache, did, false)
         .await
         .is_ok()
 }
 
 async fn assert_valid_did_document_for_service(
-    db: &sqlx::PgPool,
+    user_repo: &dyn tranquil_db_traits::UserRepository,
     cache: Arc<dyn Cache>,
-    did: &str,
+    did: &crate::types::Did,
     with_retry: bool,
 ) -> Result<(), ApiError> {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let expected_endpoint = format!("https://{}", hostname);
 
-    if did.starts_with("did:plc:") {
+    if did.as_str().starts_with("did:plc:") {
         let max_attempts = if with_retry { 5 } else { 1 };
         let cache_for_retry = cache.clone();
-        let did_owned = did.to_string();
+        let did_owned = did.as_str().to_string();
         let expected_owned = expected_endpoint.clone();
         let attempt_counter = Arc::new(AtomicUsize::new(0));
 
@@ -264,19 +235,16 @@ async fn assert_valid_did_document_for_service(
             .and_then(|v| v.get("atproto"))
             .and_then(|k| k.as_str());
 
-        let user_row = sqlx::query!(
-            "SELECT uk.key_bytes, uk.encryption_version FROM user_keys uk JOIN users u ON uk.user_id = u.id WHERE u.did = $1",
-            did
-        )
-        .fetch_optional(db)
-        .await
-        .map_err(|e| {
-            error!("Failed to fetch user key: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        let user_key = user_repo
+            .get_user_key_by_did(&did)
+            .await
+            .map_err(|e| {
+                error!("Failed to fetch user key: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
 
-        if let Some(row) = user_row {
-            let key_bytes = crate::config::decrypt_key(&row.key_bytes, row.encryption_version)
+        if let Some(key_info) = user_key {
+            let key_bytes = crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version)
                 .map_err(|e| {
                     error!("Failed to decrypt user key: {}", e);
                     ApiError::InternalError(None)
@@ -297,7 +265,7 @@ async fn assert_valid_did_document_for_service(
                 ));
             }
         }
-    } else if let Some(host_and_path) = did.strip_prefix("did:web:") {
+    } else if let Some(host_and_path) = did.as_str().strip_prefix("did:web:") {
         let client = crate::api::proxy_client::did_resolution_client();
         let decoded = host_and_path.replace("%3A", ":");
         let parts: Vec<&str> = decoded.split(':').collect();
@@ -374,7 +342,8 @@ pub async fn activate_account(
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
     let auth_user = match crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -414,7 +383,7 @@ pub async fn activate_account(
     );
     let did_validation_start = std::time::Instant::now();
     if let Err(e) =
-        assert_valid_did_document_for_service(&state.db, state.cache.clone(), did.as_str(), true)
+        assert_valid_did_document_for_service(state.user_repo.as_ref(), state.cache.clone(), &did, true)
             .await
     {
         info!(
@@ -430,8 +399,9 @@ pub async fn activate_account(
         did_validation_start.elapsed()
     );
 
-    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
+    let handle = state
+        .user_repo
+        .get_handle_by_did(&did)
         .await
         .ok()
         .flatten();
@@ -439,12 +409,7 @@ pub async fn activate_account(
         "[MIGRATION] activateAccount: Activating account did={} handle={:?}",
         did, handle
     );
-    let result = sqlx::query!(
-        "UPDATE users SET deactivated_at = NULL WHERE did = $1",
-        did.as_str()
-    )
-    .execute(&state.db)
-    .await;
+    let result = state.user_repo.activate_account(&did).await;
     match result {
         Ok(_) => {
             info!(
@@ -472,7 +437,7 @@ pub async fn activate_account(
                 "[MIGRATION] activateAccount: Sequencing identity event for did={} handle={:?}",
                 did, handle
             );
-            let handle_typed = handle.as_ref().map(Handle::new_unchecked);
+            let handle_typed = handle.clone();
             if let Err(e) = crate::api::repo::record::sequence_identity_event(
                 &state,
                 &did,
@@ -487,20 +452,18 @@ pub async fn activate_account(
             } else {
                 info!("[MIGRATION] activateAccount: Identity event sequenced successfully");
             }
-            let repo_root = sqlx::query_scalar!(
-                "SELECT r.repo_root_cid FROM repos r JOIN users u ON r.user_id = u.id WHERE u.did = $1",
-                did.as_str()
-            )
-            .fetch_optional(&state.db)
-            .await
-            .ok()
-            .flatten();
-            if let Some(root_cid) = repo_root {
+            let repo_root = state
+                .repo_repo
+                .get_repo_root_by_did(&did)
+                .await
+                .ok()
+                .flatten();
+            if let Some(root_cid_link) = repo_root {
                 info!(
                     "[MIGRATION] activateAccount: Sequencing sync event for did={} root_cid={}",
-                    did, root_cid
+                    did, root_cid_link
                 );
-                let rev = if let Ok(cid) = Cid::from_str(&root_cid) {
+                let rev = if let Ok(cid) = Cid::from_str(root_cid_link.as_str()) {
                     if let Ok(Some(block)) = state.block_store.get(&cid).await {
                         Commit::from_cbor(&block).ok().map(|c| c.rev().to_string())
                     } else {
@@ -512,7 +475,7 @@ pub async fn activate_account(
                 if let Err(e) = crate::api::repo::record::sequence_sync_event(
                     &state,
                     &did,
-                    &root_cid,
+                    root_cid_link.as_str(),
                     rev.as_deref(),
                 )
                 .await
@@ -566,7 +529,8 @@ pub async fn deactivate_account(
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
     let auth_user = match crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -598,22 +562,20 @@ pub async fn deactivate_account(
 
     let did = auth_user.did;
 
-    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
+    let handle = state
+        .user_repo
+        .get_handle_by_did(&did)
         .await
         .ok()
         .flatten();
 
-    let result = sqlx::query!(
-        "UPDATE users SET deactivated_at = NOW(), delete_after = $2 WHERE did = $1",
-        did.as_str(),
-        delete_after
-    )
-    .execute(&state.db)
-    .await;
+    let result = state
+        .user_repo
+        .deactivate_account(&did, delete_after)
+        .await;
 
     match result {
-        Ok(_) => {
+        Ok(true) => {
             if let Some(ref h) = handle {
                 let _ = state.cache.delete(&format!("handle:{}", h)).await;
             }
@@ -627,6 +589,9 @@ pub async fn deactivate_account(
             {
                 warn!("Failed to sequence account deactivated event: {}", e);
             }
+            EmptyResponse::ok().into_response()
+        }
+        Ok(false) => {
             EmptyResponse::ok().into_response()
         }
         Err(e) => {
@@ -652,7 +617,8 @@ pub async fn request_account_delete(
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
     let validated = match crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -668,15 +634,12 @@ pub async fn request_account_delete(
     };
     let did = validated.did.clone();
 
-    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, did.as_str()).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, did.as_str())
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &did)
             .await;
     }
 
-    let user_id = match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
-        .await
-    {
+    let user_id = match state.user_repo.get_id_by_did(&did).await {
         Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(None).into_response();
@@ -684,22 +647,23 @@ pub async fn request_account_delete(
     };
     let confirmation_token = Uuid::new_v4().to_string();
     let expires_at = Utc::now() + Duration::minutes(15);
-    let insert = sqlx::query!(
-        "INSERT INTO account_deletion_requests (token, did, expires_at) VALUES ($1, $2, $3)",
-        confirmation_token,
-        did.as_str(),
-        expires_at
-    )
-    .execute(&state.db)
-    .await;
-    if let Err(e) = insert {
+    if let Err(e) = state
+        .infra_repo
+        .create_deletion_request(&confirmation_token, &did, expires_at)
+        .await
+    {
         error!("DB error creating deletion token: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) =
-        crate::comms::enqueue_account_deletion(&state.db, user_id, &confirmation_token, &hostname)
-            .await
+    if let Err(e) = crate::comms::comms_repo::enqueue_account_deletion(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        user_id,
+        &confirmation_token,
+        &hostname,
+    )
+    .await
     {
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }
@@ -731,14 +695,8 @@ pub async fn delete_account(
     if token.is_empty() {
         return ApiError::InvalidToken(Some("token is required".into())).into_response();
     }
-    let user = sqlx::query!(
-        "SELECT id, password_hash, handle FROM users WHERE did = $1",
-        did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let (user_id, password_hash, handle) = match user {
-        Ok(Some(row)) => (row.id, row.password_hash, row.handle),
+    let user = match state.user_repo.get_user_for_deletion(did).await {
+        Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::InvalidRequest("account not found".into()).into_response();
         }
@@ -747,6 +705,7 @@ pub async fn delete_account(
             return ApiError::InternalError(None).into_response();
         }
     };
+    let (user_id, password_hash, handle) = (user.id, user.password_hash, user.handle);
     let password_valid = if password_hash
         .as_ref()
         .map(|h| verify(password, h).unwrap_or(false))
@@ -754,28 +713,20 @@ pub async fn delete_account(
     {
         true
     } else {
-        let app_pass_rows = sqlx::query!(
-            "SELECT password_hash FROM app_passwords WHERE user_id = $1",
-            user_id
-        )
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
-        app_pass_rows
+        let app_pass_hashes = state
+            .session_repo
+            .get_app_password_hashes_by_did(did)
+            .await
+            .unwrap_or_default();
+        app_pass_hashes
             .iter()
-            .any(|row| verify(password, &row.password_hash).unwrap_or(false))
+            .any(|h| verify(password, h).unwrap_or(false))
     };
     if !password_valid {
         return ApiError::AuthenticationFailed(Some("Invalid password".into())).into_response();
     }
-    let deletion_request = sqlx::query!(
-        "SELECT did, expires_at FROM account_deletion_requests WHERE token = $1",
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let (token_did, expires_at) = match deletion_request {
-        Ok(Some(row)) => (row.did, row.expires_at),
+    let deletion_request = match state.infra_repo.get_deletion_request(token).await {
+        Ok(Some(req)) => req,
         Ok(None) => {
             return ApiError::InvalidToken(Some("Invalid or expired token".into())).into_response();
         }
@@ -784,96 +735,49 @@ pub async fn delete_account(
             return ApiError::InternalError(None).into_response();
         }
     };
-    if token_did != did.as_str() {
+    if &deletion_request.did != did {
         return ApiError::InvalidToken(Some("Token does not match account".into())).into_response();
     }
-    if Utc::now() > expires_at {
-        let _ = sqlx::query!(
-            "DELETE FROM account_deletion_requests WHERE token = $1",
-            token
-        )
-        .execute(&state.db)
-        .await;
+    if Utc::now() > deletion_request.expires_at {
+        let _ = state.infra_repo.delete_deletion_request(token).await;
         return ApiError::ExpiredToken(None).into_response();
     }
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-    let deletion_result: Result<(), sqlx::Error> = async {
-        sqlx::query!("DELETE FROM session_tokens WHERE did = $1", did)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM records WHERE repo_id = $1", user_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM repos WHERE user_id = $1", user_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM blobs WHERE created_by_user = $1", user_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM user_keys WHERE user_id = $1", user_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM app_passwords WHERE user_id = $1", user_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM account_deletion_requests WHERE did = $1", did)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
-            .execute(&mut *tx)
-            .await?;
-        Ok(())
+    if let Err(e) = state
+        .user_repo
+        .delete_account_complete(user_id, did)
+        .await
+    {
+        error!("DB error deleting account: {:?}", e);
+        return ApiError::InternalError(None).into_response();
     }
+    let account_seq = crate::api::repo::record::sequence_account_event(
+        &state,
+        did,
+        false,
+        Some("deleted"),
+    )
     .await;
-    match deletion_result {
-        Ok(()) => {
-            if let Err(e) = tx.commit().await {
-                error!("Failed to commit account deletion transaction: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+    match account_seq {
+        Ok(seq) => {
+            if let Err(e) = state
+                .repo_repo
+                .delete_sequences_except(did, seq)
+                .await
+            {
+                warn!(
+                    "Failed to cleanup sequences for deleted account {}: {}",
+                    did, e
+                );
             }
-            let account_seq = crate::api::repo::record::sequence_account_event(
-                &state,
-                did,
-                false,
-                Some("deleted"),
-            )
-            .await;
-            match account_seq {
-                Ok(seq) => {
-                    if let Err(e) = sqlx::query!(
-                        "DELETE FROM repo_seq WHERE did = $1 AND seq != $2",
-                        did,
-                        seq
-                    )
-                    .execute(&state.db)
-                    .await
-                    {
-                        warn!(
-                            "Failed to cleanup sequences for deleted account {}: {}",
-                            did, e
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to sequence account deletion event for {}: {}",
-                        did, e
-                    );
-                }
-            }
-            let _ = state.cache.delete(&format!("handle:{}", handle)).await;
-            info!("Account {} deleted successfully", did);
-            EmptyResponse::ok().into_response()
         }
         Err(e) => {
-            error!("DB error deleting account, rolling back: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            warn!(
+                "Failed to sequence account deletion event for {}: {}",
+                did, e
+            );
         }
     }
+    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+    info!("Account {} deleted successfully", did);
+    EmptyResponse::ok().into_response()
 }

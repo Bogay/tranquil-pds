@@ -1,9 +1,12 @@
-use crate::comms::{CommsChannel, channel_display_name, enqueue_2fa_code};
+use crate::comms::{channel_display_name, comms_repo::enqueue_2fa_code};
 use crate::oauth::{
-    AuthFlowState, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, SessionId, db,
+    AuthFlowState, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, SessionId,
+    db::should_show_consent,
 };
 use crate::state::{AppState, RateLimitKind};
-use crate::types::{Handle, PlainPassword};
+use tranquil_db_traits::ScopePreference;
+use crate::types::{Did, Handle, PlainPassword};
+use tranquil_types::{AuthorizationCode, ClientId, DeviceId as DeviceIdType, RequestId};
 use axum::{
     Json,
     extract::{Query, State},
@@ -203,7 +206,8 @@ pub async fn authorize_get(
             );
         }
     };
-    let request_data = match db::get_authorization_request(&state.db, &request_uri).await {
+    let request_id = RequestId::from(request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&request_id).await {
         Ok(Some(data)) => data,
         Ok(None) => {
             if wants_json(&headers) {
@@ -235,7 +239,7 @@ pub async fn authorize_get(
         }
     };
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&request_id).await;
         if wants_json(&headers) {
             return (
                 StatusCode::BAD_REQUEST,
@@ -273,25 +277,22 @@ pub async fn authorize_get(
         tracing::info!(login_hint = %login_hint, "Checking login_hint for delegation");
         let pds_hostname =
             std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
         let normalized = if login_hint.contains('@') || login_hint.starts_with("did:") {
             login_hint.clone()
         } else if !login_hint.contains('.') {
-            format!("{}.{}", login_hint.to_lowercase(), pds_hostname)
+            format!("{}.{}", login_hint.to_lowercase(), hostname_for_handles)
         } else {
             login_hint.to_lowercase()
         };
         tracing::info!(normalized = %normalized, "Normalized login_hint");
 
-        match sqlx::query!(
-            "SELECT did, password_hash FROM users WHERE handle = $1 OR email = $1",
-            normalized
-        )
-        .fetch_optional(&state.db)
-        .await
-        {
+        match state.user_repo.get_login_check_by_handle_or_email(&normalized).await {
             Ok(Some(user)) => {
                 tracing::info!(did = %user.did, has_password = user.password_hash.is_some(), "Found user for login_hint");
-                let is_delegated = crate::delegation::is_delegated_account(&state.db, &user.did)
+                let is_delegated = state
+                    .delegation_repo
+                    .is_delegated_account(&user.did)
                     .await
                     .unwrap_or(false);
                 let has_password = user.password_hash.is_some();
@@ -319,7 +320,7 @@ pub async fn authorize_get(
 
     if !force_new_account
         && let Some(device_id) = extract_device_cookie(&headers)
-        && let Ok(accounts) = db::get_device_accounts(&state.db, &device_id).await
+        && let Ok(accounts) = state.oauth_repo.get_device_accounts(&DeviceIdType::from(device_id.clone())).await
         && !accounts.is_empty()
     {
         return redirect_see_other(&format!(
@@ -340,11 +341,13 @@ pub async fn authorize_get_json(
     let request_uri = query
         .request_uri
         .ok_or_else(|| OAuthError::InvalidRequest("request_uri is required".to_string()))?;
-    let request_data = db::get_authorization_request(&state.db, &request_uri)
-        .await?
+    let request_id_json = RequestId::from(request_uri.clone());
+    let request_data = state.oauth_repo.get_authorization_request(&request_id_json)
+        .await
+        .map_err(crate::oauth::db_err_to_oauth)?
         .ok_or_else(|| OAuthError::InvalidRequest("Invalid or expired request_uri".to_string()))?;
     if request_data.expires_at < Utc::now() {
-        db::delete_authorization_request(&state.db, &request_uri).await?;
+        let _ = state.oauth_repo.delete_authorization_request(&request_id_json).await;
         return Err(OAuthError::InvalidRequest(
             "request_uri has expired".to_string(),
         ));
@@ -417,7 +420,8 @@ pub async fn authorize_accounts(
             .into_response();
         }
     };
-    let accounts = match db::get_device_accounts(&state.db, &device_id).await {
+    let device_id_typed = DeviceIdType::from(device_id.clone());
+    let accounts = match state.oauth_repo.get_device_accounts(&device_id_typed).await {
         Ok(accts) => accts,
         Err(_) => {
             return Json(AccountsResponse {
@@ -430,7 +434,7 @@ pub async fn authorize_accounts(
     let account_infos: Vec<AccountInfo> = accounts
         .into_iter()
         .map(|row| AccountInfo {
-            did: row.did,
+            did: row.did.to_string(),
             handle: row.handle,
             email: row.email.map(|e| mask_email(&e)),
         })
@@ -469,7 +473,8 @@ pub async fn authorize_post(
             "Too many login attempts. Please try again later.",
         );
     }
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let form_request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&form_request_id).await {
         Ok(Some(data)) => data,
         Ok(None) => {
             if json_response {
@@ -502,7 +507,7 @@ pub async fn authorize_post(
         }
     };
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&form_request_id).await;
         if json_response {
             return (
                 axum::http::StatusCode::BAD_REQUEST,
@@ -536,6 +541,7 @@ pub async fn authorize_post(
         ))
     };
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
     let normalized_username = form.username.trim();
     let normalized_username = normalized_username
         .strip_prefix('@')
@@ -543,7 +549,7 @@ pub async fn authorize_post(
     let normalized_username = if normalized_username.contains('@') {
         normalized_username.to_string()
     } else if !normalized_username.contains('.') {
-        format!("{}.{}", normalized_username, pds_hostname)
+        format!("{}.{}", normalized_username, hostname_for_handles)
     } else {
         normalized_username.to_string()
     };
@@ -553,21 +559,7 @@ pub async fn authorize_post(
         pds_hostname = %pds_hostname,
         "Normalized username for lookup"
     );
-    let user = match sqlx::query!(
-        r#"
-        SELECT id, did, email, password_hash, password_required, two_factor_enabled,
-               preferred_comms_channel as "preferred_comms_channel: CommsChannel",
-               deactivated_at, takedown_ref,
-               email_verified, discord_verified, telegram_verified, signal_verified,
-               account_type::text as "account_type!"
-        FROM users
-        WHERE handle = $1 OR email = $1
-        "#,
-        normalized_username
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let user = match state.user_repo.get_login_info_by_handle_or_email(&normalized_username).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             let _ = bcrypt::verify(
@@ -596,7 +588,7 @@ pub async fn authorize_post(
     }
 
     if user.account_type == "delegated" {
-        if db::set_authorization_did(&state.db, &form.request_uri, &user.did, None)
+        if state.oauth_repo.set_authorization_did(&form_request_id, &user.did, None)
             .await
             .is_err()
         {
@@ -622,7 +614,7 @@ pub async fn authorize_post(
     }
 
     if !user.password_required {
-        if db::set_authorization_did(&state.db, &form.request_uri, &user.did, None)
+        if state.oauth_repo.set_authorization_did(&form_request_id, &user.did, None)
             .await
             .is_err()
         {
@@ -661,17 +653,17 @@ pub async fn authorize_post(
     if has_totp {
         let device_cookie = extract_device_cookie(&headers);
         let device_is_trusted = if let Some(ref dev_id) = device_cookie {
-            crate::api::server::is_device_trusted(&state.db, dev_id, &user.did).await
+            crate::api::server::is_device_trusted(state.oauth_repo.as_ref(), dev_id, &user.did).await
         } else {
             false
         };
 
         if device_is_trusted {
             if let Some(ref dev_id) = device_cookie {
-                let _ = crate::api::server::extend_device_trust(&state.db, dev_id).await;
+                let _ = crate::api::server::extend_device_trust(state.oauth_repo.as_ref(), dev_id).await;
             }
         } else {
-            if db::set_authorization_did(&state.db, &form.request_uri, &user.did, None)
+            if state.oauth_repo.set_authorization_did(&form_request_id, &user.did, None)
                 .await
                 .is_err()
             {
@@ -690,13 +682,13 @@ pub async fn authorize_post(
         }
     }
     if user.two_factor_enabled {
-        let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
-        match db::create_2fa_challenge(&state.db, &user.did, &form.request_uri).await {
+        let _ = state.oauth_repo.delete_2fa_challenge_by_request_uri(&form_request_id).await;
+        match state.oauth_repo.create_2fa_challenge(&user.did, &form_request_id).await {
             Ok(challenge) => {
                 let hostname =
                     std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
                 if let Err(e) =
-                    enqueue_2fa_code(&state.db, user.id, &challenge.code, &hostname).await
+                    enqueue_2fa_code(state.user_repo.as_ref(), state.infra_repo.as_ref(), user.id, &challenge.code, &hostname).await
                 {
                     tracing::warn!(
                         did = %user.did,
@@ -736,7 +728,8 @@ pub async fn authorize_post(
                 ip_address: extract_client_ip(&headers),
                 last_seen_at: Utc::now(),
             };
-            if db::create_device(&state.db, &new_id.0, &device_data)
+            let new_device_id_typed = DeviceIdType::from(new_id.0.clone());
+            if state.oauth_repo.create_device(&new_device_id_typed, &device_data)
                 .await
                 .is_ok()
             {
@@ -745,16 +738,15 @@ pub async fn authorize_post(
             }
             new_id.0
         };
-        let _ = db::upsert_account_device(&state.db, &user.did, &final_device_id).await;
+        let final_device_typed = DeviceIdType::from(final_device_id.clone());
+        let _ = state.oauth_repo.upsert_account_device(&user.did, &final_device_typed).await;
     }
-    if db::set_authorization_did(
-        &state.db,
-        &form.request_uri,
-        &user.did,
-        device_id.as_deref(),
-    )
-    .await
-    .is_err()
+    let set_auth_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    if state
+        .oauth_repo
+        .set_authorization_did(&form_request_id, &user.did, set_auth_device_id.as_ref())
+        .await
+        .is_err()
     {
         return show_login_error("An error occurred. Please try again.", json_response);
     }
@@ -767,10 +759,11 @@ pub async fn authorize_post(
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
-    let needs_consent = db::should_show_consent(
-        &state.db,
+    let client_id_typed = ClientId::from(request_data.parameters.client_id.clone());
+    let needs_consent = should_show_consent(
+        state.oauth_repo.as_ref(),
         &user.did,
-        &request_data.parameters.client_id,
+        &client_id_typed,
         &requested_scopes,
     )
     .await
@@ -801,12 +794,13 @@ pub async fn authorize_post(
         return redirect_see_other(&consent_url);
     }
     let code = Code::generate();
-    if db::update_authorization_request(
-        &state.db,
-        &form.request_uri,
+    let auth_post_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let auth_post_code = AuthorizationCode::from(code.0.clone());
+    if state.oauth_repo.update_authorization_request(
+        &form_request_id,
         &user.did,
-        device_id.as_deref(),
-        &code.0,
+        auth_post_device_id.as_ref(),
+        &auth_post_code,
     )
     .await
     .is_err()
@@ -864,7 +858,8 @@ pub async fn authorize_select(
         )
             .into_response()
     };
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let select_request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&select_request_id).await {
         Ok(Some(data)) => data,
         Ok(None) => {
             return json_error(
@@ -882,7 +877,7 @@ pub async fn authorize_select(
         }
     };
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&select_request_id).await;
         return json_error(
             StatusCode::BAD_REQUEST,
             "invalid_request",
@@ -899,7 +894,18 @@ pub async fn authorize_select(
             );
         }
     };
-    let account_valid = match db::verify_account_on_device(&state.db, &device_id, &form.did).await {
+    let did: Did = match form.did.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid DID format.",
+            );
+        }
+    };
+    let verify_device_id = DeviceIdType::from(device_id.clone());
+    let account_valid = match state.oauth_repo.verify_account_on_device(&verify_device_id, &did).await {
         Ok(valid) => valid,
         Err(_) => {
             return json_error(
@@ -916,19 +922,7 @@ pub async fn authorize_select(
             "This account is not available on this device. Please sign in.",
         );
     }
-    let user = match sqlx::query!(
-        r#"
-        SELECT id, two_factor_enabled,
-               preferred_comms_channel as "preferred_comms_channel: CommsChannel",
-               email_verified, discord_verified, telegram_verified, signal_verified
-        FROM users
-        WHERE did = $1
-        "#,
-        form.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let user = match state.user_repo.get_2fa_status_by_did(&did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return json_error(
@@ -956,9 +950,10 @@ pub async fn authorize_select(
             "Please verify your account before logging in.",
         );
     }
-    let has_totp = crate::api::server::has_totp_enabled(&state, &form.did).await;
+    let has_totp = crate::api::server::has_totp_enabled(&state, &did).await;
+    let select_early_device_typed = DeviceIdType::from(device_id.clone());
     if has_totp {
-        if db::set_authorization_did(&state.db, &form.request_uri, &form.did, Some(&device_id))
+        if state.oauth_repo.set_authorization_did(&select_request_id, &did, Some(&select_early_device_typed))
             .await
             .is_err()
         {
@@ -974,13 +969,13 @@ pub async fn authorize_select(
         .into_response();
     }
     if user.two_factor_enabled {
-        let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
-        match db::create_2fa_challenge(&state.db, &form.did, &form.request_uri).await {
+        let _ = state.oauth_repo.delete_2fa_challenge_by_request_uri(&select_request_id).await;
+        match state.oauth_repo.create_2fa_challenge(&did, &select_request_id).await {
             Ok(challenge) => {
                 let hostname =
                     std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
                 if let Err(e) =
-                    enqueue_2fa_code(&state.db, user.id, &challenge.code, &hostname).await
+                    enqueue_2fa_code(state.user_repo.as_ref(), state.infra_repo.as_ref(), user.id, &challenge.code, &hostname).await
                 {
                     tracing::warn!(
                         did = %form.did,
@@ -1004,14 +999,15 @@ pub async fn authorize_select(
             }
         }
     }
-    let _ = db::upsert_account_device(&state.db, &form.did, &device_id).await;
+    let select_device_typed = DeviceIdType::from(device_id.clone());
+    let _ = state.oauth_repo.upsert_account_device(&did, &select_device_typed).await;
     let code = Code::generate();
-    if db::update_authorization_request(
-        &state.db,
-        &form.request_uri,
-        &form.did,
-        Some(&device_id),
-        &code.0,
+    let select_code = AuthorizationCode::from(code.0.clone());
+    if state.oauth_repo.update_authorization_request(
+        &select_request_id,
+        &did,
+        Some(&select_device_typed),
+        &select_code,
     )
     .await
     .is_err()
@@ -1124,7 +1120,8 @@ pub async fn authorize_deny(
     State(state): State<AppState>,
     Json(form): Json<AuthorizeDenyForm>,
 ) -> Response {
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let deny_request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&deny_request_id).await {
         Ok(Some(data)) => data,
         Ok(None) => {
             return (
@@ -1147,7 +1144,7 @@ pub async fn authorize_deny(
                 .into_response();
         }
     };
-    let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+    let _ = state.oauth_repo.delete_authorization_request(&deny_request_id).await;
     let redirect_uri = &request_data.parameters.redirect_uri;
     let mut redirect_url = redirect_uri.to_string();
     let separator = if redirect_url.contains('?') { '&' } else { '?' };
@@ -1188,7 +1185,8 @@ pub async fn authorize_2fa_get(
     State(state): State<AppState>,
     Query(query): Query<Authorize2faQuery>,
 ) -> Response {
-    let challenge = match db::get_2fa_challenge(&state.db, &query.request_uri).await {
+    let twofa_request_id = RequestId::from(query.request_uri.clone());
+    let challenge = match state.oauth_repo.get_2fa_challenge(&twofa_request_id).await {
         Ok(Some(c)) => c,
         Ok(None) => {
             return redirect_to_frontend_error(
@@ -1204,13 +1202,13 @@ pub async fn authorize_2fa_get(
         }
     };
     if challenge.expires_at < Utc::now() {
-        let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
+        let _ = state.oauth_repo.delete_2fa_challenge(challenge.id).await;
         return redirect_to_frontend_error(
             "invalid_request",
             "2FA code has expired. Please start over.",
         );
     }
-    let _request_data = match db::get_authorization_request(&state.db, &query.request_uri).await {
+    let _request_data = match state.oauth_repo.get_authorization_request(&twofa_request_id).await {
         Ok(Some(d)) => d,
         Ok(None) => {
             return redirect_to_frontend_error(
@@ -1279,9 +1277,10 @@ pub async fn consent_get(
     State(state): State<AppState>,
     Query(query): Query<ConsentQuery>,
 ) -> Response {
-    let (request_data, flow_state) =
-        match db::get_authorization_request_with_state(&state.db, &query.request_uri).await {
-            Ok(Some(result)) => result,
+    let consent_request_id = RequestId::from(query.request_uri.clone());
+    let request_data =
+        match state.oauth_repo.get_authorization_request(&consent_request_id).await {
+            Ok(Some(data)) => data,
             Ok(None) => {
                 return json_error(
                     StatusCode::BAD_REQUEST,
@@ -1297,15 +1296,26 @@ pub async fn consent_get(
                 );
             }
         };
+    let flow_state = AuthFlowState::from_request_data(&request_data);
 
     if let Some(err_response) = validate_auth_flow_state(&flow_state, true) {
         if flow_state.is_expired() {
-            let _ = db::delete_authorization_request(&state.db, &query.request_uri).await;
+            let _ = state.oauth_repo.delete_authorization_request(&consent_request_id).await;
         }
         return err_response;
     }
 
-    let did = flow_state.did().unwrap().to_string();
+    let did_str = flow_state.did().unwrap().to_string();
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid DID format in request.",
+            );
+        }
+    };
     let client_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_cache
         .get(&request_data.parameters.client_id)
@@ -1318,8 +1328,11 @@ pub async fn consent_get(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("atproto");
 
-    let delegation_grant = if let Some(ref ctrl_did) = request_data.controller_did {
-        crate::delegation::get_delegation(&state.db, &did, ctrl_did)
+    let controller_did_parsed: Option<Did> = request_data.controller_did.as_ref().and_then(|s| s.parse().ok());
+    let delegation_grant = if let Some(ref ctrl_did) = controller_did_parsed {
+        state
+            .delegation_repo
+            .get_delegation(&did, ctrl_did)
             .await
             .ok()
             .flatten()
@@ -1328,14 +1341,15 @@ pub async fn consent_get(
     };
 
     let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        crate::delegation::scopes::intersect_scopes(requested_scope_str, &grant.granted_scopes)
+        crate::delegation::intersect_scopes(requested_scope_str, &grant.granted_scopes)
     } else {
         requested_scope_str.to_string()
     };
 
     let requested_scopes: Vec<&str> = effective_scope_str.split_whitespace().collect();
+    let consent_client_id = ClientId::from(request_data.parameters.client_id.clone());
     let preferences =
-        db::get_scope_preferences(&state.db, &did, &request_data.parameters.client_id)
+        state.oauth_repo.get_scope_preferences(&did, &consent_client_id)
             .await
             .unwrap_or_default();
     let pref_map: std::collections::HashMap<_, _> = preferences
@@ -1344,10 +1358,10 @@ pub async fn consent_get(
         .collect();
     let requested_scope_strings: Vec<String> =
         requested_scopes.iter().map(|s| s.to_string()).collect();
-    let show_consent = db::should_show_consent(
-        &state.db,
+    let show_consent = should_show_consent(
+        state.oauth_repo.as_ref(),
         &did,
-        &request_data.parameters.client_id,
+        &consent_client_id,
         &requested_scope_strings,
     )
     .await
@@ -1389,19 +1403,18 @@ pub async fn consent_get(
             }
         })
         .collect();
-    let (is_delegation, controller_did, controller_handle, delegation_level) =
-        if let Some(ref ctrl_did) = request_data.controller_did {
-            let ctrl_handle =
-                sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", ctrl_did)
-                    .fetch_optional(&state.db)
-                    .await
-                    .ok()
-                    .flatten();
+    let (is_delegation, controller_did_resp, controller_handle, delegation_level) =
+        if let Some(ref ctrl_did) = controller_did_parsed {
+            let ctrl_handle = state
+                .user_repo
+                .get_handle_by_did(ctrl_did)
+                .await
+                .ok()
+                .flatten()
+                .map(|h| h.to_string());
 
             let level = if let Some(ref grant) = delegation_grant {
-                let preset = crate::delegation::SCOPE_PRESETS
-                    .iter()
-                    .find(|p| p.scopes == grant.granted_scopes);
+                let preset = crate::delegation::SCOPE_PRESETS.iter().find(|p| p.scopes == grant.granted_scopes);
                 preset
                     .map(|p| p.label.to_string())
                     .unwrap_or_else(|| "Custom".to_string())
@@ -1409,7 +1422,7 @@ pub async fn consent_get(
                 "Unknown".to_string()
             };
 
-            (Some(true), Some(ctrl_did.clone()), ctrl_handle, Some(level))
+            (Some(true), Some(ctrl_did.to_string()), ctrl_handle, Some(level))
         } else {
             (None, None, None, None)
         };
@@ -1422,9 +1435,9 @@ pub async fn consent_get(
         logo_uri: client_metadata.as_ref().and_then(|m| m.logo_uri.clone()),
         scopes,
         show_consent,
-        did,
+        did: did_str,
         is_delegation,
-        controller_did,
+        controller_did: controller_did_resp,
         controller_handle,
         delegation_level,
     })
@@ -1440,9 +1453,10 @@ pub async fn consent_post(
         form.approved_scopes,
         form.remember
     );
-    let (request_data, flow_state) =
-        match db::get_authorization_request_with_state(&state.db, &form.request_uri).await {
-            Ok(Some(result)) => result,
+    let consent_post_request_id = RequestId::from(form.request_uri.clone());
+    let request_data =
+        match state.oauth_repo.get_authorization_request(&consent_post_request_id).await {
+            Ok(Some(data)) => data,
             Ok(None) => {
                 return json_error(
                     StatusCode::BAD_REQUEST,
@@ -1458,9 +1472,10 @@ pub async fn consent_post(
                 );
             }
         };
+    let flow_state = AuthFlowState::from_request_data(&request_data);
 
     if flow_state.is_expired() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&consent_post_request_id).await;
         return json_error(
             StatusCode::BAD_REQUEST,
             "invalid_request",
@@ -1471,24 +1486,40 @@ pub async fn consent_post(
         return json_error(StatusCode::FORBIDDEN, "access_denied", "Not authenticated");
     }
 
-    let did = flow_state.did().unwrap().to_string();
+    let did_str = flow_state.did().unwrap().to_string();
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "Invalid DID format",
+            );
+        }
+    };
     let original_scope_str = request_data
         .parameters
         .scope
         .as_deref()
         .unwrap_or("atproto");
 
-    let delegation_grant = if let Some(ref ctrl_did) = request_data.controller_did {
-        crate::delegation::get_delegation(&state.db, &did, ctrl_did)
+    let controller_did_parsed: Option<Did> = request_data
+        .controller_did
+        .as_ref()
+        .and_then(|s| s.parse().ok());
+
+    let delegation_grant = match controller_did_parsed.as_ref() {
+        Some(ctrl_did) => state
+            .delegation_repo
+            .get_delegation(&did, ctrl_did)
             .await
             .ok()
-            .flatten()
-    } else {
-        None
+            .flatten(),
+        None => None,
     };
 
     let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        crate::delegation::scopes::intersect_scopes(original_scope_str, &grant.granted_scopes)
+        crate::delegation::intersect_scopes(original_scope_str, &grant.granted_scopes)
     } else {
         original_scope_str.to_string()
     };
@@ -1537,33 +1568,34 @@ pub async fn consent_post(
         );
     }
     if form.remember {
-        let preferences: Vec<db::ScopePreference> = requested_scopes
+        let preferences: Vec<ScopePreference> = requested_scopes
             .iter()
-            .map(|s| db::ScopePreference {
+            .map(|s| ScopePreference {
                 scope: s.to_string(),
                 granted: form.approved_scopes.contains(&s.to_string()),
             })
             .collect();
-        let _ = db::upsert_scope_preferences(
-            &state.db,
+        let consent_post_client_id = ClientId::from(request_data.parameters.client_id.clone());
+        let _ = state.oauth_repo.upsert_scope_preferences(
             &did,
-            &request_data.parameters.client_id,
+            &consent_post_client_id,
             &preferences,
         )
         .await;
     }
     if let Err(e) =
-        db::update_request_scope(&state.db, &form.request_uri, &approved_scope_str).await
+        state.oauth_repo.update_request_scope(&consent_post_request_id, &approved_scope_str).await
     {
         tracing::warn!("Failed to update request scope: {:?}", e);
     }
     let code = Code::generate();
-    if db::update_authorization_request(
-        &state.db,
-        &form.request_uri,
+    let consent_post_device_id = request_data.device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let consent_post_code = AuthorizationCode::from(code.0.clone());
+    if state.oauth_repo.update_authorization_request(
+        &consent_post_request_id,
         &did,
-        request_data.device_id.as_deref(),
-        &code.0,
+        consent_post_device_id.as_ref(),
+        &consent_post_code,
     )
     .await
     .is_err()
@@ -1616,7 +1648,8 @@ pub async fn authorize_2fa_post(
             "Too many attempts. Please try again later.",
         );
     }
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let twofa_post_request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&twofa_post_request_id).await {
         Ok(Some(d)) => d,
         Ok(None) => {
             return json_error(
@@ -1634,20 +1667,20 @@ pub async fn authorize_2fa_post(
         }
     };
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&twofa_post_request_id).await;
         return json_error(
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Authorization request has expired.",
         );
     }
-    let challenge = db::get_2fa_challenge(&state.db, &form.request_uri)
+    let challenge = state.oauth_repo.get_2fa_challenge(&twofa_post_request_id)
         .await
         .ok()
         .flatten();
     if let Some(challenge) = challenge {
         if challenge.expires_at < Utc::now() {
-            let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
+            let _ = state.oauth_repo.delete_2fa_challenge( challenge.id).await;
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
@@ -1655,7 +1688,7 @@ pub async fn authorize_2fa_post(
             );
         }
         if challenge.attempts >= MAX_2FA_ATTEMPTS {
-            let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
+            let _ = state.oauth_repo.delete_2fa_challenge( challenge.id).await;
             return json_error(
                 StatusCode::FORBIDDEN,
                 "access_denied",
@@ -1669,22 +1702,23 @@ pub async fn authorize_2fa_post(
             .ct_eq(challenge.code.as_bytes())
             .into();
         if !code_valid {
-            let _ = db::increment_2fa_attempts(&state.db, challenge.id).await;
+            let _ = state.oauth_repo.increment_2fa_attempts(challenge.id).await;
             return json_error(
                 StatusCode::FORBIDDEN,
                 "invalid_code",
                 "Invalid verification code. Please try again.",
             );
         }
-        let _ = db::delete_2fa_challenge(&state.db, challenge.id).await;
+        let _ = state.oauth_repo.delete_2fa_challenge(challenge.id).await;
         let code = Code::generate();
         let device_id = extract_device_cookie(&headers);
-        if db::update_authorization_request(
-            &state.db,
-            &form.request_uri,
+        let twofa_totp_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+        let twofa_totp_code = AuthorizationCode::from(code.0.clone());
+        if state.oauth_repo.update_authorization_request(
+            &twofa_post_request_id,
             &challenge.did,
-            device_id.as_deref(),
-            &code.0,
+            twofa_totp_device_id.as_ref(),
+            &twofa_totp_code,
         )
         .await
         .is_err()
@@ -1706,7 +1740,7 @@ pub async fn authorize_2fa_post(
         }))
         .into_response();
     }
-    let did = match &request_data.did {
+    let did_str = match &request_data.did {
         Some(d) => d.clone(),
         None => {
             return json_error(
@@ -1714,6 +1748,12 @@ pub async fn authorize_2fa_post(
                 "invalid_request",
                 "No 2FA challenge found. Please start over.",
             );
+        }
+    };
+    let did: tranquil_types::Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return json_error(StatusCode::BAD_REQUEST, "invalid_request", "Invalid DID format.");
         }
     };
     if !crate::api::server::has_totp_enabled(&state, &did).await {
@@ -1747,7 +1787,7 @@ pub async fn authorize_2fa_post(
     if form.trust_device
         && let Some(ref dev_id) = device_id
     {
-        let _ = crate::api::server::trust_device(&state.db, dev_id).await;
+        let _ = crate::api::server::trust_device(state.oauth_repo.as_ref(), dev_id).await;
     }
     let requested_scope_str = request_data
         .parameters
@@ -1758,10 +1798,11 @@ pub async fn authorize_2fa_post(
         .split_whitespace()
         .map(|s| s.to_string())
         .collect();
-    let needs_consent = db::should_show_consent(
-        &state.db,
+    let twofa_post_client_id = ClientId::from(request_data.parameters.client_id.clone());
+    let needs_consent = should_show_consent(
+        state.oauth_repo.as_ref(),
         &did,
-        &request_data.parameters.client_id,
+        &twofa_post_client_id,
         &requested_scopes,
     )
     .await
@@ -1774,12 +1815,13 @@ pub async fn authorize_2fa_post(
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
     let code = Code::generate();
-    if db::update_authorization_request(
-        &state.db,
-        &form.request_uri,
+    let twofa_final_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let twofa_final_code = AuthorizationCode::from(code.0.clone());
+    if state.oauth_repo.update_authorization_request(
+        &twofa_post_request_id,
         &did,
-        device_id.as_deref(),
-        &code.0,
+        twofa_final_device_id.as_ref(),
+        &twofa_final_code,
     )
     .await
     .is_err()
@@ -1819,24 +1861,23 @@ pub async fn check_user_has_passkeys(
     Query(query): Query<CheckPasskeysQuery>,
 ) -> Response {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
     let normalized_identifier = query.identifier.trim();
     let normalized_identifier = normalized_identifier
         .strip_prefix('@')
         .unwrap_or(normalized_identifier);
     let normalized_identifier = if let Some(bare_handle) =
-        normalized_identifier.strip_suffix(&format!(".{}", pds_hostname))
+        normalized_identifier.strip_suffix(&format!(".{}", hostname_for_handles))
     {
         bare_handle.to_string()
     } else {
         normalized_identifier.to_string()
     };
 
-    let user = sqlx::query!(
-        "SELECT did FROM users WHERE handle = $1 OR email = $1",
-        normalized_identifier
-    )
-    .fetch_optional(&state.db)
-    .await;
+    let user = state
+        .user_repo
+        .get_login_check_by_handle_or_email(&normalized_identifier)
+        .await;
 
     let has_passkeys = match user {
         Ok(Some(u)) => crate::api::server::has_passkeys_for_user(&state, &u.did).await,
@@ -1862,22 +1903,21 @@ pub async fn check_user_security_status(
     Query(query): Query<CheckPasskeysQuery>,
 ) -> Response {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
     let identifier = query.identifier.trim();
     let identifier = identifier.strip_prefix('@').unwrap_or(identifier);
     let normalized_identifier = if identifier.contains('@') || identifier.starts_with("did:") {
         identifier.to_string()
     } else if !identifier.contains('.') {
-        format!("{}.{}", identifier.to_lowercase(), pds_hostname)
+        format!("{}.{}", identifier.to_lowercase(), hostname_for_handles)
     } else {
         identifier.to_lowercase()
     };
 
-    let user = sqlx::query!(
-        "SELECT did, password_hash FROM users WHERE handle = $1 OR email = $1",
-        normalized_identifier
-    )
-    .fetch_optional(&state.db)
-    .await;
+    let user = state
+        .user_repo
+        .get_login_check_by_handle_or_email(&normalized_identifier)
+        .await;
 
     let (has_passkeys, has_totp, has_password, is_delegated, did): (
         bool,
@@ -1890,10 +1930,12 @@ pub async fn check_user_security_status(
             let passkeys = crate::api::server::has_passkeys_for_user(&state, &u.did).await;
             let totp = crate::api::server::has_totp_enabled(&state, &u.did).await;
             let has_pw = u.password_hash.is_some();
-            let has_controllers = crate::delegation::is_delegated_account(&state.db, &u.did)
+            let has_controllers = state
+                .delegation_repo
+                .is_delegated_account(&u.did)
                 .await
                 .unwrap_or(false);
-            (passkeys, totp, has_pw, has_controllers, Some(u.did))
+            (passkeys, totp, has_pw, has_controllers, Some(u.did.to_string()))
         }
         _ => (false, false, false, false, None),
     };
@@ -1942,7 +1984,8 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let passkey_start_request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&passkey_start_request_id).await {
         Ok(Some(data)) => data,
         Ok(None) => {
             return (
@@ -1967,7 +2010,7 @@ pub async fn passkey_start(
     };
 
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&passkey_start_request_id).await;
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -1979,6 +2022,7 @@ pub async fn passkey_start(
     }
 
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
     let normalized_username = form.identifier.trim();
     let normalized_username = normalized_username
         .strip_prefix('@')
@@ -1986,23 +2030,12 @@ pub async fn passkey_start(
     let normalized_username = if normalized_username.contains('@') {
         normalized_username.to_string()
     } else if !normalized_username.contains('.') {
-        format!("{}.{}", normalized_username, pds_hostname)
+        format!("{}.{}", normalized_username, hostname_for_handles)
     } else {
         normalized_username.to_string()
     };
 
-    let user = match sqlx::query!(
-        r#"
-        SELECT did, deactivated_at, takedown_ref,
-               email_verified, discord_verified, telegram_verified, signal_verified
-        FROM users
-        WHERE handle = $1 OR email = $1
-        "#,
-        normalized_username
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let user = match state.user_repo.get_login_info_by_handle_or_email(&normalized_username).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return (
@@ -2064,21 +2097,20 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    let stored_passkeys =
-        match crate::auth::webauthn::get_passkeys_for_user(&state.db, &user.did).await {
-            Ok(pks) => pks,
-            Err(e) => {
-                tracing::error!(error = %e, "Failed to get passkeys");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": "server_error",
-                        "error_description": "An error occurred."
-                    })),
-                )
-                    .into_response();
-            }
-        };
+    let stored_passkeys = match state.user_repo.get_passkeys_for_user(&user.did).await {
+        Ok(pks) => pks,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get passkeys");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
 
     if stored_passkeys.is_empty() {
         return (
@@ -2093,7 +2125,7 @@ pub async fn passkey_start(
 
     let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
         .iter()
-        .filter_map(|sp| sp.to_security_key().ok())
+        .filter_map(|sp| serde_json::from_slice(&sp.public_key).ok())
         .collect();
 
     if passkeys.is_empty() {
@@ -2137,8 +2169,25 @@ pub async fn passkey_start(
         }
     };
 
-    if let Err(e) =
-        crate::auth::webauthn::save_authentication_state(&state.db, &user.did, &auth_state).await
+    let state_json = match serde_json::to_string(&auth_state) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to serialize authentication state");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) = state
+        .user_repo
+        .save_webauthn_challenge(&user.did, "authentication", &state_json)
+        .await
     {
         tracing::error!(error = %e, "Failed to save authentication state");
         return (
@@ -2151,7 +2200,7 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    if db::set_authorization_did(&state.db, &form.request_uri, &user.did, None)
+    if state.oauth_repo.set_authorization_did(&passkey_start_request_id, &user.did, None)
         .await
         .is_err()
     {
@@ -2181,7 +2230,8 @@ pub async fn passkey_finish(
     headers: HeaderMap,
     Json(form): Json<PasskeyFinishInput>,
 ) -> Response {
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let passkey_finish_request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&passkey_finish_request_id).await {
         Ok(Some(data)) => data,
         Ok(None) => {
             return (
@@ -2206,7 +2256,7 @@ pub async fn passkey_finish(
     };
 
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&passkey_finish_request_id).await;
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -2217,7 +2267,7 @@ pub async fn passkey_finish(
             .into_response();
     }
 
-    let did = match request_data.did {
+    let did_str = match request_data.did {
         Some(d) => d,
         None => {
             return (
@@ -2230,8 +2280,25 @@ pub async fn passkey_finish(
                 .into_response();
         }
     };
+    let did: tranquil_types::Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid DID format."
+                })),
+            )
+                .into_response();
+        }
+    };
 
-    let auth_state = match crate::auth::webauthn::load_authentication_state(&state.db, &did).await {
+    let auth_state_json = match state
+        .user_repo
+        .load_webauthn_challenge(&did, "authentication")
+        .await
+    {
         Ok(Some(s)) => s,
         Ok(None) => {
             return (
@@ -2255,6 +2322,22 @@ pub async fn passkey_finish(
                 .into_response();
         }
     };
+
+    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
+        match serde_json::from_str(&auth_state_json) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to deserialize authentication state");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "server_error",
+                        "error_description": "An error occurred."
+                    })),
+                )
+                    .into_response();
+            }
+        };
 
     let credential: webauthn_rs::prelude::PublicKeyCredential =
         match serde_json::from_value(form.credential) {
@@ -2303,17 +2386,20 @@ pub async fn passkey_finish(
         }
     };
 
-    if let Err(e) = crate::auth::webauthn::delete_authentication_state(&state.db, &did).await {
+    if let Err(e) = state
+        .user_repo
+        .delete_webauthn_challenge(&did, "authentication")
+        .await
+    {
         tracing::warn!(error = %e, "Failed to delete authentication state");
     }
 
     if auth_result.needs_update() {
-        match crate::auth::webauthn::update_passkey_counter(
-            &state.db,
-            auth_result.cred_id(),
-            auth_result.counter(),
-        )
-        .await
+        let cred_id_bytes = auth_result.cred_id().as_slice();
+        match state
+            .user_repo
+            .update_passkey_counter(cred_id_bytes, auth_result.counter() as i32)
+            .await
         {
             Ok(false) => {
                 tracing::warn!(did = %did, "Passkey counter anomaly detected - possible cloned key");
@@ -2343,23 +2429,18 @@ pub async fn passkey_finish(
         .into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT two_factor_enabled, preferred_comms_channel as \"preferred_comms_channel: CommsChannel\", id FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await;
+    let user = state.user_repo.get_2fa_status_by_did(&did).await;
 
     if let Ok(Some(user)) = user
         && user.two_factor_enabled
     {
-        let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
-        match db::create_2fa_challenge(&state.db, &did, &form.request_uri).await {
+        let _ = state.oauth_repo.delete_2fa_challenge_by_request_uri(&passkey_finish_request_id).await;
+        match state.oauth_repo.create_2fa_challenge(&did, &passkey_finish_request_id).await {
             Ok(challenge) => {
                 let hostname =
                     std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
                 if let Err(e) =
-                    enqueue_2fa_code(&state.db, user.id, &challenge.code, &hostname).await
+                    enqueue_2fa_code(state.user_repo.as_ref(), state.infra_repo.as_ref(), user.id, &challenge.code, &hostname).await
                 {
                     tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
                 }
@@ -2394,10 +2475,11 @@ pub async fn passkey_finish(
         .map(|s| s.to_string())
         .collect();
 
-    let needs_consent = db::should_show_consent(
-        &state.db,
+    let passkey_finish_client_id = ClientId::from(request_data.parameters.client_id.clone());
+    let needs_consent = should_show_consent(
+        state.oauth_repo.as_ref(),
         &did,
-        &request_data.parameters.client_id,
+        &passkey_finish_client_id,
         &requested_scopes,
     )
     .await
@@ -2412,12 +2494,13 @@ pub async fn passkey_finish(
     }
 
     let code = Code::generate();
-    if db::update_authorization_request(
-        &state.db,
-        &form.request_uri,
+    let passkey_final_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let passkey_final_code = AuthorizationCode::from(code.0.clone());
+    if state.oauth_repo.update_authorization_request(
+        &passkey_finish_request_id,
         &did,
-        device_id.as_deref(),
-        &code.0,
+        passkey_final_device_id.as_ref(),
+        &passkey_final_code,
     )
     .await
     .is_err()
@@ -2463,7 +2546,8 @@ pub async fn authorize_passkey_start(
 ) -> Response {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
 
-    let request_data = match db::get_authorization_request(&state.db, &query.request_uri).await {
+    let auth_passkey_start_request_id = RequestId::from(query.request_uri.clone());
+    let request_data = match state.oauth_repo.get_authorization_request(&auth_passkey_start_request_id).await {
         Ok(Some(d)) => d,
         Ok(None) => {
             return (
@@ -2488,7 +2572,7 @@ pub async fn authorize_passkey_start(
     };
 
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &query.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&auth_passkey_start_request_id).await;
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -2499,7 +2583,7 @@ pub async fn authorize_passkey_start(
             .into_response();
     }
 
-    let did = match &request_data.did {
+    let did_str = match &request_data.did {
         Some(d) => d.clone(),
         None => {
             return (
@@ -2513,16 +2597,29 @@ pub async fn authorize_passkey_start(
         }
     };
 
-    let stored_passkeys = match crate::auth::webauthn::get_passkeys_for_user(&state.db, &did).await
-    {
+    let did: tranquil_types::Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid DID format."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let stored_passkeys = match state.user_repo.get_passkeys_for_user(&did).await {
         Ok(pks) => pks,
         Err(e) => {
             tracing::error!("Failed to get passkeys: {:?}", e);
             return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
-                )
-                    .into_response();
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            )
+                .into_response();
         }
     };
 
@@ -2539,7 +2636,7 @@ pub async fn authorize_passkey_start(
 
     let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
         .iter()
-        .filter_map(|sp| sp.to_security_key().ok())
+        .filter_map(|sp| serde_json::from_slice(&sp.public_key).ok())
         .collect();
 
     if passkeys.is_empty() {
@@ -2574,8 +2671,22 @@ pub async fn authorize_passkey_start(
         }
     };
 
-    if let Err(e) =
-        crate::auth::webauthn::save_authentication_state(&state.db, &did, &auth_state).await
+    let state_json = match serde_json::to_string(&auth_state) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!("Failed to serialize authentication state: {:?}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(e) = state
+        .user_repo
+        .save_webauthn_challenge(&did, "authentication", &state_json)
+        .await
     {
         tracing::error!("Failed to save authentication state: {:?}", e);
         return (
@@ -2606,8 +2717,9 @@ pub async fn authorize_passkey_finish(
     Json(form): Json<AuthorizePasskeySubmit>,
 ) -> Response {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let passkey_finish_request_id = RequestId::from(form.request_uri.clone());
 
-    let request_data = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let request_data = match state.oauth_repo.get_authorization_request(&passkey_finish_request_id).await {
         Ok(Some(d)) => d,
         Ok(None) => {
             return (
@@ -2632,7 +2744,7 @@ pub async fn authorize_passkey_finish(
     };
 
     if request_data.expires_at < Utc::now() {
-        let _ = db::delete_authorization_request(&state.db, &form.request_uri).await;
+        let _ = state.oauth_repo.delete_authorization_request(&passkey_finish_request_id).await;
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -2643,7 +2755,7 @@ pub async fn authorize_passkey_finish(
             .into_response();
     }
 
-    let did = match &request_data.did {
+    let did_str = match &request_data.did {
         Some(d) => d.clone(),
         None => {
             return (
@@ -2657,7 +2769,25 @@ pub async fn authorize_passkey_finish(
         }
     };
 
-    let auth_state = match crate::auth::webauthn::load_authentication_state(&state.db, &did).await {
+    let did: tranquil_types::Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid DID format."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_state_json = match state
+        .user_repo
+        .load_webauthn_challenge(&did, "authentication")
+        .await
+    {
         Ok(Some(s)) => s,
         Ok(None) => {
             return (
@@ -2672,12 +2802,25 @@ pub async fn authorize_passkey_finish(
         Err(e) => {
             tracing::error!("Failed to load authentication state: {:?}", e);
             return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
+            )
+                .into_response();
+        }
+    };
+
+    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
+        match serde_json::from_str(&auth_state_json) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("Failed to deserialize authentication state: {:?}", e);
+                return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
                 )
                     .into_response();
-        }
-    };
+            }
+        };
 
     let credential: webauthn_rs::prelude::PublicKeyCredential =
         match serde_json::from_value(form.credential.clone()) {
@@ -2722,14 +2865,15 @@ pub async fn authorize_passkey_finish(
         }
     };
 
-    let _ = crate::auth::webauthn::delete_authentication_state(&state.db, &did).await;
+    let _ = state
+        .user_repo
+        .delete_webauthn_challenge(&did, "authentication")
+        .await;
 
-    match crate::auth::webauthn::update_passkey_counter(
-        &state.db,
-        credential.id.as_ref(),
-        auth_result.counter(),
-    )
-    .await
+    match state
+        .user_repo
+        .update_passkey_counter(credential.id.as_ref(), auth_result.counter() as i32)
+        .await
     {
         Ok(false) => {
             tracing::warn!(did = %did, "Passkey counter anomaly detected - possible cloned key");
@@ -2748,27 +2892,21 @@ pub async fn authorize_passkey_finish(
         Ok(true) => {}
     }
 
-    let has_totp = crate::api::server::has_totp_enabled_db(&state.db, &did).await;
+    let has_totp = state.user_repo.has_totp_enabled(&did).await.unwrap_or(false);
     if has_totp {
         let device_cookie = extract_device_cookie(&headers);
         let device_is_trusted = if let Some(ref dev_id) = device_cookie {
-            crate::api::server::is_device_trusted(&state.db, dev_id, &did).await
+            crate::api::server::is_device_trusted(state.oauth_repo.as_ref(), dev_id, &did).await
         } else {
             false
         };
 
         if device_is_trusted {
             if let Some(ref dev_id) = device_cookie {
-                let _ = crate::api::server::extend_device_trust(&state.db, dev_id).await;
+                let _ = crate::api::server::extend_device_trust(state.oauth_repo.as_ref(), dev_id).await;
             }
         } else {
-            let user = match sqlx::query!(
-                r#"SELECT id, preferred_comms_channel as "preferred_comms_channel: CommsChannel" FROM users WHERE did = $1"#,
-                did
-            )
-            .fetch_optional(&state.db)
-            .await
-            {
+            let user = match state.user_repo.get_2fa_status_by_did(&did).await {
                 Ok(Some(u)) => u,
                 _ => {
                     return (
@@ -2779,11 +2917,11 @@ pub async fn authorize_passkey_finish(
                 }
             };
 
-            let _ = db::delete_2fa_challenge_by_request_uri(&state.db, &form.request_uri).await;
-            match db::create_2fa_challenge(&state.db, &did, &form.request_uri).await {
+            let _ = state.oauth_repo.delete_2fa_challenge_by_request_uri(&passkey_finish_request_id).await;
+            match state.oauth_repo.create_2fa_challenge(&did, &passkey_finish_request_id).await {
                 Ok(challenge) => {
                     if let Err(e) =
-                        enqueue_2fa_code(&state.db, user.id, &challenge.code, &pds_hostname).await
+                        enqueue_2fa_code(state.user_repo.as_ref(), state.infra_repo.as_ref(), user.id, &challenge.code, &pds_hostname).await
                     {
                         tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
                     }

@@ -1,8 +1,7 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::BearerAuth;
-use crate::delegation::{self, DelegationActionType};
-use crate::oauth::db as oauth_db;
+use crate::delegation::{DelegationActionType, SCOPE_PRESETS, scopes};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{Did, Handle, Nsid, Rkey};
 use crate::util::extract_client_ip;
@@ -35,7 +34,11 @@ pub struct ListControllersResponse {
 }
 
 pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let controllers = match delegation::get_delegations_for_account(&state.db, &auth.0.did).await {
+    let controllers = match state
+        .delegation_repo
+        .get_delegations_for_account(&auth.0.did)
+        .await
+    {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to list controllers: {:?}", e);
@@ -49,7 +52,7 @@ pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -
             .into_iter()
             .map(|c| ControllerInfo {
                 did: c.did.into(),
-                handle: c.handle,
+                handle: c.handle.into(),
                 granted_scopes: c.granted_scopes,
                 granted_at: c.granted_at,
                 is_active: c.is_active,
@@ -70,23 +73,23 @@ pub async fn add_controller(
     auth: BearerAuth,
     Json(input): Json<AddControllerInput>,
 ) -> Response {
-    if let Err(e) = delegation::scopes::validate_delegation_scopes(&input.granted_scopes) {
+    if let Err(e) = scopes::validate_delegation_scopes(&input.granted_scopes) {
         return ApiError::InvalidScopes(e).into_response();
     }
 
-    let controller_exists: bool = sqlx::query_scalar!(
-        r#"SELECT EXISTS(SELECT 1 FROM users WHERE did = $1) as "exists!""#,
-        input.controller_did.as_str()
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
+    let controller_exists = state
+        .user_repo
+        .get_by_did(&input.controller_did)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
 
     if !controller_exists {
         return ApiError::ControllerNotFound.into_response();
     }
 
-    match delegation::controls_any_accounts(&state.db, &auth.0.did).await {
+    match state.delegation_repo.controls_any_accounts(&auth.0.did).await {
         Ok(true) => {
             return ApiError::InvalidDelegation(
                 "Cannot add controllers to an account that controls other accounts".into(),
@@ -101,7 +104,11 @@ pub async fn add_controller(
         Ok(false) => {}
     }
 
-    match delegation::has_any_controllers(&state.db, &input.controller_did).await {
+    match state
+        .delegation_repo
+        .has_any_controllers(&input.controller_did)
+        .await
+    {
         Ok(true) => {
             return ApiError::InvalidDelegation(
                 "Cannot add a controlled account as a controller".into(),
@@ -116,29 +123,31 @@ pub async fn add_controller(
         Ok(false) => {}
     }
 
-    match delegation::create_delegation(
-        &state.db,
-        &auth.0.did,
-        &input.controller_did,
-        &input.granted_scopes,
-        &auth.0.did,
-    )
-    .await
+    match state
+        .delegation_repo
+        .create_delegation(
+            &auth.0.did,
+            &input.controller_did,
+            &input.granted_scopes,
+            &auth.0.did,
+        )
+        .await
     {
         Ok(_) => {
-            let _ = delegation::log_delegation_action(
-                &state.db,
-                &auth.0.did,
-                &auth.0.did,
-                Some(&input.controller_did),
-                DelegationActionType::GrantCreated,
-                Some(serde_json::json!({
-                    "granted_scopes": input.granted_scopes
-                })),
-                None,
-                None,
-            )
-            .await;
+            let _ = state
+                .delegation_repo
+                .log_delegation_action(
+                    &auth.0.did,
+                    &auth.0.did,
+                    Some(&input.controller_did),
+                    DelegationActionType::GrantCreated,
+                    Some(serde_json::json!({
+                        "granted_scopes": input.granted_scopes
+                    })),
+                    None,
+                    None,
+                )
+                .await;
 
             (
                 StatusCode::OK,
@@ -165,45 +174,39 @@ pub async fn remove_controller(
     auth: BearerAuth,
     Json(input): Json<RemoveControllerInput>,
 ) -> Response {
-    match delegation::revoke_delegation(&state.db, &auth.0.did, &input.controller_did, &auth.0.did)
+    match state
+        .delegation_repo
+        .revoke_delegation(&auth.0.did, &input.controller_did, &auth.0.did)
         .await
     {
         Ok(true) => {
-            let revoked_app_passwords = sqlx::query_scalar!(
-                r#"DELETE FROM app_passwords
-                   WHERE user_id = (SELECT id FROM users WHERE did = $1)
-                   AND created_by_controller_did = $2
-                   RETURNING id"#,
-                &auth.0.did,
-                input.controller_did.as_str()
-            )
-            .fetch_all(&state.db)
-            .await
-            .map(|r| r.len())
-            .unwrap_or(0);
+            let revoked_app_passwords = state
+                .session_repo
+                .delete_app_passwords_by_controller(&auth.0.did, &input.controller_did)
+                .await
+                .unwrap_or(0) as usize;
 
-            let revoked_oauth_tokens = oauth_db::revoke_tokens_for_controller(
-                &state.db,
-                &auth.0.did,
-                &input.controller_did,
-            )
-            .await
-            .unwrap_or(0);
+            let revoked_oauth_tokens = state
+                .oauth_repo
+                .revoke_tokens_for_controller(&auth.0.did, &input.controller_did)
+                .await
+                .unwrap_or(0);
 
-            let _ = delegation::log_delegation_action(
-                &state.db,
-                &auth.0.did,
-                &auth.0.did,
-                Some(&input.controller_did),
-                DelegationActionType::GrantRevoked,
-                Some(serde_json::json!({
-                    "revoked_app_passwords": revoked_app_passwords,
-                    "revoked_oauth_tokens": revoked_oauth_tokens
-                })),
-                None,
-                None,
-            )
-            .await;
+            let _ = state
+                .delegation_repo
+                .log_delegation_action(
+                    &auth.0.did,
+                    &auth.0.did,
+                    Some(&input.controller_did),
+                    DelegationActionType::GrantRevoked,
+                    Some(serde_json::json!({
+                        "revoked_app_passwords": revoked_app_passwords,
+                        "revoked_oauth_tokens": revoked_oauth_tokens
+                    })),
+                    None,
+                    None,
+                )
+                .await;
 
             (
                 StatusCode::OK,
@@ -232,32 +235,30 @@ pub async fn update_controller_scopes(
     auth: BearerAuth,
     Json(input): Json<UpdateControllerScopesInput>,
 ) -> Response {
-    if let Err(e) = delegation::scopes::validate_delegation_scopes(&input.granted_scopes) {
+    if let Err(e) = scopes::validate_delegation_scopes(&input.granted_scopes) {
         return ApiError::InvalidScopes(e).into_response();
     }
 
-    match delegation::update_delegation_scopes(
-        &state.db,
-        &auth.0.did,
-        &input.controller_did,
-        &input.granted_scopes,
-    )
-    .await
+    match state
+        .delegation_repo
+        .update_delegation_scopes(&auth.0.did, &input.controller_did, &input.granted_scopes)
+        .await
     {
         Ok(true) => {
-            let _ = delegation::log_delegation_action(
-                &state.db,
-                &auth.0.did,
-                &auth.0.did,
-                Some(&input.controller_did),
-                DelegationActionType::ScopesModified,
-                Some(serde_json::json!({
-                    "new_scopes": input.granted_scopes
-                })),
-                None,
-                None,
-            )
-            .await;
+            let _ = state
+                .delegation_repo
+                .log_delegation_action(
+                    &auth.0.did,
+                    &auth.0.did,
+                    Some(&input.controller_did),
+                    DelegationActionType::ScopesModified,
+                    Some(serde_json::json!({
+                        "new_scopes": input.granted_scopes
+                    })),
+                    None,
+                    None,
+                )
+                .await;
 
             (
                 StatusCode::OK,
@@ -291,7 +292,11 @@ pub struct ListControlledAccountsResponse {
 }
 
 pub async fn list_controlled_accounts(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let accounts = match delegation::get_accounts_controlled_by(&state.db, &auth.0.did).await {
+    let accounts = match state
+        .delegation_repo
+        .get_accounts_controlled_by(&auth.0.did)
+        .await
+    {
         Ok(a) => a,
         Err(e) => {
             tracing::error!("Failed to list controlled accounts: {:?}", e);
@@ -305,7 +310,7 @@ pub async fn list_controlled_accounts(State(state): State<AppState>, auth: Beare
             .into_iter()
             .map(|a| DelegatedAccountInfo {
                 did: a.did.into(),
-                handle: a.handle,
+                handle: a.handle.into(),
                 granted_scopes: a.granted_scopes,
                 granted_at: a.granted_at,
             })
@@ -352,19 +357,21 @@ pub async fn get_audit_log(
     let limit = params.limit.clamp(1, 100);
     let offset = params.offset.max(0);
 
-    let entries =
-        match delegation::audit::get_audit_log_for_account(&state.db, &auth.0.did, limit, offset)
-            .await
-        {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::error!("Failed to get audit log: {:?}", e);
-                return ApiError::InternalError(Some("Failed to get audit log".into()))
-                    .into_response();
-            }
-        };
+    let entries = match state
+        .delegation_repo
+        .get_audit_log_for_account(&auth.0.did, limit, offset)
+        .await
+    {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("Failed to get audit log: {:?}", e);
+            return ApiError::InternalError(Some("Failed to get audit log".into())).into_response();
+        }
+    };
 
-    let total = delegation::audit::count_audit_log_entries(&state.db, &auth.0.did)
+    let total = state
+        .delegation_repo
+        .count_audit_log_entries(&auth.0.did)
         .await
         .unwrap_or_default();
 
@@ -401,7 +408,7 @@ pub struct GetScopePresetsResponse {
 
 pub async fn get_scope_presets() -> Response {
     Json(GetScopePresetsResponse {
-        presets: delegation::SCOPE_PRESETS
+        presets: SCOPE_PRESETS
             .iter()
             .map(|p| ScopePresetInfo {
                 name: p.name,
@@ -448,11 +455,11 @@ pub async fn create_delegated_account(
         .into_response();
     }
 
-    if let Err(e) = delegation::scopes::validate_delegation_scopes(&input.controller_scopes) {
+    if let Err(e) = scopes::validate_delegation_scopes(&input.controller_scopes) {
         return ApiError::InvalidScopes(e).into_response();
     }
 
-    match delegation::has_any_controllers(&state.db, &auth.0.did).await {
+    match state.delegation_repo.has_any_controllers(&auth.0.did).await {
         Ok(true) => {
             return ApiError::InvalidDelegation(
                 "Cannot create delegated accounts from a controlled account".into(),
@@ -468,7 +475,8 @@ pub async fn create_delegated_account(
     }
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let pds_suffix = format!(".{}", hostname);
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let pds_suffix = format!(".{}", hostname_for_handles);
 
     let handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
         let handle_to_validate = if input.handle.ends_with(&pds_suffix) {
@@ -480,7 +488,7 @@ pub async fn create_delegated_account(
             &input.handle
         };
         match crate::api::validation::validate_short_handle(handle_to_validate) {
-            Ok(h) => format!("{}.{}", h, hostname),
+            Ok(h) => format!("{}.{}", h, hostname_for_handles),
             Err(e) => {
                 return ApiError::InvalidRequest(e.to_string()).into_response();
             }
@@ -501,17 +509,9 @@ pub async fn create_delegated_account(
     }
 
     if let Some(ref code) = input.invite_code {
-        let valid = sqlx::query_scalar!(
-            "SELECT available_uses > 0 AND NOT disabled FROM invite_codes WHERE code = $1",
-            code
-        )
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(Some(false));
+        let valid = state.infra_repo.is_invite_code_valid(code).await.unwrap_or(false);
 
-        if valid != Some(true) {
+        if !valid {
             return ApiError::InvalidInviteCode.into_response();
         }
     } else {
@@ -572,44 +572,6 @@ pub async fn create_delegated_account(
     let handle = Handle::new_unchecked(&handle);
     info!(did = %did, handle = %handle, controller = %&auth.0.did, "Created DID for delegated account");
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Error starting transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
-        r#"INSERT INTO users (
-            handle, email, did, password_hash, password_required,
-            account_type, preferred_comms_channel
-        ) VALUES ($1, $2, $3, NULL, FALSE, 'delegated'::account_type, 'email'::comms_channel) RETURNING id"#,
-    )
-    .bind(handle.as_str())
-    .bind(&email)
-    .bind(did.as_str())
-    .fetch_one(&mut *tx)
-    .await;
-
-    let user_id = match user_insert {
-        Ok((id,)) => id,
-        Err(e) => {
-            if let Some(db_err) = e.as_database_error()
-                && db_err.code().as_deref() == Some("23505")
-            {
-                let constraint = db_err.constraint().unwrap_or("");
-                if constraint.contains("handle") {
-                    return ApiError::HandleNotAvailable(None).into_response();
-                } else if constraint.contains("email") {
-                    return ApiError::EmailTaken.into_response();
-                }
-            }
-            error!("Error inserting user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -617,34 +579,6 @@ pub async fn create_delegated_account(
             return ApiError::InternalError(None).into_response();
         }
     };
-
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO user_keys (user_id, key_bytes, encryption_version, encrypted_at) VALUES ($1, $2, $3, NOW())",
-        user_id,
-        &encrypted_key_bytes[..],
-        crate::config::ENCRYPTION_VERSION
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting user key: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Err(e) = sqlx::query!(
-        r#"INSERT INTO account_delegations (delegated_did, controller_did, granted_scopes, granted_by)
-           VALUES ($1, $2, $3, $4)"#,
-        did.as_str(),
-        auth.0.did.as_str(),
-        input.controller_scopes,
-        auth.0.did.as_str()
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error creating initial delegation: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
 
     let mst = Mst::new(Arc::new(state.block_store.clone()));
     let mst_root = match mst.persist().await {
@@ -670,58 +604,35 @@ pub async fn create_delegated_account(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let commit_cid_str = commit_cid.to_string();
-    let rev_str = rev.as_ref().to_string();
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
-        user_id,
-        commit_cid_str,
-        rev_str
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting repo: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
-    if let Err(e) = sqlx::query!(
-        r#"
-        INSERT INTO user_blocks (user_id, block_cid)
-        SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
-        ON CONFLICT (user_id, block_cid) DO NOTHING
-        "#,
-        user_id,
-        &genesis_block_cids
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting user_blocks: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
 
-    if let Some(ref code) = input.invite_code {
-        let _ = sqlx::query!(
-            "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
-            code
-        )
-        .execute(&mut *tx)
-        .await;
+    let create_input = tranquil_db_traits::CreateDelegatedAccountInput {
+        handle: handle.clone(),
+        email: email.clone(),
+        did: did.clone(),
+        controller_did: auth.0.did.clone(),
+        controller_scopes: input.controller_scopes.clone(),
+        encrypted_key_bytes,
+        encryption_version: crate::config::ENCRYPTION_VERSION,
+        commit_cid: commit_cid.to_string(),
+        repo_rev: rev.as_ref().to_string(),
+        genesis_block_cids,
+        invite_code: input.invite_code.clone(),
+    };
 
-        let _ = sqlx::query!(
-            "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
-            code,
-            user_id
-        )
-        .execute(&mut *tx)
-        .await;
-    }
-
-    if let Err(e) = tx.commit().await {
-        error!("Error committing transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+    let _user_id = match state.user_repo.create_delegated_account(&create_input).await {
+        Ok(id) => id,
+        Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
+            return ApiError::HandleNotAvailable(None).into_response();
+        }
+        Err(tranquil_db_traits::CreateAccountError::EmailTaken) => {
+            return ApiError::EmailTaken.into_response();
+        }
+        Err(e) => {
+            error!("Error creating delegated account: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
     if let Err(e) =
         crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
@@ -751,20 +662,21 @@ pub async fn create_delegated_account(
         warn!("Failed to create default profile for {}: {}", did, e);
     }
 
-    let _ = delegation::log_delegation_action(
-        &state.db,
-        &did,
-        &auth.0.did,
-        Some(&auth.0.did),
-        DelegationActionType::GrantCreated,
-        Some(json!({
-            "account_created": true,
-            "granted_scopes": input.controller_scopes
-        })),
-        None,
-        None,
-    )
-    .await;
+    let _ = state
+        .delegation_repo
+        .log_delegation_action(
+            &did,
+            &auth.0.did,
+            Some(&auth.0.did),
+            DelegationActionType::GrantCreated,
+            Some(json!({
+                "account_created": true,
+                "granted_scopes": input.controller_scopes
+            })),
+            None,
+            None,
+        )
+        .await;
 
     info!(did = %did, handle = %handle, controller = %&auth.0.did, "Delegated account created");
 

@@ -7,8 +7,8 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use tracing::{error, info, warn};
+use tranquil_db_traits::{SessionRepository, UserRepository};
 
 use crate::auth::BearerAuth;
 use crate::state::{AppState, RateLimitKind};
@@ -25,16 +25,8 @@ pub struct ReauthStatusResponse {
 }
 
 pub async fn get_reauth_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let session = sqlx::query!(
-        "SELECT last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let last_reauth_at = match session {
-        Ok(Some(row)) => row.last_reauth_at,
-        Ok(None) => None,
+    let last_reauth_at = match state.session_repo.get_last_reauth_at(&auth.0.did).await {
+        Ok(t) => t,
         Err(e) => {
             error!("DB error: {:?}", e);
             return ApiError::InternalError(None).into_response();
@@ -42,7 +34,8 @@ pub async fn get_reauth_status(State(state): State<AppState>, auth: BearerAuth) 
     };
 
     let reauth_required = is_reauth_required(last_reauth_at);
-    let available_methods = get_available_reauth_methods(&state.db, &auth.0.did).await;
+    let available_methods =
+        get_available_reauth_methods(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
 
     Json(ReauthStatusResponse {
         last_reauth_at,
@@ -69,15 +62,8 @@ pub async fn reauth_password(
     auth: BearerAuth,
     Json(input): Json<PasswordReauthInput>,
 ) -> Response {
-    let user = sqlx::query!(
-        "SELECT password_hash FROM users WHERE did = $1",
-        &*&auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let password_hash = match user {
-        Ok(Some(row)) => row.password_hash,
+    let password_hash = match state.user_repo.get_password_hash_by_did(&auth.0.did).await {
+        Ok(Some(hash)) => hash,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
         }
@@ -87,25 +73,18 @@ pub async fn reauth_password(
         }
     };
 
-    let password_valid = password_hash
-        .as_ref()
-        .map(|h| bcrypt::verify(&input.password, h).unwrap_or(false))
-        .unwrap_or(false);
+    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
 
     if !password_valid {
-        let app_passwords = sqlx::query!(
-            "SELECT ap.password_hash FROM app_passwords ap
-             JOIN users u ON ap.user_id = u.id
-             WHERE u.did = $1",
-            &auth.0.did
-        )
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
+        let app_password_hashes = state
+            .session_repo
+            .get_app_password_hashes_by_did(&auth.0.did)
+            .await
+            .unwrap_or_default();
 
-        let app_password_valid = app_passwords
+        let app_password_valid = app_password_hashes
             .iter()
-            .any(|ap| bcrypt::verify(&input.password, &ap.password_hash).unwrap_or(false));
+            .any(|h| bcrypt::verify(&input.password, h).unwrap_or(false));
 
         if !app_password_valid {
             warn!(did = %&auth.0.did, "Re-auth failed: invalid password");
@@ -113,7 +92,7 @@ pub async fn reauth_password(
         }
     }
 
-    match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
+    match update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
             info!(did = %&auth.0.did, "Re-auth successful via password");
             Json(ReauthResponse { reauthed_at }).into_response()
@@ -156,7 +135,7 @@ pub async fn reauth_totp(
         return ApiError::InvalidCode(Some("Invalid TOTP or backup code".into())).into_response();
     }
 
-    match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
+    match update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
             info!(did = %&auth.0.did, "Re-auth successful via TOTP");
             Json(ReauthResponse { reauthed_at }).into_response()
@@ -177,14 +156,13 @@ pub struct PasskeyReauthStartResponse {
 pub async fn reauth_passkey_start(State(state): State<AppState>, auth: BearerAuth) -> Response {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
 
-    let stored_passkeys =
-        match crate::auth::webauthn::get_passkeys_for_user(&state.db, &auth.0.did).await {
-            Ok(pks) => pks,
-            Err(e) => {
-                error!("Failed to get passkeys: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let stored_passkeys = match state.user_repo.get_passkeys_for_user(&auth.0.did).await {
+        Ok(pks) => pks,
+        Err(e) => {
+            error!("Failed to get passkeys: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
     if stored_passkeys.is_empty() {
         return ApiError::NoPasskeys.into_response();
@@ -192,7 +170,7 @@ pub async fn reauth_passkey_start(State(state): State<AppState>, auth: BearerAut
 
     let passkeys: Vec<webauthn_rs::prelude::SecurityKey> = stored_passkeys
         .iter()
-        .filter_map(|sp| sp.to_security_key().ok())
+        .filter_map(|sp| serde_json::from_slice(&sp.public_key).ok())
         .collect();
 
     if passkeys.is_empty() {
@@ -215,8 +193,18 @@ pub async fn reauth_passkey_start(State(state): State<AppState>, auth: BearerAut
         }
     };
 
-    if let Err(e) =
-        crate::auth::webauthn::save_authentication_state(&state.db, &auth.0.did, &auth_state).await
+    let state_json = match serde_json::to_string(&auth_state) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to serialize authentication state: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    if let Err(e) = state
+        .user_repo
+        .save_webauthn_challenge(&auth.0.did, "authentication", &state_json)
+        .await
     {
         error!("Failed to save authentication state: {:?}", e);
         return ApiError::InternalError(None).into_response();
@@ -239,14 +227,26 @@ pub async fn reauth_passkey_finish(
 ) -> Response {
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
 
-    let auth_state =
-        match crate::auth::webauthn::load_authentication_state(&state.db, &auth.0.did).await {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                return ApiError::NoChallengeInProgress.into_response();
-            }
+    let auth_state_json = match state
+        .user_repo
+        .load_webauthn_challenge(&auth.0.did, "authentication")
+        .await
+    {
+        Ok(Some(json)) => json,
+        Ok(None) => {
+            return ApiError::NoChallengeInProgress.into_response();
+        }
+        Err(e) => {
+            error!("Failed to load authentication state: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
+        match serde_json::from_str(&auth_state_json) {
+            Ok(s) => s,
             Err(e) => {
-                error!("Failed to load authentication state: {:?}", e);
+                error!("Failed to deserialize authentication state: {:?}", e);
                 return ApiError::InternalError(None).into_response();
             }
         };
@@ -278,17 +278,17 @@ pub async fn reauth_passkey_finish(
     };
 
     let cred_id_bytes = auth_result.cred_id().as_ref();
-    match crate::auth::webauthn::update_passkey_counter(
-        &state.db,
-        cred_id_bytes,
-        auth_result.counter(),
-    )
-    .await
+    match state
+        .user_repo
+        .update_passkey_counter(cred_id_bytes, auth_result.counter() as i32)
+        .await
     {
         Ok(false) => {
             warn!(did = %&auth.0.did, "Passkey counter anomaly detected - possible cloned key");
-            let _ =
-                crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
+            let _ = state
+                .user_repo
+                .delete_webauthn_challenge(&auth.0.did, "authentication")
+                .await;
             return ApiError::PasskeyCounterAnomaly.into_response();
         }
         Err(e) => {
@@ -297,9 +297,12 @@ pub async fn reauth_passkey_finish(
         Ok(true) => {}
     }
 
-    let _ = crate::auth::webauthn::delete_authentication_state(&state.db, &auth.0.did).await;
+    let _ = state
+        .user_repo
+        .delete_webauthn_challenge(&auth.0.did, "authentication")
+        .await;
 
-    match update_last_reauth_cached(&state.db, &state.cache, &auth.0.did).await {
+    match update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.0.did).await {
         Ok(reauthed_at) => {
             info!(did = %&auth.0.did, "Re-auth successful via passkey");
             Json(ReauthResponse { reauthed_at }).into_response()
@@ -312,18 +315,11 @@ pub async fn reauth_passkey_finish(
 }
 
 pub async fn update_last_reauth_cached(
-    db: &PgPool,
+    session_repo: &dyn SessionRepository,
     cache: &std::sync::Arc<dyn crate::cache::Cache>,
-    did: &str,
-) -> Result<DateTime<Utc>, sqlx::Error> {
-    let now = Utc::now();
-    sqlx::query!(
-        "UPDATE session_tokens SET last_reauth_at = $1, mfa_verified = TRUE WHERE did = $2",
-        now,
-        did
-    )
-    .execute(db)
-    .await?;
+    did: &crate::types::Did,
+) -> Result<DateTime<Utc>, tranquil_db_traits::DbError> {
+    let now = session_repo.update_last_reauth(did).await?;
     let cache_key = format!("reauth:{}", did);
     let _ = cache
         .set(
@@ -345,29 +341,30 @@ fn is_reauth_required(last_reauth_at: Option<DateTime<Utc>>) -> bool {
     }
 }
 
-async fn get_available_reauth_methods(db: &PgPool, did: &str) -> Vec<String> {
+async fn get_available_reauth_methods(
+    user_repo: &dyn UserRepository,
+    _session_repo: &dyn SessionRepository,
+    did: &crate::types::Did,
+) -> Vec<String> {
     let mut methods = Vec::new();
 
-    let has_password = sqlx::query_scalar!(
-        "SELECT password_hash IS NOT NULL as has_pw FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or(Some(false));
+    let has_password = user_repo
+        .get_password_hash_by_did(did)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
 
-    if has_password == Some(true) {
+    if has_password {
         methods.push("password".to_string());
     }
 
-    let has_totp = crate::api::server::totp::has_totp_enabled_db(db, did).await;
+    let has_totp = user_repo.has_totp_enabled(did).await.unwrap_or(false);
     if has_totp {
         methods.push("totp".to_string());
     }
 
-    let has_passkeys = crate::api::server::passkeys::has_passkeys_for_user_db(db, did).await;
+    let has_passkeys = user_repo.has_passkeys(did).await.unwrap_or(false);
     if has_passkeys {
         methods.push("passkey".to_string());
     }
@@ -375,24 +372,17 @@ async fn get_available_reauth_methods(db: &PgPool, did: &str) -> Vec<String> {
     methods
 }
 
-pub async fn check_reauth_required(db: &PgPool, did: &str) -> bool {
-    let session = sqlx::query!(
-        "SELECT last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
-        did
-    )
-    .fetch_optional(db)
-    .await;
-
-    match session {
-        Ok(Some(row)) => is_reauth_required(row.last_reauth_at),
+pub async fn check_reauth_required(session_repo: &dyn SessionRepository, did: &crate::types::Did) -> bool {
+    match session_repo.get_last_reauth_at(did).await {
+        Ok(last_reauth_at) => is_reauth_required(last_reauth_at),
         _ => true,
     }
 }
 
 pub async fn check_reauth_required_cached(
-    db: &PgPool,
+    session_repo: &dyn SessionRepository,
     cache: &std::sync::Arc<dyn crate::cache::Cache>,
-    did: &str,
+    did: &crate::types::Did,
 ) -> bool {
     let cache_key = format!("reauth:{}", did);
     if let Some(timestamp_str) = cache.get(&cache_key).await
@@ -406,15 +396,8 @@ pub async fn check_reauth_required_cached(
             }
         }
     }
-    let session = sqlx::query!(
-        "SELECT last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
-        did
-    )
-    .fetch_optional(db)
-    .await;
-
-    match session {
-        Ok(Some(row)) => is_reauth_required(row.last_reauth_at),
+    match session_repo.get_last_reauth_at(did).await {
+        Ok(last_reauth_at) => is_reauth_required(last_reauth_at),
         _ => true,
     }
 }
@@ -427,8 +410,12 @@ pub struct ReauthRequiredError {
     pub reauth_methods: Vec<String>,
 }
 
-pub async fn reauth_required_response(db: &PgPool, did: &str) -> Response {
-    let methods = get_available_reauth_methods(db, did).await;
+pub async fn reauth_required_response(
+    user_repo: &dyn UserRepository,
+    session_repo: &dyn SessionRepository,
+    did: &crate::types::Did,
+) -> Response {
+    let methods = get_available_reauth_methods(user_repo, session_repo, did).await;
     (
         StatusCode::UNAUTHORIZED,
         Json(ReauthRequiredError {
@@ -440,23 +427,16 @@ pub async fn reauth_required_response(db: &PgPool, did: &str) -> Response {
         .into_response()
 }
 
-pub async fn check_legacy_session_mfa(db: &PgPool, did: &str) -> bool {
-    let session = sqlx::query!(
-        "SELECT legacy_login, mfa_verified, last_reauth_at FROM session_tokens WHERE did = $1 ORDER BY created_at DESC LIMIT 1",
-        did
-    )
-    .fetch_optional(db)
-    .await;
-
-    match session {
-        Ok(Some(row)) => {
-            if !row.legacy_login {
+pub async fn check_legacy_session_mfa(session_repo: &dyn SessionRepository, did: &crate::types::Did) -> bool {
+    match session_repo.get_session_mfa_status(did).await {
+        Ok(Some(status)) => {
+            if !status.legacy_login {
                 return true;
             }
-            if row.mfa_verified {
+            if status.mfa_verified {
                 return true;
             }
-            if let Some(last_reauth) = row.last_reauth_at {
+            if let Some(last_reauth) = status.last_reauth_at {
                 let elapsed = chrono::Utc::now().signed_duration_since(last_reauth);
                 if elapsed.num_seconds() <= REAUTH_WINDOW_SECONDS {
                     return true;
@@ -468,18 +448,19 @@ pub async fn check_legacy_session_mfa(db: &PgPool, did: &str) -> bool {
     }
 }
 
-pub async fn update_mfa_verified(db: &PgPool, did: &str) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "UPDATE session_tokens SET mfa_verified = TRUE, last_reauth_at = NOW() WHERE did = $1",
-        did
-    )
-    .execute(db)
-    .await?;
-    Ok(())
+pub async fn update_mfa_verified(
+    session_repo: &dyn SessionRepository,
+    did: &crate::types::Did,
+) -> Result<(), tranquil_db_traits::DbError> {
+    session_repo.update_mfa_verified(did).await
 }
 
-pub async fn legacy_mfa_required_response(db: &PgPool, did: &str) -> Response {
-    let methods = get_available_reauth_methods(db, did).await;
+pub async fn legacy_mfa_required_response(
+    user_repo: &dyn UserRepository,
+    session_repo: &dyn SessionRepository,
+    did: &crate::types::Did,
+) -> Response {
+    let methods = get_available_reauth_methods(user_repo, session_repo, did).await;
     (
         StatusCode::FORBIDDEN,
         Json(MfaVerificationRequiredError {

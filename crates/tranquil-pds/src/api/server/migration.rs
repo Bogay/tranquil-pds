@@ -6,7 +6,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -51,7 +50,8 @@ pub async fn update_did_document(
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
     let auth_user = match crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -73,14 +73,8 @@ pub async fn update_did_document(
         .into_response();
     }
 
-    let user = match sqlx::query!(
-        "SELECT id, handle, deactivated_at FROM users WHERE did = $1",
-        &auth_user.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
+    let user = match state.user_repo.get_user_for_did_doc(&auth_user.did).await {
+        Ok(Some(u)) => u,
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             tracing::error!("DB error getting user: {:?}", e);
@@ -137,48 +131,28 @@ pub async fn update_did_document(
 
     let also_known_as: Option<Vec<String>> = input.also_known_as.clone();
 
-    let now = Utc::now();
-
-    let upsert_result = sqlx::query!(
-        r#"
-        INSERT INTO did_web_overrides (user_id, verification_methods, also_known_as, updated_at)
-        VALUES ($1, COALESCE($2, '[]'::jsonb), COALESCE($3, '{}'::text[]), $4)
-        ON CONFLICT (user_id) DO UPDATE SET
-            verification_methods = CASE WHEN $2 IS NOT NULL THEN $2 ELSE did_web_overrides.verification_methods END,
-            also_known_as = CASE WHEN $3 IS NOT NULL THEN $3 ELSE did_web_overrides.also_known_as END,
-            updated_at = $4
-        "#,
-        user.id,
-        verification_methods_json,
-        also_known_as.as_deref(),
-        now
-    )
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = upsert_result {
+    if let Err(e) = state
+        .user_repo
+        .upsert_did_web_overrides(user.id, verification_methods_json, also_known_as)
+        .await
+    {
         tracing::error!("DB error upserting did_web_overrides: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
 
     if let Some(ref endpoint) = input.service_endpoint {
         let endpoint_clean = endpoint.trim().trim_end_matches('/');
-        let update_result = sqlx::query!(
-            "UPDATE users SET migrated_to_pds = $1, migrated_at = $2 WHERE did = $3",
-            endpoint_clean,
-            now,
-            &auth_user.did
-        )
-        .execute(&state.db)
-        .await;
-
-        if let Err(e) = update_result {
+        if let Err(e) = state
+            .user_repo
+            .update_migrated_to_pds(&auth_user.did, endpoint_clean)
+            .await
+        {
             tracing::error!("DB error updating service endpoint: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     }
 
-    let did_doc = build_did_document(&state.db, &auth_user.did).await;
+    let did_doc = build_did_document(&state, &auth_user.did).await;
 
     tracing::info!("Updated DID document for {}", &auth_user.did);
 
@@ -208,7 +182,8 @@ pub async fn get_did_document(
         std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
     );
     let auth_user = match crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -230,21 +205,15 @@ pub async fn get_did_document(
         .into_response();
     }
 
-    let did_doc = build_did_document(&state.db, &auth_user.did).await;
+    let did_doc = build_did_document(&state, &auth_user.did).await;
 
     (StatusCode::OK, Json(json!({ "didDocument": did_doc }))).into_response()
 }
 
-async fn build_did_document(db: &sqlx::PgPool, did: &str) -> serde_json::Value {
+async fn build_did_document(state: &AppState, did: &crate::types::Did) -> serde_json::Value {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
 
-    let user = match sqlx::query!(
-        "SELECT id, handle, migrated_to_pds FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(db)
-    .await
-    {
+    let user = match state.user_repo.get_user_for_did_doc_build(did).await {
         Ok(Some(row)) => row,
         _ => {
             return json!({
@@ -253,14 +222,12 @@ async fn build_did_document(db: &sqlx::PgPool, did: &str) -> serde_json::Value {
         }
     };
 
-    let overrides = sqlx::query!(
-        "SELECT verification_methods, also_known_as FROM did_web_overrides WHERE user_id = $1",
-        user.id
-    )
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten();
+    let overrides = state
+        .user_repo
+        .get_did_web_overrides(user.id)
+        .await
+        .ok()
+        .flatten();
 
     let service_endpoint = user
         .migrated_to_pds
@@ -299,20 +266,15 @@ async fn build_did_document(db: &sqlx::PgPool, did: &str) -> serde_json::Value {
         });
     }
 
-    let key_row = sqlx::query!(
-        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
-        user.id
-    )
-    .fetch_optional(db)
-    .await;
+    let key_info = state.user_repo.get_user_key_by_id(user.id).await.ok().flatten();
 
-    let public_key_multibase = match key_row {
-        Ok(Some(row)) => match crate::config::decrypt_key(&row.key_bytes, row.encryption_version) {
+    let public_key_multibase = match key_info {
+        Some(info) => match crate::config::decrypt_key(&info.key_bytes, info.encryption_version) {
             Ok(key_bytes) => crate::api::identity::did::get_public_key_multibase(&key_bytes)
                 .unwrap_or_else(|_| "error".to_string()),
             Err(_) => "error".to_string(),
         },
-        _ => "error".to_string(),
+        None => "error".to_string(),
     };
 
     let also_known_as = if let Some(ref ovr) = overrides {

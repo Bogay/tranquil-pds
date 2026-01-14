@@ -8,10 +8,10 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use serde_json::json;
 use sha2::Sha256;
-use sqlx::PgPool;
 use subtle::ConstantTimeEq;
+use tranquil_db_traits::{OAuthRepository, UserRepository};
+use tranquil_types::TokenId;
 
-use super::db;
 use super::scopes::ScopePermissions;
 use super::{DPoPVerifier, OAuthError};
 use crate::config::AuthConfig;
@@ -34,7 +34,7 @@ pub struct VerifyResult {
 }
 
 pub async fn verify_oauth_access_token(
-    pool: &PgPool,
+    oauth_repo: &dyn OAuthRepository,
     access_token: &str,
     dpop_proof: Option<&str>,
     http_method: &str,
@@ -46,10 +46,13 @@ pub async fn verify_oauth_access_token(
         has_dpop_proof = dpop_proof.is_some(),
         "Verifying OAuth access token"
     );
-    let token_data = db::get_token_by_id(pool, &token_info.token_id)
-        .await?
+    let token_id = TokenId::from(token_info.token_id.clone());
+    let token_data = oauth_repo
+        .get_token_by_id(&token_id)
+        .await
+        .map_err(crate::oauth::db_err_to_oauth)?
         .ok_or_else(|| {
-            tracing::warn!(token_id = %token_info.token_id, "Token not found in database");
+            tracing::warn!(token_id = %token_id, "Token not found in database");
             OAuthError::InvalidToken("Token not found or revoked".to_string())
         })?;
     let now = chrono::Utc::now();
@@ -73,7 +76,11 @@ pub async fn verify_oauth_access_token(
                 tracing::warn!(error = ?e, http_method = %http_method, http_uri = %http_uri, "DPoP proof verification failed");
                 e
             })?;
-        if !db::check_and_record_dpop_jti(pool, &result.jti).await? {
+        if !oauth_repo
+            .check_and_record_dpop_jti(&result.jti)
+            .await
+            .map_err(crate::oauth::db_err_to_oauth)?
+        {
             return Err(OAuthError::InvalidDpopProof(
                 "DPoP proof has already been used".to_string(),
             ));
@@ -86,7 +93,7 @@ pub async fn verify_oauth_access_token(
     }
     Ok(VerifyResult {
         did: token_data.did,
-        token_id: token_info.token_id,
+        token_id: token_id.to_string(),
         client_id: token_data.client_id,
         scope: token_data.scope,
     })
@@ -271,7 +278,7 @@ impl FromRequestParts<AppState> for OAuthUser {
             });
         };
         let dpop_proof = parts.headers.get("DPoP").and_then(|v| v.to_str().ok());
-        if let Ok(result) = try_legacy_auth(&state.db, token).await {
+        if let Ok(result) = try_legacy_auth(state.user_repo.as_ref(), token).await {
             return Ok(OAuthUser {
                 did: result.did,
                 client_id: None,
@@ -282,7 +289,14 @@ impl FromRequestParts<AppState> for OAuthUser {
         }
         let http_method = parts.method.as_str();
         let http_uri = crate::util::build_full_url(&parts.uri.to_string());
-        match verify_oauth_access_token(&state.db, token, dpop_proof, http_method, &http_uri).await
+        match verify_oauth_access_token(
+            state.oauth_repo.as_ref(),
+            token,
+            dpop_proof,
+            http_method,
+            &http_uri,
+        )
+        .await
         {
             Ok(result) => {
                 let permissions = ScopePermissions::from_scope_string(result.scope.as_deref());
@@ -371,8 +385,8 @@ struct LegacyAuthResult {
     did: String,
 }
 
-async fn try_legacy_auth(pool: &PgPool, token: &str) -> Result<LegacyAuthResult, ()> {
-    match crate::auth::validate_bearer_token(pool, token).await {
+async fn try_legacy_auth(user_repo: &dyn UserRepository, token: &str) -> Result<LegacyAuthResult, ()> {
+    match crate::auth::validate_bearer_token(user_repo, token).await {
         Ok(user) if !user.is_oauth => Ok(LegacyAuthResult {
             did: user.did.to_string(),
         }),

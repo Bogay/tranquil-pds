@@ -6,6 +6,7 @@ use crate::state::AppState;
 use crate::sync::import::{ImportError, apply_import, parse_car};
 use crate::sync::verify::CarVerifier;
 use crate::types::Did;
+use tranquil_types::{AtUri, CidLink};
 use axum::{
     body::Bytes,
     extract::State,
@@ -45,13 +46,7 @@ pub async fn import_repo(
     }
     let auth_user = auth.0;
     let did = &auth_user.did;
-    let user = match sqlx::query!(
-        "SELECT id, handle, deactivated_at, takedown_ref FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let user = match state.user_repo.get_by_did(did).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -190,46 +185,38 @@ pub async fn import_repo(
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_BLOCKS);
-    match apply_import(&state.db, user_id, root, blocks.clone(), max_blocks).await {
+    match apply_import(&state.repo_repo, user_id, root, blocks.clone(), max_blocks).await {
         Ok(import_result) => {
             info!(
                 "Successfully imported {} records for user {}",
                 import_result.records.len(),
                 did
             );
-            let blob_refs: Vec<(String, String)> = import_result
+            let blob_refs: Vec<(AtUri, CidLink)> = import_result
                 .records
                 .iter()
                 .flat_map(|record| {
-                    let record_uri = format!("at://{}/{}/{}", did, record.collection, record.rkey);
+                    let record_uri = AtUri::from_parts(did.as_str(), &record.collection, &record.rkey);
                     record
                         .blob_refs
                         .iter()
-                        .map(move |blob_ref| (record_uri.clone(), blob_ref.cid.clone()))
+                        .map(move |blob_ref| (record_uri.clone(), CidLink::new_unchecked(blob_ref.cid.clone())))
                 })
                 .collect();
 
             if !blob_refs.is_empty() {
-                let (record_uris, blob_cids): (Vec<String>, Vec<String>) =
+                let (record_uris, blob_cids): (Vec<AtUri>, Vec<CidLink>) =
                     blob_refs.into_iter().unzip();
 
-                match sqlx::query!(
-                    r#"
-                    INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
-                    SELECT $1, * FROM UNNEST($2::text[], $3::text[])
-                    ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
-                    "#,
-                    user_id,
-                    &record_uris,
-                    &blob_cids
-                )
-                .execute(&state.db)
-                .await
+                match state
+                    .blob_repo
+                    .insert_record_blobs(user_id, &record_uris, &blob_cids)
+                    .await
                 {
-                    Ok(result) => {
+                    Ok(()) => {
                         info!(
                             "Recorded {} blob references for imported repo",
-                            result.rows_affected()
+                            blob_cids.len()
                         );
                     }
                     Err(e) => {
@@ -237,16 +224,7 @@ pub async fn import_repo(
                     }
                 }
             }
-            let key_row = match sqlx::query!(
-                r#"SELECT uk.key_bytes, uk.encryption_version
-                   FROM user_keys uk
-                   JOIN users u ON uk.user_id = u.id
-                   WHERE u.did = $1"#,
-                did
-            )
-            .fetch_optional(&state.db)
-            .await
-            {
+            let key_row = match state.user_repo.get_user_with_key_by_did(did).await {
                 Ok(Some(row)) => row,
                 Ok(None) => {
                     error!("No signing key found for user {}", did);
@@ -295,36 +273,26 @@ pub async fn import_repo(
                     return ApiError::InternalError(None).into_response();
                 }
             };
-            let new_root_str = new_root_cid.to_string();
-            if let Err(e) = sqlx::query!(
-                "UPDATE repos SET repo_root_cid = $1, repo_rev = $2, updated_at = NOW() WHERE user_id = $3",
-                new_root_str,
-                &new_rev_str,
-                user_id
-            )
-            .execute(&state.db)
-            .await
+            let new_root_cid_link = CidLink::new_unchecked(&new_root_cid.to_string());
+            if let Err(e) = state
+                .repo_repo
+                .update_repo_root(user_id, &new_root_cid_link, &new_rev_str)
+                .await
             {
                 error!("Failed to update repo root: {:?}", e);
                 return ApiError::InternalError(None).into_response();
             }
             let mut all_block_cids: Vec<Vec<u8>> = blocks.keys().map(|c| c.to_bytes()).collect();
             all_block_cids.push(new_root_cid.to_bytes());
-            if let Err(e) = sqlx::query!(
-                r#"
-                INSERT INTO user_blocks (user_id, block_cid)
-                SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
-                ON CONFLICT (user_id, block_cid) DO NOTHING
-                "#,
-                user_id,
-                &all_block_cids
-            )
-            .execute(&state.db)
-            .await
+            if let Err(e) = state
+                .repo_repo
+                .insert_user_blocks(user_id, &all_block_cids, &new_rev_str)
+                .await
             {
                 error!("Failed to insert user_blocks: {:?}", e);
                 return ApiError::InternalError(None).into_response();
             }
+            let new_root_str = new_root_cid.to_string();
             info!(
                 "Created new commit for imported repo: cid={}, rev={}",
                 new_root_str, new_rev_str
@@ -338,15 +306,14 @@ pub async fn import_repo(
                     "$type": "app.bsky.actor.defs#personalDetailsPref",
                     "birthDate": "1998-05-06T00:00:00.000Z"
                 });
-                if let Err(e) = sqlx::query!(
-                    "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
-                     ON CONFLICT (user_id, name) DO NOTHING",
-                    user_id,
-                    "app.bsky.actor.defs#personalDetailsPref",
-                    birthdate_pref
-                )
-                .execute(&state.db)
-                .await
+                if let Err(e) = state
+                    .infra_repo
+                    .insert_account_preference_if_not_exists(
+                        user_id,
+                        "app.bsky.actor.defs#personalDetailsPref",
+                        birthdate_pref,
+                    )
+                    .await
                 {
                     warn!(
                         "Failed to set default birthdate preference for migrated user: {:?}",
@@ -397,37 +364,20 @@ async fn sequence_import_event(
     state: &AppState,
     did: &Did,
     commit_cid: &str,
-) -> Result<(), sqlx::Error> {
-    let prev_cid: Option<String> = None;
-    let prev_data_cid: Option<String> = None;
-    let ops = serde_json::json!([]);
-    let blobs: Vec<String> = vec![];
-    let blocks_cids: Vec<String> = vec![];
-    let did_str = did.as_str();
+) -> Result<(), tranquil_db::DbError> {
+    let data = tranquil_db::CommitEventData {
+        did: did.clone(),
+        event_type: "commit".to_string(),
+        commit_cid: Some(CidLink::new_unchecked(commit_cid)),
+        prev_cid: None,
+        ops: Some(serde_json::json!([])),
+        blobs: Some(vec![]),
+        blocks_cids: Some(vec![]),
+        prev_data_cid: None,
+        rev: None,
+    };
 
-    let mut tx = state.db.begin().await?;
-
-    let seq_row = sqlx::query!(
-        r#"
-        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids)
-        VALUES ($1, 'commit', $2, $3, $4, $5, $6, $7)
-        RETURNING seq
-        "#,
-        did_str,
-        commit_cid,
-        prev_cid,
-        prev_data_cid,
-        ops,
-        &blobs,
-        &blocks_cids
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-
-    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&mut *tx)
-        .await?;
-
-    tx.commit().await?;
+    let seq = state.repo_repo.insert_commit_event(&data).await?;
+    state.repo_repo.notify_update(seq).await?;
     Ok(())
 }

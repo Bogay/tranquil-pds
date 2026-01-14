@@ -4,6 +4,7 @@ use crate::state::AppState;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use tranquil_types::CidLink;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,14 +43,25 @@ fn is_valid_hex_color(s: &str) -> bool {
 pub async fn get_server_config(
     State(state): State<AppState>,
 ) -> Result<Json<ServerConfigResponse>, ApiError> {
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT key, value FROM server_config WHERE key IN ('server_name', 'primary_color', 'primary_color_dark', 'secondary_color', 'secondary_color_dark', 'logo_cid')"
-    )
-    .fetch_all(&state.db)
-    .await?;
+    let keys = &[
+        "server_name",
+        "primary_color",
+        "primary_color_dark",
+        "secondary_color",
+        "secondary_color_dark",
+        "logo_cid",
+    ];
 
-    let config_map: std::collections::HashMap<String, String> =
-        rows.into_iter().collect();
+    let rows = state
+        .infra_repo
+        .get_server_configs(keys)
+        .await
+        .map_err(|e| {
+            error!("DB error fetching server config: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
+
+    let config_map: std::collections::HashMap<String, String> = rows.into_iter().collect();
 
     Ok(Json(ServerConfigResponse {
         server_name: config_map
@@ -64,26 +76,6 @@ pub async fn get_server_config(
     }))
 }
 
-async fn upsert_config(db: &sqlx::PgPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO server_config (key, value, updated_at) VALUES ($1, $2, NOW())
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()",
-    )
-    .bind(key)
-    .bind(value)
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-async fn delete_config(db: &sqlx::PgPool, key: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM server_config WHERE key = $1")
-        .bind(key)
-        .execute(db)
-        .await?;
-    Ok(())
-}
-
 pub async fn update_server_config(
     State(state): State<AppState>,
     _admin: BearerAuthAdmin,
@@ -96,14 +88,35 @@ pub async fn update_server_config(
                 "Server name must be 1-100 characters".into(),
             ));
         }
-        upsert_config(&state.db, "server_name", trimmed).await?;
+        state
+            .infra_repo
+            .upsert_server_config("server_name", trimmed)
+            .await
+            .map_err(|e| {
+                error!("DB error upserting server_name: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
     }
 
     if let Some(ref color) = req.primary_color {
         if color.is_empty() {
-            delete_config(&state.db, "primary_color").await?;
+            state
+                .infra_repo
+                .delete_server_config("primary_color")
+                .await
+                .map_err(|e| {
+                    error!("DB error deleting primary_color: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else if is_valid_hex_color(color) {
-            upsert_config(&state.db, "primary_color", color).await?;
+            state
+                .infra_repo
+                .upsert_server_config("primary_color", color)
+                .await
+                .map_err(|e| {
+                    error!("DB error upserting primary_color: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid primary color format (expected #RRGGBB)".into(),
@@ -113,9 +126,23 @@ pub async fn update_server_config(
 
     if let Some(ref color) = req.primary_color_dark {
         if color.is_empty() {
-            delete_config(&state.db, "primary_color_dark").await?;
+            state
+                .infra_repo
+                .delete_server_config("primary_color_dark")
+                .await
+                .map_err(|e| {
+                    error!("DB error deleting primary_color_dark: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else if is_valid_hex_color(color) {
-            upsert_config(&state.db, "primary_color_dark", color).await?;
+            state
+                .infra_repo
+                .upsert_server_config("primary_color_dark", color)
+                .await
+                .map_err(|e| {
+                    error!("DB error upserting primary_color_dark: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid primary dark color format (expected #RRGGBB)".into(),
@@ -125,9 +152,23 @@ pub async fn update_server_config(
 
     if let Some(ref color) = req.secondary_color {
         if color.is_empty() {
-            delete_config(&state.db, "secondary_color").await?;
+            state
+                .infra_repo
+                .delete_server_config("secondary_color")
+                .await
+                .map_err(|e| {
+                    error!("DB error deleting secondary_color: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else if is_valid_hex_color(color) {
-            upsert_config(&state.db, "secondary_color", color).await?;
+            state
+                .infra_repo
+                .upsert_server_config("secondary_color", color)
+                .await
+                .map_err(|e| {
+                    error!("DB error upserting secondary_color: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid secondary color format (expected #RRGGBB)".into(),
@@ -137,9 +178,23 @@ pub async fn update_server_config(
 
     if let Some(ref color) = req.secondary_color_dark {
         if color.is_empty() {
-            delete_config(&state.db, "secondary_color_dark").await?;
+            state
+                .infra_repo
+                .delete_server_config("secondary_color_dark")
+                .await
+                .map_err(|e| {
+                    error!("DB error deleting secondary_color_dark: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else if is_valid_hex_color(color) {
-            upsert_config(&state.db, "secondary_color_dark", color).await?;
+            state
+                .infra_repo
+                .upsert_server_config("secondary_color_dark", color)
+                .await
+                .map_err(|e| {
+                    error!("DB error upserting secondary_color_dark: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid secondary dark color format (expected #RRGGBB)".into(),
@@ -148,10 +203,12 @@ pub async fn update_server_config(
     }
 
     if let Some(ref logo_cid) = req.logo_cid {
-        let old_logo_cid: Option<String> =
-            sqlx::query_scalar("SELECT value FROM server_config WHERE key = 'logo_cid'")
-                .fetch_optional(&state.db)
-                .await?;
+        let old_logo_cid = state
+            .infra_repo
+            .get_server_config("logo_cid")
+            .await
+            .ok()
+            .flatten();
 
         let should_delete_old = match (&old_logo_cid, logo_cid.is_empty()) {
             (Some(old), true) => Some(old.clone()),
@@ -159,27 +216,38 @@ pub async fn update_server_config(
             _ => None,
         };
 
-        if let Some(old_cid) = should_delete_old
-            && let Ok(Some(blob)) =
-                sqlx::query!("SELECT storage_key FROM blobs WHERE cid = $1", old_cid)
-                    .fetch_optional(&state.db)
-                    .await
-        {
-            if let Err(e) = state.blob_store.delete(&blob.storage_key).await {
-                error!("Failed to delete old logo blob from storage: {:?}", e);
-            }
-            if let Err(e) = sqlx::query!("DELETE FROM blobs WHERE cid = $1", old_cid)
-                .execute(&state.db)
-                .await
+        if let Some(old_cid_str) = should_delete_old {
+            let old_cid = CidLink::new_unchecked(old_cid_str);
+            if let Ok(Some(storage_key)) =
+                state.infra_repo.get_blob_storage_key_by_cid(&old_cid).await
             {
-                error!("Failed to delete old logo blob record: {:?}", e);
+                if let Err(e) = state.blob_store.delete(&storage_key).await {
+                    error!("Failed to delete old logo blob from storage: {:?}", e);
+                }
+                if let Err(e) = state.infra_repo.delete_blob_by_cid(&old_cid).await {
+                    error!("Failed to delete old logo blob record: {:?}", e);
+                }
             }
         }
 
         if logo_cid.is_empty() {
-            delete_config(&state.db, "logo_cid").await?;
+            state
+                .infra_repo
+                .delete_server_config("logo_cid")
+                .await
+                .map_err(|e| {
+                    error!("DB error deleting logo_cid: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         } else {
-            upsert_config(&state.db, "logo_cid", logo_cid).await?;
+            state
+                .infra_repo
+                .upsert_server_config("logo_cid", logo_cid)
+                .await
+                .map_err(|e| {
+                    error!("DB error upserting logo_cid: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
         }
     }
 

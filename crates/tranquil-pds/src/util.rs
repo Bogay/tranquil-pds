@@ -3,13 +3,9 @@ use cid::Cid;
 use ipld_core::ipld::Ipld;
 use rand::Rng;
 use serde_json::Value as JsonValue;
-use sqlx::PgPool;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::OnceLock;
-use uuid::Uuid;
-
-use crate::types::{Did, Handle};
 
 const BASE32_ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz234567";
 const DEFAULT_MAX_BLOB_SIZE: usize = 10 * 1024 * 1024 * 1024;
@@ -41,66 +37,6 @@ pub fn generate_token_code_parts(parts: usize, part_len: usize) -> String {
         })
         .collect::<Vec<_>>()
         .join("-")
-}
-
-#[derive(Debug)]
-pub enum DbLookupError {
-    NotFound,
-    DatabaseError(sqlx::Error),
-}
-
-impl From<sqlx::Error> for DbLookupError {
-    fn from(e: sqlx::Error) -> Self {
-        DbLookupError::DatabaseError(e)
-    }
-}
-
-pub async fn get_user_id_by_did(db: &PgPool, did: &str) -> Result<Uuid, DbLookupError> {
-    sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(db)
-        .await?
-        .ok_or(DbLookupError::NotFound)
-}
-
-pub struct UserInfo {
-    pub id: Uuid,
-    pub did: Did,
-    pub handle: Handle,
-}
-
-pub async fn get_user_by_did(db: &PgPool, did: &str) -> Result<UserInfo, DbLookupError> {
-    sqlx::query_as!(
-        UserInfo,
-        "SELECT id, did, handle FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(db)
-    .await?
-    .ok_or(DbLookupError::NotFound)
-}
-
-pub async fn get_user_by_identifier(
-    db: &PgPool,
-    identifier: &str,
-) -> Result<UserInfo, DbLookupError> {
-    sqlx::query_as!(
-        UserInfo,
-        "SELECT id, did, handle FROM users WHERE did = $1 OR handle = $1",
-        identifier
-    )
-    .fetch_optional(db)
-    .await?
-    .ok_or(DbLookupError::NotFound)
-}
-
-pub async fn is_account_migrated(db: &PgPool, did: &str) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query!(
-        r#"SELECT (migrated_to_pds IS NOT NULL AND deactivated_at IS NOT NULL) as "migrated!: bool" FROM users WHERE did = $1"#,
-        did
-    )
-    .fetch_optional(db)
-    .await?;
-    Ok(row.map(|r| r.migrated).unwrap_or(false))
 }
 
 pub fn parse_repeated_query_param(query: Option<&str>, key: &str) -> Vec<String> {

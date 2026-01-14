@@ -74,34 +74,30 @@ async fn handle_migration_verification(
         return Err(ApiError::InvalidChannel);
     }
 
-    let user = sqlx::query!(
-        "SELECT id, email, email_verified FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        warn!(error = %e, "Database error during migration verification");
-        ApiError::InternalError(None)
-    })?;
-
-    let user = user.ok_or(ApiError::AccountNotFound)?;
+    let did_typed: Did = did.parse().map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+    let user = state
+        .user_repo
+        .get_verification_info(&did_typed)
+        .await
+        .map_err(|e| {
+            warn!(error = ?e, "Database error during migration verification");
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     if user.email.as_ref().map(|e| e.to_lowercase()) != Some(identifier.to_string()) {
         return Err(ApiError::IdentifierMismatch);
     }
 
     if !user.email_verified {
-        sqlx::query!(
-            "UPDATE users SET email_verified = true WHERE id = $1",
-            user.id
-        )
-        .execute(&state.db)
-        .await
-        .map_err(|e| {
-            warn!(error = %e, "Failed to update email_verified status");
-            ApiError::InternalError(None)
-        })?;
+        state
+            .user_repo
+            .set_email_verified_flag(user.id)
+            .await
+            .map_err(|e| {
+                warn!(error = ?e, "Failed to update email_verified status");
+                ApiError::InternalError(None)
+            })?;
     }
 
     info!(did = %did, "Migration email verified successfully");
@@ -120,48 +116,62 @@ async fn handle_channel_update(
     channel: &str,
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_one(&state.db)
+    let did_typed: Did = did.parse().map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+    let user_id = state
+        .user_repo
+        .get_id_by_did(&did_typed)
         .await
-        .map_err(|_| ApiError::InternalError(None))?;
+        .map_err(|_| ApiError::InternalError(None))?
+        .ok_or(ApiError::AccountNotFound)?;
 
-    let update_result = match channel {
-        "email" => sqlx::query!(
-            "UPDATE users SET email = $1, email_verified = TRUE, updated_at = NOW() WHERE id = $2",
-            identifier,
-            user_id
-        ).execute(&state.db).await,
-        "discord" => sqlx::query!(
-            "UPDATE users SET discord_id = $1, discord_verified = TRUE, updated_at = NOW() WHERE id = $2",
-            identifier,
-            user_id
-        ).execute(&state.db).await,
-        "telegram" => sqlx::query!(
-            "UPDATE users SET telegram_username = $1, telegram_verified = TRUE, updated_at = NOW() WHERE id = $2",
-            identifier,
-            user_id
-        ).execute(&state.db).await,
-        "signal" => sqlx::query!(
-            "UPDATE users SET signal_number = $1, signal_verified = TRUE, updated_at = NOW() WHERE id = $2",
-            identifier,
-            user_id
-        ).execute(&state.db).await,
+    match channel {
+        "email" => {
+            let success = state
+                .user_repo
+                .verify_email_channel(user_id, identifier)
+                .await
+                .map_err(|e| {
+                    error!("Failed to update email channel: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
+            if !success {
+                return Err(ApiError::EmailTaken);
+            }
+        }
+        "discord" => {
+            state
+                .user_repo
+                .verify_discord_channel(user_id, identifier)
+                .await
+                .map_err(|e| {
+                    error!("Failed to update discord channel: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
+        }
+        "telegram" => {
+            state
+                .user_repo
+                .verify_telegram_channel(user_id, identifier)
+                .await
+                .map_err(|e| {
+                    error!("Failed to update telegram channel: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
+        }
+        "signal" => {
+            state
+                .user_repo
+                .verify_signal_channel(user_id, identifier)
+                .await
+                .map_err(|e| {
+                    error!("Failed to update signal channel: {:?}", e);
+                    ApiError::InternalError(None)
+                })?;
+        }
         _ => {
             return Err(ApiError::InvalidChannel);
         }
     };
-
-    if let Err(e) = update_result {
-        error!("Failed to update user channel: {:?}", e);
-        if channel == "email"
-            && e.as_database_error()
-                .map(|db| db.is_unique_violation())
-                .unwrap_or(false)
-        {
-            return Err(ApiError::EmailTaken);
-        }
-        return Err(ApiError::InternalError(None));
-    }
 
     info!(did = %did, channel = %channel, "Channel verified successfully");
 
@@ -179,18 +189,16 @@ async fn handle_signup_verification(
     channel: &str,
     _identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    let user = sqlx::query!(
-        "SELECT id, handle, email, email_verified, discord_verified, telegram_verified, signal_verified FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        warn!(error = %e, "Database error during signup verification");
-        ApiError::InternalError(None)
-    })?;
-
-    let user = user.ok_or(ApiError::AccountNotFound)?;
+    let did_typed: Did = did.parse().map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+    let user = state
+        .user_repo
+        .get_verification_info(&did_typed)
+        .await
+        .map_err(|e| {
+            warn!(error = ?e, "Database error during signup verification");
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let is_verified = user.email_verified
         || user.discord_verified
@@ -206,48 +214,51 @@ async fn handle_signup_verification(
         }));
     }
 
-    let update_result = match channel {
+    match channel {
         "email" => {
-            sqlx::query!(
-                "UPDATE users SET email_verified = TRUE WHERE id = $1",
-                user.id
-            )
-            .execute(&state.db)
-            .await
+            state
+                .user_repo
+                .set_email_verified_flag(user.id)
+                .await
+                .map_err(|e| {
+                    warn!(error = ?e, "Failed to update email verified status");
+                    ApiError::InternalError(None)
+                })?;
         }
         "discord" => {
-            sqlx::query!(
-                "UPDATE users SET discord_verified = TRUE WHERE id = $1",
-                user.id
-            )
-            .execute(&state.db)
-            .await
+            state
+                .user_repo
+                .set_discord_verified_flag(user.id)
+                .await
+                .map_err(|e| {
+                    warn!(error = ?e, "Failed to update discord verified status");
+                    ApiError::InternalError(None)
+                })?;
         }
         "telegram" => {
-            sqlx::query!(
-                "UPDATE users SET telegram_verified = TRUE WHERE id = $1",
-                user.id
-            )
-            .execute(&state.db)
-            .await
+            state
+                .user_repo
+                .set_telegram_verified_flag(user.id)
+                .await
+                .map_err(|e| {
+                    warn!(error = ?e, "Failed to update telegram verified status");
+                    ApiError::InternalError(None)
+                })?;
         }
         "signal" => {
-            sqlx::query!(
-                "UPDATE users SET signal_verified = TRUE WHERE id = $1",
-                user.id
-            )
-            .execute(&state.db)
-            .await
+            state
+                .user_repo
+                .set_signal_verified_flag(user.id)
+                .await
+                .map_err(|e| {
+                    warn!(error = ?e, "Failed to update signal verified status");
+                    ApiError::InternalError(None)
+                })?;
         }
         _ => {
             return Err(ApiError::InvalidChannel);
         }
     };
-
-    update_result.map_err(|e| {
-        warn!(error = %e, "Failed to update channel verified status");
-        ApiError::InternalError(None)
-    })?;
 
     info!(did = %did, channel = %channel, "Signup verified successfully");
 

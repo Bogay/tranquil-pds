@@ -34,14 +34,7 @@ pub async fn request_email_update(
         return e;
     }
 
-    let did = auth.0.did.to_string();
-    let user = match sqlx::query!(
-        "SELECT id, handle, email, email_verified FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let user = match state.user_repo.get_email_info_by_did(&auth.0.did).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -61,16 +54,21 @@ pub async fn request_email_update(
 
     if token_required {
         let code = crate::auth::verification_token::generate_channel_update_token(
-            &did,
+            &auth.0.did,
             "email_update",
             &current_email.to_lowercase(),
         );
         let formatted_code = crate::auth::verification_token::format_token_for_display(&code);
 
         let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-        if let Err(e) =
-            crate::comms::enqueue_email_update_token(&state.db, user.id, &formatted_code, &hostname)
-                .await
+        if let Err(e) = crate::comms::comms_repo::enqueue_email_update_token(
+            state.user_repo.as_ref(),
+            state.infra_repo.as_ref(),
+            user.id,
+            &formatted_code,
+            &hostname,
+        )
+        .await
         {
             warn!("Failed to enqueue email update notification: {:?}", e);
         }
@@ -111,14 +109,8 @@ pub async fn confirm_email(
         return e;
     }
 
-    let did = auth.0.did.to_string();
-    let user = match sqlx::query!(
-        "SELECT id, email, email_verified FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let did = &auth.0.did;
+    let user = match state.user_repo.get_email_info_by_did(did).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -154,7 +146,7 @@ pub async fn confirm_email(
 
     match verified {
         Ok(token_data) => {
-            if token_data.did != did {
+            if token_data.did != did.as_str() {
                 return ApiError::InvalidToken(None).into_response();
             }
         }
@@ -166,14 +158,7 @@ pub async fn confirm_email(
         }
     }
 
-    let update = sqlx::query!(
-        "UPDATE users SET email_verified = TRUE, updated_at = NOW() WHERE id = $1",
-        user.id
-    )
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = update {
+    if let Err(e) = state.user_repo.set_email_verified(user.id, true).await {
         error!("DB error confirming email: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -207,14 +192,8 @@ pub async fn update_email(
         return e;
     }
 
-    let did = auth_user.did.to_string();
-    let user = match sqlx::query!(
-        "SELECT id, email, email_verified FROM users WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let did = &auth_user.did;
+    let user = match state.user_repo.get_email_info_by_did(did).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -262,7 +241,7 @@ pub async fn update_email(
 
         match verified {
             Ok(token_data) => {
-                if token_data.did != did {
+                if token_data.did != did.as_str() {
                     return ApiError::InvalidToken(None).into_response();
                 }
             }
@@ -275,34 +254,12 @@ pub async fn update_email(
         }
     }
 
-    let exists = sqlx::query!(
-        "SELECT 1 as one FROM users WHERE LOWER(email) = $1 AND id != $2",
-        new_email,
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    if let Ok(Some(_)) = exists {
+    if let Ok(true) = state.user_repo.check_email_exists(&new_email, user_id).await {
         return ApiError::InvalidRequest("Email is already in use".into()).into_response();
     }
 
-    let update: Result<sqlx::postgres::PgQueryResult, sqlx::Error> = sqlx::query!(
-        "UPDATE users SET email = $1, email_verified = FALSE, updated_at = NOW() WHERE id = $2",
-        new_email,
-        user_id
-    )
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = update {
+    if let Err(e) = state.user_repo.update_email(user_id, &new_email).await {
         error!("DB error updating email: {:?}", e);
-        if e.as_database_error()
-            .map(|db_err: &dyn sqlx::error::DatabaseError| db_err.is_unique_violation())
-            .unwrap_or(false)
-        {
-            return ApiError::EmailTaken.into_response();
-        }
         return ApiError::InternalError(None).into_response();
     }
 
@@ -310,29 +267,30 @@ pub async fn update_email(
         crate::auth::verification_token::generate_signup_token(&did, "email", &new_email);
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
-    if let Err(e) = crate::comms::enqueue_signup_verification(
-        &state.db,
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+        state.infra_repo.as_ref(),
         user_id,
         "email",
         &new_email,
         &formatted_token,
-        None,
+        &hostname,
     )
     .await
     {
         warn!("Failed to send verification email to new address: {:?}", e);
     }
 
-    match sqlx::query!(
-        "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, 'email_auth_factor', $2) ON CONFLICT (user_id, name) DO UPDATE SET value_json = $2",
-        user_id,
-        json!(input.email_auth_factor.unwrap_or(false))
-    )
-    .execute(&state.db)
-    .await
+    if let Err(e) = state
+        .infra_repo
+        .upsert_account_preference(
+            user_id,
+            "email_auth_factor",
+            json!(input.email_auth_factor.unwrap_or(false)),
+        )
+        .await
     {
-        Ok(_) => {}
-        Err(e) => warn!("Failed to update email_auth_factor preference: {}", e),
+        warn!("Failed to update email_auth_factor preference: {}", e);
     }
 
     info!("Email updated for user {}", user_id);
@@ -357,15 +315,12 @@ pub async fn check_email_verified(
         return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT email_verified FROM users WHERE email = $1 OR handle = $1",
-        input.identifier
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    match user {
-        Ok(Some(row)) => VerifiedResponse::response(row.email_verified).into_response(),
+    match state
+        .user_repo
+        .check_email_verified_by_identifier(&input.identifier)
+        .await
+    {
+        Ok(Some(verified)) => VerifiedResponse::response(verified).into_response(),
         Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error checking email verified: {:?}", e);

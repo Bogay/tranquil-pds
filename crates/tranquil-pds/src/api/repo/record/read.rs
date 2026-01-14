@@ -59,22 +59,33 @@ pub async fn get_record(
     Query(input): Query<GetRecordInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
     let user_id_opt = if input.repo.is_did() {
-        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo.as_str())
-            .fetch_optional(&state.db)
+        let did: crate::types::Did = match input.repo.as_str().parse() {
+            Ok(d) => d,
+            Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
+        };
+        state
+            .user_repo
+            .get_id_by_did(&did)
             .await
-            .map(|opt| opt.map(|r| r.id))
+            .map_err(|_| ())
     } else {
         let repo_str = input.repo.as_str();
-        let handle = if !repo_str.contains('.') {
-            format!("{}.{}", repo_str, hostname)
+        let handle_str = if !repo_str.contains('.') {
+            format!("{}.{}", repo_str, hostname_for_handles)
         } else {
             repo_str.to_string()
         };
-        sqlx::query!("SELECT id FROM users WHERE handle = $1", handle)
-            .fetch_optional(&state.db)
+        let handle: crate::types::Handle = match handle_str.parse() {
+            Ok(h) => h,
+            Err(_) => return ApiError::InvalidRequest("Invalid handle format".into()).into_response(),
+        };
+        state
+            .user_repo
+            .get_id_by_handle(&handle)
             .await
-            .map(|opt| opt.map(|r| r.id))
+            .map_err(|_| ())
     };
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
@@ -85,20 +96,17 @@ pub async fn get_record(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let record_row = sqlx::query!(
-        "SELECT record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey = $3",
-        user_id,
-        input.collection.as_str(),
-        input.rkey.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let record_cid_str: String = match record_row {
-        Ok(Some(row)) => row.record_cid,
+    let record_row = state
+        .repo_repo
+        .get_record_cid(user_id, &input.collection, &input.rkey)
+        .await;
+    let record_cid_link = match record_row {
+        Ok(Some(cid)) => cid,
         _ => {
             return ApiError::RecordNotFound.into_response();
         }
     };
+    let record_cid_str = record_cid_link.to_string();
     if let Some(expected_cid) = &input.cid
         && &record_cid_str != expected_cid
     {
@@ -152,22 +160,33 @@ pub async fn list_records(
     Query(input): Query<ListRecordsInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
     let user_id_opt = if input.repo.is_did() {
-        sqlx::query!("SELECT id FROM users WHERE did = $1", input.repo.as_str())
-            .fetch_optional(&state.db)
+        let did: crate::types::Did = match input.repo.as_str().parse() {
+            Ok(d) => d,
+            Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
+        };
+        state
+            .user_repo
+            .get_id_by_did(&did)
             .await
-            .map(|opt| opt.map(|r| r.id))
+            .map_err(|_| ())
     } else {
         let repo_str = input.repo.as_str();
-        let handle = if !repo_str.contains('.') {
-            format!("{}.{}", repo_str, hostname)
+        let handle_str = if !repo_str.contains('.') {
+            format!("{}.{}", repo_str, hostname_for_handles)
         } else {
             repo_str.to_string()
         };
-        sqlx::query!("SELECT id FROM users WHERE handle = $1", handle)
-            .fetch_optional(&state.db)
+        let handle: crate::types::Handle = match handle_str.parse() {
+            Ok(h) => h,
+            Err(_) => return ApiError::InvalidRequest("Invalid handle format".into()).into_response(),
+        };
+        state
+            .user_repo
+            .get_id_by_handle(&handle)
             .await
-            .map(|opt| opt.map(|r| r.id))
+            .map_err(|_| ())
     };
     let user_id: uuid::Uuid = match user_id_opt {
         Ok(Some(id)) => id,
@@ -181,67 +200,33 @@ pub async fn list_records(
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
     let reverse = input.reverse.unwrap_or(false);
     let limit_i64 = limit as i64;
-    let order = if reverse { "ASC" } else { "DESC" };
-    let rows_res: Result<Vec<(String, String)>, sqlx::Error> = if let Some(cursor) = &input.cursor {
-        let comparator = if reverse { ">" } else { "<" };
-        let query = format!(
-            "SELECT rkey, record_cid FROM records WHERE repo_id = $1 AND collection = $2 AND rkey {} $3 ORDER BY rkey {} LIMIT $4",
-            comparator, order
-        );
-        sqlx::query_as(&query)
-            .bind(user_id)
-            .bind(input.collection.as_str())
-            .bind(cursor)
-            .bind(limit_i64)
-            .fetch_all(&state.db)
-            .await
-    } else {
-        let mut conditions = vec!["repo_id = $1", "collection = $2"];
-        let mut param_idx = 3;
-        if input.rkey_start.is_some() {
-            conditions.push("rkey > $3");
-            param_idx += 1;
-        }
-        if input.rkey_end.is_some() {
-            conditions.push(if param_idx == 3 {
-                "rkey < $3"
-            } else {
-                "rkey < $4"
-            });
-            param_idx += 1;
-        }
-        let limit_idx = param_idx;
-        let query = format!(
-            "SELECT rkey, record_cid FROM records WHERE {} ORDER BY rkey {} LIMIT ${}",
-            conditions.join(" AND "),
-            order,
-            limit_idx
-        );
-        let mut query_builder = sqlx::query_as::<_, (String, String)>(&query)
-            .bind(user_id)
-            .bind(input.collection.as_str());
-        if let Some(start) = &input.rkey_start {
-            query_builder = query_builder.bind(start.as_str());
-        }
-        if let Some(end) = &input.rkey_end {
-            query_builder = query_builder.bind(end.as_str());
-        }
-        query_builder.bind(limit_i64).fetch_all(&state.db).await
-    };
-    let rows = match rows_res {
+    let cursor_rkey = input.cursor.as_ref().and_then(|c| c.parse::<crate::types::Rkey>().ok());
+    let rows = match state
+        .repo_repo
+        .list_records(
+            user_id,
+            &input.collection,
+            cursor_rkey.as_ref(),
+            limit_i64,
+            reverse,
+            input.rkey_start.as_ref(),
+            input.rkey_end.as_ref(),
+        )
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             error!("Error listing records: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
-    let last_rkey = rows.last().map(|(rkey, _)| rkey.clone());
+    let last_rkey = rows.last().map(|r| r.rkey.to_string());
     let parsed_rows: Vec<(Cid, String, String)> = rows
         .iter()
-        .filter_map(|(rkey, cid_str)| {
-            Cid::from_str(cid_str)
+        .filter_map(|row| {
+            Cid::from_str(row.record_cid.as_str())
                 .ok()
-                .map(|cid| (cid, rkey.clone(), cid_str.clone()))
+                .map(|cid| (cid, row.rkey.to_string(), row.record_cid.to_string()))
         })
         .collect();
     let cids: Vec<Cid> = parsed_rows.iter().map(|(cid, _, _)| *cid).collect();

@@ -25,43 +25,34 @@ pub async fn request_plc_operation_signature(
     ) {
         return e;
     }
-    let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", &auth_user.did)
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(row)) => row,
+    let user_id = match state.user_repo.get_id_by_did(&auth_user.did).await {
+        Ok(Some(id)) => id,
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
-    let _ = sqlx::query!(
-        "DELETE FROM plc_operation_tokens WHERE user_id = $1 OR expires_at < NOW()",
-        user.id
-    )
-    .execute(&state.db)
-    .await;
+    let _ = state.infra_repo.delete_plc_tokens_for_user(user_id).await;
     let plc_token = generate_plc_token();
     let expires_at = Utc::now() + Duration::minutes(10);
-    if let Err(e) = sqlx::query!(
-        r#"
-        INSERT INTO plc_operation_tokens (user_id, token, expires_at)
-        VALUES ($1, $2, $3)
-        "#,
-        user.id,
-        plc_token,
-        expires_at
-    )
-    .execute(&state.db)
-    .await
+    if let Err(e) = state
+        .infra_repo
+        .insert_plc_token(user_id, &plc_token, expires_at)
+        .await
     {
         error!("Failed to create PLC token: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) =
-        crate::comms::enqueue_plc_operation(&state.db, user.id, &plc_token, &hostname).await
+    if let Err(e) = crate::comms::comms_repo::enqueue_plc_operation(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        user_id,
+        &plc_token,
+        &hostname,
+    )
+    .await
     {
         warn!("Failed to enqueue PLC operation notification: {:?}", e);
     }

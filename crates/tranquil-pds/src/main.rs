@@ -32,18 +32,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let backfill_db = state.db.clone();
+    let backfill_repo_repo = state.repo_repo.clone();
     let backfill_block_store = state.block_store.clone();
     tokio::spawn(async move {
         tokio::join!(
-            backfill_genesis_commit_blocks(&backfill_db, backfill_block_store.clone()),
-            backfill_repo_rev(&backfill_db, backfill_block_store.clone()),
-            backfill_user_blocks(&backfill_db, backfill_block_store.clone()),
-            backfill_record_blobs(&backfill_db, backfill_block_store),
+            backfill_genesis_commit_blocks(backfill_repo_repo.clone(), backfill_block_store.clone()),
+            backfill_repo_rev(backfill_repo_repo.clone(), backfill_block_store.clone()),
+            backfill_user_blocks(backfill_repo_repo.clone(), backfill_block_store.clone()),
+            backfill_record_blobs(backfill_repo_repo, backfill_block_store),
         );
     });
 
-    let mut comms_service = CommsService::new(state.db.clone());
+    let mut comms_service = CommsService::new(state.infra_repo.clone());
 
     if let Some(email_sender) = EmailSender::from_env() {
         info!("Email comms enabled");
@@ -88,7 +88,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let backup_handle = if let Some(backup_storage) = state.backup_storage.clone() {
         info!("Backup service enabled");
         Some(tokio::spawn(start_backup_tasks(
-            state.db.clone(),
+            state.repo_repo.clone(),
+            state.backup_repo.clone(),
             state.block_store.clone(),
             backup_storage,
             shutdown_rx.clone(),
@@ -99,7 +100,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let scheduled_handle = tokio::spawn(start_scheduled_tasks(
-        state.db.clone(),
+        state.user_repo.clone(),
+        state.blob_repo.clone(),
         state.blob_store.clone(),
         shutdown_rx,
     ));

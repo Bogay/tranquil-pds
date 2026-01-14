@@ -14,6 +14,7 @@ use serde::Deserialize;
 use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
+use tranquil_types::Did;
 
 fn parse_get_blocks_query(query_string: &str) -> Result<(String, Vec<String>), String> {
     let did = crate::util::parse_repeated_query_param(Some(query_string), "did")
@@ -29,12 +30,16 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
         return ApiError::InvalidRequest("Missing query parameters".into()).into_response();
     };
 
-    let (did, cid_strings) = match parse_get_blocks_query(&query_string) {
+    let (did_str, cid_strings) = match parse_get_blocks_query(&query_string) {
         Ok(parsed) => parsed,
         Err(msg) => return ApiError::InvalidRequest(msg).into_response(),
     };
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
 
-    let _account = match assert_repo_availability(&state.db, &did, false).await {
+    let _account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };
@@ -119,7 +124,11 @@ pub async fn get_repo(
     State(state): State<AppState>,
     Query(query): Query<GetRepoQuery>,
 ) -> Response {
-    let account = match assert_repo_availability(&state.db, &query.did, false).await {
+    let did: Did = match query.did.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
+    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };
@@ -133,11 +142,11 @@ pub async fn get_repo(
     };
 
     if let Some(since) = &query.since {
-        return get_repo_since(&state, &query.did, &head_cid, since).await;
+        return get_repo_since(&state, &did, &head_cid, since).await;
     }
 
     let car_bytes = match generate_repo_car_from_user_blocks(
-        &state.db,
+        state.repo_repo.as_ref(),
         &state.block_store,
         account.user_id,
         &head_cid,
@@ -159,48 +168,32 @@ pub async fn get_repo(
         .into_response()
 }
 
-async fn get_repo_since(state: &AppState, did: &str, head_cid: &Cid, since: &str) -> Response {
-    let events = sqlx::query!(
-        r#"
-        SELECT blocks_cids, commit_cid
-        FROM repo_seq
-        WHERE did = $1 AND rev > $2
-        ORDER BY seq DESC
-        "#,
-        did,
-        since
-    )
-    .fetch_all(&state.db)
-    .await;
+async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str) -> Response {
+    let user_id = match state.user_repo.get_id_by_did(did).await {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
+                .into_response();
+        }
+        Err(e) => {
+            error!("DB error looking up user: {:?}", e);
+            return ApiError::InternalError(Some("Database error".into())).into_response();
+        }
+    };
 
-    let events = match events {
-        Ok(e) => e,
+    let block_cid_bytes = match state.repo_repo.get_user_block_cids_since_rev(user_id, since).await
+    {
+        Ok(cids) => cids,
         Err(e) => {
             error!("DB error in get_repo_since: {:?}", e);
             return ApiError::InternalError(Some("Database error".into())).into_response();
         }
     };
 
-    let block_cids: Vec<Cid> = events
+    let block_cids: Vec<Cid> = block_cid_bytes
         .iter()
-        .flat_map(|event| {
-            let block_cids = event
-                .blocks_cids
-                .as_ref()
-                .map(|cids| cids.iter().filter_map(|s| Cid::from_str(s).ok()).collect())
-                .unwrap_or_else(Vec::new);
-            let commit_cid = event
-                .commit_cid
-                .as_ref()
-                .and_then(|s| Cid::from_str(s).ok());
-            block_cids.into_iter().chain(commit_cid)
-        })
-        .fold(Vec::new(), |mut acc, cid| {
-            if !acc.contains(&cid) {
-                acc.push(cid);
-            }
-            acc
-        });
+        .filter_map(|bytes| Cid::try_from(bytes.as_slice()).ok())
+        .collect();
 
     let mut car_bytes = match encode_car_header(head_cid) {
         Ok(h) => h,
@@ -269,7 +262,11 @@ pub async fn get_record(
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    let account = match assert_repo_availability(&state.db, &query.did, false).await {
+    let did: Did = match query.did.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
+    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };

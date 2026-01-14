@@ -13,6 +13,7 @@ use bcrypt::verify;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
+use tranquil_types::TokenId;
 
 fn extract_client_ip(headers: &HeaderMap) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
@@ -90,26 +91,16 @@ pub async fn create_session(
         return ApiError::RateLimitExceeded(None).into_response();
     }
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let normalized_identifier = normalize_handle(&input.identifier, &pds_hostname);
+    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
+    let normalized_identifier = normalize_handle(&input.identifier, hostname_for_handles);
     info!(
         "Normalized identifier: {} -> {}",
         input.identifier, normalized_identifier
     );
-    let row = match sqlx::query!(
-        r#"SELECT
-            u.id, u.did, u.handle, u.password_hash, u.email, u.deactivated_at, u.takedown_ref,
-            u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,
-            u.allow_legacy_login, u.migrated_to_pds,
-            u.preferred_comms_channel as "preferred_comms_channel: crate::comms::CommsChannel",
-            k.key_bytes, k.encryption_version,
-            (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled
-        FROM users u
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE u.handle = $1 OR u.email = $1 OR u.did = $1"#,
-        normalized_identifier
-    )
-    .fetch_optional(&state.db)
-    .await
+    let row = match state
+        .user_repo
+        .get_login_full_by_identifier(&normalized_identifier)
+        .await
     {
         Ok(Some(row)) => row,
         Ok(None) => {
@@ -141,13 +132,11 @@ pub async fn create_session(
     {
         (true, None, None, None)
     } else {
-        let app_passwords = sqlx::query!(
-            "SELECT name, password_hash, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20",
-            row.id
-        )
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
+        let app_passwords = state
+            .session_repo
+            .get_app_passwords_for_login(row.id)
+            .await
+            .unwrap_or_default();
         let matched = app_passwords
             .iter()
             .find(|app| verify(&input.password, &app.password_hash).unwrap_or(false));
@@ -178,7 +167,9 @@ pub async fn create_session(
     }
     let is_verified =
         row.email_verified || row.discord_verified || row.telegram_verified || row.signal_verified;
-    let is_delegated = crate::delegation::is_delegated_account(&state.db, &row.did)
+    let is_delegated = state
+        .delegation_repo
+        .is_delegated_account(&row.did)
         .await
         .unwrap_or(false);
     if !is_verified && !is_delegated {
@@ -193,7 +184,7 @@ pub async fn create_session(
         )
             .into_response();
     }
-    let has_totp = row.totp_enabled.unwrap_or(false);
+    let has_totp = row.totp_enabled;
     let is_legacy_login = has_totp;
     if has_totp && !row.allow_legacy_login {
         warn!("Legacy login blocked for TOTP-enabled account: {}", row.did);
@@ -229,21 +220,20 @@ pub async fn create_session(
     };
     let did_for_doc = row.did.clone();
     let did_resolver = state.did_resolver.clone();
+    let session_data = tranquil_db_traits::SessionTokenCreate {
+        did: row.did.clone(),
+        access_jti: access_meta.jti.clone(),
+        refresh_jti: refresh_meta.jti.clone(),
+        access_expires_at: access_meta.expires_at,
+        refresh_expires_at: refresh_meta.expires_at,
+        legacy_login: is_legacy_login,
+        mfa_verified: false,
+        scope: app_password_scopes.clone(),
+        controller_did: app_password_controller.clone(),
+        app_password_name: app_password_name.clone(),
+    };
     let (insert_result, did_doc) = tokio::join!(
-        sqlx::query!(
-            "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope, controller_did, app_password_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            row.did,
-            access_meta.jti,
-            refresh_meta.jti,
-            access_meta.expires_at,
-            refresh_meta.expires_at,
-            is_legacy_login,
-            false,
-            app_password_scopes,
-            app_password_controller,
-            app_password_name
-        )
-        .execute(&state.db),
+        state.session_repo.create_session(&session_data),
         did_resolver.resolve_did_document(&did_for_doc)
     );
     if let Err(e) = insert_result {
@@ -257,8 +247,9 @@ pub async fn create_session(
             "Legacy login on TOTP-enabled account - sending notification"
         );
         let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-        if let Err(e) = crate::comms::queue_legacy_login_notification(
-            &state.db,
+        if let Err(e) = crate::comms::comms_repo::enqueue_legacy_login(
+            state.user_repo.as_ref(),
+            state.infra_repo.as_ref(),
             row.id,
             &hostname,
             &client_ip,
@@ -296,24 +287,16 @@ pub async fn get_session(
     let did_for_doc = auth_user.did.clone();
     let did_resolver = state.did_resolver.clone();
     let (db_result, did_doc) = tokio::join!(
-        sqlx::query!(
-            r#"SELECT
-                handle, email, email_verified, is_admin, deactivated_at, takedown_ref, preferred_locale,
-                preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
-                discord_verified, telegram_verified, signal_verified, migrated_to_pds, migrated_at
-            FROM users WHERE did = $1"#,
-            &auth_user.did
-        )
-        .fetch_optional(&state.db),
+        state.user_repo.get_session_info_by_did(&auth_user.did),
         did_resolver.resolve_did_document(&did_for_doc)
     );
     match db_result {
         Ok(Some(row)) => {
-            let (preferred_channel, preferred_channel_verified) = match row.preferred_channel {
-                crate::comms::CommsChannel::Email => ("email", row.email_verified),
-                crate::comms::CommsChannel::Discord => ("discord", row.discord_verified),
-                crate::comms::CommsChannel::Telegram => ("telegram", row.telegram_verified),
-                crate::comms::CommsChannel::Signal => ("signal", row.signal_verified),
+            let (preferred_channel, preferred_channel_verified) = match row.preferred_comms_channel {
+                tranquil_db_traits::CommsChannel::Email => ("email", row.email_verified),
+                tranquil_db_traits::CommsChannel::Discord => ("discord", row.discord_verified),
+                tranquil_db_traits::CommsChannel::Telegram => ("telegram", row.telegram_verified),
+                tranquil_db_traits::CommsChannel::Signal => ("signal", row.signal_verified),
             };
             let pds_hostname =
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -379,11 +362,8 @@ pub async fn delete_session(
         Err(_) => return ApiError::AuthenticationFailed(None).into_response(),
     };
     let did = crate::auth::get_did_from_token(&extracted.token).ok();
-    match sqlx::query!("DELETE FROM session_tokens WHERE access_jti = $1", jti)
-        .execute(&state.db)
-        .await
-    {
-        Ok(res) if res.rows_affected() > 0 => {
+    match state.session_repo.delete_session_by_access_jti(&jti).await {
+        Ok(rows) if rows > 0 => {
             if let Some(did) = did {
                 let session_cache_key = format!("auth:session:{}:{}", did, jti);
                 let _ = state.cache.delete(&session_cache_key).await;
@@ -391,10 +371,7 @@ pub async fn delete_session(
             EmptyResponse::ok().into_response()
         }
         Ok(_) => ApiError::AuthenticationFailed(None).into_response(),
-        Err(e) => {
-            error!("Database error in delete_session: {:?}", e);
-            ApiError::AuthenticationFailed(None).into_response()
-        }
+        Err(_) => ApiError::AuthenticationFailed(None).into_response(),
     }
 }
 
@@ -424,44 +401,21 @@ pub async fn refresh_session(
                 .into_response();
         }
     };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-    if let Ok(Some(session_id)) = sqlx::query_scalar!(
-        "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1 FOR UPDATE",
-        refresh_jti
-    )
-    .fetch_optional(&mut *tx)
-    .await
+    if let Ok(Some(_)) = state
+        .session_repo
+        .check_refresh_token_used(&refresh_jti)
+        .await
     {
-        warn!(
-            "Refresh token reuse detected! Revoking token family for session_id: {}",
-            session_id
-        );
-        let _ = sqlx::query!("DELETE FROM session_tokens WHERE id = $1", session_id)
-            .execute(&mut *tx)
-            .await;
-        let _ = tx.commit().await;
+        warn!("Refresh token reuse detected for jti: {}", refresh_jti);
         return ApiError::AuthenticationFailed(Some(
             "Refresh token has been revoked due to suspected compromise".into(),
         ))
         .into_response();
     }
-    let session_row = match sqlx::query!(
-        r#"SELECT st.id, st.did, st.scope, st.controller_did, k.key_bytes, k.encryption_version
-           FROM session_tokens st
-           JOIN users u ON st.did = u.did
-           JOIN user_keys k ON u.id = k.user_id
-           WHERE st.refresh_jti = $1 AND st.refresh_expires_at > NOW()
-           FOR UPDATE OF st"#,
-        refresh_jti
-    )
-    .fetch_optional(&mut *tx)
-    .await
+    let session_row = match state
+        .session_repo
+        .get_session_for_refresh(&refresh_jti)
+        .await
     {
         Ok(Some(row)) => row,
         Ok(None) => {
@@ -474,7 +428,7 @@ pub async fn refresh_session(
         }
     };
     let key_bytes =
-        match crate::config::decrypt_key(&session_row.key_bytes, session_row.encryption_version) {
+        match crate::config::decrypt_key(&session_row.key_bytes, Some(session_row.encryption_version)) {
             Ok(k) => k,
             Err(e) => {
                 error!("Failed to decrypt user key: {:?}", e);
@@ -506,67 +460,52 @@ pub async fn refresh_session(
                 return ApiError::InternalError(None).into_response();
             }
         };
-    match sqlx::query!(
-        "INSERT INTO used_refresh_tokens (refresh_jti, session_id) VALUES ($1, $2) ON CONFLICT (refresh_jti) DO NOTHING",
-        refresh_jti,
-        session_row.id
-    )
-    .execute(&mut *tx)
-    .await
+    let refresh_data = tranquil_db_traits::SessionRefreshData {
+        old_refresh_jti: refresh_jti.clone(),
+        session_id: session_row.id,
+        new_access_jti: new_access_meta.jti.clone(),
+        new_refresh_jti: new_refresh_meta.jti.clone(),
+        new_access_expires_at: new_access_meta.expires_at,
+        new_refresh_expires_at: new_refresh_meta.expires_at,
+    };
+    match state
+        .session_repo
+        .refresh_session_atomic(&refresh_data)
+        .await
     {
-        Ok(result) if result.rows_affected() == 0 => {
-            warn!("Concurrent refresh token reuse detected for session_id: {}", session_row.id);
-            let _ = sqlx::query!("DELETE FROM session_tokens WHERE id = $1", session_row.id)
-                .execute(&mut *tx)
-                .await;
-            let _ = tx.commit().await;
-            return ApiError::AuthenticationFailed(Some("Refresh token has been revoked due to suspected compromise".into())).into_response();
+        Ok(tranquil_db_traits::RefreshSessionResult::Success) => {}
+        Ok(tranquil_db_traits::RefreshSessionResult::TokenAlreadyUsed) => {
+            warn!("Refresh token reuse detected during atomic operation");
+            return ApiError::AuthenticationFailed(Some(
+                "Refresh token has been revoked due to suspected compromise".into(),
+            ))
+            .into_response();
+        }
+        Ok(tranquil_db_traits::RefreshSessionResult::ConcurrentRefresh) => {
+            warn!("Concurrent refresh detected for session_id: {}", session_row.id);
+            return ApiError::AuthenticationFailed(Some(
+                "Refresh token has been revoked due to suspected compromise".into(),
+            ))
+            .into_response();
         }
         Err(e) => {
-            error!("Failed to record used refresh token: {:?}", e);
+            error!("Database error during session refresh: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
-        Ok(_) => {}
-    }
-    if let Err(e) = sqlx::query!(
-        "UPDATE session_tokens SET access_jti = $1, refresh_jti = $2, access_expires_at = $3, refresh_expires_at = $4, updated_at = NOW() WHERE id = $5",
-        new_access_meta.jti,
-        new_refresh_meta.jti,
-        new_access_meta.expires_at,
-        new_refresh_meta.expires_at,
-        session_row.id
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Database error updating session: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
     }
     let did_for_doc = session_row.did.clone();
     let did_resolver = state.did_resolver.clone();
     let (db_result, did_doc) = tokio::join!(
-        sqlx::query!(
-            r#"SELECT
-                handle, email, email_verified, is_admin, preferred_locale, deactivated_at, takedown_ref,
-                preferred_comms_channel as "preferred_channel: crate::comms::CommsChannel",
-                discord_verified, telegram_verified, signal_verified
-            FROM users WHERE did = $1"#,
-            session_row.did
-        )
-        .fetch_optional(&state.db),
+        state.user_repo.get_session_info_by_did(&session_row.did),
         did_resolver.resolve_did_document(&did_for_doc)
     );
     match db_result {
         Ok(Some(u)) => {
-            let (preferred_channel, preferred_channel_verified) = match u.preferred_channel {
-                crate::comms::CommsChannel::Email => ("email", u.email_verified),
-                crate::comms::CommsChannel::Discord => ("discord", u.discord_verified),
-                crate::comms::CommsChannel::Telegram => ("telegram", u.telegram_verified),
-                crate::comms::CommsChannel::Signal => ("signal", u.signal_verified),
+            let (preferred_channel, preferred_channel_verified) = match u.preferred_comms_channel {
+                tranquil_db_traits::CommsChannel::Email => ("email", u.email_verified),
+                tranquil_db_traits::CommsChannel::Discord => ("discord", u.discord_verified),
+                tranquil_db_traits::CommsChannel::Telegram => ("telegram", u.telegram_verified),
+                tranquil_db_traits::CommsChannel::Signal => ("signal", u.signal_verified),
             };
             let pds_hostname =
                 std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
@@ -630,19 +569,10 @@ pub async fn confirm_signup(
     Json(input): Json<ConfirmSignupInput>,
 ) -> Response {
     info!("confirm_signup called for DID: {}", input.did);
-    let row = match sqlx::query!(
-        r#"SELECT
-            u.id, u.did, u.handle, u.email,
-            u.preferred_comms_channel as "channel: crate::comms::CommsChannel",
-            u.discord_id, u.telegram_username, u.signal_number,
-            k.key_bytes, k.encryption_version
-        FROM users u
-        JOIN user_keys k ON u.id = k.user_id
-        WHERE u.did = $1"#,
-        input.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await
+    let row = match state
+        .user_repo
+        .get_confirm_signup_by_did(&input.did)
+        .await
     {
         Ok(Some(row)) => row,
         Ok(None) => {
@@ -657,15 +587,15 @@ pub async fn confirm_signup(
     };
 
     let (channel_str, identifier) = match row.channel {
-        crate::comms::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
-        crate::comms::CommsChannel::Discord => {
+        tranquil_db_traits::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
+        tranquil_db_traits::CommsChannel::Discord => {
             ("discord", row.discord_id.clone().unwrap_or_default())
         }
-        crate::comms::CommsChannel::Telegram => (
+        tranquil_db_traits::CommsChannel::Telegram => (
             "telegram",
             row.telegram_username.clone().unwrap_or_default(),
         ),
-        crate::comms::CommsChannel::Signal => {
+        tranquil_db_traits::CommsChannel::Signal => {
             ("signal", row.signal_number.clone().unwrap_or_default())
         }
     };
@@ -721,64 +651,49 @@ pub async fn confirm_signup(
         }
     };
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    let verified_column = match row.channel {
-        crate::comms::CommsChannel::Email => "email_verified",
-        crate::comms::CommsChannel::Discord => "discord_verified",
-        crate::comms::CommsChannel::Telegram => "telegram_verified",
-        crate::comms::CommsChannel::Signal => "signal_verified",
-    };
-    let update_query = format!("UPDATE users SET {} = TRUE WHERE did = $1", verified_column);
-    if let Err(e) = sqlx::query(&update_query)
-        .bind(input.did.as_str())
-        .execute(&mut *tx)
+    if let Err(e) = state
+        .user_repo
+        .set_channel_verified(&input.did, row.channel.clone())
         .await
     {
         error!("Failed to update verification status: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
 
-    let no_scope: Option<String> = None;
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        row.did,
-        access_meta.jti,
-        refresh_meta.jti,
-        access_meta.expires_at,
-        refresh_meta.expires_at,
-        false,
-        false,
-        no_scope
-    )
-    .execute(&mut *tx)
-    .await
-    {
+    let session_data = tranquil_db_traits::SessionTokenCreate {
+        did: row.did.clone(),
+        access_jti: access_meta.jti.clone(),
+        refresh_jti: refresh_meta.jti.clone(),
+        access_expires_at: access_meta.expires_at,
+        refresh_expires_at: refresh_meta.expires_at,
+        legacy_login: false,
+        mfa_verified: false,
+        scope: None,
+        controller_did: None,
+        app_password_name: None,
+    };
+    if let Err(e) = state.session_repo.create_session(&session_data).await {
         error!("Failed to insert session: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
 
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::comms::enqueue_welcome(&state.db, row.id, &hostname).await {
+    if let Err(e) = crate::comms::comms_repo::enqueue_welcome(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        row.id,
+        &hostname,
+    )
+    .await
+    {
         warn!("Failed to enqueue welcome notification: {:?}", e);
     }
-    let email_verified = matches!(row.channel, crate::comms::CommsChannel::Email);
+    let email_verified = matches!(row.channel, tranquil_db_traits::CommsChannel::Email);
     let preferred_channel = match row.channel {
-        crate::comms::CommsChannel::Email => "email",
-        crate::comms::CommsChannel::Discord => "discord",
-        crate::comms::CommsChannel::Telegram => "telegram",
-        crate::comms::CommsChannel::Signal => "signal",
+        tranquil_db_traits::CommsChannel::Email => "email",
+        tranquil_db_traits::CommsChannel::Discord => "discord",
+        tranquil_db_traits::CommsChannel::Telegram => "telegram",
+        tranquil_db_traits::CommsChannel::Signal => "signal",
     };
     Json(ConfirmSignupOutput {
         access_jwt: access_meta.token,
@@ -804,18 +719,10 @@ pub async fn resend_verification(
     Json(input): Json<ResendVerificationInput>,
 ) -> Response {
     info!("resend_verification called for DID: {}", input.did);
-    let row = match sqlx::query!(
-        r#"SELECT
-            id, handle, email,
-            preferred_comms_channel as "channel: crate::comms::CommsChannel",
-            discord_id, telegram_username, signal_number,
-            email_verified, discord_verified, telegram_verified, signal_verified
-        FROM users
-        WHERE did = $1"#,
-        input.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await
+    let row = match state
+        .user_repo
+        .get_resend_verification_by_did(&input.did)
+        .await
     {
         Ok(Some(row)) => row,
         Ok(None) => {
@@ -833,15 +740,15 @@ pub async fn resend_verification(
     }
 
     let (channel_str, recipient) = match row.channel {
-        crate::comms::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
-        crate::comms::CommsChannel::Discord => {
+        tranquil_db_traits::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
+        tranquil_db_traits::CommsChannel::Discord => {
             ("discord", row.discord_id.clone().unwrap_or_default())
         }
-        crate::comms::CommsChannel::Telegram => (
+        tranquil_db_traits::CommsChannel::Telegram => (
             "telegram",
             row.telegram_username.clone().unwrap_or_default(),
         ),
-        crate::comms::CommsChannel::Signal => {
+        tranquil_db_traits::CommsChannel::Signal => {
             ("signal", row.signal_number.clone().unwrap_or_default())
         }
     };
@@ -851,13 +758,14 @@ pub async fn resend_verification(
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
 
-    if let Err(e) = crate::comms::enqueue_signup_verification(
-        &state.db,
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+        state.infra_repo.as_ref(),
         row.id,
         channel_str,
         &recipient,
         &formatted_token,
-        None,
+        &hostname,
     )
     .await
     {
@@ -894,26 +802,7 @@ pub async fn list_sessions(
         .and_then(|v| v.strip_prefix("Bearer "))
         .and_then(|token| crate::auth::get_jti_from_token(token).ok());
 
-    let jwt_rows = match sqlx::query_as::<
-        _,
-        (
-            i32,
-            String,
-            chrono::DateTime<chrono::Utc>,
-            chrono::DateTime<chrono::Utc>,
-        ),
-    >(
-        r#"
-        SELECT id, access_jti, created_at, refresh_expires_at
-        FROM session_tokens
-        WHERE did = $1 AND refresh_expires_at > NOW()
-        ORDER BY created_at DESC
-        "#,
-    )
-    .bind(&auth.0.did)
-    .fetch_all(&state.db)
-    .await
-    {
+    let jwt_rows = match state.session_repo.list_sessions_by_did(&auth.0.did).await {
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching JWT sessions: {:?}", e);
@@ -921,27 +810,7 @@ pub async fn list_sessions(
         }
     };
 
-    let oauth_rows = match sqlx::query_as::<
-        _,
-        (
-            i32,
-            String,
-            chrono::DateTime<chrono::Utc>,
-            chrono::DateTime<chrono::Utc>,
-            String,
-        ),
-    >(
-        r#"
-        SELECT id, token_id, created_at, expires_at, client_id
-        FROM oauth_token
-        WHERE did = $1 AND expires_at > NOW()
-        ORDER BY created_at DESC
-        "#,
-    )
-    .bind(&auth.0.did)
-    .fetch_all(&state.db)
-    .await
-    {
+    let oauth_rows = match state.oauth_repo.list_sessions_by_did(&auth.0.did).await {
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching OAuth sessions: {:?}", e);
@@ -949,33 +818,28 @@ pub async fn list_sessions(
         }
     };
 
-    let jwt_sessions = jwt_rows
-        .into_iter()
-        .map(|(id, access_jti, created_at, expires_at)| SessionInfo {
-            id: format!("jwt:{}", id),
-            session_type: "legacy".to_string(),
-            client_name: None,
-            created_at: created_at.to_rfc3339(),
-            expires_at: expires_at.to_rfc3339(),
-            is_current: current_jti.as_ref() == Some(&access_jti),
-        });
+    let jwt_sessions = jwt_rows.into_iter().map(|row| SessionInfo {
+        id: format!("jwt:{}", row.id),
+        session_type: "legacy".to_string(),
+        client_name: None,
+        created_at: row.created_at.to_rfc3339(),
+        expires_at: row.refresh_expires_at.to_rfc3339(),
+        is_current: current_jti.as_ref() == Some(&row.access_jti),
+    });
 
     let is_oauth = auth.0.is_oauth;
-    let oauth_sessions =
-        oauth_rows
-            .into_iter()
-            .map(|(id, token_id, created_at, expires_at, client_id)| {
-                let client_name = extract_client_name(&client_id);
-                let is_current_oauth = is_oauth && current_jti.as_ref() == Some(&token_id);
-                SessionInfo {
-                    id: format!("oauth:{}", id),
-                    session_type: "oauth".to_string(),
-                    client_name: Some(client_name),
-                    created_at: created_at.to_rfc3339(),
-                    expires_at: expires_at.to_rfc3339(),
-                    is_current: is_current_oauth,
-                }
-            });
+    let oauth_sessions = oauth_rows.into_iter().map(|row| {
+        let client_name = extract_client_name(&row.client_id);
+        let is_current_oauth = is_oauth && current_jti.as_ref().map(|s| s.as_str()) == Some(row.token_id.as_str());
+        SessionInfo {
+            id: format!("oauth:{}", row.id),
+            session_type: "oauth".to_string(),
+            client_name: Some(client_name),
+            created_at: row.created_at.to_rfc3339(),
+            expires_at: row.expires_at.to_rfc3339(),
+            is_current: is_current_oauth,
+        }
+    });
 
     let mut sessions: Vec<SessionInfo> = jwt_sessions.chain(oauth_sessions).collect();
     sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -1008,15 +872,12 @@ pub async fn revoke_session(
         let Ok(session_id) = jwt_id.parse::<i32>() else {
             return ApiError::InvalidRequest("Invalid session ID".into()).into_response();
         };
-        let session = sqlx::query_as::<_, (String,)>(
-            "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
-        )
-        .bind(session_id)
-        .bind(&auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
-        let access_jti = match session {
-            Ok(Some((jti,))) => jti,
+        let access_jti = match state
+            .session_repo
+            .get_session_access_jti_by_id(session_id, &auth.0.did)
+            .await
+        {
+            Ok(Some(jti)) => jti,
             Ok(None) => {
                 return ApiError::SessionNotFound.into_response();
             }
@@ -1025,11 +886,7 @@ pub async fn revoke_session(
                 return ApiError::InternalError(None).into_response();
             }
         };
-        if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE id = $1")
-            .bind(session_id)
-            .execute(&state.db)
-            .await
-        {
+        if let Err(e) = state.session_repo.delete_session_by_id(session_id).await {
             error!("DB error deleting session: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
@@ -1042,13 +899,12 @@ pub async fn revoke_session(
         let Ok(session_id) = oauth_id.parse::<i32>() else {
             return ApiError::InvalidRequest("Invalid session ID".into()).into_response();
         };
-        let result = sqlx::query("DELETE FROM oauth_token WHERE id = $1 AND did = $2")
-            .bind(session_id)
-            .bind(&auth.0.did)
-            .execute(&state.db)
-            .await;
-        match result {
-            Ok(r) if r.rows_affected() == 0 => {
+        match state
+            .oauth_repo
+            .delete_session_by_id(session_id, &auth.0.did)
+            .await
+        {
+            Ok(0) => {
                 return ApiError::SessionNotFound.into_response();
             }
             Err(e) => {
@@ -1078,56 +934,33 @@ pub async fn revoke_all_sessions(
         return ApiError::InvalidToken(None).into_response();
     };
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
     if auth.0.is_oauth {
-        if let Err(e) = sqlx::query("DELETE FROM session_tokens WHERE did = $1")
-            .bind(&auth.0.did)
-            .execute(&mut *tx)
-            .await
-        {
+        if let Err(e) = state.session_repo.delete_sessions_by_did(&auth.0.did).await {
             error!("DB error revoking JWT sessions: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
-        if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1 AND token_id != $2")
-            .bind(&auth.0.did)
-            .bind(jti)
-            .execute(&mut *tx)
+        let jti_typed = TokenId::from(jti.clone());
+        if let Err(e) = state
+            .oauth_repo
+            .delete_sessions_by_did_except(&auth.0.did, &jti_typed)
             .await
         {
             error!("DB error revoking OAuth sessions: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     } else {
-        if let Err(e) =
-            sqlx::query("DELETE FROM session_tokens WHERE did = $1 AND access_jti != $2")
-                .bind(&auth.0.did)
-                .bind(jti)
-                .execute(&mut *tx)
-                .await
+        if let Err(e) = state
+            .session_repo
+            .delete_sessions_by_did_except_jti(&auth.0.did, jti)
+            .await
         {
             error!("DB error revoking JWT sessions: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
-        if let Err(e) = sqlx::query("DELETE FROM oauth_token WHERE did = $1")
-            .bind(&auth.0.did)
-            .execute(&mut *tx)
-            .await
-        {
+        if let Err(e) = state.oauth_repo.delete_sessions_by_did(&auth.0.did).await {
             error!("DB error revoking OAuth sessions: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
-    }
-
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
     }
 
     info!(did = %&auth.0.did, "All other sessions revoked");
@@ -1145,21 +978,10 @@ pub async fn get_legacy_login_preference(
     State(state): State<AppState>,
     auth: BearerAuth,
 ) -> Response {
-    let result = sqlx::query!(
-        r#"SELECT
-            u.allow_legacy_login,
-            (EXISTS(SELECT 1 FROM user_totp t WHERE t.did = u.did AND t.verified = TRUE) OR
-             EXISTS(SELECT 1 FROM passkeys p WHERE p.did = u.did)) as "has_mfa!"
-        FROM users u WHERE u.did = $1"#,
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    match result {
-        Ok(Some(row)) => Json(LegacyLoginPreferenceOutput {
-            allow_legacy_login: row.allow_legacy_login,
-            has_mfa: row.has_mfa,
+    match state.user_repo.get_legacy_login_pref(&auth.0.did).await {
+        Ok(Some(pref)) => Json(LegacyLoginPreferenceOutput {
+            allow_legacy_login: pref.allow_legacy_login,
+            has_mfa: pref.has_mfa,
         })
         .into_response(),
         Ok(None) => ApiError::AccountNotFound.into_response(),
@@ -1181,25 +1003,21 @@ pub async fn update_legacy_login_preference(
     auth: BearerAuth,
     Json(input): Json<UpdateLegacyLoginInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
             .await;
     }
 
-    if crate::api::server::reauth::check_reauth_required(&state.db, &auth.0.did).await {
-        return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
+    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.0.did).await {
+        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
     }
 
-    let result = sqlx::query!(
-        "UPDATE users SET allow_legacy_login = $1 WHERE did = $2 RETURNING did",
-        input.allow_legacy_login,
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    match result {
-        Ok(Some(_)) => {
+    match state
+        .user_repo
+        .update_legacy_login(&auth.0.did, input.allow_legacy_login)
+        .await
+    {
+        Ok(true) => {
             info!(
                 did = %&auth.0.did,
                 allow_legacy_login = input.allow_legacy_login,
@@ -1210,7 +1028,7 @@ pub async fn update_legacy_login_preference(
             }))
             .into_response()
         }
-        Ok(None) => ApiError::AccountNotFound.into_response(),
+        Ok(false) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
             ApiError::InternalError(None).into_response()
@@ -1239,16 +1057,12 @@ pub async fn update_locale(
         .into_response();
     }
 
-    let result = sqlx::query!(
-        "UPDATE users SET preferred_locale = $1 WHERE did = $2 RETURNING did",
-        input.preferred_locale,
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    match result {
-        Ok(Some(_)) => {
+    match state
+        .user_repo
+        .update_locale(&auth.0.did, &input.preferred_locale)
+        .await
+    {
+        Ok(true) => {
             info!(
                 did = %&auth.0.did,
                 locale = %input.preferred_locale,
@@ -1259,7 +1073,7 @@ pub async fn update_locale(
             }))
             .into_response()
         }
-        Ok(None) => ApiError::AccountNotFound.into_response(),
+        Ok(false) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error updating locale: {:?}", e);
             ApiError::InternalError(None).into_response()

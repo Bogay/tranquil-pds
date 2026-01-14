@@ -44,26 +44,23 @@ pub async fn submit_plc_operation(
     let op = &input.operation;
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let public_url = format!("https://{}", hostname);
-    let user = match sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(row)) => row,
-        _ => {
-            return ApiError::AccountNotFound.into_response();
+    let user = match state.user_repo.get_id_and_handle_by_did(did).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            return ApiError::InternalError(None).into_response();
         }
     };
-    let key_row = match sqlx::query!(
-        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
-        user.id
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let key_row = match state.user_repo.get_user_key_by_id(user.id).await {
         Ok(Some(row)) => row,
-        _ => {
+        Ok(None) => {
             return ApiError::InternalError(Some("User signing key not found".into()))
                 .into_response();
+        }
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            return ApiError::InternalError(None).into_response();
         }
     };
     let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
@@ -139,19 +136,13 @@ pub async fn submit_plc_operation(
     {
         return ApiError::from(e).into_response();
     }
-    match sqlx::query!(
-        "INSERT INTO repo_seq (did, event_type, handle) VALUES ($1, 'identity', $2) RETURNING seq",
-        did,
-        user.handle
-    )
-    .fetch_one(&state.db)
-    .await
+    match state
+        .repo_repo
+        .insert_identity_event(did, Some(&user.handle))
+        .await
     {
-        Ok(row) => {
-            if let Err(e) = sqlx::query(&format!("NOTIFY repo_updates, '{}'", row.seq))
-                .execute(&state.db)
-                .await
-            {
+        Ok(seq) => {
+            if let Err(e) = state.repo_repo.notify_update(seq).await {
                 warn!("Failed to notify identity event: {:?}", e);
             }
         }

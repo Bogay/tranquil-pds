@@ -38,27 +38,30 @@ pub async fn reserve_signing_key(
     State(state): State<AppState>,
     Json(input): Json<ReserveSigningKeyInput>,
 ) -> Response {
+    let did: Option<crate::types::Did> = match input.did {
+        Some(ref d) => match d.parse() {
+            Ok(parsed) => Some(parsed),
+            Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+        },
+        None => None,
+    };
     let signing_key = SigningKey::random(&mut rand::thread_rng());
     let private_key_bytes = signing_key.to_bytes();
     let public_key_did_key = public_key_to_did_key(&signing_key);
     let expires_at = Utc::now() + Duration::hours(24);
     let private_bytes: &[u8] = &private_key_bytes;
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO reserved_signing_keys (did, public_key_did_key, private_key_bytes, expires_at)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id
-        "#,
-        input.did,
-        public_key_did_key,
-        private_bytes,
-        expires_at
-    )
-    .fetch_one(&state.db)
-    .await;
-    match result {
-        Ok(row) => {
-            info!("Reserved signing key {} for did {:?}", row.id, input.did);
+    match state
+        .infra_repo
+        .reserve_signing_key(
+            did.as_ref(),
+            &public_key_did_key,
+            private_bytes,
+            expires_at,
+        )
+        .await
+    {
+        Ok(key_id) => {
+            info!("Reserved signing key {} for did {:?}", key_id, input.did);
             (
                 StatusCode::OK,
                 Json(ReserveSigningKeyOutput {

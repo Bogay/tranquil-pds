@@ -48,11 +48,12 @@ async fn test_resolve_handle_success() {
 #[tokio::test]
 async fn test_resolve_handle_not_found() {
     let client = client();
-    let params = [("handle", "nonexistent_handle_12345")];
+    let _base = base_url().await;
+    let params = [("handle", "nonexistent.handle.test")];
     let res = client
         .get(format!(
             "{}/xrpc/com.atproto.identity.resolveHandle",
-            base_url().await
+            _base
         ))
         .query(&params)
         .send()
@@ -99,12 +100,13 @@ async fn test_create_did_web_account_and_resolve() {
     let mock_addr = mock_uri.trim_start_matches("http://");
     let did = format!("did:web:{}", mock_addr.replace(":", "%3A"));
     let handle = format!("wu{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
-    let pds_endpoint = base_url().await.replace("http://", "https://");
+    let base = base_url().await;
+    let pds_endpoint = common::pds_endpoint();
 
     let reserve_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.reserveSigningKey",
-            base_url().await
+            base
         ))
         .json(&json!({ "did": did }))
         .send()
@@ -149,7 +151,7 @@ async fn test_create_did_web_account_and_resolve() {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
-            base_url().await
+            base
         ))
         .json(&payload)
         .send()
@@ -169,7 +171,7 @@ async fn test_create_did_web_account_and_resolve() {
         .expect("createAccount response was not JSON");
     assert_eq!(body["did"], did);
     let res = client
-        .get(format!("{}/u/{}/did.json", base_url().await, handle))
+        .get(format!("{}/u/{}/did.json", base, handle))
         .send()
         .await
         .expect("Failed to fetch DID doc");
@@ -217,18 +219,19 @@ async fn test_create_account_duplicate_handle() {
 #[tokio::test]
 async fn test_did_web_lifecycle() {
     let client = client();
+    let base = base_url().await;
     let mock_server = MockServer::start().await;
     let mock_uri = mock_server.uri();
     let mock_addr = mock_uri.trim_start_matches("http://");
     let handle = format!("lc{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let did = format!("did:web:{}:u:{}", mock_addr.replace(":", "%3A"), handle);
     let email = format!("{}@test.com", handle);
-    let pds_endpoint = base_url().await.replace("http://", "https://");
+    let pds_endpoint = common::pds_endpoint();
 
     let reserve_res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.reserveSigningKey",
-            base_url().await
+            base
         ))
         .json(&json!({ "did": did }))
         .send()
@@ -273,7 +276,7 @@ async fn test_did_web_lifecycle() {
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.server.createAccount",
-            base_url().await
+            base
         ))
         .json(&create_payload)
         .send()

@@ -17,42 +17,10 @@ pub struct ServerStatsResponse {
 }
 
 pub async fn get_server_stats(State(state): State<AppState>, _auth: BearerAuthAdmin) -> Response {
-    let user_count: i64 = match sqlx::query_scalar!("SELECT COUNT(*) FROM users")
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(Some(count)) => count,
-        Ok(None) => 0,
-        Err(_) => 0,
-    };
-
-    let repo_count: i64 = match sqlx::query_scalar!("SELECT COUNT(*) FROM repos")
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(Some(count)) => count,
-        Ok(None) => 0,
-        Err(_) => 0,
-    };
-
-    let record_count: i64 = match sqlx::query_scalar!("SELECT COUNT(*) FROM records")
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(Some(count)) => count,
-        Ok(None) => 0,
-        Err(_) => 0,
-    };
-
-    let blob_storage_bytes: i64 =
-        match sqlx::query_scalar!("SELECT COALESCE(SUM(size_bytes), 0)::BIGINT FROM blobs")
-            .fetch_one(&state.db)
-            .await
-        {
-            Ok(Some(bytes)) => bytes,
-            Ok(None) => 0,
-            Err(_) => 0,
-        };
+    let user_count = state.user_repo.count_users().await.unwrap_or(0);
+    let repo_count = state.repo_repo.count_repos().await.unwrap_or(0);
+    let record_count = state.repo_repo.count_all_records().await.unwrap_or(0);
+    let blob_storage_bytes = state.blob_repo.sum_blob_storage().await.unwrap_or(0);
 
     Json(ServerStatsResponse {
         user_count,

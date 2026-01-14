@@ -11,6 +11,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use tranquil_types::{CidLink, Did};
 
 #[derive(Deserialize)]
 pub struct GetBlobParams {
@@ -22,36 +23,36 @@ pub async fn get_blob(
     State(state): State<AppState>,
     Query(params): Query<GetBlobParams>,
 ) -> Response {
-    let did = params.did.trim();
-    let cid = params.cid.trim();
-    if did.is_empty() {
+    let did_str = params.did.trim();
+    let cid_str = params.cid.trim();
+    if did_str.is_empty() {
         return ApiError::InvalidRequest("did is required".into()).into_response();
     }
-    if cid.is_empty() {
+    if cid_str.is_empty() {
         return ApiError::InvalidRequest("cid is required".into()).into_response();
     }
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
+    let cid: CidLink = match cid_str.parse() {
+        Ok(c) => c,
+        Err(_) => return ApiError::InvalidRequest("invalid cid".into()).into_response(),
+    };
 
-    let _account = match assert_repo_availability(&state.db, did, false).await {
+    let _account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };
 
-    let blob_result = sqlx::query!(
-        "SELECT storage_key, mime_type, size_bytes FROM blobs WHERE cid = $1",
-        cid
-    )
-    .fetch_optional(&state.db)
-    .await;
+    let blob_result = state.blob_repo.get_blob_metadata(&cid).await;
     match blob_result {
-        Ok(Some(row)) => {
-            let storage_key = &row.storage_key;
-            let mime_type = &row.mime_type;
-            let size_bytes = row.size_bytes;
-            match state.blob_store.get(storage_key).await {
+        Ok(Some(metadata)) => {
+            match state.blob_store.get(&metadata.storage_key).await {
                 Ok(data) => Response::builder()
                     .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, mime_type)
-                    .header(header::CONTENT_LENGTH, size_bytes.to_string())
+                    .header(header::CONTENT_TYPE, &metadata.mime_type)
+                    .header(header::CONTENT_LENGTH, metadata.size_bytes.to_string())
                     .header("x-content-type-options", "nosniff")
                     .header("content-security-policy", "default-src 'none'; sandbox")
                     .body(Body::from(data))
@@ -65,7 +66,7 @@ pub async fn get_blob(
         Ok(None) => ApiError::BlobNotFound(Some("Blob not found".into())).into_response(),
         Err(e) => {
             error!("DB error in get_blob: {:?}", e);
-            ApiError::InternalError(Some("Database error".into())).into_response()
+            ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
         }
     }
 }
@@ -89,12 +90,16 @@ pub async fn list_blobs(
     State(state): State<AppState>,
     Query(params): Query<ListBlobsParams>,
 ) -> Response {
-    let did = params.did.trim();
-    if did.is_empty() {
+    let did_str = params.did.trim();
+    if did_str.is_empty() {
         return ApiError::InvalidRequest("did is required".into()).into_response();
     }
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
 
-    let account = match assert_repo_availability(&state.db, did, false).await {
+    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };
@@ -103,40 +108,26 @@ pub async fn list_blobs(
     let cursor_cid = params.cursor.as_deref().unwrap_or("");
     let user_id = account.user_id;
 
-    let cids_result: Result<Vec<String>, sqlx::Error> = if let Some(since) = &params.since {
-        sqlx::query_scalar!(
-            r#"
-            SELECT DISTINCT unnest(blobs) as "cid!"
-            FROM repo_seq
-            WHERE did = $1 AND rev > $2 AND blobs IS NOT NULL
-            "#,
-            did,
-            since
-        )
-        .fetch_all(&state.db)
-        .await
-        .map(|mut cids| {
-            cids.sort();
-            cids.into_iter()
-                .filter(|c| c.as_str() > cursor_cid)
-                .take((limit + 1) as usize)
-                .collect()
-        })
+    let cids_result: Result<Vec<String>, _> = if let Some(since) = &params.since {
+        state
+            .blob_repo
+            .list_blobs_since_rev(&did, since)
+            .await
+            .map(|cids| {
+                let mut cid_strs: Vec<String> = cids.into_iter().map(|c| c.to_string()).collect();
+                cid_strs.sort();
+                cid_strs
+                    .into_iter()
+                    .filter(|c| c.as_str() > cursor_cid)
+                    .take((limit + 1) as usize)
+                    .collect()
+            })
     } else {
-        sqlx::query!(
-            r#"
-            SELECT cid FROM blobs
-            WHERE created_by_user = $1 AND cid > $2
-            ORDER BY cid ASC
-            LIMIT $3
-            "#,
-            user_id,
-            cursor_cid,
-            limit + 1
-        )
-        .fetch_all(&state.db)
-        .await
-        .map(|rows| rows.into_iter().map(|r| r.cid).collect())
+        state
+            .blob_repo
+            .list_blobs_by_user(user_id, Some(cursor_cid), limit + 1)
+            .await
+            .map(|cids| cids.into_iter().map(|c| c.to_string()).collect())
     };
     match cids_result {
         Ok(cids) => {
@@ -154,7 +145,7 @@ pub async fn list_blobs(
         }
         Err(e) => {
             error!("DB error in list_blobs: {:?}", e);
-            ApiError::InternalError(Some("Database error".into())).into_response()
+            ApiError::InternalError(Some(format!("Database error: {}", e))).into_response()
         }
     }
 }

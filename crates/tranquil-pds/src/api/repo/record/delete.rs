@@ -1,10 +1,10 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::api::repo::record::write::{CommitInfo, prepare_repo_write};
-use crate::delegation::{self, DelegationActionType};
+use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
-use crate::types::{AtIdentifier, Nsid, Rkey};
+use crate::types::{AtIdentifier, AtUri, Nsid, Rkey};
 use axum::{
     Json,
     extract::State,
@@ -183,21 +183,27 @@ pub async fn delete_record(
     };
 
     if let Some(ref controller) = controller_did {
-        let _ = delegation::log_delegation_action(
-            &state.db,
-            &did,
-            controller,
-            Some(controller),
-            DelegationActionType::RepoWrite,
-            Some(json!({
-                "action": "delete",
-                "collection": collection_for_audit,
-                "rkey": rkey_for_audit
-            })),
-            None,
-            None,
-        )
-        .await;
+        let _ = state
+            .delegation_repo
+            .log_delegation_action(
+                &did,
+                controller,
+                Some(controller),
+                DelegationActionType::RepoWrite,
+                Some(json!({
+                    "action": "delete",
+                    "collection": collection_for_audit,
+                    "rkey": rkey_for_audit
+                })),
+                None,
+                None,
+            )
+            .await;
+    }
+
+    let deleted_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
+    if let Err(e) = state.backlink_repo.remove_backlinks_by_uri(&deleted_uri).await {
+        error!("Failed to remove backlinks for {}: {}", deleted_uri, e);
     }
 
     (
@@ -210,4 +216,116 @@ pub async fn delete_record(
         }),
     )
         .into_response()
+}
+
+use crate::types::Did;
+use uuid::Uuid;
+
+pub async fn delete_record_internal(
+    state: &AppState,
+    did: &Did,
+    user_id: Uuid,
+    collection: &Nsid,
+    rkey: &Rkey,
+) -> Result<(), String> {
+    let root_cid_str = state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Repo root not found".to_string())?;
+
+    let current_root_cid =
+        Cid::from_str(root_cid_str.as_str()).map_err(|_| "Invalid repo root CID".to_string())?;
+
+    let tracking_store = TrackingBlockStore::new(state.block_store.clone());
+    let commit_bytes = tracking_store
+        .get(&current_root_cid)
+        .await
+        .map_err(|e| format!("Failed to fetch commit: {:?}", e))?
+        .ok_or_else(|| "Commit block not found".to_string())?;
+
+    let commit = Commit::from_cbor(&commit_bytes)
+        .map_err(|e| format!("Failed to parse commit: {:?}", e))?;
+
+    let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+    let key = format!("{}/{}", collection, rkey);
+
+    let prev_record_cid = mst
+        .get(&key)
+        .await
+        .map_err(|e| format!("MST get error: {:?}", e))?;
+
+    let Some(prev_cid) = prev_record_cid else {
+        return Ok(());
+    };
+
+    let new_mst = mst
+        .delete(&key)
+        .await
+        .map_err(|e| format!("Failed to delete from MST: {:?}", e))?;
+
+    let new_mst_root = new_mst
+        .persist()
+        .await
+        .map_err(|e| format!("Failed to persist MST: {:?}", e))?;
+
+    let op = RecordOp::Delete {
+        collection: collection.clone(),
+        rkey: rkey.clone(),
+        prev: Some(prev_cid),
+    };
+
+    let mut new_mst_blocks = std::collections::BTreeMap::new();
+    let mut old_mst_blocks = std::collections::BTreeMap::new();
+
+    new_mst
+        .blocks_for_path(&key, &mut new_mst_blocks)
+        .await
+        .map_err(|e| format!("Failed to get new MST blocks: {:?}", e))?;
+
+    mst.blocks_for_path(&key, &mut old_mst_blocks)
+        .await
+        .map_err(|e| format!("Failed to get old MST blocks: {:?}", e))?;
+
+    let mut relevant_blocks = new_mst_blocks.clone();
+    relevant_blocks.extend(old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));
+
+    let written_cids: Vec<Cid> = tracking_store
+        .get_all_relevant_cids()
+        .into_iter()
+        .chain(relevant_blocks.keys().copied())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
+
+    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
+        .chain(
+            old_mst_blocks
+                .keys()
+                .filter(|cid| !new_mst_blocks.contains_key(*cid))
+                .copied(),
+        )
+        .chain(std::iter::once(prev_cid))
+        .collect();
+
+    commit_and_log(
+        state,
+        CommitParams {
+            did,
+            user_id,
+            current_root_cid: Some(current_root_cid),
+            prev_data_cid: Some(commit.data),
+            new_mst_root,
+            ops: vec![op],
+            blocks_cids: &written_cids_str,
+            blobs: &[],
+            obsolete_cids,
+        },
+    )
+    .await?;
+
+    Ok(())
 }

@@ -36,6 +36,41 @@ fn extract_blob_cids_recursive(value: &Value, blobs: &mut Vec<String>) {
     }
 }
 
+use tranquil_db_traits::Backlink;
+use crate::types::AtUri;
+
+pub fn extract_backlinks(uri: &AtUri, record: &Value) -> Vec<Backlink> {
+    let record_type = record
+        .get("$type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    match record_type {
+        "app.bsky.graph.follow" | "app.bsky.graph.block" => record
+            .get("subject")
+            .and_then(|v| v.as_str())
+            .filter(|s| s.starts_with("did:"))
+            .map(|subject| vec![Backlink {
+                uri: uri.clone(),
+                path: "subject".to_string(),
+                link_to: subject.to_string(),
+            }])
+            .unwrap_or_default(),
+        "app.bsky.feed.like" | "app.bsky.feed.repost" => record
+            .get("subject")
+            .and_then(|v| v.get("uri"))
+            .and_then(|v| v.as_str())
+            .filter(|s| s.starts_with("at://"))
+            .map(|subject_uri| vec![Backlink {
+                uri: uri.clone(),
+                path: "subject.uri".to_string(),
+                link_to: subject_uri.to_string(),
+            }])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 pub fn create_signed_commit(
     did: &Did,
     data: Cid,
@@ -98,6 +133,8 @@ pub async fn commit_and_log(
     state: &AppState,
     params: CommitParams<'_>,
 ) -> Result<CommitResult, String> {
+    use tranquil_db_traits::{ApplyCommitError, ApplyCommitInput, CommitEventData, RecordDelete, RecordUpsert};
+
     let CommitParams {
         did,
         user_id,
@@ -109,13 +146,12 @@ pub async fn commit_and_log(
         blobs,
         obsolete_cids,
     } = params;
-    let key_row = sqlx::query!(
-        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
-        user_id
-    )
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| format!("Failed to fetch signing key: {}", e))?;
+    let key_row = state
+        .user_repo
+        .get_user_key_by_id(user_id)
+        .await
+        .map_err(|e| format!("Failed to fetch signing key: {}", e))?
+        .ok_or_else(|| "Signing key not found".to_string())?;
     let key_bytes = crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
         .map_err(|e| format!("Failed to decrypt signing key: {}", e))?;
     let signing_key =
@@ -129,184 +165,48 @@ pub async fn commit_and_log(
         .put(&new_commit_bytes)
         .await
         .map_err(|e| format!("Failed to save commit block: {:?}", e))?;
-    let mut tx = state
-        .db
-        .begin()
-        .await
-        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-    let lock_result = sqlx::query!(
-        "SELECT repo_root_cid FROM repos WHERE user_id = $1 FOR UPDATE NOWAIT",
-        user_id
-    )
-    .fetch_optional(&mut *tx)
-    .await;
-    match lock_result {
-        Err(e) => {
-            if let Some(db_err) = e.as_database_error()
-                && db_err.code().as_deref() == Some("55P03")
-            {
-                return Err(
-                    "ConcurrentModification: Another request is modifying this repo".to_string(),
-                );
-            }
-            return Err(format!("Failed to acquire repo lock: {}", e));
-        }
-        Ok(Some(row)) => {
-            if let Some(expected_root) = &current_root_cid
-                && row.repo_root_cid != expected_root.to_string()
-            {
-                return Err(
-                    "ConcurrentModification: Repo has been modified since last read".to_string(),
-                );
-            }
-        }
-        Ok(None) => {
-            return Err("Repo not found".to_string());
-        }
-    }
-    let is_account_active = sqlx::query_scalar!(
-        "SELECT deactivated_at IS NULL FROM users WHERE id = $1",
-        user_id
-    )
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| format!("Failed to check account status: {}", e))?
-    .flatten()
-    .unwrap_or(false);
-    sqlx::query!(
-        "UPDATE repos SET repo_root_cid = $1, repo_rev = $2 WHERE user_id = $3",
-        new_root_cid.to_string(),
-        &rev_str,
-        user_id
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("DB Error (repos): {}", e))?;
+
     let mut all_block_cids: Vec<Vec<u8>> = blocks_cids
         .iter()
         .filter_map(|s| Cid::from_str(s).ok())
         .map(|c| c.to_bytes())
         .collect();
     all_block_cids.push(new_root_cid.to_bytes());
-    if !all_block_cids.is_empty() {
-        sqlx::query!(
-            r#"
-            INSERT INTO user_blocks (user_id, block_cid)
-            SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
-            ON CONFLICT (user_id, block_cid) DO NOTHING
-            "#,
-            user_id,
-            &all_block_cids
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (user_blocks): {}", e))?;
-    }
-    if !obsolete_cids.is_empty() {
-        let obsolete_bytes: Vec<Vec<u8>> = obsolete_cids.iter().map(|c| c.to_bytes()).collect();
-        sqlx::query!(
-            r#"
-            DELETE FROM user_blocks
-            WHERE user_id = $1
-            AND block_cid = ANY($2)
-            "#,
-            user_id,
-            &obsolete_bytes as &[Vec<u8>]
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (user_blocks delete obsolete): {}", e))?;
-    }
-    let (upserts, deletes): (Vec<_>, Vec<_>) = ops
-        .iter()
-        .partition(|op| matches!(op, RecordOp::Create { .. } | RecordOp::Update { .. }));
-    let (upsert_collections, upsert_rkeys, upsert_cids): (Vec<String>, Vec<String>, Vec<String>) =
-        upserts
-            .into_iter()
-            .filter_map(|op| match op {
-                RecordOp::Create {
-                    collection,
-                    rkey,
-                    cid,
+
+    let obsolete_bytes: Vec<Vec<u8>> = obsolete_cids.iter().map(|c| c.to_bytes()).collect();
+
+    let (record_upserts, record_deletes): (Vec<RecordUpsert>, Vec<RecordDelete>) = ops.iter().fold(
+        (Vec::new(), Vec::new()),
+        |(mut upserts, mut deletes), op| {
+            match op {
+                RecordOp::Create { collection, rkey, cid }
+                | RecordOp::Update { collection, rkey, cid, .. } => {
+                    upserts.push(RecordUpsert {
+                        collection: collection.clone(),
+                        rkey: rkey.clone(),
+                        cid: crate::types::CidLink::new_unchecked(&cid.to_string()),
+                    });
                 }
-                | RecordOp::Update {
-                    collection,
-                    rkey,
-                    cid,
-                    ..
-                } => Some((collection.to_string(), rkey.to_string(), cid.to_string())),
-                _ => None,
-            })
-            .fold(
-                (Vec::new(), Vec::new(), Vec::new()),
-                |(mut cols, mut rkeys, mut cids), (c, r, ci)| {
-                    cols.push(c);
-                    rkeys.push(r);
-                    cids.push(ci);
-                    (cols, rkeys, cids)
-                },
-            );
-    let (delete_collections, delete_rkeys): (Vec<String>, Vec<String>) = deletes
-        .into_iter()
-        .filter_map(|op| match op {
-            RecordOp::Delete {
-                collection, rkey, ..
-            } => Some((collection.to_string(), rkey.to_string())),
-            _ => None,
-        })
-        .unzip();
-    if !upsert_collections.is_empty() {
-        sqlx::query!(
-            r#"
-            INSERT INTO records (repo_id, collection, rkey, record_cid, repo_rev)
-            SELECT $1, collection, rkey, record_cid, $5
-            FROM UNNEST($2::text[], $3::text[], $4::text[]) AS t(collection, rkey, record_cid)
-            ON CONFLICT (repo_id, collection, rkey) DO UPDATE
-            SET record_cid = EXCLUDED.record_cid, repo_rev = EXCLUDED.repo_rev, created_at = NOW()
-            "#,
-            user_id,
-            &upsert_collections,
-            &upsert_rkeys,
-            &upsert_cids,
-            rev_str
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (records batch upsert): {}", e))?;
-    }
-    if !delete_collections.is_empty() {
-        sqlx::query!(
-            r#"
-            DELETE FROM records
-            WHERE repo_id = $1
-            AND (collection, rkey) IN (SELECT * FROM UNNEST($2::text[], $3::text[]))
-            "#,
-            user_id,
-            &delete_collections,
-            &delete_rkeys
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (records batch delete): {}", e))?;
-    }
-    let ops_json = ops
+                RecordOp::Delete { collection, rkey, .. } => {
+                    deletes.push(RecordDelete {
+                        collection: collection.clone(),
+                        rkey: rkey.clone(),
+                    });
+                }
+            }
+            (upserts, deletes)
+        },
+    );
+
+    let ops_json: Vec<serde_json::Value> = ops
         .iter()
         .map(|op| match op {
-            RecordOp::Create {
-                collection,
-                rkey,
-                cid,
-            } => json!({
+            RecordOp::Create { collection, rkey, cid } => json!({
                 "action": "create",
                 "path": format!("{}/{}", collection, rkey),
                 "cid": cid.to_string()
             }),
-            RecordOp::Update {
-                collection,
-                rkey,
-                cid,
-                prev,
-            } => {
+            RecordOp::Update { collection, rkey, cid, prev } => {
                 let mut obj = json!({
                     "action": "update",
                     "path": format!("{}/{}", collection, rkey),
@@ -317,11 +217,7 @@ pub async fn commit_and_log(
                 }
                 obj
             }
-            RecordOp::Delete {
-                collection,
-                rkey,
-                prev,
-            } => {
+            RecordOp::Delete { collection, rkey, prev } => {
                 let mut obj = json!({
                     "action": "delete",
                     "path": format!("{}/{}", collection, rkey),
@@ -333,40 +229,49 @@ pub async fn commit_and_log(
                 obj
             }
         })
-        .collect::<Vec<_>>();
-    if is_account_active {
-        let event_type = "commit";
-        let prev_cid_str = current_root_cid.map(|c| c.to_string());
-        let prev_data_cid_str = prev_data_cid.map(|c| c.to_string());
-        let seq_row = sqlx::query!(
-            r#"
-            INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, prev_data_cid)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING seq
-            "#,
-            did.as_str(),
-            event_type,
-            new_root_cid.to_string(),
-            prev_cid_str,
-            json!(ops_json),
-            blobs,
-            blocks_cids,
-            prev_data_cid_str,
-        )
-        .fetch_one(&mut *tx)
+        .collect();
+
+    let commit_event = CommitEventData {
+        did: did.clone(),
+        event_type: "commit".to_string(),
+        commit_cid: Some(crate::types::CidLink::new_unchecked(&new_root_cid.to_string())),
+        prev_cid: current_root_cid.map(|c| crate::types::CidLink::new_unchecked(&c.to_string())),
+        ops: Some(json!(ops_json)),
+        blobs: Some(blobs.to_vec()),
+        blocks_cids: Some(blocks_cids.to_vec()),
+        prev_data_cid: prev_data_cid.map(|c| crate::types::CidLink::new_unchecked(&c.to_string())),
+        rev: Some(rev_str.clone()),
+    };
+
+    let input = ApplyCommitInput {
+        user_id,
+        did: did.clone(),
+        expected_root_cid: current_root_cid.map(|c| crate::types::CidLink::new_unchecked(&c.to_string())),
+        new_root_cid: crate::types::CidLink::new_unchecked(&new_root_cid.to_string()),
+        new_rev: rev_str.clone(),
+        new_block_cids: all_block_cids,
+        obsolete_block_cids: obsolete_bytes,
+        record_upserts,
+        record_deletes,
+        commit_event,
+    };
+
+    let result = state
+        .repo_repo
+        .apply_commit(input)
         .await
-        .map_err(|e| format!("DB Error (repo_seq): {}", e))?;
-        sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("DB Error (notify): {}", e))?;
-    }
-    tx.commit()
-        .await
-        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-    if is_account_active {
+        .map_err(|e| match e {
+            ApplyCommitError::RepoNotFound => "Repo not found".to_string(),
+            ApplyCommitError::ConcurrentModification => {
+                "ConcurrentModification: Repo has been modified since last read".to_string()
+            }
+            ApplyCommitError::Database(msg) => format!("DB Error: {}", msg),
+        })?;
+
+    if result.is_account_active {
         let _ = sequence_sync_event(state, did, &new_root_cid.to_string(), Some(&rev_str)).await;
     }
+
     Ok(CommitResult {
         commit_cid: new_root_cid,
         rev: rev_str,
@@ -382,21 +287,20 @@ pub async fn create_record_internal(
     use crate::repo::tracking::TrackingBlockStore;
     use jacquard_repo::mst::Mst;
     use std::sync::Arc;
-    let user_id: Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
+    let user_id: Uuid = state
+        .user_repo
+        .get_id_by_did(did)
         .await
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "User not found".to_string())?;
-    let root_cid_str: String = sqlx::query_scalar!(
-        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| format!("DB error: {}", e))?
-    .ok_or_else(|| "Repo not found".to_string())?;
+    let root_cid_link = state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Repo not found".to_string())?;
     let current_root_cid =
-        Cid::from_str(&root_cid_str).map_err(|_| "Invalid repo root CID".to_string())?;
+        Cid::from_str(root_cid_link.as_str()).map_err(|_| "Invalid repo root CID".to_string())?;
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = tracking_store
         .get(&current_root_cid)
@@ -481,31 +385,11 @@ pub async fn sequence_identity_event(
     did: &Did,
     handle: Option<&Handle>,
 ) -> Result<i64, String> {
-    let mut tx = state
-        .db
-        .begin()
+    state
+        .repo_repo
+        .insert_identity_event(did, handle)
         .await
-        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-    let seq_row = sqlx::query!(
-        r#"
-        INSERT INTO repo_seq (did, event_type, handle)
-        VALUES ($1, 'identity', $2)
-        RETURNING seq
-        "#,
-        did.as_str(),
-        handle.map(|h| h.as_str()),
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| format!("DB Error (repo_seq identity): {}", e))?;
-    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (notify): {}", e))?;
-    tx.commit()
-        .await
-        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-    Ok(seq_row.seq)
+        .map_err(|e| format!("DB Error (identity event): {}", e))
 }
 pub async fn sequence_account_event(
     state: &AppState,
@@ -513,32 +397,11 @@ pub async fn sequence_account_event(
     active: bool,
     status: Option<&str>,
 ) -> Result<i64, String> {
-    let mut tx = state
-        .db
-        .begin()
+    state
+        .repo_repo
+        .insert_account_event(did, active, status)
         .await
-        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-    let seq_row = sqlx::query!(
-        r#"
-        INSERT INTO repo_seq (did, event_type, active, status)
-        VALUES ($1, 'account', $2, $3)
-        RETURNING seq
-        "#,
-        did.as_str(),
-        active,
-        status,
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| format!("DB Error (repo_seq account): {}", e))?;
-    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (notify): {}", e))?;
-    tx.commit()
-        .await
-        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-    Ok(seq_row.seq)
+        .map_err(|e| format!("DB Error (account event): {}", e))
 }
 pub async fn sequence_sync_event(
     state: &AppState,
@@ -546,32 +409,12 @@ pub async fn sequence_sync_event(
     commit_cid: &str,
     rev: Option<&str>,
 ) -> Result<i64, String> {
-    let mut tx = state
-        .db
-        .begin()
+    let cid_link = crate::types::CidLink::new_unchecked(commit_cid);
+    state
+        .repo_repo
+        .insert_sync_event(did, &cid_link, rev)
         .await
-        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-    let seq_row = sqlx::query!(
-        r#"
-        INSERT INTO repo_seq (did, event_type, commit_cid, rev)
-        VALUES ($1, 'sync', $2, $3)
-        RETURNING seq
-        "#,
-        did.as_str(),
-        commit_cid,
-        rev,
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| format!("DB Error (repo_seq sync): {}", e))?;
-    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (notify): {}", e))?;
-    tx.commit()
-        .await
-        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-    Ok(seq_row.seq)
+        .map_err(|e| format!("DB Error (sync event): {}", e))
 }
 
 pub async fn sequence_genesis_commit(
@@ -581,39 +424,11 @@ pub async fn sequence_genesis_commit(
     mst_root_cid: &Cid,
     rev: &str,
 ) -> Result<i64, String> {
-    let ops = serde_json::json!([]);
-    let blobs: Vec<String> = vec![];
-    let blocks_cids: Vec<String> = vec![mst_root_cid.to_string(), commit_cid.to_string()];
-    let prev_cid: Option<&str> = None;
-    let commit_cid_str = commit_cid.to_string();
-    let mut tx = state
-        .db
-        .begin()
+    let commit_cid_link = crate::types::CidLink::new_unchecked(&commit_cid.to_string());
+    let mst_root_cid_link = crate::types::CidLink::new_unchecked(&mst_root_cid.to_string());
+    state
+        .repo_repo
+        .insert_genesis_commit_event(did, &commit_cid_link, &mst_root_cid_link, rev)
         .await
-        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-    let seq_row = sqlx::query!(
-        r#"
-        INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, rev)
-        VALUES ($1, 'commit', $2, $3::TEXT, $4, $5, $6, $7)
-        RETURNING seq
-        "#,
-        did.as_str(),
-        commit_cid_str,
-        prev_cid,
-        ops,
-        &blobs,
-        &blocks_cids,
-        rev
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| format!("DB Error (repo_seq genesis commit): {}", e))?;
-    sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq_row.seq))
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("DB Error (notify): {}", e))?;
-    tx.commit()
-        .await
-        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-    Ok(seq_row.seq)
+        .map_err(|e| format!("DB Error (genesis commit event): {}", e))
 }

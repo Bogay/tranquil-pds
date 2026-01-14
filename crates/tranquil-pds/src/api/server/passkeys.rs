@@ -1,11 +1,7 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
 use crate::auth::BearerAuth;
-use crate::auth::webauthn::{
-    self, WebAuthnConfig, delete_passkey as db_delete_passkey, delete_registration_state,
-    get_passkeys_for_user, load_registration_state, save_passkey, save_registration_state,
-    update_passkey_name as db_update_passkey_name,
-};
+use crate::auth::webauthn::WebAuthnConfig;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -46,12 +42,8 @@ pub async fn start_passkey_registration(
         Err(e) => return e.into_response(),
     };
 
-    let user = sqlx::query!("SELECT handle FROM users WHERE did = $1", &*auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
-
-    let handle = match user {
-        Ok(Some(row)) => row.handle,
+    let handle = match state.user_repo.get_handle_by_did(&auth.0.did).await {
+        Ok(Some(h)) => h,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
         }
@@ -61,7 +53,7 @@ pub async fn start_passkey_registration(
         }
     };
 
-    let existing_passkeys = match get_passkeys_for_user(&state.db, &auth.0.did).await {
+    let existing_passkeys = match state.user_repo.get_passkeys_for_user(&auth.0.did).await {
         Ok(passkeys) => passkeys,
         Err(e) => {
             error!("DB error fetching existing passkeys: {:?}", e);
@@ -90,7 +82,19 @@ pub async fn start_passkey_registration(
         }
     };
 
-    if let Err(e) = save_registration_state(&state.db, &auth.0.did, &reg_state).await {
+    let state_json = match serde_json::to_string(&reg_state) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to serialize registration state: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    if let Err(e) = state
+        .user_repo
+        .save_webauthn_challenge(&auth.0.did, "registration", &state_json)
+        .await
+    {
         error!("Failed to save registration state: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -126,13 +130,25 @@ pub async fn finish_passkey_registration(
         Err(e) => return e.into_response(),
     };
 
-    let reg_state = match load_registration_state(&state.db, &auth.0.did).await {
-        Ok(Some(state)) => state,
+    let reg_state_json = match state
+        .user_repo
+        .load_webauthn_challenge(&auth.0.did, "registration")
+        .await
+    {
+        Ok(Some(json)) => json,
         Ok(None) => {
             return ApiError::NoRegistrationInProgress.into_response();
         }
         Err(e) => {
             error!("DB error loading registration state: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    let reg_state: SecurityKeyRegistration = match serde_json::from_str(&reg_state_json) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to deserialize registration state: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
@@ -153,13 +169,23 @@ pub async fn finish_passkey_registration(
         }
     };
 
-    let passkey_id = match save_passkey(
-        &state.db,
-        &auth.0.did,
-        &passkey,
-        input.friendly_name.as_deref(),
-    )
-    .await
+    let public_key = match serde_json::to_vec(&passkey) {
+        Ok(pk) => pk,
+        Err(e) => {
+            error!("Failed to serialize passkey: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    let passkey_id = match state
+        .user_repo
+        .save_passkey(
+            &auth.0.did,
+            passkey.cred_id(),
+            &public_key,
+            input.friendly_name.as_deref(),
+        )
+        .await
     {
         Ok(id) => id,
         Err(e) => {
@@ -168,7 +194,11 @@ pub async fn finish_passkey_registration(
         }
     };
 
-    if let Err(e) = delete_registration_state(&state.db, &auth.0.did).await {
+    if let Err(e) = state
+        .user_repo
+        .delete_webauthn_challenge(&auth.0.did, "registration")
+        .await
+    {
         warn!("Failed to delete registration state: {:?}", e);
     }
 
@@ -203,7 +233,7 @@ pub struct ListPasskeysResponse {
 }
 
 pub async fn list_passkeys(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let passkeys = match get_passkeys_for_user(&state.db, &auth.0.did).await {
+    let passkeys = match state.user_repo.get_passkeys_for_user(&auth.0.did).await {
         Ok(pks) => pks,
         Err(e) => {
             error!("DB error fetching passkeys: {:?}", e);
@@ -239,13 +269,13 @@ pub async fn delete_passkey(
     auth: BearerAuth,
     Json(input): Json<DeletePasskeyInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
             .await;
     }
 
-    if crate::api::server::reauth::check_reauth_required(&state.db, &auth.0.did).await {
-        return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
+    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.0.did).await {
+        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
     }
 
     let id: uuid::Uuid = match input.id.parse() {
@@ -255,7 +285,7 @@ pub async fn delete_passkey(
         }
     };
 
-    match db_delete_passkey(&state.db, id, &auth.0.did).await {
+    match state.user_repo.delete_passkey(id, &auth.0.did).await {
         Ok(true) => {
             info!(did = %auth.0.did, passkey_id = %id, "Passkey deleted");
             EmptyResponse::ok().into_response()
@@ -287,7 +317,11 @@ pub async fn update_passkey(
         }
     };
 
-    match db_update_passkey_name(&state.db, id, &auth.0.did, &input.friendly_name).await {
+    match state
+        .user_repo
+        .update_passkey_name(id, &auth.0.did, &input.friendly_name)
+        .await
+    {
         Ok(true) => {
             info!(did = %auth.0.did, passkey_id = %id, "Passkey renamed");
             EmptyResponse::ok().into_response()
@@ -300,10 +334,6 @@ pub async fn update_passkey(
     }
 }
 
-pub async fn has_passkeys_for_user(state: &AppState, did: &str) -> bool {
-    has_passkeys_for_user_db(&state.db, did).await
-}
-
-pub async fn has_passkeys_for_user_db(db: &sqlx::PgPool, did: &str) -> bool {
-    webauthn::has_passkeys(db, did).await.unwrap_or(false)
+pub async fn has_passkeys_for_user(state: &AppState, did: &crate::types::Did) -> bool {
+    state.user_repo.has_passkeys(did).await.unwrap_or(false)
 }

@@ -19,28 +19,33 @@ pub async fn describe_repo(
     Query(input): Query<DescribeRepoInput>,
 ) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
     let user_row = if input.repo.is_did() {
-        sqlx::query!(
-            "SELECT id, handle, did FROM users WHERE did = $1",
-            input.repo.as_str()
-        )
-        .fetch_optional(&state.db)
-        .await
-        .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
+        let did: crate::types::Did = match input.repo.as_str().parse() {
+            Ok(d) => d,
+            Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
+        };
+        state
+            .user_repo
+            .get_by_did(&did)
+            .await
+            .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
     } else {
         let repo_str = input.repo.as_str();
-        let handle = if !repo_str.contains('.') {
-            format!("{}.{}", repo_str, hostname)
+        let handle_str = if !repo_str.contains('.') {
+            format!("{}.{}", repo_str, hostname_for_handles)
         } else {
             repo_str.to_string()
         };
-        sqlx::query!(
-            "SELECT id, handle, did FROM users WHERE handle = $1",
-            handle
-        )
-        .fetch_optional(&state.db)
-        .await
-        .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
+        let handle: crate::types::Handle = match handle_str.parse() {
+            Ok(h) => h,
+            Err(_) => return ApiError::InvalidRequest("Invalid handle format".into()).into_response(),
+        };
+        state
+            .user_repo
+            .get_by_handle(&handle)
+            .await
+            .map(|opt| opt.map(|r| (r.id, r.handle, r.did)))
     };
     let (user_id, handle, did) = match user_row {
         Ok(Some((id, handle, did))) => (id, handle, did),
@@ -51,16 +56,11 @@ pub async fn describe_repo(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let collections_query = sqlx::query!(
-        "SELECT DISTINCT collection FROM records WHERE repo_id = $1",
-        user_id
-    )
-    .fetch_all(&state.db)
-    .await;
-    let collections: Vec<String> = match collections_query {
-        Ok(rows) => rows.iter().map(|r| r.collection.clone()).collect(),
-        Err(_) => Vec::new(),
-    };
+    let collections = state
+        .repo_repo
+        .list_collections(user_id)
+        .await
+        .unwrap_or_default();
     let did_doc = json!({
         "id": did,
         "alsoKnownAs": [format!("at://{}", handle)]

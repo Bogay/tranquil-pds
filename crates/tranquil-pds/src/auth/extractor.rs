@@ -130,7 +130,8 @@ impl FromRequestParts<AppState> for BearerAuth {
             let uri = build_full_url(&parts.uri.to_string());
 
             match validate_token_with_dpop(
-                &state.db,
+                state.user_repo.as_ref(),
+                state.oauth_repo.as_ref(),
                 &extracted.token,
                 true,
                 dpop_proof,
@@ -148,8 +149,12 @@ impl FromRequestParts<AppState> for BearerAuth {
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         } else {
-            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token)
-                .await
+            match validate_bearer_token_cached(
+                state.user_repo.as_ref(),
+                state.cache.as_ref(),
+                &extracted.token,
+            )
+            .await
             {
                 Ok(user) => Ok(BearerAuth(user)),
                 Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
@@ -186,7 +191,8 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
             let uri = build_full_url(&parts.uri.to_string());
 
             match validate_token_with_dpop(
-                &state.db,
+                state.user_repo.as_ref(),
+                state.oauth_repo.as_ref(),
                 &extracted.token,
                 true,
                 dpop_proof,
@@ -204,7 +210,7 @@ impl FromRequestParts<AppState> for BearerAuthAllowDeactivated {
             }
         } else {
             match validate_bearer_token_cached_allow_deactivated(
-                &state.db,
+                state.user_repo.as_ref(),
                 state.cache.as_ref(),
                 &extracted.token,
             )
@@ -244,7 +250,8 @@ impl FromRequestParts<AppState> for BearerAuthAllowTakendown {
             let uri = build_full_url(&parts.uri.to_string());
 
             match validate_token_with_dpop(
-                &state.db,
+                state.user_repo.as_ref(),
+                state.oauth_repo.as_ref(),
                 &extracted.token,
                 true,
                 dpop_proof,
@@ -261,7 +268,9 @@ impl FromRequestParts<AppState> for BearerAuthAllowTakendown {
                 Err(_) => Err(AuthError::AuthenticationFailed),
             }
         } else {
-            match validate_bearer_token_allow_takendown(&state.db, &extracted.token).await {
+            match validate_bearer_token_allow_takendown(state.user_repo.as_ref(), &extracted.token)
+                .await
+            {
                 Ok(user) => Ok(BearerAuthAllowTakendown(user)),
                 Err(TokenValidationError::AccountDeactivated) => Err(AuthError::AccountDeactivated),
                 Err(TokenValidationError::TokenExpired) => Err(AuthError::TokenExpired),
@@ -296,7 +305,8 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
             let uri = build_full_url(&parts.uri.to_string());
 
             match validate_token_with_dpop(
-                &state.db,
+                state.user_repo.as_ref(),
+                state.oauth_repo.as_ref(),
                 &extracted.token,
                 true,
                 dpop_proof,
@@ -320,8 +330,12 @@ impl FromRequestParts<AppState> for BearerAuthAdmin {
                 Err(_) => return Err(AuthError::AuthenticationFailed),
             }
         } else {
-            match validate_bearer_token_cached(&state.db, state.cache.as_ref(), &extracted.token)
-                .await
+            match validate_bearer_token_cached(
+                state.user_repo.as_ref(),
+                state.cache.as_ref(),
+                &extracted.token,
+            )
+            .await
             {
                 Ok(user) => user,
                 Err(TokenValidationError::AccountDeactivated) => {

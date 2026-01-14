@@ -1,7 +1,6 @@
 use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde_json::json;
-use tracing::error;
 
 fn get_available_comms_channels() -> Vec<&'static str> {
     let mut channels = vec!["email"];
@@ -64,11 +63,8 @@ pub async fn describe_server() -> impl IntoResponse {
     }))
 }
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
-    match sqlx::query!("SELECT 1 as one").fetch_one(&state.db).await {
-        Ok(_) => (StatusCode::OK, "OK"),
-        Err(e) => {
-            error!("Health check failed: {:?}", e);
-            (StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable")
-        }
+    match state.infra_repo.health_check().await {
+        Ok(true) => (StatusCode::OK, "OK"),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable"),
     }
 }

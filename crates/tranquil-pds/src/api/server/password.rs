@@ -14,7 +14,6 @@ use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 fn generate_reset_code() -> String {
     crate::util::generate_token_code()
@@ -58,22 +57,20 @@ pub async fn request_password_reset(
         return ApiError::InvalidRequest("email or handle is required".into()).into_response();
     }
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
     let normalized = identifier.to_lowercase();
     let normalized = normalized.strip_prefix('@').unwrap_or(&normalized);
     let normalized_handle = if normalized.contains('@') || normalized.contains('.') {
         normalized.to_string()
     } else {
-        format!("{}.{}", normalized, pds_hostname)
+        format!("{}.{}", normalized, hostname_for_handles)
     };
-    let user = sqlx::query!(
-        "SELECT id FROM users WHERE LOWER(email) = $1 OR handle = $2",
-        normalized,
-        normalized_handle
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let user_id = match user {
-        Ok(Some(row)) => row.id,
+    let user_id = match state
+        .user_repo
+        .get_id_by_email_or_handle(&normalized, &normalized_handle)
+        .await
+    {
+        Ok(Some(id)) => id,
         Ok(None) => {
             info!("Password reset requested for unknown identifier");
             return EmptyResponse::ok().into_response();
@@ -85,20 +82,23 @@ pub async fn request_password_reset(
     };
     let code = generate_reset_code();
     let expires_at = Utc::now() + Duration::minutes(10);
-    let update = sqlx::query!(
-        "UPDATE users SET password_reset_code = $1, password_reset_code_expires_at = $2 WHERE id = $3",
-        code,
-        expires_at,
-        user_id
-    )
-    .execute(&state.db)
-    .await;
-    if let Err(e) = update {
+    if let Err(e) = state
+        .user_repo
+        .set_password_reset_code(user_id, &code, expires_at)
+        .await
+    {
         error!("DB error setting reset code: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    if let Err(e) = crate::comms::enqueue_password_reset(&state.db, user_id, &code, &hostname).await
+    if let Err(e) = crate::comms::comms_repo::enqueue_password_reset(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        user_id,
+        &code,
+        &hostname,
+    )
+    .await
     {
         warn!("Failed to enqueue password reset notification: {:?}", e);
     }
@@ -136,17 +136,8 @@ pub async fn reset_password(
     if let Err(e) = validate_password(password) {
         return ApiError::InvalidRequest(e.to_string()).into_response();
     }
-    let user = sqlx::query!(
-        "SELECT id, password_reset_code, password_reset_code_expires_at FROM users WHERE password_reset_code = $1",
-        token
-    )
-    .fetch_optional(&state.db)
-    .await;
-    let (user_id, expires_at) = match user {
-        Ok(Some(row)) => {
-            let expires = row.password_reset_code_expires_at;
-            (row.id, expires)
-        }
+    let user = match state.user_repo.get_user_by_reset_code(token).await {
+        Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::InvalidToken(None).into_response();
         }
@@ -155,21 +146,15 @@ pub async fn reset_password(
             return ApiError::InternalError(None).into_response();
         }
     };
-    if let Some(exp) = expires_at {
-        if Utc::now() > exp {
-            if let Err(e) = sqlx::query!(
-                "UPDATE users SET password_reset_code = NULL, password_reset_code_expires_at = NULL WHERE id = $1",
-                user_id
-            )
-            .execute(&state.db)
-            .await
-            {
-                error!("Failed to clear expired reset code: {:?}", e);
-            }
-            return ApiError::ExpiredToken(None).into_response();
-        }
-    } else {
+    let user_id = user.id;
+    let Some(exp) = user.expires_at else {
         return ApiError::InvalidToken(None).into_response();
+    };
+    if Utc::now() > exp {
+        if let Err(e) = state.user_repo.clear_password_reset_code(user_id).await {
+            error!("Failed to clear expired reset code: {:?}", e);
+        }
+        return ApiError::ExpiredToken(None).into_response();
     }
     let password_clone = password.to_string();
     let password_hash =
@@ -184,63 +169,19 @@ pub async fn reset_password(
                 return ApiError::InternalError(None).into_response();
             }
         };
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
+    let result = match state
+        .user_repo
+        .reset_password_with_sessions(user_id, &password_hash)
+        .await
+    {
+        Ok(r) => r,
         Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
+            error!("Failed to reset password: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
-    if let Err(e) = sqlx::query!(
-        "UPDATE users SET password_hash = $1, password_reset_code = NULL, password_reset_code_expires_at = NULL, password_required = TRUE WHERE id = $2",
-        password_hash,
-        user_id
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("DB error updating password: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-    let user_did = match sqlx::query_scalar!("SELECT did FROM users WHERE id = $1", user_id)
-        .fetch_one(&mut *tx)
-        .await
-    {
-        Ok(did) => did,
-        Err(e) => {
-            error!("Failed to get DID for user {}: {:?}", user_id, e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-    let session_jtis: Vec<String> = match sqlx::query_scalar!(
-        "SELECT access_jti FROM session_tokens WHERE did = $1",
-        user_did
-    )
-    .fetch_all(&mut *tx)
-    .await
-    {
-        Ok(jtis) => jtis,
-        Err(e) => {
-            error!("Failed to fetch session JTIs: {:?}", e);
-            vec![]
-        }
-    };
-    if let Err(e) = sqlx::query!("DELETE FROM session_tokens WHERE did = $1", user_did)
-        .execute(&mut *tx)
-        .await
-    {
-        error!(
-            "Failed to invalidate sessions after password reset: {:?}",
-            e
-        );
-        return ApiError::InternalError(None).into_response();
-    }
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit password reset transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-    futures::future::join_all(session_jtis.into_iter().map(|jti| {
-        let cache_key = format!("auth:session:{}:{}", user_did, jti);
+    futures::future::join_all(result.session_jtis.iter().map(|jti| {
+        let cache_key = format!("auth:session:{}:{}", result.did, jti);
         let cache = state.cache.clone();
         async move {
             if let Err(e) = cache.delete(&cache_key).await {
@@ -268,8 +209,8 @@ pub async fn change_password(
     auth: BearerAuth,
     Json(input): Json<ChangePasswordInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
             .await;
     }
 
@@ -284,13 +225,8 @@ pub async fn change_password(
     if let Err(e) = validate_password(new_password) {
         return ApiError::InvalidRequest(e.to_string()).into_response();
     }
-    let user =
-        sqlx::query_as::<_, (Uuid, String)>("SELECT id, password_hash FROM users WHERE did = $1")
-            .bind(&auth.0.did)
-            .fetch_optional(&state.db)
-            .await;
-    let (user_id, password_hash) = match user {
-        Ok(Some(row)) => row,
+    let user = match state.user_repo.get_id_and_password_hash_by_did(&auth.0.did).await {
+        Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
         }
@@ -299,6 +235,7 @@ pub async fn change_password(
             return ApiError::InternalError(None).into_response();
         }
     };
+    let (user_id, password_hash) = (user.id, user.password_hash);
     let valid = match verify(current_password, &password_hash) {
         Ok(v) => v,
         Err(e) => {
@@ -322,12 +259,7 @@ pub async fn change_password(
                 return ApiError::InternalError(None).into_response();
             }
         };
-    if let Err(e) = sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
-        .bind(&new_hash)
-        .bind(user_id)
-        .execute(&state.db)
-        .await
-    {
+    if let Err(e) = state.user_repo.update_password_hash(user_id, &new_hash).await {
         error!("DB error updating password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -336,17 +268,8 @@ pub async fn change_password(
 }
 
 pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let user = sqlx::query!(
-        "SELECT password_hash IS NOT NULL as has_password FROM users WHERE did = $1",
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    match user {
-        Ok(Some(row)) => {
-            HasPasswordResponse::response(row.has_password.unwrap_or(false)).into_response()
-        }
+    match state.user_repo.has_password_by_did(&auth.0.did).await {
+        Ok(Some(has)) => HasPasswordResponse::response(has).into_response(),
         Ok(None) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error: {:?}", e);
@@ -356,23 +279,22 @@ pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth
 }
 
 pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
+        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
             .await;
     }
 
     if crate::api::server::reauth::check_reauth_required_cached(
-        &state.db,
+        &*state.session_repo,
         &state.cache,
         &auth.0.did,
     )
     .await
     {
-        return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
+        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
     }
 
-    let has_passkeys =
-        crate::api::server::passkeys::has_passkeys_for_user_db(&state.db, &auth.0.did).await;
+    let has_passkeys = state.user_repo.has_passkeys(&auth.0.did).await.unwrap_or(false);
     if !has_passkeys {
         return ApiError::InvalidRequest(
             "You must have at least one passkey registered before removing your password".into(),
@@ -380,14 +302,7 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
         .into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT id, password_hash FROM users WHERE did = $1",
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let user = match user {
+    let user = match state.user_repo.get_password_info_by_did(&auth.0.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -402,13 +317,7 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
         return ApiError::InvalidRequest("Account already has no password".into()).into_response();
     }
 
-    if let Err(e) = sqlx::query!(
-        "UPDATE users SET password_hash = NULL, password_required = FALSE WHERE id = $1",
-        user.id
-    )
-    .execute(&state.db)
-    .await
-    {
+    if let Err(e) = state.user_repo.remove_user_password(user.id).await {
         error!("DB error removing password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -429,13 +338,13 @@ pub async fn set_password(
     Json(input): Json<SetPasswordInput>,
 ) -> Response {
     if crate::api::server::reauth::check_reauth_required_cached(
-        &state.db,
+        &*state.session_repo,
         &state.cache,
         &auth.0.did,
     )
     .await
     {
-        return crate::api::server::reauth::reauth_required_response(&state.db, &auth.0.did).await;
+        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
     }
 
     let new_password = &input.new_password;
@@ -446,14 +355,7 @@ pub async fn set_password(
         return ApiError::InvalidRequest(e.to_string()).into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT id, password_hash FROM users WHERE did = $1",
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let user = match user {
+    let user = match state.user_repo.get_password_info_by_did(&auth.0.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -485,14 +387,7 @@ pub async fn set_password(
             }
         };
 
-    if let Err(e) = sqlx::query!(
-        "UPDATE users SET password_hash = $1, password_required = TRUE WHERE id = $2",
-        new_hash,
-        user.id
-    )
-    .execute(&state.db)
-    .await
-    {
+    if let Err(e) = state.user_repo.set_new_user_password(user.id, &new_hash).await {
         error!("DB error setting password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }

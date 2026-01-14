@@ -76,6 +76,16 @@ pub fn app_port() -> u16 {
     *APP_PORT.get().expect("APP_PORT not initialized")
 }
 
+#[allow(dead_code)]
+pub fn pds_hostname() -> String {
+    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| format!("pds.test:{}", app_port()))
+}
+
+#[allow(dead_code)]
+pub fn pds_endpoint() -> String {
+    format!("https://{}", pds_hostname())
+}
+
 pub async fn base_url() -> &'static str {
     SERVER_URL.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -457,7 +467,7 @@ async fn spawn_app(database_url: String) -> String {
     let addr = listener.local_addr().unwrap();
     APP_PORT.set(addr.port()).ok();
     unsafe {
-        std::env::set_var("PDS_HOSTNAME", addr.to_string());
+        std::env::set_var("PDS_HOSTNAME", format!("pds.test:{}", addr.port()));
     }
     let rate_limiters = RateLimiters::new()
         .with_login_limit(10000)
@@ -474,7 +484,7 @@ async fn spawn_app(database_url: String) -> String {
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    format!("http://{}", addr)
+    format!("http://localhost:{}", addr.port())
 }
 
 #[allow(dead_code)]

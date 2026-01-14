@@ -1,9 +1,10 @@
 use crate::oauth::{
     AuthorizationRequestParameters, ClientAuth, ClientMetadataCache, OAuthError, RequestData,
-    RequestId, db,
+    RequestId,
     scopes::{ParsedScope, parse_scope},
 };
 use crate::state::{AppState, RateLimitKind};
+use tranquil_types::RequestId as RequestIdType;
 use axum::body::Bytes;
 use axum::{Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
@@ -131,11 +132,16 @@ pub async fn pushed_authorization_request(
         code: None,
         controller_did: None,
     };
-    db::create_authorization_request(&state.db, &request_id.0, &request_data).await?;
+    let request_id_typed = RequestIdType::from(request_id.0.clone());
+    state
+        .oauth_repo
+        .create_authorization_request(&request_id_typed, &request_data)
+        .await
+        .map_err(crate::oauth::db_err_to_oauth)?;
     tokio::spawn({
-        let pool = state.db.clone();
+        let oauth_repo = state.oauth_repo.clone();
         async move {
-            if let Err(e) = db::delete_expired_authorization_requests(&pool).await {
+            if let Err(e) = oauth_repo.delete_expired_authorization_requests().await {
                 tracing::warn!("Failed to cleanup expired authorization requests: {:?}", e);
             }
         }

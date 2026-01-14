@@ -198,14 +198,14 @@ impl TryFrom<SequencedEvent> for CommitFrame {
     type Error = CommitFrameError;
 
     fn try_from(event: SequencedEvent) -> Result<Self, Self::Error> {
-        let commit_cid_str = event.commit_cid.ok_or_else(|| {
+        let commit_cid = event.commit_cid.ok_or_else(|| {
             CommitFrameError::InvalidCommitCid("Missing commit_cid in event".to_string())
         })?;
         let builder = CommitFrameBuilder::new(
             event.seq,
-            event.did,
-            &commit_cid_str,
-            event.prev_cid.as_deref(),
+            event.did.to_string(),
+            commit_cid.as_str(),
+            event.prev_cid.as_ref().map(|c| c.as_str()),
             event.ops.unwrap_or_default(),
             event.blobs.unwrap_or_default(),
             event.created_at,

@@ -2,147 +2,26 @@ use cid::Cid;
 use ipld_core::ipld::Ipld;
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
-use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
+use tranquil_db_traits::{
+    BackupRepository, BlobRepository, BrokenGenesisCommit, RepoRepository, UserRepository,
+};
+use tranquil_types::{AtUri, CidLink, Did};
 
 use crate::repo::PostgresBlockStore;
 use crate::storage::{BackupStorage, BlobStorage};
 use crate::sync::car::encode_car_header;
 
-async fn update_genesis_blocks_cids(db: &PgPool, blocks_cids: &[String], seq: i64) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "UPDATE repo_seq SET blocks_cids = $1 WHERE seq = $2",
-        blocks_cids,
-        seq
-    )
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-async fn update_repo_rev(db: &PgPool, rev: &str, user_id: uuid::Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        "UPDATE repos SET repo_rev = $1 WHERE user_id = $2",
-        rev,
-        user_id
-    )
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-async fn insert_user_blocks(db: &PgPool, user_id: uuid::Uuid, block_cids: &[Vec<u8>]) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        r#"
-        INSERT INTO user_blocks (user_id, block_cid)
-        SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
-        ON CONFLICT (user_id, block_cid) DO NOTHING
-        "#,
-        user_id,
-        block_cids
-    )
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-async fn fetch_user_records(db: &PgPool, user_id: uuid::Uuid) -> Result<Vec<(String, String, String)>, sqlx::Error> {
-    let rows = sqlx::query!(
-        "SELECT collection, rkey, record_cid FROM records WHERE repo_id = $1",
-        user_id
-    )
-    .fetch_all(db)
-    .await?;
-    Ok(rows.into_iter().map(|r| (r.collection, r.rkey, r.record_cid)).collect())
-}
-
-async fn insert_record_blobs(db: &PgPool, user_id: uuid::Uuid, record_uris: &[String], blob_cids: &[String]) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        r#"
-        INSERT INTO record_blobs (repo_id, record_uri, blob_cid)
-        SELECT $1, record_uri, blob_cid
-        FROM UNNEST($2::text[], $3::text[]) AS t(record_uri, blob_cid)
-        ON CONFLICT (repo_id, record_uri, blob_cid) DO NOTHING
-        "#,
-        user_id,
-        record_uris,
-        blob_cids
-    )
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-async fn delete_backup_record(db: &PgPool, id: uuid::Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query!("DELETE FROM account_backups WHERE id = $1", id)
-        .execute(db)
-        .await?;
-    Ok(())
-}
-
-async fn fetch_old_backups(
-    db: &PgPool,
-    user_id: uuid::Uuid,
-    retention_count: i64,
-) -> Result<Vec<(uuid::Uuid, String)>, sqlx::Error> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT id, storage_key
-        FROM account_backups
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        OFFSET $2
-        "#,
-        user_id,
-        retention_count
-    )
-    .fetch_all(db)
-    .await?;
-    Ok(rows.into_iter().map(|r| (r.id, r.storage_key)).collect())
-}
-
-async fn insert_backup_record(
-    db: &PgPool,
-    user_id: uuid::Uuid,
-    storage_key: &str,
-    repo_root_cid: &str,
-    repo_rev: &str,
-    block_count: i32,
-    size_bytes: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query!(
-        r#"
-        INSERT INTO account_backups (user_id, storage_key, repo_root_cid, repo_rev, block_count, size_bytes)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        "#,
-        user_id,
-        storage_key,
-        repo_root_cid,
-        repo_rev,
-        block_count,
-        size_bytes
-    )
-    .execute(db)
-    .await?;
-    Ok(())
-}
-
-struct GenesisCommitRow {
-    seq: i64,
-    did: String,
-    commit_cid: Option<String>,
-}
-
 async fn process_genesis_commit(
-    db: &PgPool,
+    repo_repo: &dyn RepoRepository,
     block_store: &PostgresBlockStore,
-    row: GenesisCommitRow,
-) -> Result<(String, i64), (i64, &'static str)> {
+    row: BrokenGenesisCommit,
+) -> Result<(Did, i64), (i64, &'static str)> {
     let commit_cid_str = row.commit_cid.ok_or((row.seq, "missing commit_cid"))?;
     let commit_cid = Cid::from_str(&commit_cid_str).map_err(|_| (row.seq, "invalid CID"))?;
     let block = block_store
@@ -152,28 +31,24 @@ async fn process_genesis_commit(
         .ok_or((row.seq, "block not found"))?;
     let commit = Commit::from_cbor(&block).map_err(|_| (row.seq, "failed to parse commit"))?;
     let blocks_cids = vec![commit.data.to_string(), commit_cid.to_string()];
-    update_genesis_blocks_cids(db, &blocks_cids, row.seq)
+    repo_repo
+        .update_seq_blocks_cids(row.seq, &blocks_cids)
         .await
         .map_err(|_| (row.seq, "failed to update"))?;
     Ok((row.did, row.seq))
 }
 
-pub async fn backfill_genesis_commit_blocks(db: &PgPool, block_store: PostgresBlockStore) {
-    let broken_genesis_commits = match sqlx::query!(
-        r#"
-        SELECT seq, did, commit_cid
-        FROM repo_seq
-        WHERE event_type = 'commit'
-          AND prev_cid IS NULL
-          AND (blocks_cids IS NULL OR array_length(blocks_cids, 1) IS NULL OR array_length(blocks_cids, 1) = 0)
-        "#
-    )
-    .fetch_all(db)
-    .await
-    {
+pub async fn backfill_genesis_commit_blocks(
+    repo_repo: Arc<dyn RepoRepository>,
+    block_store: PostgresBlockStore,
+) {
+    let broken_genesis_commits = match repo_repo.get_broken_genesis_commits().await {
         Ok(rows) => rows,
         Err(e) => {
-            error!("Failed to query repo_seq for genesis commit backfill: {}", e);
+            error!(
+                "Failed to query repo_seq for genesis commit backfill: {:?}",
+                e
+            );
             return;
         }
     };
@@ -189,15 +64,9 @@ pub async fn backfill_genesis_commit_blocks(db: &PgPool, block_store: PostgresBl
     );
 
     let results = futures::future::join_all(broken_genesis_commits.into_iter().map(|row| {
-        process_genesis_commit(
-            db,
-            &block_store,
-            GenesisCommitRow {
-                seq: row.seq,
-                did: row.did,
-                commit_cid: row.commit_cid,
-            },
-        )
+        let repo_repo = repo_repo.clone();
+        let block_store = block_store.clone();
+        async move { process_genesis_commit(repo_repo.as_ref(), &block_store, row).await }
     }))
     .await;
 
@@ -219,7 +88,7 @@ pub async fn backfill_genesis_commit_blocks(db: &PgPool, block_store: PostgresBl
 }
 
 async fn process_repo_rev(
-    db: &PgPool,
+    repo_repo: &dyn RepoRepository,
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
     repo_root_cid: String,
@@ -233,24 +102,24 @@ async fn process_repo_rev(
         .ok_or(user_id)?;
     let commit = Commit::from_cbor(&block).map_err(|_| user_id)?;
     let rev = commit.rev().to_string();
-    update_repo_rev(db, &rev, user_id)
+    repo_repo
+        .update_repo_rev(user_id, &rev)
         .await
         .map_err(|_| user_id)?;
     Ok(user_id)
 }
 
-pub async fn backfill_repo_rev(db: &PgPool, block_store: PostgresBlockStore) {
-    let repos_missing_rev =
-        match sqlx::query!("SELECT user_id, repo_root_cid FROM repos WHERE repo_rev IS NULL")
-            .fetch_all(db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                error!("Failed to query repos for backfill: {}", e);
-                return;
-            }
-        };
+pub async fn backfill_repo_rev(
+    repo_repo: Arc<dyn RepoRepository>,
+    block_store: PostgresBlockStore,
+) {
+    let repos_missing_rev = match repo_repo.get_repos_without_rev().await {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to query repos for backfill: {:?}", e);
+            return;
+        }
+    };
 
     if repos_missing_rev.is_empty() {
         debug!("No repos need repo_rev backfill");
@@ -263,28 +132,32 @@ pub async fn backfill_repo_rev(db: &PgPool, block_store: PostgresBlockStore) {
     );
 
     let results = futures::future::join_all(repos_missing_rev.into_iter().map(|repo| {
-        process_repo_rev(db, &block_store, repo.user_id, repo.repo_root_cid)
+        let repo_repo = repo_repo.clone();
+        let block_store = block_store.clone();
+        async move {
+            process_repo_rev(repo_repo.as_ref(), &block_store, repo.user_id, repo.repo_root_cid.to_string())
+                .await
+        }
     }))
     .await;
 
-    let (success, failed) = results
-        .iter()
-        .fold((0, 0), |(s, f), r| match r {
-            Ok(_) => (s + 1, f),
-            Err(user_id) => {
-                warn!(user_id = %user_id, "Failed to update repo_rev");
-                (s, f + 1)
-            }
-        });
+    let (success, failed) = results.iter().fold((0, 0), |(s, f), r| match r {
+        Ok(_) => (s + 1, f),
+        Err(user_id) => {
+            warn!(user_id = %user_id, "Failed to update repo_rev");
+            (s, f + 1)
+        }
+    });
 
     info!(success, failed, "Completed repo_rev backfill");
 }
 
 async fn process_user_blocks(
-    db: &PgPool,
+    repo_repo: &dyn RepoRepository,
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
     repo_root_cid: String,
+    repo_rev: Option<String>,
 ) -> Result<(uuid::Uuid, usize), uuid::Uuid> {
     let root_cid = Cid::from_str(&repo_root_cid).map_err(|_| user_id)?;
     let block_cids = collect_current_repo_blocks(block_store, &root_cid)
@@ -294,27 +167,22 @@ async fn process_user_blocks(
         return Err(user_id);
     }
     let count = block_cids.len();
-    insert_user_blocks(db, user_id, &block_cids)
+    let rev = repo_rev.unwrap_or_else(|| "0".to_string());
+    repo_repo
+        .insert_user_blocks(user_id, &block_cids, &rev)
         .await
         .map_err(|_| user_id)?;
     Ok((user_id, count))
 }
 
-pub async fn backfill_user_blocks(db: &PgPool, block_store: PostgresBlockStore) {
-    let users_without_blocks = match sqlx::query!(
-        r#"
-        SELECT u.id as user_id, r.repo_root_cid
-        FROM users u
-        JOIN repos r ON r.user_id = u.id
-        WHERE NOT EXISTS (SELECT 1 FROM user_blocks ub WHERE ub.user_id = u.id)
-        "#
-    )
-    .fetch_all(db)
-    .await
-    {
+pub async fn backfill_user_blocks(
+    repo_repo: Arc<dyn RepoRepository>,
+    block_store: PostgresBlockStore,
+) {
+    let users_without_blocks = match repo_repo.get_users_without_blocks().await {
         Ok(rows) => rows,
         Err(e) => {
-            error!("Failed to query users for user_blocks backfill: {}", e);
+            error!("Failed to query users for user_blocks backfill: {:?}", e);
             return;
         }
     };
@@ -330,7 +198,18 @@ pub async fn backfill_user_blocks(db: &PgPool, block_store: PostgresBlockStore) 
     );
 
     let results = futures::future::join_all(users_without_blocks.into_iter().map(|user| {
-        process_user_blocks(db, &block_store, user.user_id, user.repo_root_cid)
+        let repo_repo = repo_repo.clone();
+        let block_store = block_store.clone();
+        async move {
+            process_user_blocks(
+                repo_repo.as_ref(),
+                &block_store,
+                user.user_id,
+                user.repo_root_cid.to_string(),
+                user.repo_rev,
+            )
+            .await
+        }
     }))
     .await;
 
@@ -401,22 +280,23 @@ pub async fn collect_current_repo_blocks(
 }
 
 async fn process_record_blobs(
-    db: &PgPool,
+    repo_repo: &dyn RepoRepository,
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
-    did: String,
-) -> Result<(uuid::Uuid, String, usize), (uuid::Uuid, &'static str)> {
-    let records = fetch_user_records(db, user_id)
+    did: Did,
+) -> Result<(uuid::Uuid, Did, usize), (uuid::Uuid, &'static str)> {
+    let records = repo_repo
+        .get_all_records(user_id)
         .await
         .map_err(|_| (user_id, "failed to fetch records"))?;
 
-    let mut batch_record_uris: Vec<String> = Vec::new();
-    let mut batch_blob_cids: Vec<String> = Vec::new();
+    let mut batch_record_uris: Vec<AtUri> = Vec::new();
+    let mut batch_blob_cids: Vec<CidLink> = Vec::new();
 
-    futures::future::join_all(records.into_iter().map(|(collection, rkey, record_cid)| {
+    futures::future::join_all(records.into_iter().map(|record| {
         let did = did.clone();
         async move {
-            let cid = Cid::from_str(&record_cid).ok()?;
+            let cid = Cid::from_str(&record.record_cid).ok()?;
             let block_bytes = block_store.get(&cid).await.ok()??;
             let record_ipld: Ipld = serde_ipld_dagcbor::from_slice(&block_bytes).ok()?;
             let blob_refs = crate::sync::import::find_blob_refs_ipld(&record_ipld, 0);
@@ -424,8 +304,9 @@ async fn process_record_blobs(
                 blob_refs
                     .into_iter()
                     .map(|blob_ref| {
-                        let record_uri = format!("at://{}/{}/{}", did, collection, rkey);
-                        (record_uri, blob_ref.cid)
+                        let record_uri =
+                            AtUri::from_parts(did.as_str(), record.collection.as_str(), record.rkey.as_str());
+                        (record_uri, CidLink::new_unchecked(blob_ref.cid))
                     })
                     .collect::<Vec<_>>(),
             )
@@ -442,29 +323,22 @@ async fn process_record_blobs(
 
     let blob_refs_found = batch_record_uris.len();
     if !batch_record_uris.is_empty() {
-        insert_record_blobs(db, user_id, &batch_record_uris, &batch_blob_cids)
+        repo_repo
+            .insert_record_blobs(user_id, &batch_record_uris, &batch_blob_cids)
             .await
             .map_err(|_| (user_id, "failed to insert"))?;
     }
     Ok((user_id, did, blob_refs_found))
 }
 
-pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore) {
-    let users_needing_backfill = match sqlx::query!(
-        r#"
-        SELECT DISTINCT u.id as user_id, u.did
-        FROM users u
-        JOIN records r ON r.repo_id = u.id
-        WHERE NOT EXISTS (SELECT 1 FROM record_blobs rb WHERE rb.repo_id = u.id)
-        LIMIT 100
-        "#
-    )
-    .fetch_all(db)
-    .await
-    {
+pub async fn backfill_record_blobs(
+    repo_repo: Arc<dyn RepoRepository>,
+    block_store: PostgresBlockStore,
+) {
+    let users_needing_backfill = match repo_repo.get_users_needing_record_blobs_backfill(100).await {
         Ok(rows) => rows,
         Err(e) => {
-            error!("Failed to query users for record_blobs backfill: {}", e);
+            error!("Failed to query users for record_blobs backfill: {:?}", e);
             return;
         }
     };
@@ -480,7 +354,11 @@ pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore)
     );
 
     let results = futures::future::join_all(users_needing_backfill.into_iter().map(|user| {
-        process_record_blobs(db, &block_store, user.user_id, user.did)
+        let repo_repo = repo_repo.clone();
+        let block_store = block_store.clone();
+        async move {
+            process_record_blobs(repo_repo.as_ref(), &block_store, user.user_id, user.did).await
+        }
     }))
     .await;
 
@@ -501,7 +379,8 @@ pub async fn backfill_record_blobs(db: &PgPool, block_store: PostgresBlockStore)
 }
 
 pub async fn start_scheduled_tasks(
-    db: PgPool,
+    user_repo: Arc<dyn UserRepository>,
+    blob_repo: Arc<dyn BlobRepository>,
     blob_store: Arc<dyn BlobStorage>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
@@ -529,7 +408,11 @@ pub async fn start_scheduled_tasks(
                 }
             }
             _ = ticker.tick() => {
-                if let Err(e) = process_scheduled_deletions(&db, blob_store.as_ref()).await {
+                if let Err(e) = process_scheduled_deletions(
+                    user_repo.as_ref(),
+                    blob_repo.as_ref(),
+                    blob_store.as_ref(),
+                ).await {
                     error!("Error processing scheduled deletions: {}", e);
                 }
             }
@@ -538,22 +421,14 @@ pub async fn start_scheduled_tasks(
 }
 
 async fn process_scheduled_deletions(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
+    blob_repo: &dyn BlobRepository,
     blob_store: &dyn BlobStorage,
 ) -> Result<(), String> {
-    let accounts_to_delete = sqlx::query!(
-        r#"
-        SELECT did, handle
-        FROM users
-        WHERE delete_after IS NOT NULL
-          AND delete_after < NOW()
-          AND deactivated_at IS NOT NULL
-        LIMIT 100
-        "#
-    )
-    .fetch_all(db)
-    .await
-    .map_err(|e| format!("DB error fetching accounts to delete: {}", e))?;
+    let accounts_to_delete = user_repo
+        .get_accounts_scheduled_for_deletion(100)
+        .await
+        .map_err(|e| format!("DB error fetching accounts to delete: {:?}", e))?;
 
     if accounts_to_delete.is_empty() {
         debug!("No accounts scheduled for deletion");
@@ -566,7 +441,8 @@ async fn process_scheduled_deletions(
     );
 
     futures::future::join_all(accounts_to_delete.into_iter().map(|account| async move {
-        let result = delete_account_data(db, blob_store, &account.did, &account.handle).await;
+        let result =
+            delete_account_data(user_repo, blob_repo, blob_store, account.id, &account.did).await;
         (account.did, account.handle, result)
     }))
     .await
@@ -580,23 +456,16 @@ async fn process_scheduled_deletions(
 }
 
 async fn delete_account_data(
-    db: &PgPool,
+    user_repo: &dyn UserRepository,
+    blob_repo: &dyn BlobRepository,
     blob_store: &dyn BlobStorage,
-    did: &str,
-    _handle: &str,
+    user_id: uuid::Uuid,
+    did: &Did,
 ) -> Result<(), String> {
-    let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_one(db)
+    let blob_storage_keys = blob_repo
+        .get_blob_storage_keys_by_user(user_id)
         .await
-        .map_err(|e| format!("DB error fetching user: {}", e))?;
-
-    let blob_storage_keys: Vec<String> = sqlx::query_scalar!(
-        r#"SELECT storage_key as "storage_key!" FROM blobs WHERE created_by_user = $1"#,
-        user_id
-    )
-    .fetch_all(db)
-    .await
-    .map_err(|e| format!("DB error fetching blob keys: {}", e))?;
+        .map_err(|e| format!("DB error fetching blob keys: {:?}", e))?;
 
     futures::future::join_all(blob_storage_keys.iter().map(|storage_key| async move {
         (storage_key, blob_store.delete(storage_key).await)
@@ -608,50 +477,10 @@ async fn delete_account_data(
         warn!(storage_key = %key, error = %e, "Failed to delete blob from storage (continuing anyway)");
     });
 
-    let mut tx = db
-        .begin()
+    let _account_seq = user_repo
+        .delete_account_with_firehose(user_id, did)
         .await
-        .map_err(|e| format!("Failed to begin transaction: {}", e))?;
-
-    sqlx::query!("DELETE FROM blobs WHERE created_by_user = $1", user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("Failed to delete blobs: {}", e))?;
-
-    sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("Failed to delete user: {}", e))?;
-
-    let account_seq = sqlx::query_scalar!(
-        r#"
-        INSERT INTO repo_seq (did, event_type, active, status)
-        VALUES ($1, 'account', false, 'deleted')
-        RETURNING seq
-        "#,
-        did
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| format!("Failed to sequence account deletion: {}", e))?;
-
-    sqlx::query!(
-        "DELETE FROM repo_seq WHERE did = $1 AND seq != $2",
-        did,
-        account_seq
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| format!("Failed to cleanup sequences: {}", e))?;
-
-    tx.commit()
-        .await
-        .map_err(|e| format!("Failed to commit transaction: {}", e))?;
-
-    sqlx::query(&format!("NOTIFY repo_updates, '{}'", account_seq))
-        .execute(db)
-        .await
-        .map_err(|e| format!("Failed to notify: {}", e))?;
+        .map_err(|e| format!("Failed to delete account: {:?}", e))?;
 
     info!(
         did = %did,
@@ -663,7 +492,8 @@ async fn delete_account_data(
 }
 
 pub async fn start_backup_tasks(
-    db: PgPool,
+    repo_repo: Arc<dyn RepoRepository>,
+    backup_repo: Arc<dyn BackupRepository>,
     block_store: PostgresBlockStore,
     backup_storage: Arc<BackupStorage>,
     mut shutdown_rx: watch::Receiver<bool>,
@@ -688,7 +518,12 @@ pub async fn start_backup_tasks(
                 }
             }
             _ = ticker.tick() => {
-                if let Err(e) = process_scheduled_backups(&db, &block_store, &backup_storage).await {
+                if let Err(e) = process_scheduled_backups(
+                    repo_repo.as_ref(),
+                    backup_repo.as_ref(),
+                    &block_store,
+                    &backup_storage,
+                ).await {
                     error!("Error processing scheduled backups: {}", e);
                 }
             }
@@ -711,7 +546,8 @@ enum BackupOutcome {
 }
 
 async fn process_single_backup(
-    db: &PgPool,
+    repo_repo: &dyn RepoRepository,
+    backup_repo: &dyn BackupRepository,
     block_store: &PostgresBlockStore,
     backup_storage: &BackupStorage,
     user_id: uuid::Uuid,
@@ -729,7 +565,7 @@ async fn process_single_backup(
         Err(_) => return BackupOutcome::Skipped(did, "invalid repo_root_cid"),
     };
 
-    let car_bytes = match generate_full_backup(db, block_store, user_id, &head_cid).await {
+    let car_bytes = match generate_full_backup(repo_repo, block_store, user_id, &head_cid).await {
         Ok(bytes) => bytes,
         Err(e) => return BackupOutcome::Failed(did, format!("CAR generation: {}", e)),
     };
@@ -742,16 +578,16 @@ async fn process_single_backup(
         Err(e) => return BackupOutcome::Failed(did, format!("S3 upload: {}", e)),
     };
 
-    if let Err(e) = insert_backup_record(
-        db,
-        user_id,
-        &storage_key,
-        &repo_root_cid,
-        &repo_rev,
-        block_count,
-        size_bytes,
-    )
-    .await
+    if let Err(e) = backup_repo
+        .insert_backup(
+            user_id,
+            &storage_key,
+            &repo_root_cid,
+            &repo_rev,
+            block_count,
+            size_bytes,
+        )
+        .await
     {
         if let Err(rollback_err) = backup_storage.delete_backup(&storage_key).await {
             error!(
@@ -761,7 +597,7 @@ async fn process_single_backup(
                 "Failed to rollback orphaned backup from S3"
             );
         }
-        return BackupOutcome::Failed(did, format!("DB insert: {}", e));
+        return BackupOutcome::Failed(did, format!("DB insert: {:?}", e));
     }
 
     BackupOutcome::Success(BackupResult {
@@ -774,35 +610,18 @@ async fn process_single_backup(
 }
 
 async fn process_scheduled_backups(
-    db: &PgPool,
+    repo_repo: &dyn RepoRepository,
+    backup_repo: &dyn BackupRepository,
     block_store: &PostgresBlockStore,
     backup_storage: &BackupStorage,
 ) -> Result<(), String> {
     let backup_interval_secs = BackupStorage::interval_secs() as i64;
     let retention_count = BackupStorage::retention_count();
 
-    let users_needing_backup = sqlx::query!(
-        r#"
-        SELECT u.id as user_id, u.did, r.repo_root_cid, r.repo_rev
-        FROM users u
-        JOIN repos r ON r.user_id = u.id
-        WHERE u.backup_enabled = true
-          AND u.deactivated_at IS NULL
-          AND (
-            NOT EXISTS (
-              SELECT 1 FROM account_backups ab WHERE ab.user_id = u.id
-            )
-            OR (
-              SELECT MAX(ab.created_at) FROM account_backups ab WHERE ab.user_id = u.id
-            ) < NOW() - make_interval(secs => $1)
-          )
-        LIMIT 50
-        "#,
-        backup_interval_secs as f64
-    )
-    .fetch_all(db)
-    .await
-    .map_err(|e| format!("DB error fetching users for backup: {}", e))?;
+    let users_needing_backup = backup_repo
+        .get_users_needing_backup(backup_interval_secs, 50)
+        .await
+        .map_err(|e| format!("DB error fetching users for backup: {:?}", e))?;
 
     if users_needing_backup.is_empty() {
         debug!("No accounts need backup");
@@ -816,12 +635,13 @@ async fn process_scheduled_backups(
 
     let results = futures::future::join_all(users_needing_backup.into_iter().map(|user| {
         process_single_backup(
-            db,
+            repo_repo,
+            backup_repo,
             block_store,
             backup_storage,
-            user.user_id,
-            user.did,
-            user.repo_root_cid,
+            user.id,
+            user.did.to_string(),
+            user.repo_root_cid.to_string(),
             user.repo_rev,
         )
     }))
@@ -838,7 +658,8 @@ async fn process_scheduled_backups(
                     "Created backup"
                 );
                 if let Err(e) =
-                    cleanup_old_backups(db, backup_storage, result.user_id, retention_count).await
+                    cleanup_old_backups(backup_repo, backup_storage, result.user_id, retention_count)
+                        .await
                 {
                     warn!(did = %result.did, error = %e, "Failed to cleanup old backups");
                 }
@@ -905,21 +726,19 @@ fn encode_car_block(cid: &Cid, block: &[u8]) -> Vec<u8> {
 }
 
 pub async fn generate_repo_car_from_user_blocks(
-    db: &PgPool,
+    repo_repo: &dyn tranquil_db_traits::RepoRepository,
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
     _head_cid: &Cid,
 ) -> Result<Vec<u8>, String> {
     use std::str::FromStr;
 
-    let repo_root_cid_str: String = sqlx::query_scalar!(
-        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(db)
-    .await
-    .map_err(|e| format!("Failed to fetch repo: {}", e))?
-    .ok_or_else(|| "Repository not found".to_string())?;
+    let repo_root_cid_str: String = repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .map_err(|e| format!("Failed to fetch repo: {:?}", e))?
+        .ok_or_else(|| "Repository not found".to_string())?
+        .to_string();
 
     let actual_head_cid =
         Cid::from_str(&repo_root_cid_str).map_err(|e| format!("Invalid repo_root_cid: {}", e))?;
@@ -928,12 +747,12 @@ pub async fn generate_repo_car_from_user_blocks(
 }
 
 pub async fn generate_full_backup(
-    db: &PgPool,
+    repo_repo: &dyn tranquil_db_traits::RepoRepository,
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
     head_cid: &Cid,
 ) -> Result<Vec<u8>, String> {
-    generate_repo_car_from_user_blocks(db, block_store, user_id, head_cid).await
+    generate_repo_car_from_user_blocks(repo_repo, block_store, user_id, head_cid).await
 }
 
 pub fn count_car_blocks(car_bytes: &[u8]) -> i32 {
@@ -977,24 +796,25 @@ fn read_varint(data: &[u8]) -> Option<(u64, usize)> {
 }
 
 async fn cleanup_old_backups(
-    db: &PgPool,
+    backup_repo: &dyn BackupRepository,
     backup_storage: &BackupStorage,
     user_id: uuid::Uuid,
     retention_count: u32,
 ) -> Result<(), String> {
-    let old_backups = fetch_old_backups(db, user_id, retention_count as i64)
+    let old_backups = backup_repo
+        .get_old_backups(user_id, retention_count as i64)
         .await
-        .map_err(|e| format!("DB error fetching old backups: {}", e))?;
+        .map_err(|e| format!("DB error fetching old backups: {:?}", e))?;
 
-    let results = futures::future::join_all(old_backups.into_iter().map(|(id, storage_key)| async move {
-        match backup_storage.delete_backup(&storage_key).await {
-            Ok(()) => match delete_backup_record(db, id).await {
+    let results = futures::future::join_all(old_backups.into_iter().map(|backup| async move {
+        match backup_storage.delete_backup(&backup.storage_key).await {
+            Ok(()) => match backup_repo.delete_backup(backup.id).await {
                 Ok(()) => Ok(()),
-                Err(e) => Err(format!("DB delete failed for {}: {}", storage_key, e)),
+                Err(e) => Err(format!("DB delete failed for {}: {:?}", backup.storage_key, e)),
             },
             Err(e) => {
                 warn!(
-                    storage_key = %storage_key,
+                    storage_key = %backup.storage_key,
                     error = %e,
                     "Failed to delete old backup from storage, skipping DB cleanup to avoid orphan"
                 );

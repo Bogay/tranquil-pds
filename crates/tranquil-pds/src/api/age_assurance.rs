@@ -43,7 +43,8 @@ async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option
     let http_uri = "/";
 
     let auth_user = match validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -64,22 +65,18 @@ async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option
         }
     };
 
-    let row = match sqlx::query!(
-        "SELECT created_at FROM users WHERE did = $1",
-        &auth_user.did
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(r) => {
-            tracing::debug!(?r, "age assurance: query result");
-            r
+    match state.user_repo.get_by_did(&auth_user.did).await {
+        Ok(Some(user)) => {
+            tracing::debug!(created_at = ?user.created_at, "age assurance: got user");
+            Some(user.created_at.to_rfc3339())
+        }
+        Ok(None) => {
+            tracing::debug!("age assurance: user not found");
+            None
         }
         Err(e) => {
             tracing::warn!(?e, "age assurance: query failed");
-            return None;
+            None
         }
-    };
-
-    row.map(|r| r.created_at.to_rfc3339())
+    }
 }

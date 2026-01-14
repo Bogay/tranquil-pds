@@ -14,6 +14,7 @@ use cid::Cid;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
+use tranquil_db::{BackupRepository, OldBackupInfo};
 use tracing::{error, info, warn};
 
 #[derive(Serialize)]
@@ -35,14 +36,8 @@ pub struct ListBackupsOutput {
 }
 
 pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let user = match sqlx::query!(
-        "SELECT id, backup_enabled FROM users WHERE did = $1",
-        auth.0.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(u)) => u,
+    let (user_id, backup_enabled) = match state.backup_repo.get_user_backup_status(&auth.0.did).await {
+        Ok(Some(status)) => status,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
         }
@@ -52,18 +47,7 @@ pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Re
         }
     };
 
-    let backups = match sqlx::query!(
-        r#"
-        SELECT id, repo_rev, repo_root_cid, block_count, size_bytes, created_at
-        FROM account_backups
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        "#,
-        user.id
-    )
-    .fetch_all(&state.db)
-    .await
-    {
+    let backups = match state.backup_repo.list_backups_for_user(user_id).await {
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching backups: {:?}", e);
@@ -87,7 +71,7 @@ pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Re
         StatusCode::OK,
         Json(ListBackupsOutput {
             backups: backup_list,
-            backup_enabled: user.backup_enabled,
+            backup_enabled,
         }),
     )
         .into_response()
@@ -110,19 +94,7 @@ pub async fn get_backup(
         }
     };
 
-    let backup = match sqlx::query!(
-        r#"
-        SELECT ab.storage_key, ab.repo_rev
-        FROM account_backups ab
-        JOIN users u ON u.id = ab.user_id
-        WHERE ab.id = $1 AND u.did = $2
-        "#,
-        backup_id,
-        auth.0.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let backup_info = match state.backup_repo.get_backup_storage_info(backup_id, &auth.0.did).await {
         Ok(Some(b)) => b,
         Ok(None) => {
             return ApiError::BackupNotFound.into_response();
@@ -140,7 +112,7 @@ pub async fn get_backup(
         }
     };
 
-    let car_bytes = match backup_storage.get_backup(&backup.storage_key).await {
+    let car_bytes = match backup_storage.get_backup(&backup_info.storage_key).await {
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to fetch backup from storage: {:?}", e);
@@ -155,7 +127,7 @@ pub async fn get_backup(
             (axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car"),
             (
                 axum::http::header::CONTENT_DISPOSITION,
-                &format!("attachment; filename=\"{}.car\"", backup.repo_rev),
+                &format!("attachment; filename=\"{}.car\"", backup_info.repo_rev),
             ),
         ],
         car_bytes,
@@ -180,18 +152,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         }
     };
 
-    let user = match sqlx::query!(
-        r#"
-        SELECT u.id, u.did, u.backup_enabled, u.deactivated_at, r.repo_root_cid, r.repo_rev
-        FROM users u
-        JOIN repos r ON r.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        auth.0.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let user = match state.backup_repo.get_user_for_backup(&auth.0.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -221,7 +182,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
     };
 
     let car_bytes =
-        match generate_full_backup(&state.db, &state.block_store, user.id, &head_cid).await {
+        match generate_full_backup(state.repo_repo.as_ref(), &state.block_store, user.id, &head_cid).await {
             Ok(bytes) => bytes,
             Err(e) => {
                 error!("Failed to generate CAR: {:?}", e);
@@ -244,22 +205,14 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         }
     };
 
-    let backup_id = match sqlx::query_scalar!(
-        r#"
-        INSERT INTO account_backups (user_id, storage_key, repo_root_cid, repo_rev, block_count, size_bytes)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id
-        "#,
+    let backup_id = match state.backup_repo.insert_backup(
         user.id,
-        storage_key,
-        user.repo_root_cid,
-        repo_rev,
+        &storage_key,
+        &user.repo_root_cid,
+        &repo_rev,
         block_count,
-        size_bytes
-    )
-    .fetch_one(&state.db)
-    .await
-    {
+        size_bytes,
+    ).await {
         Ok(id) => id,
         Err(e) => {
             error!("DB error inserting backup: {:?}", e);
@@ -282,7 +235,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
     );
 
     let retention = BackupStorage::retention_count();
-    if let Err(e) = cleanup_old_backups(&state.db, backup_storage, user.id, retention).await {
+    if let Err(e) = cleanup_old_backups(state.backup_repo.as_ref(), backup_storage, user.id, retention).await {
         warn!(did = %user.did, error = %e, "Failed to cleanup old backups after manual backup");
     }
 
@@ -299,25 +252,15 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
 }
 
 async fn cleanup_old_backups(
-    db: &sqlx::PgPool,
+    backup_repo: &dyn BackupRepository,
     backup_storage: &BackupStorage,
     user_id: uuid::Uuid,
     retention_count: u32,
 ) -> Result<(), String> {
-    let old_backups = sqlx::query!(
-        r#"
-        SELECT id, storage_key
-        FROM account_backups
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        OFFSET $2
-        "#,
-        user_id,
-        retention_count as i64
-    )
-    .fetch_all(db)
-    .await
-    .map_err(|e| format!("DB error fetching old backups: {}", e))?;
+    let old_backups: Vec<OldBackupInfo> = backup_repo
+        .get_old_backups(user_id, retention_count as i64)
+        .await
+        .map_err(|e| format!("DB error fetching old backups: {}", e))?;
 
     for backup in old_backups {
         if let Err(e) = backup_storage.delete_backup(&backup.storage_key).await {
@@ -329,8 +272,8 @@ async fn cleanup_old_backups(
             continue;
         }
 
-        sqlx::query!("DELETE FROM account_backups WHERE id = $1", backup.id)
-            .execute(db)
+        backup_repo
+            .delete_backup(backup.id)
             .await
             .map_err(|e| format!("Failed to delete old backup record: {}", e))?;
     }
@@ -355,19 +298,7 @@ pub async fn delete_backup(
         }
     };
 
-    let backup = match sqlx::query!(
-        r#"
-        SELECT ab.id, ab.storage_key, u.deactivated_at
-        FROM account_backups ab
-        JOIN users u ON u.id = ab.user_id
-        WHERE ab.id = $1 AND u.did = $2
-        "#,
-        backup_id,
-        auth.0.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let backup = match state.backup_repo.get_backup_for_deletion(backup_id, &auth.0.did).await {
         Ok(Some(b)) => b,
         Ok(None) => {
             return ApiError::BackupNotFound.into_response();
@@ -392,10 +323,7 @@ pub async fn delete_backup(
         );
     }
 
-    if let Err(e) = sqlx::query!("DELETE FROM account_backups WHERE id = $1", backup.id)
-        .execute(&state.db)
-        .await
-    {
+    if let Err(e) = state.backup_repo.delete_backup(backup.id).await {
         error!("DB error deleting backup: {:?}", e);
         return ApiError::InternalError(Some("Failed to delete backup".into())).into_response();
     }
@@ -416,14 +344,8 @@ pub async fn set_backup_enabled(
     auth: BearerAuth,
     Json(input): Json<SetBackupEnabledInput>,
 ) -> Response {
-    let user = match sqlx::query!(
-        "SELECT deactivated_at FROM users WHERE did = $1",
-        auth.0.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(u)) => u,
+    let deactivated_at = match state.backup_repo.get_user_deactivated_status(&auth.0.did).await {
+        Ok(Some(status)) => status,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
         }
@@ -433,18 +355,11 @@ pub async fn set_backup_enabled(
         }
     };
 
-    if user.deactivated_at.is_some() {
+    if deactivated_at.is_some() {
         return ApiError::AccountDeactivated.into_response();
     }
 
-    if let Err(e) = sqlx::query!(
-        "UPDATE users SET backup_enabled = $1 WHERE did = $2",
-        input.enabled,
-        auth.0.did.as_str()
-    )
-    .execute(&state.db)
-    .await
-    {
+    if let Err(e) = state.backup_repo.update_backup_enabled(&auth.0.did, input.enabled).await {
         error!("DB error updating backup_enabled: {:?}", e);
         return ApiError::InternalError(Some("Failed to update setting".into())).into_response();
     }
@@ -455,11 +370,8 @@ pub async fn set_backup_enabled(
 }
 
 pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", auth.0.did.as_str())
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(u)) => u,
+    let user_id = match state.backup_repo.get_user_id_by_did(&auth.0.did).await {
+        Ok(Some(id)) => id,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
         }
@@ -469,18 +381,7 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
         }
     };
 
-    let blobs = match sqlx::query!(
-        r#"
-        SELECT DISTINCT b.cid, b.storage_key, b.mime_type
-        FROM blobs b
-        JOIN record_blobs rb ON rb.blob_cid = b.cid
-        WHERE rb.repo_id = $1
-        "#,
-        user.id
-    )
-    .fetch_all(&state.db)
-    .await
-    {
+    let blobs = match state.backup_repo.get_blobs_for_export(user_id).await {
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching blobs: {:?}", e);

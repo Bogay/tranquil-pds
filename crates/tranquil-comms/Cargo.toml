@@ -14,5 +14,6 @@ serde_json = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tranquil-db-traits = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true }

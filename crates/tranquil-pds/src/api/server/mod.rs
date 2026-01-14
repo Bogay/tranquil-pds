@@ -32,8 +32,8 @@ pub use passkey_account::{
     request_passkey_recovery, start_passkey_registration_for_setup,
 };
 pub use passkeys::{
-    delete_passkey, finish_passkey_registration, has_passkeys_for_user, has_passkeys_for_user_db,
-    list_passkeys, start_passkey_registration, update_passkey,
+    delete_passkey, finish_passkey_registration, has_passkeys_for_user, list_passkeys,
+    start_passkey_registration, update_passkey,
 };
 pub use password::{
     change_password, get_password_status, remove_password, request_password_reset, reset_password,
@@ -53,7 +53,7 @@ pub use session::{
 pub use signing_key::reserve_signing_key;
 pub use totp::{
     create_totp_secret, disable_totp, enable_totp, get_totp_status, has_totp_enabled,
-    has_totp_enabled_db, regenerate_backup_codes, verify_totp_or_backup_for_user,
+    regenerate_backup_codes, verify_totp_or_backup_for_user,
 };
 pub use trusted_devices::{
     extend_device_trust, is_device_trusted, list_trusted_devices, revoke_trusted_device,

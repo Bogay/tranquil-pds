@@ -7,8 +7,9 @@ use axum::{
 };
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use tracing::{error, info};
+use tranquil_db_traits::OAuthRepository;
+use tranquil_types::DeviceId;
 
 use crate::auth::BearerAuth;
 use crate::state::AppState;
@@ -71,18 +72,7 @@ pub struct ListTrustedDevicesResponse {
 }
 
 pub async fn list_trusted_devices(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let devices = sqlx::query!(
-        r#"SELECT od.id, od.user_agent, od.friendly_name, od.trusted_at, od.trusted_until, od.last_seen_at
-           FROM oauth_device od
-           JOIN oauth_account_device oad ON od.id = oad.device_id
-           WHERE oad.did = $1 AND od.trusted_until IS NOT NULL AND od.trusted_until > NOW()
-           ORDER BY od.last_seen_at DESC"#,
-        &auth.0.did
-    )
-    .fetch_all(&state.db)
-    .await;
-
-    match devices {
+    match state.oauth_repo.list_trusted_devices(&auth.0.did).await {
         Ok(rows) => {
             let devices = rows
                 .into_iter()
@@ -120,19 +110,14 @@ pub async fn revoke_trusted_device(
     auth: BearerAuth,
     Json(input): Json<RevokeTrustedDeviceInput>,
 ) -> Response {
-    let device_exists = sqlx::query_scalar!(
-        r#"SELECT 1 as one FROM oauth_device od
-           JOIN oauth_account_device oad ON od.id = oad.device_id
-           WHERE oad.did = $1 AND od.id = $2"#,
-        &auth.0.did,
-        input.device_id
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    match device_exists {
-        Ok(Some(_)) => {}
-        Ok(None) => {
+    let device_id = DeviceId::from(input.device_id.clone());
+    match state
+        .oauth_repo
+        .device_belongs_to_user(&device_id, &auth.0.did)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
             return ApiError::DeviceNotFound.into_response();
         }
         Err(e) => {
@@ -141,15 +126,8 @@ pub async fn revoke_trusted_device(
         }
     }
 
-    let result = sqlx::query!(
-        "UPDATE oauth_device SET trusted_at = NULL, trusted_until = NULL WHERE id = $1",
-        input.device_id
-    )
-    .execute(&state.db)
-    .await;
-
-    match result {
-        Ok(_) => {
+    match state.oauth_repo.revoke_device_trust(&device_id).await {
+        Ok(()) => {
             info!(did = %&auth.0.did, device_id = %input.device_id, "Trusted device revoked");
             SuccessResponse::ok().into_response()
         }
@@ -172,19 +150,14 @@ pub async fn update_trusted_device(
     auth: BearerAuth,
     Json(input): Json<UpdateTrustedDeviceInput>,
 ) -> Response {
-    let device_exists = sqlx::query_scalar!(
-        r#"SELECT 1 as one FROM oauth_device od
-           JOIN oauth_account_device oad ON od.id = oad.device_id
-           WHERE oad.did = $1 AND od.id = $2"#,
-        &auth.0.did,
-        input.device_id
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    match device_exists {
-        Ok(Some(_)) => {}
-        Ok(None) => {
+    let device_id = DeviceId::from(input.device_id.clone());
+    match state
+        .oauth_repo
+        .device_belongs_to_user(&device_id, &auth.0.did)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
             return ApiError::DeviceNotFound.into_response();
         }
         Err(e) => {
@@ -193,16 +166,12 @@ pub async fn update_trusted_device(
         }
     }
 
-    let result = sqlx::query!(
-        "UPDATE oauth_device SET friendly_name = $1 WHERE id = $2",
-        input.friendly_name,
-        input.device_id
-    )
-    .execute(&state.db)
-    .await;
-
-    match result {
-        Ok(_) => {
+    match state
+        .oauth_repo
+        .update_device_friendly_name(&device_id, input.friendly_name.as_deref())
+        .await
+    {
+        Ok(()) => {
             info!(did = %auth.0.did, device_id = %input.device_id, "Trusted device updated");
             SuccessResponse::ok().into_response()
         }
@@ -213,55 +182,43 @@ pub async fn update_trusted_device(
     }
 }
 
-pub async fn get_device_trust_state(db: &PgPool, device_id: &str, did: &str) -> DeviceTrustState {
-    let result = sqlx::query!(
-        r#"SELECT trusted_at, trusted_until FROM oauth_device od
-           JOIN oauth_account_device oad ON od.id = oad.device_id
-           WHERE od.id = $1 AND oad.did = $2"#,
-        device_id,
-        did
-    )
-    .fetch_optional(db)
-    .await;
-
-    match result {
-        Ok(Some(row)) => DeviceTrustState::from_timestamps(row.trusted_at, row.trusted_until),
+pub async fn get_device_trust_state(
+    oauth_repo: &dyn OAuthRepository,
+    device_id: &str,
+    did: &tranquil_types::Did,
+) -> DeviceTrustState {
+    let device_id_typed = DeviceId::from(device_id.to_string());
+    match oauth_repo.get_device_trust_info(&device_id_typed, did).await {
+        Ok(Some(info)) => DeviceTrustState::from_timestamps(info.trusted_at, info.trusted_until),
         _ => DeviceTrustState::Untrusted,
     }
 }
 
-pub async fn is_device_trusted(db: &PgPool, device_id: &str, did: &str) -> bool {
-    get_device_trust_state(db, device_id, did)
+pub async fn is_device_trusted(
+    oauth_repo: &dyn OAuthRepository,
+    device_id: &str,
+    did: &tranquil_types::Did,
+) -> bool {
+    get_device_trust_state(oauth_repo, device_id, did)
         .await
         .is_trusted()
 }
 
-pub async fn trust_device(db: &PgPool, device_id: &str) -> Result<(), sqlx::Error> {
+pub async fn trust_device(
+    oauth_repo: &dyn OAuthRepository,
+    device_id: &str,
+) -> Result<(), tranquil_db_traits::DbError> {
     let now = Utc::now();
     let trusted_until = now + Duration::days(TRUST_DURATION_DAYS);
-
-    sqlx::query!(
-        "UPDATE oauth_device SET trusted_at = $1, trusted_until = $2 WHERE id = $3",
-        now,
-        trusted_until,
-        device_id
-    )
-    .execute(db)
-    .await?;
-
-    Ok(())
+    let device_id_typed = DeviceId::from(device_id.to_string());
+    oauth_repo.trust_device(&device_id_typed, now, trusted_until).await
 }
 
-pub async fn extend_device_trust(db: &PgPool, device_id: &str) -> Result<(), sqlx::Error> {
+pub async fn extend_device_trust(
+    oauth_repo: &dyn OAuthRepository,
+    device_id: &str,
+) -> Result<(), tranquil_db_traits::DbError> {
     let trusted_until = Utc::now() + Duration::days(TRUST_DURATION_DAYS);
-
-    sqlx::query!(
-        "UPDATE oauth_device SET trusted_until = $1 WHERE id = $2 AND trusted_until IS NOT NULL",
-        trusted_until,
-        device_id
-    )
-    .execute(db)
-    .await?;
-
-    Ok(())
+    let device_id_typed = DeviceId::from(device_id.to_string());
+    oauth_repo.extend_device_trust(&device_id_typed, trusted_until).await
 }

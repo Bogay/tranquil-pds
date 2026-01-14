@@ -1,7 +1,7 @@
 use super::validation::validate_record_with_status;
 use crate::api::error::ApiError;
-use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
-use crate::delegation::{self, DelegationActionType};
+use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_backlinks, extract_blob_cids};
+use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use crate::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
@@ -15,38 +15,10 @@ use cid::Cid;
 use jacquard_repo::{commit::Commit, mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{PgPool, Row};
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
-
-pub async fn has_verified_comms_channel(db: &PgPool, did: &Did) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query(
-        r#"
-        SELECT
-            email_verified,
-            discord_verified,
-            telegram_verified,
-            signal_verified
-        FROM users
-        WHERE did = $1
-        "#,
-    )
-    .bind(did.as_str())
-    .fetch_optional(db)
-    .await?;
-    match row {
-        Some(r) => {
-            let email_verified: bool = r.get("email_verified");
-            let discord_verified: bool = r.get("discord_verified");
-            let telegram_verified: bool = r.get("telegram_verified");
-            let signal_verified: bool = r.get("signal_verified");
-            Ok(email_verified || discord_verified || telegram_verified || signal_verified)
-        }
-        None => Ok(false),
-    }
-}
 
 pub struct RepoWriteAuth {
     pub did: Did,
@@ -70,7 +42,8 @@ pub async fn prepare_repo_write(
     .ok_or_else(|| ApiError::AuthenticationRequired.into_response())?;
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
     let auth_user = crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -89,40 +62,45 @@ pub async fn prepare_repo_write(
             ApiError::InvalidRepo("Repo does not match authenticated user".into()).into_response(),
         );
     }
-    if crate::util::is_account_migrated(&state.db, &auth_user.did)
+    if state
+        .user_repo
+        .is_account_migrated(&auth_user.did)
         .await
         .unwrap_or(false)
     {
         return Err(ApiError::AccountMigrated.into_response());
     }
-    let is_verified = has_verified_comms_channel(&state.db, &auth_user.did)
+    let is_verified = state
+        .user_repo
+        .has_verified_comms_channel(&auth_user.did)
         .await
         .unwrap_or(false);
-    let is_delegated = crate::delegation::is_delegated_account(&state.db, &auth_user.did)
+    let is_delegated = state
+        .delegation_repo
+        .is_delegated_account(&auth_user.did)
         .await
         .unwrap_or(false);
     if !is_verified && !is_delegated {
         return Err(ApiError::AccountNotVerified.into_response());
     }
-    let user_id = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &auth_user.did)
-        .fetch_optional(&state.db)
+    let user_id = state
+        .user_repo
+        .get_id_by_did(&auth_user.did)
         .await
         .map_err(|e| {
             error!("DB error fetching user: {}", e);
             ApiError::InternalError(None).into_response()
         })?
         .ok_or_else(|| ApiError::InternalError(Some("User not found".into())).into_response())?;
-    let root_cid_str: String = sqlx::query_scalar!(
-        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        error!("DB error fetching repo root: {}", e);
-        ApiError::InternalError(None).into_response()
-    })?
-    .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())).into_response())?;
+    let root_cid_str = state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .map_err(|e| {
+            error!("DB error fetching repo root: {}", e);
+            ApiError::InternalError(None).into_response()
+        })?
+        .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())).into_response())?;
     let current_root_cid = Cid::from_str(&root_cid_str).map_err(|_| {
         ApiError::InternalError(Some("Invalid repo root CID".into())).into_response()
     })?;
@@ -200,16 +178,7 @@ pub async fn create_record(
     {
         return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
     }
-    let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = match tracking_store.get(&current_root_cid).await {
-        Ok(Some(b)) => b,
-        _ => return ApiError::InternalError(Some("Commit block not found".into())).into_response(),
-    };
-    let commit = match Commit::from_cbor(&commit_bytes) {
-        Ok(c) => c,
-        _ => return ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
-    };
-    let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+
     let validation_status = if input.validate == Some(false) {
         None
     } else {
@@ -225,6 +194,79 @@ pub async fn create_record(
         }
     };
     let rkey = input.rkey.unwrap_or_else(Rkey::generate);
+
+    let tracking_store = TrackingBlockStore::new(state.block_store.clone());
+    let commit_bytes = match tracking_store.get(&current_root_cid).await {
+        Ok(Some(b)) => b,
+        _ => return ApiError::InternalError(Some("Commit block not found".into())).into_response(),
+    };
+    let commit = match Commit::from_cbor(&commit_bytes) {
+        Ok(c) => c,
+        _ => return ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
+    };
+    let mut mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
+    let initial_mst_root = commit.data;
+
+    let mut ops: Vec<RecordOp> = Vec::new();
+    let mut conflict_uris_to_cleanup: Vec<AtUri> = Vec::new();
+    let mut all_old_mst_blocks = std::collections::BTreeMap::new();
+
+    if input.validate != Some(false) {
+        let record_uri = AtUri::from_parts(&did, &input.collection, &rkey);
+        let backlinks = extract_backlinks(&record_uri, &input.record);
+
+        if !backlinks.is_empty() {
+            let conflicts = match state
+                .backlink_repo
+                .get_backlink_conflicts(user_id, &input.collection, &backlinks)
+                .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("Failed to check backlink conflicts: {}", e);
+                    return ApiError::InternalError(None).into_response();
+                }
+            };
+
+            for conflict_uri in conflicts {
+                let conflict_rkey = match conflict_uri.rkey() {
+                    Some(r) => Rkey::from(r.to_string()),
+                    None => continue,
+                };
+                let conflict_collection = match conflict_uri.collection() {
+                    Some(c) => Nsid::from(c.to_string()),
+                    None => continue,
+                };
+                let conflict_key = format!("{}/{}", conflict_collection, conflict_rkey);
+
+                let prev_cid = match mst.get(&conflict_key).await {
+                    Ok(Some(cid)) => cid,
+                    Ok(None) => continue,
+                    Err(_) => continue,
+                };
+
+                if mst.blocks_for_path(&conflict_key, &mut all_old_mst_blocks).await.is_err() {
+                    error!("Failed to get old MST blocks for conflict {}", conflict_uri);
+                }
+
+                mst = match mst.delete(&conflict_key).await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        error!("Failed to delete conflict from MST {}: {:?}", conflict_uri, e);
+                        continue;
+                    }
+                };
+
+                ops.push(RecordOp::Delete {
+                    collection: conflict_collection,
+                    rkey: conflict_rkey,
+                    prev: Some(prev_cid),
+                });
+                conflict_uris_to_cleanup.push(conflict_uri);
+            }
+        }
+    }
+
     let record_ipld = crate::util::json_to_ipld(&input.record);
     let mut record_bytes = Vec::new();
     if serde_ipld_dagcbor::to_writer(&mut record_bytes, &record_ipld).is_err() {
@@ -238,6 +280,11 @@ pub async fn create_record(
         }
     };
     let key = format!("{}/{}", input.collection, rkey);
+
+    if mst.blocks_for_path(&key, &mut all_old_mst_blocks).await.is_err() {
+        error!("Failed to get old MST blocks for new record path");
+    }
+
     let new_mst = match mst.add(&key, record_cid).await {
         Ok(m) => m,
         _ => return ApiError::InternalError(Some("Failed to add to MST".into())).into_response(),
@@ -246,13 +293,14 @@ pub async fn create_record(
         Ok(c) => c,
         _ => return ApiError::InternalError(Some("Failed to persist MST".into())).into_response(),
     };
-    let op = RecordOp::Create {
+
+    ops.push(RecordOp::Create {
         collection: input.collection.clone(),
         rkey: rkey.clone(),
         cid: record_cid,
-    };
+    });
+
     let mut new_mst_blocks = std::collections::BTreeMap::new();
-    let mut old_mst_blocks = std::collections::BTreeMap::new();
     if new_mst
         .blocks_for_path(&key, &mut new_mst_blocks)
         .await
@@ -261,17 +309,10 @@ pub async fn create_record(
         return ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
             .into_response();
     }
-    if mst
-        .blocks_for_path(&key, &mut old_mst_blocks)
-        .await
-        .is_err()
-    {
-        return ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
-            .into_response();
-    }
+
     let mut relevant_blocks = new_mst_blocks.clone();
-    relevant_blocks.extend(old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));
-    relevant_blocks.insert(record_cid, bytes::Bytes::from(record_bytes));
+    relevant_blocks.extend(all_old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));
+    relevant_blocks.insert(record_cid, bytes::Bytes::new());
     let written_cids: Vec<Cid> = tracking_store
         .get_all_relevant_cids()
         .into_iter()
@@ -283,21 +324,22 @@ pub async fn create_record(
     let blob_cids = extract_blob_cids(&input.record);
     let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
         .chain(
-            old_mst_blocks
+            all_old_mst_blocks
                 .keys()
                 .filter(|cid| !new_mst_blocks.contains_key(*cid))
                 .copied(),
         )
         .collect();
+
     let commit_result = match commit_and_log(
         &state,
         CommitParams {
             did: &did,
             user_id,
             current_root_cid: Some(current_root_cid),
-            prev_data_cid: Some(commit.data),
+            prev_data_cid: Some(initial_mst_root),
             new_mst_root,
-            ops: vec![op],
+            ops,
             blocks_cids: &written_cids_str,
             blobs: &blob_cids,
             obsolete_cids,
@@ -312,28 +354,47 @@ pub async fn create_record(
         Err(e) => return ApiError::InternalError(Some(e)).into_response(),
     };
 
+    for conflict_uri in conflict_uris_to_cleanup {
+        if let Err(e) = state.backlink_repo.remove_backlinks_by_uri(&conflict_uri).await {
+            error!("Failed to remove backlinks for {}: {}", conflict_uri, e);
+        }
+    }
+
     if let Some(ref controller) = controller_did {
-        let _ = delegation::log_delegation_action(
-            &state.db,
-            &did,
-            controller,
-            Some(controller),
-            DelegationActionType::RepoWrite,
-            Some(json!({
-                "action": "create",
-                "collection": input.collection,
-                "rkey": rkey
-            })),
-            None,
-            None,
-        )
-        .await;
+        let _ = state
+            .delegation_repo
+            .log_delegation_action(
+                &did,
+                controller,
+                Some(controller),
+                DelegationActionType::RepoWrite,
+                Some(json!({
+                    "action": "create",
+                    "collection": input.collection,
+                    "rkey": rkey
+                })),
+                None,
+                None,
+            )
+            .await;
+    }
+
+    let created_uri = AtUri::from_parts(&did, &input.collection, &rkey);
+    let backlinks = extract_backlinks(&created_uri, &input.record);
+    if !backlinks.is_empty() {
+        if let Err(e) = state
+            .backlink_repo
+            .add_backlinks(user_id, &backlinks)
+            .await
+        {
+            error!("Failed to add backlinks for {}: {}", created_uri, e);
+        }
     }
 
     (
         StatusCode::OK,
         Json(CreateRecordOutput {
-            uri: AtUri::from_parts(&did, &input.collection, &rkey),
+            uri: created_uri,
             cid: record_cid.to_string(),
             commit: CommitInfo {
                 cid: commit_result.commit_cid.to_string(),
@@ -574,21 +635,22 @@ pub async fn put_record(
     };
 
     if let Some(ref controller) = controller_did {
-        let _ = delegation::log_delegation_action(
-            &state.db,
-            &did,
-            controller,
-            Some(controller),
-            DelegationActionType::RepoWrite,
-            Some(json!({
-                "action": if is_update { "update" } else { "create" },
-                "collection": input.collection,
-                "rkey": input.rkey
-            })),
-            None,
-            None,
-        )
-        .await;
+        let _ = state
+            .delegation_repo
+            .log_delegation_action(
+                &did,
+                controller,
+                Some(controller),
+                DelegationActionType::RepoWrite,
+                Some(json!({
+                    "action": if is_update { "update" } else { "create" },
+                    "collection": input.collection,
+                    "rkey": input.rkey
+                })),
+                None,
+                None,
+            )
+            .await;
     }
 
     (

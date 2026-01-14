@@ -67,24 +67,16 @@ pub async fn sign_plc_operation(
             .into_response();
         }
     };
-    let user = match sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(row)) => row,
-        _ => {
-            return ApiError::AccountNotFound.into_response();
+    let user_id = match state.user_repo.get_id_by_did(did).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            return ApiError::InternalError(None).into_response();
         }
     };
-    let token_row = match sqlx::query!(
-        "SELECT id, expires_at FROM plc_operation_tokens WHERE user_id = $1 AND token = $2",
-        user.id,
-        token
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
+    let token_expiry = match state.infra_repo.get_plc_token_expiry(user_id, token).await {
+        Ok(Some(expiry)) => expiry,
         Ok(None) => {
             return ApiError::InvalidToken(Some("Invalid or expired token".into())).into_response();
         }
@@ -93,26 +85,19 @@ pub async fn sign_plc_operation(
             return ApiError::InternalError(None).into_response();
         }
     };
-    if Utc::now() > token_row.expires_at {
-        let _ = sqlx::query!(
-            "DELETE FROM plc_operation_tokens WHERE id = $1",
-            token_row.id
-        )
-        .execute(&state.db)
-        .await;
+    if Utc::now() > token_expiry {
+        let _ = state.infra_repo.delete_plc_token(user_id, token).await;
         return ApiError::ExpiredToken(Some("Token has expired".into())).into_response();
     }
-    let key_row = match sqlx::query!(
-        "SELECT key_bytes, encryption_version FROM user_keys WHERE user_id = $1",
-        user.id
-    )
-    .fetch_optional(&state.db)
-    .await
-    {
+    let key_row = match state.user_repo.get_user_key_by_id(user_id).await {
         Ok(Some(row)) => row,
-        _ => {
+        Ok(None) => {
             return ApiError::InternalError(Some("User signing key not found".into()))
                 .into_response();
+        }
+        Err(e) => {
+            error!("DB error: {:?}", e);
+            return ApiError::InternalError(None).into_response();
         }
     };
     let key_bytes = match crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)
@@ -179,12 +164,7 @@ pub async fn sign_plc_operation(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let _ = sqlx::query!(
-        "DELETE FROM plc_operation_tokens WHERE id = $1",
-        token_row.id
-    )
-    .execute(&state.db)
-    .await;
+    let _ = state.infra_repo.delete_plc_token(user_id, token).await;
     info!("Signed PLC operation for user {}", did);
     (
         StatusCode::OK,

@@ -13,6 +13,7 @@ use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tracing::error;
+use tranquil_types::Did;
 
 async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<String> {
     let cid = Cid::from_str(cid_str).ok()?;
@@ -36,12 +37,16 @@ pub async fn get_latest_commit(
     State(state): State<AppState>,
     Query(params): Query<GetLatestCommitParams>,
 ) -> Response {
-    let did = params.did.trim();
-    if did.is_empty() {
+    let did_str = params.did.trim();
+    if did_str.is_empty() {
         return ApiError::InvalidRequest("did is required".into()).into_response();
     }
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
 
-    let account = match assert_repo_availability(&state.db, did, false).await {
+    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };
@@ -53,7 +58,7 @@ pub async fn get_latest_commit(
     let Some(rev) = get_rev_from_commit(&state, &repo_root_cid).await else {
         error!(
             "Failed to parse commit for DID {}: CID {}",
-            did, repo_root_cid
+            did_str, repo_root_cid
         );
         return ApiError::InternalError(Some("Failed to read repo commit".into())).into_response();
     };
@@ -97,27 +102,19 @@ pub async fn list_repos(
     Query(params): Query<ListReposParams>,
 ) -> Response {
     let limit = params.limit.unwrap_or(50).clamp(1, 1000);
-    let cursor_did = params.cursor.as_deref().unwrap_or("");
-    let result = sqlx::query!(
-        r#"
-        SELECT u.did, u.deactivated_at, u.takedown_ref, r.repo_root_cid, r.repo_rev
-        FROM repos r
-        JOIN users u ON r.user_id = u.id
-        WHERE u.did > $1
-        ORDER BY u.did ASC
-        LIMIT $2
-        "#,
-        cursor_did,
-        limit + 1
-    )
-    .fetch_all(&state.db)
-    .await;
+    let cursor_did: Option<Did> = params
+        .cursor
+        .as_ref()
+        .and_then(|s| s.parse().ok());
+    let cursor_ref = cursor_did.as_ref();
+    let result = state.repo_repo.list_repos_paginated(cursor_ref, limit + 1).await;
     match result {
         Ok(rows) => {
             let has_more = rows.len() as i64 > limit;
             let mut repos: Vec<RepoInfo> = Vec::new();
             for row in rows.iter().take(limit as usize) {
-                let rev = match get_rev_from_commit(&state, &row.repo_root_cid).await {
+                let cid_str = row.repo_root_cid.to_string();
+                let rev = match get_rev_from_commit(&state, &cid_str).await {
                     Some(r) => r,
                     None => {
                         if let Some(ref stored_rev) = row.repo_rev {
@@ -140,8 +137,8 @@ pub async fn list_repos(
                     AccountStatus::Active
                 };
                 repos.push(RepoInfo {
-                    did: row.did.clone(),
-                    head: row.repo_root_cid.clone(),
+                    did: row.did.to_string(),
+                    head: cid_str,
                     rev,
                     active: status.is_active(),
                     status: status.as_str().map(String::from),
@@ -187,15 +184,19 @@ pub async fn get_repo_status(
     State(state): State<AppState>,
     Query(params): Query<GetRepoStatusParams>,
 ) -> Response {
-    let did = params.did.trim();
-    if did.is_empty() {
+    let did_str = params.did.trim();
+    if did_str.is_empty() {
         return ApiError::InvalidRequest("did is required".into()).into_response();
     }
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
 
-    let account = match get_account_with_status(&state.db, did).await {
+    let account = match get_account_with_status(state.repo_repo.as_ref(), &did).await {
         Ok(Some(a)) => a,
         Ok(None) => {
-            return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
+            return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did_str)))
                 .into_response();
         }
         Err(e) => {

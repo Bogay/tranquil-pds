@@ -1,7 +1,8 @@
 use crate::api::error::ApiError;
 use crate::auth::{BearerAuthAllowDeactivated, ServiceTokenVerifier, is_service_token};
-use crate::delegation::{self, DelegationActionType};
+use crate::delegation::DelegationActionType;
 use crate::state::AppState;
+use crate::types::{CidLink, Did};
 use crate::util::get_max_blob_size;
 use axum::body::Body;
 use axum::{
@@ -55,7 +56,7 @@ pub async fn upload_blob(
 
     let is_service_auth = is_service_token(&token);
 
-    let (did, _is_migration, controller_did) = if is_service_auth {
+    let (did, _is_migration, controller_did): (Did, bool, Option<Did>) = if is_service_auth {
         debug!("Verifying service token for blob upload");
         let verifier = ServiceTokenVerifier::new();
         match verifier
@@ -64,7 +65,11 @@ pub async fn upload_blob(
         {
             Ok(claims) => {
                 debug!("Service token verified for DID: {}", claims.iss);
-                (claims.iss, false, None)
+                let did: Did = match claims.iss.parse() {
+                    Ok(d) => d,
+                    Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+                };
+                (did, false, None)
             }
             Err(e) => {
                 error!("Service token verification failed: {:?}", e);
@@ -82,7 +87,8 @@ pub async fn upload_blob(
             std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
         );
         match crate::auth::validate_token_with_dpop(
-            &state.db,
+            state.user_repo.as_ref(),
+            state.oauth_repo.as_ref(),
             &token,
             extracted.is_dpop,
             dpop_proof,
@@ -105,17 +111,15 @@ pub async fn upload_blob(
                 ) {
                     return e;
                 }
-                let deactivated = sqlx::query_scalar!(
-                    "SELECT deactivated_at FROM users WHERE did = $1",
-                    &user.did
-                )
-                .fetch_optional(&state.db)
-                .await
-                .ok()
-                .flatten()
-                .flatten();
-                let ctrl_did = user.controller_did.map(|d| d.to_string());
-                (user.did.to_string(), deactivated.is_some(), ctrl_did)
+                let deactivated = state
+                    .user_repo
+                    .get_status_by_did(&user.did)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|s| s.deactivated_at);
+                let ctrl_did = user.controller_did.clone();
+                (user.did, deactivated.is_some(), ctrl_did)
             }
             Err(_) => {
                 return ApiError::AuthenticationFailed(None).into_response();
@@ -123,7 +127,9 @@ pub async fn upload_blob(
         }
     };
 
-    if crate::util::is_account_migrated(&state.db, &did)
+    if state
+        .user_repo
+        .is_account_migrated(&did)
         .await
         .unwrap_or(false)
     {
@@ -135,11 +141,8 @@ pub async fn upload_blob(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("application/octet-stream");
 
-    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did)
-        .fetch_optional(&state.db)
-        .await;
-    let user_id = match user_query {
-        Ok(Some(row)) => row.id,
+    let user_id = match state.user_repo.get_id_by_did(&did).await {
+        Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(None).into_response();
         }
@@ -192,6 +195,7 @@ pub async fn upload_blob(
     };
     let cid = Cid::new_v1(0x55, multihash);
     let cid_str = cid.to_string();
+    let cid_link: CidLink = CidLink::new_unchecked(&cid_str);
     let storage_key = format!("blobs/{}", cid_str);
 
     info!(
@@ -199,27 +203,11 @@ pub async fn upload_blob(
         size, cid_str
     );
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            let _ = state.blob_store.delete(&temp_key).await;
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    let insert = sqlx::query!(
-        "INSERT INTO blobs (cid, mime_type, size_bytes, created_by_user, storage_key) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (cid) DO NOTHING RETURNING cid",
-        cid_str,
-        mime_type,
-        size as i64,
-        user_id,
-        storage_key
-    )
-    .fetch_optional(&mut *tx)
-    .await;
-
-    let was_inserted = match insert {
+    let was_inserted = match state
+        .blob_repo
+        .insert_blob(&cid_link, &mime_type, size as i64, user_id, &storage_key)
+        .await
+    {
         Ok(Some(_)) => true,
         Ok(None) => false,
         Err(e) => {
@@ -229,41 +217,33 @@ pub async fn upload_blob(
         }
     };
 
-    if was_inserted && let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
-        let _ = state.blob_store.delete(&temp_key).await;
-        error!("Failed to copy blob to final location: {:?}", e);
-        return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
+    if was_inserted {
+        if let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
+            let _ = state.blob_store.delete(&temp_key).await;
+            error!("Failed to copy blob to final location: {:?}", e);
+            return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
+        }
     }
 
     let _ = state.blob_store.delete(&temp_key).await;
 
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit blob transaction: {:?}", e);
-        if was_inserted && let Err(cleanup_err) = state.blob_store.delete(&storage_key).await {
-            error!(
-                "Failed to cleanup orphaned blob {}: {:?}",
-                storage_key, cleanup_err
-            );
-        }
-        return ApiError::InternalError(None).into_response();
-    }
-
     if let Some(ref controller) = controller_did {
-        let _ = delegation::log_delegation_action(
-            &state.db,
-            &did,
-            controller,
-            Some(controller),
-            DelegationActionType::BlobUpload,
-            Some(json!({
-                "cid": cid_str,
-                "mime_type": mime_type,
-                "size": size
-            })),
-            None,
-            None,
-        )
-        .await;
+        let _ = state
+            .delegation_repo
+            .log_delegation_action(
+                &did,
+                controller,
+                Some(controller),
+                DelegationActionType::BlobUpload,
+                Some(json!({
+                    "cid": cid_str,
+                    "mime_type": mime_type,
+                    "size": size
+                })),
+                None,
+                None,
+            )
+            .await;
     }
 
     Json(json!({
@@ -305,47 +285,35 @@ pub async fn list_missing_blobs(
     Query(params): Query<ListMissingBlobsParams>,
 ) -> Response {
     let auth_user = auth.0;
-    let did = auth_user.did;
-    let user_query = sqlx::query!("SELECT id FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
-        .await;
-    let user_id = match user_query {
-        Ok(Some(row)) => row.id,
-        _ => {
+    let did = &auth_user.did;
+    let user = match state.user_repo.get_by_did(did).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return ApiError::InternalError(None).into_response(),
+        Err(e) => {
+            error!("DB error fetching user: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
-    let cursor_cid = params.cursor.as_deref().unwrap_or("");
-    let missing_query = sqlx::query!(
-        r#"
-        SELECT rb.blob_cid, rb.record_uri
-        FROM record_blobs rb
-        LEFT JOIN blobs b ON rb.blob_cid = b.cid
-        WHERE rb.repo_id = $1 AND b.cid IS NULL AND rb.blob_cid > $2
-        ORDER BY rb.blob_cid
-        LIMIT $3
-        "#,
-        user_id,
-        cursor_cid,
-        limit + 1
-    )
-    .fetch_all(&state.db)
-    .await;
-    let rows = match missing_query {
-        Ok(r) => r,
+    let cursor = params.cursor.as_deref();
+    let missing = match state
+        .blob_repo
+        .list_missing_blobs(user.id, cursor, limit + 1)
+        .await
+    {
+        Ok(m) => m,
         Err(e) => {
             error!("DB error fetching missing blobs: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
-    let has_more = rows.len() > limit as usize;
-    let blobs: Vec<RecordBlob> = rows
+    let has_more = missing.len() > limit as usize;
+    let blobs: Vec<RecordBlob> = missing
         .into_iter()
         .take(limit as usize)
-        .map(|row| RecordBlob {
-            cid: row.blob_cid,
-            record_uri: row.record_uri,
+        .map(|m| RecordBlob {
+            cid: m.blob_cid.to_string(),
+            record_uri: m.record_uri.to_string(),
         })
         .collect();
     let next_cursor = if has_more {

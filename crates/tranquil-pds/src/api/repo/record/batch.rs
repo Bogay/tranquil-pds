@@ -1,9 +1,8 @@
 use super::validation::validate_record_with_status;
-use super::write::has_verified_comms_channel;
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
 use crate::auth::BearerAuth;
-use crate::delegation::{self, DelegationActionType};
+use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use crate::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
@@ -280,16 +279,22 @@ pub async fn apply_writes(
         return ApiError::InvalidRepo("Repo does not match authenticated user".into())
             .into_response();
     }
-    if crate::util::is_account_migrated(&state.db, &did)
+    if state
+        .user_repo
+        .is_account_migrated(&did)
         .await
         .unwrap_or(false)
     {
         return ApiError::AccountMigrated.into_response();
     }
-    let is_verified = has_verified_comms_channel(&state.db, &did)
+    let is_verified = state
+        .user_repo
+        .has_verified_comms_channel(&did)
         .await
         .unwrap_or(false);
-    let is_delegated = crate::delegation::is_delegated_account(&state.db, &did)
+    let is_delegated = state
+        .delegation_repo
+        .is_delegated_account(&did)
         .await
         .unwrap_or(false);
     if !is_verified && !is_delegated {
@@ -373,20 +378,18 @@ pub async fn apply_writes(
         }
     }
 
-    let user_id: uuid::Uuid =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did.as_str())
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(id)) => id,
-            _ => return ApiError::InternalError(Some("User not found".into())).into_response(),
-        };
-    let root_cid_str: String = match sqlx::query_scalar!(
-        "SELECT repo_root_cid FROM repos WHERE user_id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
+    let user_id: uuid::Uuid = match state
+        .user_repo
+        .get_id_by_did(&did)
+        .await
+    {
+        Ok(Some(id)) => id,
+        _ => return ApiError::InternalError(Some("User not found".into())).into_response(),
+    };
+    let root_cid_str = match state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
     {
         Ok(Some(cid_str)) => cid_str,
         _ => return ApiError::InternalError(Some("Repo root not found".into())).into_response(),
@@ -544,21 +547,22 @@ pub async fn apply_writes(
             })
             .collect();
 
-        let _ = delegation::log_delegation_action(
-            &state.db,
-            &did,
-            controller,
-            Some(controller),
-            DelegationActionType::RepoWrite,
-            Some(json!({
-                "action": "apply_writes",
-                "count": input.writes.len(),
-                "writes": write_summary
-            })),
-            None,
-            None,
-        )
-        .await;
+        let _ = state
+            .delegation_repo
+            .log_delegation_action(
+                &did,
+                controller,
+                Some(controller),
+                DelegationActionType::RepoWrite,
+                Some(json!({
+                    "action": "apply_writes",
+                    "count": input.writes.len(),
+                    "writes": write_summary
+                })),
+                None,
+                None,
+            )
+            .await;
     }
 
     (

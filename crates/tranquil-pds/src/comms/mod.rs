@@ -7,9 +7,4 @@ pub use tranquil_comms::{
     sanitize_header_value, validate_locale,
 };
 
-pub use service::{
-    CommsService, channel_display_name, enqueue_2fa_code, enqueue_account_deletion, enqueue_comms,
-    enqueue_email_update, enqueue_email_update_token, enqueue_migration_verification,
-    enqueue_passkey_recovery, enqueue_password_reset, enqueue_plc_operation,
-    enqueue_signup_verification, enqueue_welcome, queue_legacy_login_notification,
-};
+pub use service::{CommsService, channel_display_name, repo as comms_repo};

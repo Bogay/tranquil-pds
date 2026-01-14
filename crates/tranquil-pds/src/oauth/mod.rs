@@ -4,6 +4,11 @@ pub mod jwks;
 pub mod scopes;
 pub mod verify;
 
+pub fn db_err_to_oauth(err: tranquil_db::DbError) -> OAuthError {
+    tracing::error!("Database error in OAuth flow: {}", err);
+    OAuthError::ServerError("An internal error occurred".to_string())
+}
+
 pub use tranquil_oauth::{
     AuthFlowState, AuthorizationRequestParameters, AuthorizationServerMetadata,
     AuthorizedClientData, ClientAuth, ClientMetadata, ClientMetadataCache, Code, DPoPClaims,

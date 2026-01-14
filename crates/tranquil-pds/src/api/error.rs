@@ -158,7 +158,8 @@ impl ApiError {
             Self::RepoTakendown | Self::RepoDeactivated | Self::RepoNotFound(_) => {
                 StatusCode::BAD_REQUEST
             }
-            Self::InvalidSwap(_) | Self::TotpAlreadyEnabled => StatusCode::CONFLICT,
+            Self::TotpAlreadyEnabled => StatusCode::CONFLICT,
+            Self::InvalidSwap(_) => StatusCode::BAD_REQUEST,
             Self::InvalidRequest(_)
             | Self::InvalidHandle(_)
             | Self::HandleNotAvailable(_)
@@ -474,21 +475,13 @@ impl From<crate::auth::TokenValidationError> for ApiError {
             crate::auth::TokenValidationError::OAuthTokenExpired => {
                 Self::OAuthExpiredToken(Some("Token has expired".to_string()))
             }
-        }
-    }
-}
-
-impl From<crate::util::DbLookupError> for ApiError {
-    fn from(e: crate::util::DbLookupError) -> Self {
-        match e {
-            crate::util::DbLookupError::NotFound => Self::AccountNotFound,
-            crate::util::DbLookupError::DatabaseError(db_err) => {
-                tracing::error!("Database error: {:?}", db_err);
-                Self::DatabaseError
+            crate::auth::TokenValidationError::InvalidToken => {
+                Self::AuthenticationFailed(Some("Invalid token format".to_string()))
             }
         }
     }
 }
+
 
 impl From<crate::auth::extractor::AuthError> for ApiError {
     fn from(e: crate::auth::extractor::AuthError) -> Self {
@@ -642,6 +635,15 @@ impl From<crate::storage::StorageError> for ApiError {
         tracing::error!("Storage error: {:?}", e);
         Self::InternalError(Some("Storage operation failed".into()))
     }
+}
+
+pub fn parse_did(s: &str) -> Result<tranquil_types::Did, Response> {
+    s.parse()
+        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()).into_response())
+}
+
+pub fn parse_did_option(s: Option<&str>) -> Result<Option<tranquil_types::Did>, Response> {
+    s.map(parse_did).transpose()
 }
 
 pub struct AtpJson<T>(pub T);

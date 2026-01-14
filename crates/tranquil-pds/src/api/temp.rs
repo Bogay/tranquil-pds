@@ -28,7 +28,8 @@ pub async fn check_signup_queue(State(state): State<AppState>, headers: HeaderMa
     {
         let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
         if let Ok(user) = validate_token_with_dpop(
-            &state.db,
+            state.user_repo.as_ref(),
+            state.oauth_repo.as_ref(),
             &extracted.token,
             extracted.is_dpop,
             dpop_proof,

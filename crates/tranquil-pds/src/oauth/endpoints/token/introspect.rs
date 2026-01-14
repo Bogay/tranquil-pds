@@ -1,11 +1,12 @@
 use super::helpers::extract_token_claims;
-use crate::oauth::{OAuthError, db};
+use crate::oauth::OAuthError;
 use crate::state::{AppState, RateLimitKind};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::{Form, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tranquil_types::{RefreshToken, TokenId};
 
 #[derive(Debug, Deserialize)]
 pub struct RevokeRequest {
@@ -28,10 +29,25 @@ pub async fn revoke_token(
         return Err(OAuthError::RateLimited);
     }
     if let Some(token) = &request.token {
-        if let Some((db_id, _)) = db::get_token_by_refresh_token(&state.db, token).await? {
-            db::delete_token_family(&state.db, db_id).await?;
+        let refresh_token = RefreshToken::from(token.clone());
+        if let Some((db_id, _)) = state
+            .oauth_repo
+            .get_token_by_refresh_token(&refresh_token)
+            .await
+            .map_err(crate::oauth::db_err_to_oauth)?
+        {
+            state
+                .oauth_repo
+                .delete_token_family(db_id)
+                .await
+                .map_err(crate::oauth::db_err_to_oauth)?;
         } else {
-            db::delete_token(&state.db, token).await?;
+            let token_id = TokenId::from(token.clone());
+            state
+                .oauth_repo
+                .delete_token(&token_id)
+                .await
+                .map_err(crate::oauth::db_err_to_oauth)?;
         }
     }
     Ok(StatusCode::OK)
@@ -102,7 +118,8 @@ pub async fn introspect_token(
         Ok(info) => info,
         Err(_) => return Ok(Json(inactive_response)),
     };
-    let token_data = match db::get_token_by_id(&state.db, &token_info.sid).await {
+    let token_id = TokenId::from(token_info.sid.clone());
+    let token_data = match state.oauth_repo.get_token_by_id(&token_id).await {
         Ok(Some(data)) => data,
         _ => return Ok(Json(inactive_response)),
     };

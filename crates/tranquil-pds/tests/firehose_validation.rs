@@ -850,3 +850,134 @@ async fn test_firehose_outdated_cursor_info() {
         "Should have received commits even with outdated cursor"
     );
 }
+
+#[tokio::test]
+async fn test_firehose_car_contains_mst_blocks() {
+    let client = client();
+    let (token, did) = create_account_and_login(&client).await;
+
+    for i in 0..3 {
+        let post_payload = json!({
+            "repo": did,
+            "collection": "app.bsky.feed.post",
+            "record": {
+                "$type": "app.bsky.feed.post",
+                "text": format!("Setup post {}", i),
+                "createdAt": chrono::Utc::now().to_rfc3339(),
+            }
+        });
+        client
+            .post(format!(
+                "{}/xrpc/com.atproto.repo.createRecord",
+                base_url().await
+            ))
+            .bearer_auth(&token)
+            .json(&post_payload)
+            .send()
+            .await
+            .expect("Failed to create setup post");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    let url = format!(
+        "ws://127.0.0.1:{}/xrpc/com.atproto.sync.subscribeRepos",
+        app_port()
+    );
+    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let post_payload = json!({
+        "repo": did,
+        "collection": "app.bsky.feed.post",
+        "record": {
+            "$type": "app.bsky.feed.post",
+            "text": "Test post for MST block validation",
+            "createdAt": chrono::Utc::now().to_rfc3339(),
+        }
+    });
+    let res = client
+        .post(format!(
+            "{}/xrpc/com.atproto.repo.createRecord",
+            base_url().await
+        ))
+        .bearer_auth(&token)
+        .json(&post_payload)
+        .send()
+        .await
+        .expect("Failed to create post");
+    assert_eq!(res.status(), StatusCode::OK);
+    let create_result: Value = res.json().await.unwrap();
+    let record_cid_str = create_result["cid"].as_str().unwrap();
+    let expected_record_cid: Cid = record_cid_str.parse().unwrap();
+
+    let mut frame_opt: Option<CommitFrame> = None;
+    let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let msg = ws_stream.next().await.unwrap().unwrap();
+            let raw_bytes = match msg {
+                tungstenite::Message::Binary(bin) => bin,
+                _ => continue,
+            };
+            if let Ok((_, f)) = parse_frame(&raw_bytes)
+                && f.repo == did
+                && f.ops.iter().any(|op| op.cid == Some(expected_record_cid))
+            {
+                frame_opt = Some(f);
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(timeout.is_ok(), "Timed out waiting for firehose event");
+    let frame = frame_opt.expect("No matching frame found");
+
+    let mut car_reader = CarReader::new(Cursor::new(&frame.blocks)).await.unwrap();
+
+    let mut block_count = 0;
+    let mut found_commit = false;
+    let mut found_record = false;
+    let mut mst_block_count = 0;
+
+    while let Ok(Some((cid, data))) = car_reader.next_block().await {
+        block_count += 1;
+
+        if cid == frame.commit {
+            found_commit = true;
+            continue;
+        }
+
+        if cid == expected_record_cid {
+            found_record = true;
+            continue;
+        }
+
+        if data.len() > 10 && data.len() < 5000 {
+            mst_block_count += 1;
+        }
+    }
+
+    println!("CAR block analysis:");
+    println!("  Total blocks: {}", block_count);
+    println!("  Found commit: {}", found_commit);
+    println!("  Found record: {}", found_record);
+    println!("  MST/other blocks: {}", mst_block_count);
+
+    assert!(found_commit, "CAR must contain commit block");
+    assert!(found_record, "CAR must contain record block");
+
+    assert!(
+        block_count >= 3,
+        "CAR should contain at least commit + record + MST node(s), got {} blocks. \
+         This may indicate firehose is not including all relevant blocks.",
+        block_count
+    );
+
+    assert!(
+        mst_block_count >= 1,
+        "CAR should contain MST node blocks for repo validation, got {} MST blocks. \
+         Firehose must include relevant MST blocks, not just new ones.",
+        mst_block_count
+    );
+
+    ws_stream.send(tungstenite::Message::Close(None)).await.ok();
+}

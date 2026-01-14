@@ -10,10 +10,25 @@ use sqlx::PgPool;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tranquil_db::{
+    BacklinkRepository, BackupRepository, BlobRepository, DelegationRepository, InfraRepository,
+    OAuthRepository, PostgresRepositories, RepoEventNotifier, RepoRepository, SessionRepository,
+    UserRepository,
+};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: PgPool,
+    pub repos: Arc<PostgresRepositories>,
+    pub user_repo: Arc<dyn UserRepository>,
+    pub oauth_repo: Arc<dyn OAuthRepository>,
+    pub session_repo: Arc<dyn SessionRepository>,
+    pub delegation_repo: Arc<dyn DelegationRepository>,
+    pub repo_repo: Arc<dyn RepoRepository>,
+    pub blob_repo: Arc<dyn BlobRepository>,
+    pub infra_repo: Arc<dyn InfraRepository>,
+    pub backup_repo: Arc<dyn BackupRepository>,
+    pub backlink_repo: Arc<dyn BacklinkRepository>,
+    pub event_notifier: Arc<dyn RepoEventNotifier>,
     pub block_store: PostgresBlockStore,
     pub blob_store: Arc<dyn BlobStorage>,
     pub backup_storage: Option<Arc<BackupStorage>>,
@@ -133,7 +148,8 @@ impl AppState {
     pub async fn from_db(db: PgPool) -> Self {
         AuthConfig::init();
 
-        let block_store = PostgresBlockStore::new(db.clone());
+        let repos = Arc::new(PostgresRepositories::new(db.clone()));
+        let block_store = PostgresBlockStore::new(db);
         let blob_store = S3BlobStorage::new().await;
         let backup_storage = BackupStorage::new().await.map(Arc::new);
 
@@ -149,7 +165,17 @@ impl AppState {
         let did_resolver = Arc::new(DidResolver::new());
 
         Self {
-            db,
+            user_repo: repos.user.clone(),
+            oauth_repo: repos.oauth.clone(),
+            session_repo: repos.session.clone(),
+            delegation_repo: repos.delegation.clone(),
+            repo_repo: repos.repo.clone(),
+            blob_repo: repos.blob.clone(),
+            infra_repo: repos.infra.clone(),
+            backup_repo: repos.backup.clone(),
+            backlink_repo: repos.backlink.clone(),
+            event_notifier: repos.event_notifier.clone(),
+            repos,
             block_store,
             blob_store: Arc::new(blob_store),
             backup_storage,

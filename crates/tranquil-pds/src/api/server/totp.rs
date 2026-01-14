@@ -13,7 +13,6 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
@@ -28,24 +27,18 @@ pub struct CreateTotpSecretResponse {
 }
 
 pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let existing = sqlx::query_scalar!(
-        "SELECT verified FROM user_totp WHERE did = $1",
-        &*&auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    if let Ok(Some(true)) = existing {
-        return ApiError::TotpAlreadyEnabled.into_response();
+    match state.user_repo.get_totp_record(&auth.0.did).await {
+        Ok(Some(record)) if record.verified => return ApiError::TotpAlreadyEnabled.into_response(),
+        Ok(_) => {}
+        Err(e) => {
+            error!("DB error checking TOTP: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
     }
 
     let secret = generate_totp_secret();
 
-    let handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", &*&auth.0.did)
-        .fetch_optional(&state.db)
-        .await;
-
-    let handle = match handle {
+    let handle = match state.user_repo.get_handle_by_did(&auth.0.did).await {
         Ok(Some(h)) => h,
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
@@ -74,25 +67,11 @@ pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth)
         }
     };
 
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO user_totp (did, secret_encrypted, encryption_version, verified, created_at)
-        VALUES ($1, $2, $3, false, NOW())
-        ON CONFLICT (did) DO UPDATE SET
-            secret_encrypted = $2,
-            encryption_version = $3,
-            verified = false,
-            created_at = NOW(),
-            last_used = NULL
-        "#,
-        &auth.0.did,
-        encrypted_secret,
-        ENCRYPTION_VERSION
-    )
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = result {
+    if let Err(e) = state
+        .user_repo
+        .upsert_totp_secret(&auth.0.did, &encrypted_secret, ENCRYPTION_VERSION)
+        .await
+    {
         error!("Failed to store TOTP secret: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -133,14 +112,7 @@ pub async fn enable_totp(
         return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let totp_row = sqlx::query!(
-        "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let totp_row = match totp_row {
+    let totp_record = match state.user_repo.get_totp_record(&auth.0.did).await {
         Ok(Some(row)) => row,
         Ok(None) => return ApiError::TotpNotEnabled.into_response(),
         Err(e) => {
@@ -149,18 +121,18 @@ pub async fn enable_totp(
         }
     };
 
-    if totp_row.verified {
+    if totp_record.verified {
         return ApiError::TotpAlreadyEnabled.into_response();
     }
 
-    let secret = match decrypt_totp_secret(&totp_row.secret_encrypted, totp_row.encryption_version)
-    {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to decrypt TOTP secret: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let secret =
+        match decrypt_totp_secret(&totp_record.secret_encrypted, totp_record.encryption_version) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to decrypt TOTP secret: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
@@ -168,33 +140,6 @@ pub async fn enable_totp(
     }
 
     let backup_codes = generate_backup_codes();
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    if let Err(e) = sqlx::query!(
-        "UPDATE user_totp SET verified = true, last_used = NOW() WHERE did = $1",
-        &auth.0.did
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Failed to enable TOTP: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", &*&auth.0.did)
-        .execute(&mut *tx)
-        .await
-    {
-        error!("Failed to clear old backup codes: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
     let backup_hashes: Result<Vec<_>, _> =
         backup_codes.iter().map(|c| hash_backup_code(c)).collect();
     let backup_hashes = match backup_hashes {
@@ -205,23 +150,12 @@ pub async fn enable_totp(
         }
     };
 
-    if let Err(e) = sqlx::query!(
-        r#"
-        INSERT INTO backup_codes (did, code_hash, created_at)
-        SELECT $1, hash, NOW() FROM UNNEST($2::text[]) AS t(hash)
-        "#,
-        &auth.0.did,
-        &backup_hashes[..]
-    )
-    .execute(&mut *tx)
-    .await
+    if let Err(e) = state
+        .user_repo
+        .enable_totp_with_backup_codes(&auth.0.did, &backup_hashes)
+        .await
     {
-        error!("Failed to store backup codes: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit transaction: {:?}", e);
+        error!("Failed to enable TOTP: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
 
@@ -241,9 +175,14 @@ pub async fn disable_totp(
     auth: BearerAuth,
     Json(input): Json<DisableTotpInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&state.db, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&state.db, &auth.0.did)
-            .await;
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await
+    {
+        return crate::api::server::reauth::legacy_mfa_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     if !state
@@ -254,15 +193,8 @@ pub async fn disable_totp(
         return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT password_hash FROM users WHERE did = $1",
-        &*&auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let password_hash = match user {
-        Ok(Some(row)) => row.password_hash,
+    let password_hash = match state.user_repo.get_password_hash_by_did(&auth.0.did).await {
+        Ok(Some(hash)) => hash,
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
@@ -270,22 +202,12 @@ pub async fn disable_totp(
         }
     };
 
-    let password_valid = password_hash
-        .as_ref()
-        .map(|h| bcrypt::verify(&input.password, h).unwrap_or(false))
-        .unwrap_or(false);
+    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
     if !password_valid {
         return ApiError::InvalidPassword("Password is incorrect".into()).into_response();
     }
 
-    let totp_row = sqlx::query!(
-        "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let totp_row = match totp_row {
+    let totp_record = match state.user_repo.get_totp_record(&auth.0.did).await {
         Ok(Some(row)) if row.verified => row,
         Ok(Some(_)) | Ok(None) => return ApiError::TotpNotEnabled.into_response(),
         Err(e) => {
@@ -298,14 +220,16 @@ pub async fn disable_totp(
     let code_valid = if is_backup_code_format(code) {
         verify_backup_code_for_user(&state, &auth.0.did, code).await
     } else {
-        let secret =
-            match decrypt_totp_secret(&totp_row.secret_encrypted, totp_row.encryption_version) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Failed to decrypt TOTP secret: {:?}", e);
-                    return ApiError::InternalError(None).into_response();
-                }
-            };
+        let secret = match decrypt_totp_secret(
+            &totp_record.secret_encrypted,
+            totp_record.encryption_version,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to decrypt TOTP secret: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
         verify_totp_code(&secret, code)
     };
 
@@ -313,32 +237,12 @@ pub async fn disable_totp(
         return ApiError::InvalidCode(Some("Invalid verification code".into())).into_response();
     }
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    if let Err(e) = sqlx::query!("DELETE FROM user_totp WHERE did = $1", &*&auth.0.did)
-        .execute(&mut *tx)
+    if let Err(e) = state
+        .user_repo
+        .delete_totp_and_backup_codes(&auth.0.did)
         .await
     {
         error!("Failed to delete TOTP: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", &*&auth.0.did)
-        .execute(&mut *tx)
-        .await
-    {
-        error!("Failed to delete backup codes: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit transaction: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
 
@@ -356,14 +260,7 @@ pub struct GetTotpStatusResponse {
 }
 
 pub async fn get_totp_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let totp_row = sqlx::query!(
-        "SELECT verified FROM user_totp WHERE did = $1",
-        &*&auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let enabled = match totp_row {
+    let enabled = match state.user_repo.get_totp_record(&auth.0.did).await {
         Ok(Some(row)) => row.verified,
         Ok(None) => false,
         Err(e) => {
@@ -372,14 +269,13 @@ pub async fn get_totp_status(State(state): State<AppState>, auth: BearerAuth) ->
         }
     };
 
-    let backup_count_row = sqlx::query!(
-        "SELECT COUNT(*) as count FROM backup_codes WHERE did = $1 AND used_at IS NULL",
-        &auth.0.did
-    )
-    .fetch_one(&state.db)
-    .await;
-
-    let backup_count = backup_count_row.map(|r| r.count.unwrap_or(0)).unwrap_or(0);
+    let backup_count = match state.user_repo.count_unused_backup_codes(&auth.0.did).await {
+        Ok(count) => count,
+        Err(e) => {
+            error!("DB error counting backup codes: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
     Json(GetTotpStatusResponse {
         enabled,
@@ -414,15 +310,8 @@ pub async fn regenerate_backup_codes(
         return ApiError::RateLimitExceeded(None).into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT password_hash FROM users WHERE did = $1",
-        &*&auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let password_hash = match user {
-        Ok(Some(row)) => row.password_hash,
+    let password_hash = match state.user_repo.get_password_hash_by_did(&auth.0.did).await {
+        Ok(Some(hash)) => hash,
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
@@ -430,22 +319,12 @@ pub async fn regenerate_backup_codes(
         }
     };
 
-    let password_valid = password_hash
-        .as_ref()
-        .map(|h| bcrypt::verify(&input.password, h).unwrap_or(false))
-        .unwrap_or(false);
+    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
     if !password_valid {
         return ApiError::InvalidPassword("Password is incorrect".into()).into_response();
     }
 
-    let totp_row = sqlx::query!(
-        "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
-        &auth.0.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let totp_row = match totp_row {
+    let totp_record = match state.user_repo.get_totp_record(&auth.0.did).await {
         Ok(Some(row)) if row.verified => row,
         Ok(Some(_)) | Ok(None) => return ApiError::TotpNotEnabled.into_response(),
         Err(e) => {
@@ -454,14 +333,14 @@ pub async fn regenerate_backup_codes(
         }
     };
 
-    let secret = match decrypt_totp_secret(&totp_row.secret_encrypted, totp_row.encryption_version)
-    {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to decrypt TOTP secret: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let secret =
+        match decrypt_totp_secret(&totp_record.secret_encrypted, totp_record.encryption_version) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to decrypt TOTP secret: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
@@ -469,22 +348,6 @@ pub async fn regenerate_backup_codes(
     }
 
     let backup_codes = generate_backup_codes();
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    if let Err(e) = sqlx::query!("DELETE FROM backup_codes WHERE did = $1", &*&auth.0.did)
-        .execute(&mut *tx)
-        .await
-    {
-        error!("Failed to clear old backup codes: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
     let backup_hashes: Result<Vec<_>, _> =
         backup_codes.iter().map(|c| hash_backup_code(c)).collect();
     let backup_hashes = match backup_hashes {
@@ -495,23 +358,12 @@ pub async fn regenerate_backup_codes(
         }
     };
 
-    if let Err(e) = sqlx::query!(
-        r#"
-        INSERT INTO backup_codes (did, code_hash, created_at)
-        SELECT $1, hash, NOW() FROM UNNEST($2::text[]) AS t(hash)
-        "#,
-        &auth.0.did,
-        &backup_hashes[..]
-    )
-    .execute(&mut *tx)
-    .await
+    if let Err(e) = state
+        .user_repo
+        .replace_backup_codes(&auth.0.did, &backup_hashes)
+        .await
     {
-        error!("Failed to store backup codes: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit transaction: {:?}", e);
+        error!("Failed to regenerate backup codes: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
 
@@ -520,17 +372,10 @@ pub async fn regenerate_backup_codes(
     Json(RegenerateBackupCodesResponse { backup_codes }).into_response()
 }
 
-async fn verify_backup_code_for_user(state: &AppState, did: &str, code: &str) -> bool {
+async fn verify_backup_code_for_user(state: &AppState, did: &crate::types::Did, code: &str) -> bool {
     let code = code.trim().to_uppercase();
 
-    let backup_codes = sqlx::query!(
-        "SELECT id, code_hash FROM backup_codes WHERE did = $1 AND used_at IS NULL",
-        did
-    )
-    .fetch_all(&state.db)
-    .await;
-
-    let backup_codes = match backup_codes {
+    let backup_codes = match state.user_repo.get_unused_backup_codes(did).await {
         Ok(codes) => codes,
         Err(e) => {
             warn!("Failed to fetch backup codes: {:?}", e);
@@ -544,62 +389,43 @@ async fn verify_backup_code_for_user(state: &AppState, did: &str, code: &str) ->
 
     match matched {
         Some(row) => {
-            let _ = sqlx::query!(
-                "UPDATE backup_codes SET used_at = $1 WHERE id = $2",
-                Utc::now(),
-                row.id
-            )
-            .execute(&state.db)
-            .await;
+            let _ = state.user_repo.mark_backup_code_used(row.id).await;
             true
         }
         None => false,
     }
 }
 
-pub async fn verify_totp_or_backup_for_user(state: &AppState, did: &str, code: &str) -> bool {
+pub async fn verify_totp_or_backup_for_user(state: &AppState, did: &crate::types::Did, code: &str) -> bool {
     let code = code.trim();
 
     if is_backup_code_format(code) {
         return verify_backup_code_for_user(state, did, code).await;
     }
 
-    let totp_row = sqlx::query!(
-        "SELECT secret_encrypted, encryption_version, verified FROM user_totp WHERE did = $1",
-        did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let totp_row = match totp_row {
+    let totp_record = match state.user_repo.get_totp_record(did).await {
         Ok(Some(row)) if row.verified => row,
         _ => return false,
     };
 
-    let secret = match decrypt_totp_secret(&totp_row.secret_encrypted, totp_row.encryption_version)
-    {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
+    let secret =
+        match decrypt_totp_secret(&totp_record.secret_encrypted, totp_record.encryption_version) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
 
     if verify_totp_code(&secret, code) {
-        let _ = sqlx::query!("UPDATE user_totp SET last_used = NOW() WHERE did = $1", did)
-            .execute(&state.db)
-            .await;
+        let _ = state.user_repo.update_totp_last_used(did).await;
         return true;
     }
 
     false
 }
 
-pub async fn has_totp_enabled(state: &AppState, did: &str) -> bool {
-    has_totp_enabled_db(&state.db, did).await
-}
-
-pub async fn has_totp_enabled_db(db: &sqlx::PgPool, did: &str) -> bool {
-    let result = sqlx::query_scalar!("SELECT verified FROM user_totp WHERE did = $1", did)
-        .fetch_optional(db)
-        .await;
-
-    matches!(result, Ok(Some(true)))
+pub async fn has_totp_enabled(state: &AppState, did: &crate::types::Did) -> bool {
+    state
+        .user_repo
+        .has_totp_enabled(did)
+        .await
+        .unwrap_or(false)
 }

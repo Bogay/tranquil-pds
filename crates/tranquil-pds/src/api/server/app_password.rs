@@ -1,9 +1,8 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
 use crate::auth::BearerAuth;
-use crate::delegation::{self, DelegationActionType};
+use crate::delegation::{DelegationActionType, intersect_scopes};
 use crate::state::{AppState, RateLimitKind};
-use crate::util::get_user_id_by_did;
 use axum::{
     Json,
     extract::State,
@@ -12,6 +11,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tranquil_db_traits::AppPasswordCreate;
 use tracing::{error, warn};
 
 #[derive(Serialize)]
@@ -35,17 +35,16 @@ pub async fn list_app_passwords(
     State(state): State<AppState>,
     BearerAuth(auth_user): BearerAuth,
 ) -> Response {
-    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
-        Ok(id) => id,
-        Err(e) => return ApiError::from(e).into_response(),
+    let user = match state.user_repo.get_by_did(&auth_user.did).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
+        Err(e) => {
+            error!("DB error getting user: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
     };
-    match sqlx::query!(
-        "SELECT name, created_at, privileged, scopes, created_by_controller_did FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC",
-        user_id
-    )
-    .fetch_all(&state.db)
-    .await
-    {
+
+    match state.session_repo.list_app_passwords(user.id).await {
         Ok(rows) => {
             let passwords: Vec<AppPassword> = rows
                 .iter()
@@ -54,7 +53,7 @@ pub async fn list_app_passwords(
                     created_at: row.created_at.to_rfc3339(),
                     privileged: row.privileged,
                     scopes: row.scopes.clone(),
-                    created_by_controller: row.created_by_controller_did.clone(),
+                    created_by_controller: row.created_by_controller_did.as_ref().map(|d| d.to_string()),
                 })
                 .collect();
             Json(ListAppPasswordsOutput { passwords }).into_response()
@@ -98,34 +97,41 @@ pub async fn create_app_password(
         warn!(ip = %client_ip, "App password creation rate limit exceeded");
         return ApiError::RateLimitExceeded(None).into_response();
     }
-    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
-        Ok(id) => id,
-        Err(e) => return ApiError::from(e).into_response(),
+
+    let user = match state.user_repo.get_by_did(&auth_user.did).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
+        Err(e) => {
+            error!("DB error getting user: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
     };
+
     let name = input.name.trim();
     if name.is_empty() {
         return ApiError::InvalidRequest("name is required".into()).into_response();
     }
-    let existing = sqlx::query!(
-        "SELECT id FROM app_passwords WHERE user_id = $1 AND name = $2",
-        user_id,
-        name
-    )
-    .fetch_optional(&state.db)
-    .await;
-    if let Ok(Some(_)) = existing {
-        return ApiError::DuplicateAppPassword.into_response();
+
+    match state.session_repo.get_app_password_by_name(user.id, name).await {
+        Ok(Some(_)) => return ApiError::DuplicateAppPassword.into_response(),
+        Err(e) => {
+            error!("DB error checking app password: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+        Ok(None) => {}
     }
 
     let (final_scopes, controller_did) = if let Some(ref controller) = auth_user.controller_did {
-        let grant = delegation::get_delegation(&state.db, &auth_user.did, controller)
+        let grant = state
+            .delegation_repo
+            .get_delegation(&auth_user.did, controller)
             .await
             .ok()
             .flatten();
         let granted_scopes = grant.map(|g| g.granted_scopes).unwrap_or_default();
 
         let requested = input.scopes.as_deref().unwrap_or("atproto");
-        let intersected = delegation::intersect_scopes(requested, &granted_scopes);
+        let intersected = intersect_scopes(requested, &granted_scopes);
 
         if intersected.is_empty() && !granted_scopes.is_empty() {
             return ApiError::InsufficientScope(None).into_response();
@@ -152,6 +158,7 @@ pub async fn create_app_password(
         })
         .collect::<Vec<String>>()
         .join("-");
+
     let password_clone = password.clone();
     let password_hash = match tokio::task::spawn_blocking(move || {
         bcrypt::hash(&password_clone, bcrypt::DEFAULT_COST)
@@ -168,38 +175,38 @@ pub async fn create_app_password(
             return ApiError::InternalError(None).into_response();
         }
     };
+
     let privileged = input.privileged.unwrap_or(false);
     let created_at = chrono::Utc::now();
-    match sqlx::query!(
-        "INSERT INTO app_passwords (user_id, name, password_hash, created_at, privileged, scopes, created_by_controller_did) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        user_id,
-        name,
+
+    let create_data = AppPasswordCreate {
+        user_id: user.id,
+        name: name.to_string(),
         password_hash,
-        created_at,
         privileged,
-        final_scopes,
-        controller_did.as_deref()
-    )
-    .execute(&state.db)
-    .await
-    {
+        scopes: final_scopes.clone(),
+        created_by_controller_did: controller_did.clone(),
+    };
+
+    match state.session_repo.create_app_password(&create_data).await {
         Ok(_) => {
             if let Some(ref controller) = controller_did {
-                let _ = delegation::log_delegation_action(
-                    &state.db,
-                    &auth_user.did,
-                    controller,
-                    Some(controller),
-                    DelegationActionType::AccountAction,
-                    Some(json!({
-                        "action": "create_app_password",
-                        "name": name,
-                        "scopes": final_scopes
-                    })),
-                    None,
-                    None,
-                )
-                .await;
+                let _ = state
+                    .delegation_repo
+                    .log_delegation_action(
+                        &auth_user.did,
+                        controller,
+                        Some(controller),
+                        DelegationActionType::AccountAction,
+                        Some(json!({
+                            "action": "create_app_password",
+                            "name": name,
+                            "scopes": final_scopes
+                        })),
+                        None,
+                        None,
+                    )
+                    .await;
             }
             Json(CreateAppPasswordOutput {
                 name: name.to_string(),
@@ -227,33 +234,35 @@ pub async fn revoke_app_password(
     BearerAuth(auth_user): BearerAuth,
     Json(input): Json<RevokeAppPasswordInput>,
 ) -> Response {
-    let user_id = match get_user_id_by_did(&state.db, &auth_user.did).await {
-        Ok(id) => id,
-        Err(e) => return ApiError::from(e).into_response(),
+    let user = match state.user_repo.get_by_did(&auth_user.did).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
+        Err(e) => {
+            error!("DB error getting user: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
     };
+
     let name = input.name.trim();
     if name.is_empty() {
         return ApiError::InvalidRequest("name is required".into()).into_response();
     }
-    let sessions_to_invalidate = sqlx::query_scalar!(
-        "SELECT access_jti FROM session_tokens WHERE did = $1 AND app_password_name = $2",
-        &auth_user.did,
-        name
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-    if let Err(e) = sqlx::query!(
-        "DELETE FROM session_tokens WHERE did = $1 AND app_password_name = $2",
-        &auth_user.did,
-        name
-    )
-    .execute(&state.db)
-    .await
+
+    let sessions_to_invalidate = state
+        .session_repo
+        .get_session_jtis_by_app_password(&auth_user.did, name)
+        .await
+        .unwrap_or_default();
+
+    if let Err(e) = state
+        .session_repo
+        .delete_sessions_by_app_password(&auth_user.did, name)
+        .await
     {
         error!("DB error revoking sessions for app password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
+
     futures::future::join_all(sessions_to_invalidate.iter().map(|jti| {
         let cache_key = format!("auth:session:{}:{}", &auth_user.did, jti);
         let cache = state.cache.clone();
@@ -262,16 +271,11 @@ pub async fn revoke_app_password(
         }
     }))
     .await;
-    if let Err(e) = sqlx::query!(
-        "DELETE FROM app_passwords WHERE user_id = $1 AND name = $2",
-        user_id,
-        name
-    )
-    .execute(&state.db)
-    .await
-    {
+
+    if let Err(e) = state.session_repo.delete_app_password(user.id, name).await {
         error!("DB error revoking app password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
+
     EmptyResponse::ok().into_response()
 }

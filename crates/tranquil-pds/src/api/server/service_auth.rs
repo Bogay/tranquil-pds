@@ -81,7 +81,7 @@ pub async fn get_service_auth(
 
     let auth_user = if is_dpop {
         match crate::oauth::verify::verify_oauth_access_token(
-            &state.db,
+            state.oauth_repo.as_ref(),
             &token,
             dpop_proof,
             "GET",
@@ -119,7 +119,7 @@ pub async fn get_service_auth(
             }
         }
     } else {
-        match crate::auth::validate_bearer_token_for_service_auth(&state.db, &token).await {
+        match crate::auth::validate_bearer_token_for_service_auth(state.user_repo.as_ref(), &token).await {
             Ok(user) => user,
             Err(e) => {
                 warn!(error = ?e, "getServiceAuth auth validation failed");
@@ -137,28 +137,27 @@ pub async fn get_service_auth(
         Some(kb) => kb.clone(),
         None => {
             warn!(did = %&auth_user.did, "getServiceAuth: OAuth token has no key_bytes, fetching from DB");
-            match sqlx::query_as::<_, (Vec<u8>, Option<i32>)>(
-                "SELECT k.key_bytes, k.encryption_version
-                 FROM users u
-                 JOIN user_keys k ON u.id = k.user_id
-                 WHERE u.did = $1",
-            )
-            .bind(&auth_user.did)
-            .fetch_optional(&state.db)
-            .await
-            {
-                Ok(Some((key_bytes_enc, encryption_version))) => {
-                    match crate::config::decrypt_key(&key_bytes_enc, encryption_version) {
-                        Ok(key) => key,
-                        Err(e) => {
-                            error!(error = ?e, "Failed to decrypt user key for service auth");
-                            return ApiError::AuthenticationFailed(Some(
-                                "Failed to get signing key".into(),
-                            ))
-                            .into_response();
+            match state.user_repo.get_user_info_by_did(&auth_user.did).await {
+                Ok(Some(info)) => match info.key_bytes {
+                    Some(key_bytes_enc) => {
+                        match crate::config::decrypt_key(&key_bytes_enc, info.encryption_version) {
+                            Ok(key) => key,
+                            Err(e) => {
+                                error!(error = ?e, "Failed to decrypt user key for service auth");
+                                return ApiError::AuthenticationFailed(Some(
+                                    "Failed to get signing key".into(),
+                                ))
+                                .into_response();
+                            }
                         }
                     }
-                }
+                    None => {
+                        return ApiError::AuthenticationFailed(Some(
+                            "User has no signing key".into(),
+                        ))
+                        .into_response();
+                    }
+                },
                 Ok(None) => {
                     return ApiError::AuthenticationFailed(Some("User has no signing key".into()))
                         .into_response();
@@ -196,17 +195,13 @@ pub async fn get_service_auth(
         }
     }
 
-    let user_status = sqlx::query!(
-        "SELECT takedown_ref FROM users WHERE did = $1",
-        &auth_user.did
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let is_takendown = match user_status {
-        Ok(Some(row)) => row.takedown_ref.is_some(),
-        _ => false,
-    };
+    let is_takendown = state
+        .user_repo
+        .get_status_by_did(&auth_user.did)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|s| s.takedown_ref.is_some());
 
     if is_takendown && lxm != Some("com.atproto.server.createAccount") {
         return ApiError::InvalidToken(Some("Bad token scope".into())).into_response();

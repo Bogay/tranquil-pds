@@ -10,6 +10,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use tranquil_db_traits::InviteCodeSortOrder;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,20 +25,22 @@ pub async fn disable_invite_codes(
     Json(input): Json<DisableInviteCodesInput>,
 ) -> Response {
     if let Some(codes) = &input.codes {
-        let _ = sqlx::query!(
-            "UPDATE invite_codes SET disabled = TRUE WHERE code = ANY($1)",
-            codes as &[String]
-        )
-        .execute(&state.db)
-        .await;
+        if let Err(e) = state.infra_repo.disable_invite_codes_by_code(codes).await {
+            error!("DB error disabling invite codes: {:?}", e);
+        }
     }
     if let Some(accounts) = &input.accounts {
-        let _ = sqlx::query!(
-            "UPDATE invite_codes SET disabled = TRUE WHERE created_by_user IN (SELECT id FROM users WHERE did = ANY($1))",
-            accounts as &[String]
-        )
-        .execute(&state.db)
-        .await;
+        let accounts_typed: Vec<tranquil_types::Did> = accounts
+            .iter()
+            .filter_map(|a| a.parse().ok())
+            .collect();
+        if let Err(e) = state
+            .infra_repo
+            .disable_invite_codes_by_account(&accounts_typed)
+            .await
+        {
+            error!("DB error disabling invite codes by account: {:?}", e);
+        }
     }
     EmptyResponse::ok().into_response()
 }
@@ -81,59 +84,16 @@ pub async fn get_invite_codes(
     Query(params): Query<GetInviteCodesParams>,
 ) -> Response {
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
-    let sort = params.sort.as_deref().unwrap_or("recent");
-    let order_clause = match sort {
-        "usage" => "available_uses DESC",
-        _ => "created_at DESC",
+    let sort_order = match params.sort.as_deref() {
+        Some("usage") => InviteCodeSortOrder::Usage,
+        _ => InviteCodeSortOrder::Recent,
     };
-    let codes_result = if let Some(cursor) = &params.cursor {
-        sqlx::query_as::<
-            _,
-            (
-                String,
-                i32,
-                Option<bool>,
-                uuid::Uuid,
-                chrono::DateTime<chrono::Utc>,
-            ),
-        >(&format!(
-            r#"
-            SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
-            FROM invite_codes ic
-            WHERE ic.created_at < (SELECT created_at FROM invite_codes WHERE code = $1)
-            ORDER BY {}
-            LIMIT $2
-            "#,
-            order_clause
-        ))
-        .bind(cursor)
-        .bind(limit)
-        .fetch_all(&state.db)
+
+    let codes_rows = match state
+        .infra_repo
+        .list_invite_codes(params.cursor.as_deref(), limit, sort_order)
         .await
-    } else {
-        sqlx::query_as::<
-            _,
-            (
-                String,
-                i32,
-                Option<bool>,
-                uuid::Uuid,
-                chrono::DateTime<chrono::Utc>,
-            ),
-        >(&format!(
-            r#"
-            SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
-            FROM invite_codes ic
-            ORDER BY {}
-            LIMIT $1
-            "#,
-            order_clause
-        ))
-        .bind(limit)
-        .fetch_all(&state.db)
-        .await
-    };
-    let codes_rows = match codes_result {
+    {
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching invite codes: {:?}", e);
@@ -141,72 +101,58 @@ pub async fn get_invite_codes(
         }
     };
 
-    let user_ids: Vec<uuid::Uuid> = codes_rows.iter().map(|(_, _, _, uid, _)| *uid).collect();
-    let code_strings: Vec<String> = codes_rows.iter().map(|(c, _, _, _, _)| c.clone()).collect();
+    let user_ids: Vec<uuid::Uuid> = codes_rows.iter().map(|r| r.created_by_user).collect();
+    let code_strings: Vec<String> = codes_rows.iter().map(|r| r.code.clone()).collect();
 
-    let mut creator_dids: std::collections::HashMap<uuid::Uuid, String> =
-        std::collections::HashMap::new();
-    sqlx::query!(
-        "SELECT id, did FROM users WHERE id = ANY($1)",
-        &user_ids
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .for_each(|r| {
-        creator_dids.insert(r.id, r.did);
-    });
-
-    let mut uses_by_code: std::collections::HashMap<String, Vec<InviteCodeUseInfo>> =
-        std::collections::HashMap::new();
-    if !code_strings.is_empty() {
-        sqlx::query!(
-            r#"
-            SELECT icu.code, u.did, icu.used_at
-            FROM invite_code_uses icu
-            JOIN users u ON icu.used_by_user = u.id
-            WHERE icu.code = ANY($1)
-            ORDER BY icu.used_at DESC
-            "#,
-            &code_strings
-        )
-        .fetch_all(&state.db)
+    let creator_dids: std::collections::HashMap<uuid::Uuid, tranquil_types::Did> = state
+        .infra_repo
+        .get_user_dids_by_ids(&user_ids)
         .await
         .unwrap_or_default()
         .into_iter()
-        .for_each(|r| {
-            uses_by_code
-                .entry(r.code)
-                .or_default()
-                .push(InviteCodeUseInfo {
-                    used_by: r.did,
-                    used_at: r.used_at.to_rfc3339(),
+        .collect();
+
+    let uses_by_code: std::collections::HashMap<String, Vec<InviteCodeUseInfo>> = if code_strings
+        .is_empty()
+    {
+        std::collections::HashMap::new()
+    } else {
+        state
+            .infra_repo
+            .get_invite_code_uses_batch(&code_strings)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .fold(std::collections::HashMap::new(), |mut acc, u| {
+                acc.entry(u.code.clone()).or_default().push(InviteCodeUseInfo {
+                    used_by: u.used_by_did.to_string(),
+                    used_at: u.used_at.to_rfc3339(),
                 });
-        });
-    }
+                acc
+            })
+    };
 
     let codes: Vec<InviteCodeInfo> = codes_rows
         .iter()
-        .map(|(code, available_uses, disabled, created_by_user, created_at)| {
+        .map(|r| {
             let creator_did = creator_dids
-                .get(created_by_user)
-                .cloned()
+                .get(&r.created_by_user)
+                .map(|d| d.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             InviteCodeInfo {
-                code: code.clone(),
-                available: *available_uses,
-                disabled: disabled.unwrap_or(false),
+                code: r.code.clone(),
+                available: r.available_uses,
+                disabled: r.disabled.unwrap_or(false),
                 for_account: creator_did.clone(),
                 created_by: creator_did,
-                created_at: created_at.to_rfc3339(),
-                uses: uses_by_code.get(code).cloned().unwrap_or_default(),
+                created_at: r.created_at.to_rfc3339(),
+                uses: uses_by_code.get(&r.code).cloned().unwrap_or_default(),
             }
         })
         .collect();
 
     let next_cursor = if codes_rows.len() == limit as usize {
-        codes_rows.last().map(|(code, _, _, _, _)| code.clone())
+        codes_rows.last().map(|r| r.code.clone())
     } else {
         None
     };
@@ -234,19 +180,13 @@ pub async fn disable_account_invites(
     if account.is_empty() {
         return ApiError::InvalidRequest("account is required".into()).into_response();
     }
-    let result = sqlx::query!(
-        "UPDATE users SET invites_disabled = TRUE WHERE did = $1",
-        account
-    )
-    .execute(&state.db)
-    .await;
-    match result {
-        Ok(r) => {
-            if r.rows_affected() == 0 {
-                return ApiError::AccountNotFound.into_response();
-            }
-            EmptyResponse::ok().into_response()
-        }
+    let account_did: tranquil_types::Did = match account.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+    };
+    match state.user_repo.set_invites_disabled(&account_did, true).await {
+        Ok(true) => EmptyResponse::ok().into_response(),
+        Ok(false) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error disabling account invites: {:?}", e);
             ApiError::InternalError(None).into_response()
@@ -268,19 +208,13 @@ pub async fn enable_account_invites(
     if account.is_empty() {
         return ApiError::InvalidRequest("account is required".into()).into_response();
     }
-    let result = sqlx::query!(
-        "UPDATE users SET invites_disabled = FALSE WHERE did = $1",
-        account
-    )
-    .execute(&state.db)
-    .await;
-    match result {
-        Ok(r) => {
-            if r.rows_affected() == 0 {
-                return ApiError::AccountNotFound.into_response();
-            }
-            EmptyResponse::ok().into_response()
-        }
+    let account_did: tranquil_types::Did = match account.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+    };
+    match state.user_repo.set_invites_disabled(&account_did, false).await {
+        Ok(true) => EmptyResponse::ok().into_response(),
+        Ok(false) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
             error!("DB error enabling account invites: {:?}", e);
             ApiError::InternalError(None).into_response()

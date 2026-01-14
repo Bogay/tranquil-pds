@@ -54,68 +54,37 @@ pub async fn search_accounts(
     Query(params): Query<SearchAccountsParams>,
 ) -> Response {
     let limit = params.limit.clamp(1, 100);
-    let cursor_did = params.cursor.as_deref().unwrap_or("");
     let email_filter = params.email.as_deref().map(|e| format!("%{}%", e));
     let handle_filter = params.handle.as_deref().map(|h| format!("%{}%", h));
-    let result = sqlx::query_as::<
-        _,
-        (
-            String,
-            String,
-            Option<String>,
-            chrono::DateTime<chrono::Utc>,
-            bool,
-            Option<chrono::DateTime<chrono::Utc>>,
-            Option<bool>,
-        ),
-    >(
-        r#"
-        SELECT did, handle, email, created_at, email_verified, deactivated_at, invites_disabled
-        FROM users
-        WHERE did > $1
-          AND ($2::text IS NULL OR email ILIKE $2)
-          AND ($3::text IS NULL OR handle ILIKE $3)
-        ORDER BY did ASC
-        LIMIT $4
-        "#,
-    )
-    .bind(cursor_did)
-    .bind(&email_filter)
-    .bind(&handle_filter)
-    .bind(limit + 1)
-    .fetch_all(&state.db)
-    .await;
+    let cursor_did: Option<Did> = params.cursor.as_ref().and_then(|c| c.parse().ok());
+    let result = state
+        .user_repo
+        .search_accounts(
+            cursor_did.as_ref(),
+            email_filter.as_deref(),
+            handle_filter.as_deref(),
+            limit + 1,
+        )
+        .await;
     match result {
         Ok(rows) => {
             let has_more = rows.len() > limit as usize;
             let accounts: Vec<AccountView> = rows
                 .into_iter()
                 .take(limit as usize)
-                .map(
-                    |(
-                        did,
-                        handle,
-                        email,
-                        created_at,
-                        email_verified,
-                        deactivated_at,
-                        invites_disabled,
-                    )| {
-                        AccountView {
-                            did: did.clone().into(),
-                            handle: handle.into(),
-                            email,
-                            indexed_at: created_at.to_rfc3339(),
-                            email_confirmed_at: if email_verified {
-                                Some(created_at.to_rfc3339())
-                            } else {
-                                None
-                            },
-                            deactivated_at: deactivated_at.map(|dt| dt.to_rfc3339()),
-                            invites_disabled,
-                        }
+                .map(|row| AccountView {
+                    did: row.did.clone(),
+                    handle: row.handle,
+                    email: row.email,
+                    indexed_at: row.created_at.to_rfc3339(),
+                    email_confirmed_at: if row.email_verified {
+                        Some(row.created_at.to_rfc3339())
+                    } else {
+                        None
                     },
-                )
+                    deactivated_at: row.deactivated_at.map(|dt| dt.to_rfc3339()),
+                    invites_disabled: row.invites_disabled,
+                })
                 .collect();
             let next_cursor = if has_more {
                 accounts.last().map(|a| a.did.to_string())

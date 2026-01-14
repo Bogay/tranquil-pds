@@ -2,6 +2,7 @@ use crate::api::ApiError;
 use crate::auth::BearerAuth;
 use crate::auth::extractor::BearerAuthAdmin;
 use crate::state::AppState;
+use crate::types::Did;
 use axum::{
     Json,
     extract::State,
@@ -50,27 +51,24 @@ pub async fn create_invite_code(
         return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
     }
 
-    let for_account = input
-        .for_account
-        .unwrap_or_else(|| auth_user.did.to_string());
+    let for_account: Did = match &input.for_account {
+        Some(acct) => match acct.parse() {
+            Ok(d) => d,
+            Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+        },
+        None => auth_user.did.clone(),
+    };
     let code = gen_invite_code();
 
-    match sqlx::query!(
-        "INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
-         SELECT $1, $2, id, $3 FROM users WHERE is_admin = true LIMIT 1",
-        code,
-        input.use_count,
-        for_account
-    )
-    .execute(&state.db)
-    .await
+    match state
+        .infra_repo
+        .create_invite_code(&code, input.use_count, Some(&for_account))
+        .await
     {
-        Ok(result) => {
-            if result.rows_affected() == 0 {
-                error!("No admin user found to create invite code");
-                return ApiError::InternalError(None).into_response();
-            }
-            Json(CreateInviteCodeOutput { code }).into_response()
+        Ok(true) => Json(CreateInviteCodeOutput { code }).into_response(),
+        Ok(false) => {
+            error!("No admin user found to create invite code");
+            ApiError::InternalError(None).into_response()
         }
         Err(e) => {
             error!("DB error creating invite code: {:?}", e);
@@ -108,45 +106,38 @@ pub async fn create_invite_codes(
     }
 
     let code_count = input.code_count.unwrap_or(1).max(1);
-    let for_accounts = input
-        .for_accounts
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| vec![auth_user.did.to_string()]);
+    let for_accounts: Vec<Did> = match &input.for_accounts {
+        Some(accounts) if !accounts.is_empty() => {
+            let parsed: Result<Vec<Did>, _> = accounts.iter().map(|a| a.parse()).collect();
+            match parsed {
+                Ok(dids) => dids,
+                Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+            }
+        }
+        _ => vec![auth_user.did.clone()],
+    };
 
-    let admin_user_id =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE is_admin = true LIMIT 1")
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(id)) => id,
-            Ok(None) => {
-                error!("No admin user found to create invite codes");
-                return ApiError::InternalError(None).into_response();
-            }
-            Err(e) => {
-                error!("DB error looking up admin user: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let admin_user_id = match state.user_repo.get_any_admin_user_id().await {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            error!("No admin user found to create invite codes");
+            return ApiError::InternalError(None).into_response();
+        }
+        Err(e) => {
+            error!("DB error looking up admin user: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
     let result = futures::future::try_join_all(for_accounts.into_iter().map(|account| {
-        let db = state.db.clone();
+        let infra_repo = state.infra_repo.clone();
         let use_count = input.use_count;
         async move {
             let codes: Vec<String> = (0..code_count).map(|_| gen_invite_code()).collect();
-            sqlx::query!(
-                r#"
-                INSERT INTO invite_codes (code, available_uses, created_by_user, for_account)
-                SELECT code, $2, $3, $4 FROM UNNEST($1::text[]) AS t(code)
-                "#,
-                &codes[..],
-                use_count,
-                admin_user_id,
-                account
-            )
-            .execute(&db)
-            .await
-            .map(|_| AccountCodes { account, codes })
+            infra_repo
+                .create_invite_codes_batch(&codes, use_count, admin_user_id, Some(&account))
+                .await
+                .map(|_| AccountCodes { account: account.to_string(), codes })
         }
     }))
     .await;
@@ -203,78 +194,59 @@ pub async fn get_account_invite_codes(
 ) -> Response {
     let include_used = params.include_used.unwrap_or(true);
 
-    let codes_rows = match sqlx::query!(
-        r#"
-        SELECT
-            ic.code,
-            ic.available_uses,
-            ic.created_at,
-            ic.disabled,
-            ic.for_account,
-            (SELECT COUNT(*) FROM invite_code_uses icu WHERE icu.code = ic.code)::int as "use_count!"
-        FROM invite_codes ic
-        WHERE ic.for_account = $1
-        ORDER BY ic.created_at DESC
-        "#,
-        &auth_user.did
-    )
-    .fetch_all(&state.db)
-    .await
+    let codes_info = match state
+        .infra_repo
+        .get_invite_codes_for_account(&auth_user.did)
+        .await
     {
-        Ok(rows) => rows,
+        Ok(info) => info,
         Err(e) => {
             error!("DB error fetching invite codes: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
 
-    let filtered_rows: Vec<_> = codes_rows
+    let filtered_codes: Vec<_> = codes_info
         .into_iter()
-        .filter(|row| {
-            let disabled = row.disabled.unwrap_or(false);
-            !disabled && (include_used || row.use_count < row.available_uses)
-        })
+        .filter(|info| !info.disabled)
         .collect();
 
-    let codes = futures::future::join_all(filtered_rows.into_iter().map(|row| {
-        let db = state.db.clone();
+    let codes = futures::future::join_all(filtered_codes.into_iter().map(|info| {
+        let infra_repo = state.infra_repo.clone();
         async move {
-            let uses = sqlx::query!(
-                r#"
-                SELECT u.did, u.handle, icu.used_at
-                FROM invite_code_uses icu
-                JOIN users u ON icu.used_by_user = u.id
-                WHERE icu.code = $1
-                ORDER BY icu.used_at DESC
-                "#,
-                row.code
-            )
-            .fetch_all(&db)
-            .await
-            .map(|use_rows| {
-                use_rows
-                    .iter()
-                    .map(|u| InviteCodeUse {
-                        used_by: u.did.clone(),
-                        used_by_handle: Some(u.handle.clone()),
-                        used_at: u.used_at.to_rfc3339(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+            let uses = infra_repo
+                .get_invite_code_uses(&info.code)
+                .await
+                .map(|use_rows| {
+                    use_rows
+                        .into_iter()
+                        .map(|u| InviteCodeUse {
+                            used_by: u.used_by_did.to_string(),
+                            used_by_handle: u.used_by_handle.map(|h| h.to_string()),
+                            used_at: u.used_at.to_rfc3339(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
 
-            InviteCode {
-                code: row.code,
-                available: row.available_uses,
-                disabled: false,
-                for_account: row.for_account,
-                created_by: "admin".to_string(),
-                created_at: row.created_at.to_rfc3339(),
-                uses,
+            let use_count = uses.len() as i32;
+            if !include_used && use_count >= info.available_uses {
+                return None;
             }
+
+            Some(InviteCode {
+                code: info.code,
+                available: info.available_uses,
+                disabled: false,
+                for_account: info.for_account.map(|d| d.to_string()).unwrap_or_default(),
+                created_by: info.created_by.map(|d| d.to_string()).unwrap_or_else(|| "admin".to_string()),
+                created_at: info.created_at.to_rfc3339(),
+                uses,
+            })
         }
     }))
     .await;
 
+    let codes: Vec<InviteCode> = codes.into_iter().flatten().collect();
     Json(GetAccountInviteCodesOutput { codes }).into_response()
 }

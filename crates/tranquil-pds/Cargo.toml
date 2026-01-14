@@ -15,6 +15,8 @@ tranquil-scopes = { workspace = true }
 tranquil-auth = { workspace = true }
 tranquil-oauth = { workspace = true }
 tranquil-comms = { workspace = true }
+tranquil-db = { workspace = true }
+tranquil-db-traits = { workspace = true }
 
 aes-gcm = { workspace = true }
 backon = { workspace = true }

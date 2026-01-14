@@ -1,63 +1,6 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "comms_channel", rename_all = "lowercase")]
-pub enum CommsChannel {
-    Email,
-    Discord,
-    Telegram,
-    Signal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "comms_status", rename_all = "lowercase")]
-pub enum CommsStatus {
-    Pending,
-    Processing,
-    Sent,
-    Failed,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "comms_type", rename_all = "snake_case")]
-pub enum CommsType {
-    Welcome,
-    EmailVerification,
-    PasswordReset,
-    EmailUpdate,
-    AccountDeletion,
-    AdminEmail,
-    PlcOperation,
-    TwoFactorCode,
-    PasskeyRecovery,
-    LegacyLoginAlert,
-    MigrationVerification,
-}
-
-#[derive(Debug, Clone)]
-pub struct QueuedComms {
-    pub id: Uuid,
-    pub user_id: Uuid,
-    pub channel: CommsChannel,
-    pub comms_type: CommsType,
-    pub status: CommsStatus,
-    pub recipient: String,
-    pub subject: Option<String>,
-    pub body: String,
-    pub metadata: Option<serde_json::Value>,
-    pub attempts: i32,
-    pub max_attempts: i32,
-    pub last_error: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub scheduled_for: DateTime<Utc>,
-    pub processed_at: Option<DateTime<Utc>>,
-}
+pub use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType, QueuedComms};
 
 pub struct NewComms {
     pub user_id: Uuid,

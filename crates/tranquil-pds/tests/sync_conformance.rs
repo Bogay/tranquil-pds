@@ -352,6 +352,8 @@ async fn test_get_repo_since_returns_partial() {
     let initial_body: Value = initial_commit_res.json().await.unwrap();
     let initial_rev = initial_body["rev"].as_str().unwrap();
 
+    create_post(&client, &did, &jwt, "Test post for since param").await;
+
     let full_repo_res = client
         .get(format!(
             "{}/xrpc/com.atproto.sync.getRepo",
@@ -364,8 +366,6 @@ async fn test_get_repo_since_returns_partial() {
     assert_eq!(full_repo_res.status(), StatusCode::OK);
     let full_repo_bytes = full_repo_res.bytes().await.unwrap();
     let full_repo_size = full_repo_bytes.len();
-
-    create_post(&client, &did, &jwt, "Test post for since param").await;
 
     let partial_repo_res = client
         .get(format!(

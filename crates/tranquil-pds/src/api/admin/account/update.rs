@@ -27,16 +27,13 @@ pub async fn update_account_email(
     if account.is_empty() || email.is_empty() {
         return ApiError::InvalidRequest("account and email are required".into()).into_response();
     }
-    let result = sqlx::query!("UPDATE users SET email = $1 WHERE did = $2", email, account)
-        .execute(&state.db)
-        .await;
-    match result {
-        Ok(r) => {
-            if r.rows_affected() == 0 {
-                return ApiError::AccountNotFound.into_response();
-            }
-            EmptyResponse::ok().into_response()
-        }
+    let account_did: Did = match account.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+    };
+    match state.user_repo.admin_update_email(&account_did, email).await {
+        Ok(0) => ApiError::AccountNotFound.into_response(),
+        Ok(_) => EmptyResponse::ok().into_response(),
         Err(e) => {
             error!("DB error updating email: {:?}", e);
             ApiError::InternalError(None).into_response()
@@ -67,45 +64,35 @@ pub async fn update_account_handle(
         return ApiError::InvalidHandle(None).into_response();
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
     let handle = if !input_handle.contains('.') {
-        format!("{}.{}", input_handle, hostname)
+        format!("{}.{}", input_handle, hostname_for_handles)
     } else {
         input_handle.to_string()
     };
-    let old_handle = sqlx::query_scalar!("SELECT handle FROM users WHERE did = $1", did.as_str())
-        .fetch_optional(&state.db)
+    let old_handle = state
+        .user_repo
+        .get_handle_by_did(did)
         .await
         .ok()
         .flatten();
-    let existing = sqlx::query!(
-        "SELECT id FROM users WHERE handle = $1 AND did != $2",
-        handle,
-        did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-    if let Ok(Some(_)) = existing {
+    let user_id = match state.user_repo.get_id_by_did(did).await {
+        Ok(Some(id)) => id,
+        _ => return ApiError::AccountNotFound.into_response(),
+    };
+    let handle_for_check = Handle::new_unchecked(&handle);
+    if let Ok(true) = state.user_repo.check_handle_exists(&handle_for_check, user_id).await {
         return ApiError::HandleTaken.into_response();
     }
-    let result = sqlx::query!(
-        "UPDATE users SET handle = $1 WHERE did = $2",
-        handle,
-        did.as_str()
-    )
-    .execute(&state.db)
-    .await;
-    match result {
-        Ok(r) => {
-            if r.rows_affected() == 0 {
-                return ApiError::AccountNotFound.into_response();
-            }
+    match state.user_repo.admin_update_handle(did, &handle_for_check).await {
+        Ok(0) => ApiError::AccountNotFound.into_response(),
+        Ok(_) => {
             if let Some(old) = old_handle {
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
-            let handle_typed = Handle::new_unchecked(&handle);
             if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, did, Some(&handle_typed))
+                crate::api::repo::record::sequence_identity_event(&state, did, Some(&handle_for_check))
                     .await
             {
                 warn!(
@@ -114,7 +101,7 @@ pub async fn update_account_handle(
                 );
             }
             if let Err(e) =
-                crate::api::identity::did::update_plc_handle(&state, did.as_str(), &handle).await
+                crate::api::identity::did::update_plc_handle(&state, did, &handle_for_check).await
             {
                 warn!("Failed to update PLC handle for admin handle update: {}", e);
             }
@@ -150,20 +137,9 @@ pub async fn update_account_password(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let result = sqlx::query!(
-        "UPDATE users SET password_hash = $1 WHERE did = $2",
-        password_hash,
-        did.as_str()
-    )
-    .execute(&state.db)
-    .await;
-    match result {
-        Ok(r) => {
-            if r.rows_affected() == 0 {
-                return ApiError::AccountNotFound.into_response();
-            }
-            EmptyResponse::ok().into_response()
-        }
+    match state.user_repo.admin_update_password(did, &password_hash).await {
+        Ok(0) => ApiError::AccountNotFound.into_response(),
+        Ok(_) => EmptyResponse::ok().into_response(),
         Err(e) => {
             error!("DB error updating password: {:?}", e);
             ApiError::InternalError(None).into_response()

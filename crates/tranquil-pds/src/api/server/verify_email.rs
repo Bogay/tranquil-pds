@@ -55,21 +55,14 @@ pub async fn resend_migration_verification(
 ) -> Result<Json<ResendMigrationVerificationOutput>, ApiError> {
     let email = input.email.trim().to_lowercase();
 
-    let user = sqlx::query!(
-        "SELECT id, did, email, email_verified, handle FROM users WHERE LOWER(email) = $1",
-        email
-    )
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        warn!(error = %e, "Database error during resend verification");
-        ApiError::InternalError(None)
-    })?;
-
-    let user = match user {
-        Some(u) => u,
-        None => {
+    let user = match state.user_repo.get_by_email(&email).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
             return Ok(Json(ResendMigrationVerificationOutput { sent: true }));
+        }
+        Err(e) => {
+            warn!(error = ?e, "Database error during resend verification");
+            return Err(ApiError::InternalError(None));
         }
     };
 
@@ -81,8 +74,9 @@ pub async fn resend_migration_verification(
     let token = crate::auth::verification_token::generate_migration_token(&user.did, &email);
     let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
 
-    if let Err(e) = crate::comms::enqueue_migration_verification(
-        &state.db,
+    if let Err(e) = crate::comms::comms_repo::enqueue_migration_verification(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
         user.id,
         &email,
         &formatted_token,
@@ -90,7 +84,7 @@ pub async fn resend_migration_verification(
     )
     .await
     {
-        warn!(error = %e, "Failed to enqueue migration verification email");
+        warn!(error = ?e, "Failed to enqueue migration verification email");
     }
 
     info!(did = %user.did, "Resent migration verification email");

@@ -72,18 +72,9 @@ async fn proxy_to_report_service(
     let key_bytes = match &auth_user.key_bytes {
         Some(kb) => kb.clone(),
         None => {
-            match sqlx::query_as::<_, (Vec<u8>, Option<i32>)>(
-                "SELECT k.key_bytes, k.encryption_version
-                 FROM users u
-                 JOIN user_keys k ON u.id = k.user_id
-                 WHERE u.did = $1",
-            )
-            .bind(&auth_user.did)
-            .fetch_optional(&state.db)
-            .await
-            {
-                Ok(Some((key_bytes_enc, encryption_version))) => {
-                    match crate::config::decrypt_key(&key_bytes_enc, encryption_version) {
+            match state.user_repo.get_with_key_by_did(&auth_user.did).await {
+                Ok(Some(user_with_key)) => {
+                    match crate::config::decrypt_key(&user_with_key.key_bytes, user_with_key.encryption_version) {
                         Ok(key) => key,
                         Err(e) => {
                             error!(error = ?e, "Failed to decrypt user key for report service auth");
@@ -185,7 +176,7 @@ async fn proxy_to_report_service(
 
 async fn create_report_locally(
     state: &AppState,
-    did: &str,
+    did: &crate::types::Did,
     is_takendown: bool,
     input: CreateReportInput,
 ) -> Response {
@@ -214,19 +205,14 @@ async fn create_report_locally(
     let report_id = (uuid::Uuid::now_v7().as_u128() & 0x7FFF_FFFF_FFFF_FFFF) as i64;
     let subject_json = json!(input.subject);
 
-    let insert = sqlx::query!(
-        "INSERT INTO reports (id, reason_type, reason, subject_json, reported_by_did, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+    if let Err(e) = state.infra_repo.insert_report(
         report_id,
-        input.reason_type,
-        input.reason,
+        &input.reason_type,
+        input.reason.as_deref(),
         subject_json,
         did,
-        created_at
-    )
-    .execute(&state.db)
-    .await;
-
-    if let Err(e) = insert {
+        created_at,
+    ).await {
         error!("Failed to insert report: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }

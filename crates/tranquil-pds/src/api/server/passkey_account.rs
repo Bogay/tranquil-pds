@@ -149,7 +149,8 @@ pub async fn create_passkey_account(
             .unwrap_or(false);
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let pds_suffix = format!(".{}", hostname);
+    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let pds_suffix = format!(".{}", hostname_for_handles);
 
     let handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
         let handle_to_validate = if input.handle.ends_with(&pds_suffix) {
@@ -161,7 +162,7 @@ pub async fn create_passkey_account(
             &input.handle
         };
         match crate::api::validation::validate_short_handle(handle_to_validate) {
-            Ok(h) => format!("{}.{}", h, hostname),
+            Ok(h) => format!("{}.{}", h, hostname_for_handles),
             Err(_) => {
                 return ApiError::InvalidHandle(None).into_response();
             }
@@ -182,17 +183,9 @@ pub async fn create_passkey_account(
     }
 
     if let Some(ref code) = input.invite_code {
-        let valid = sqlx::query_scalar!(
-            "SELECT available_uses > 0 AND NOT disabled FROM invite_codes WHERE code = $1",
-            code
-        )
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(Some(false));
+        let valid = state.infra_repo.is_invite_code_valid(code).await.unwrap_or(false);
 
-        if valid != Some(true) {
+        if !valid {
             return ApiError::InvalidInviteCode.into_response();
         }
     } else {
@@ -233,21 +226,8 @@ pub async fn create_passkey_account(
 
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
-            let reserved = sqlx::query!(
-                r#"
-                SELECT id, private_key_bytes
-                FROM reserved_signing_keys
-                WHERE public_key_did_key = $1
-                  AND used_at IS NULL
-                  AND expires_at > NOW()
-                FOR UPDATE
-                "#,
-                signing_key_did
-            )
-            .fetch_optional(&state.db)
-            .await;
-            match reserved {
-                Ok(Some(row)) => (row.private_key_bytes, Some(row.id)),
+            match state.infra_repo.get_reserved_signing_key(signing_key_did).await {
+                Ok(Some(reserved)) => (reserved.private_key_bytes, Some(reserved.id)),
                 Ok(None) => {
                     return ApiError::InvalidSigningKey.into_response();
                 }
@@ -271,7 +251,7 @@ pub async fn create_passkey_account(
 
     let did = match did_type {
         "web" => {
-            let subdomain_host = format!("{}.{}", input.handle, hostname);
+            let subdomain_host = format!("{}.{}", input.handle, hostname_for_handles);
             let encoded_subdomain = subdomain_host.replace(':', "%3A");
             let self_hosted_did = format!("did:web:{}", encoded_subdomain);
             info!(did = %self_hosted_did, "Creating self-hosted did:web passkey account");
@@ -391,83 +371,10 @@ pub async fn create_passkey_account(
     };
     let setup_expires_at = Utc::now() + Duration::hours(1);
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Error starting transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    let is_first_user = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
-        .fetch_one(&mut *tx)
-        .await
-        .map(|c| c.unwrap_or(0) == 0)
-        .unwrap_or(false);
-
     let deactivated_at: Option<chrono::DateTime<Utc>> = if is_byod_did_web {
         Some(Utc::now())
     } else {
         None
-    };
-
-    let user_insert: Result<(Uuid,), _> = sqlx::query_as(
-        r#"INSERT INTO users (
-            handle, email, did, password_hash, password_required,
-            preferred_comms_channel,
-            discord_id, telegram_username, signal_number,
-            recovery_token, recovery_token_expires_at,
-            is_admin, deactivated_at
-        ) VALUES ($1, $2, $3, NULL, FALSE, $4::comms_channel, $5, $6, $7, $8, $9, $10, $11) RETURNING id"#,
-    )
-    .bind(&handle)
-    .bind(&email)
-    .bind(&did)
-    .bind(verification_channel)
-    .bind(
-        input
-            .discord_id
-            .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty()),
-    )
-    .bind(
-        input
-            .telegram_username
-            .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty()),
-    )
-    .bind(
-        input
-            .signal_number
-            .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty()),
-    )
-    .bind(&setup_token_hash)
-    .bind(setup_expires_at)
-    .bind(is_first_user)
-    .bind(deactivated_at)
-    .fetch_one(&mut *tx)
-    .await;
-
-    let user_id = match user_insert {
-        Ok((id,)) => id,
-        Err(e) => {
-            if let Some(db_err) = e.as_database_error()
-                && db_err.code().as_deref() == Some("23505")
-            {
-                let constraint = db_err.constraint().unwrap_or("");
-                if constraint.contains("handle") {
-                    return ApiError::HandleNotAvailable(None).into_response();
-                } else if constraint.contains("email") {
-                    return ApiError::EmailTaken.into_response();
-                }
-            }
-            error!("Error inserting user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
     };
 
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
@@ -477,31 +384,6 @@ pub async fn create_passkey_account(
             return ApiError::InternalError(None).into_response();
         }
     };
-
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO user_keys (user_id, key_bytes, encryption_version, encrypted_at) VALUES ($1, $2, $3, NOW())",
-        user_id,
-        &encrypted_key_bytes[..],
-        crate::config::ENCRYPTION_VERSION
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting user key: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Some(key_id) = reserved_key_id
-        && let Err(e) = sqlx::query!(
-            "UPDATE reserved_signing_keys SET used_at = NOW() WHERE id = $1",
-            key_id
-        )
-        .execute(&mut *tx)
-        .await
-    {
-        error!("Error marking reserved key as used: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
 
     let mst = Mst::new(Arc::new(state.block_store.clone()));
     let mst_root = match mst.persist().await {
@@ -528,80 +410,61 @@ pub async fn create_passkey_account(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let commit_cid_str = commit_cid.to_string();
-    let rev_str = rev.as_ref().to_string();
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
-        user_id,
-        commit_cid_str,
-        rev_str
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting repo: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
-    if let Err(e) = sqlx::query!(
-        r#"
-        INSERT INTO user_blocks (user_id, block_cid)
-        SELECT $1, block_cid FROM UNNEST($2::bytea[]) AS t(block_cid)
-        ON CONFLICT (user_id, block_cid) DO NOTHING
-        "#,
-        user_id,
-        &genesis_block_cids
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error inserting user_blocks: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
 
-    if let Some(ref code) = input.invite_code {
-        let _ = sqlx::query!(
-            "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
-            code
-        )
-        .execute(&mut *tx)
-        .await;
-
-        let _ = sqlx::query!(
-            "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
-            code,
-            user_id
-        )
-        .execute(&mut *tx)
-        .await;
-    }
-
-    if std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").is_ok() {
-        let birthdate_pref = json!({
+    let birthdate_pref = std::env::var("PDS_AGE_ASSURANCE_OVERRIDE").ok().map(|_| {
+        json!({
             "$type": "app.bsky.actor.defs#personalDetailsPref",
             "birthDate": "1998-05-06T00:00:00.000Z"
-        });
-        if let Err(e) = sqlx::query!(
-            "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
-             ON CONFLICT (user_id, name) DO NOTHING",
-            user_id,
-            "app.bsky.actor.defs#personalDetailsPref",
-            birthdate_pref
-        )
-        .execute(&mut *tx)
-        .await
-        {
-            warn!("Failed to set default birthdate preference: {:?}", e);
-        }
-    }
+        })
+    });
 
-    if let Err(e) = tx.commit().await {
-        error!("Error committing transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+    let preferred_comms_channel = match verification_channel {
+        "email" => tranquil_db_traits::CommsChannel::Email,
+        "discord" => tranquil_db_traits::CommsChannel::Discord,
+        "telegram" => tranquil_db_traits::CommsChannel::Telegram,
+        "signal" => tranquil_db_traits::CommsChannel::Signal,
+        _ => tranquil_db_traits::CommsChannel::Email,
+    };
+
+    let handle_typed = Handle::new_unchecked(&handle);
+    let create_input = tranquil_db_traits::CreatePasskeyAccountInput {
+        handle: handle_typed.clone(),
+        email: email.clone().unwrap_or_default(),
+        did: did_typed.clone(),
+        preferred_comms_channel,
+        discord_id: input.discord_id.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        telegram_username: input.telegram_username.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        signal_number: input.signal_number.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        setup_token_hash,
+        setup_expires_at,
+        deactivated_at,
+        encrypted_key_bytes,
+        encryption_version: crate::config::ENCRYPTION_VERSION,
+        reserved_key_id,
+        commit_cid: commit_cid.to_string(),
+        repo_rev: rev.as_ref().to_string(),
+        genesis_block_cids,
+        invite_code: input.invite_code.clone(),
+        birthdate_pref,
+    };
+
+    let create_result = match state.user_repo.create_passkey_account(&create_input).await {
+        Ok(r) => r,
+        Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
+            return ApiError::HandleNotAvailable(None).into_response();
+        }
+        Err(tranquil_db_traits::CreateAccountError::EmailTaken) => {
+            return ApiError::EmailTaken.into_response();
+        }
+        Err(e) => {
+            error!("Error creating passkey account: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+    let user_id = create_result.user_id;
 
     if !is_byod_did_web {
-        let handle_typed = Handle::new_unchecked(&handle);
         if let Err(e) = crate::api::repo::record::sequence_identity_event(
             &state,
             &did_typed,
@@ -642,13 +505,13 @@ pub async fn create_passkey_account(
     );
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
-    if let Err(e) = crate::comms::enqueue_signup_verification(
-        &state.db,
+    if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+        state.infra_repo.as_ref(),
         user_id,
         verification_channel,
         &verification_recipient,
         &formatted_token,
-        None,
+        &hostname,
     )
     .await
     {
@@ -662,21 +525,19 @@ pub async fn create_passkey_account(
             Ok(token_meta) => {
                 let refresh_jti = uuid::Uuid::new_v4().to_string();
                 let refresh_expires = chrono::Utc::now() + chrono::Duration::hours(24);
-                let no_scope: Option<String> = None;
-                if let Err(e) = sqlx::query!(
-                    "INSERT INTO session_tokens (did, access_jti, refresh_jti, access_expires_at, refresh_expires_at, legacy_login, mfa_verified, scope) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                    did,
-                    token_meta.jti,
+                let session_data = tranquil_db::SessionTokenCreate {
+                    did: did_typed.clone(),
+                    access_jti: token_meta.jti.clone(),
                     refresh_jti,
-                    token_meta.expires_at,
-                    refresh_expires,
-                    false,
-                    false,
-                    no_scope
-                )
-                .execute(&state.db)
-                .await
-                {
+                    access_expires_at: token_meta.expires_at,
+                    refresh_expires_at: refresh_expires,
+                    legacy_login: false,
+                    mfa_verified: false,
+                    scope: None,
+                    controller_did: None,
+                    app_password_name: None,
+                };
+                if let Err(e) = state.session_repo.create_session(&session_data).await {
                     warn!(did = %did, "Failed to insert migration session: {:?}", e);
                 }
                 info!(did = %did, "Generated migration access token for BYOD passkey account");
@@ -723,15 +584,7 @@ pub async fn complete_passkey_setup(
     State(state): State<AppState>,
     Json(input): Json<CompletePasskeySetupInput>,
 ) -> Response {
-    let user = sqlx::query!(
-        r#"SELECT id, handle, recovery_token, recovery_token_expires_at, password_required
-           FROM users WHERE did = $1"#,
-        input.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let user = match user {
+    let user = match state.user_repo.get_user_for_passkey_setup(&input.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -772,17 +625,26 @@ pub async fn complete_passkey_setup(
         }
     };
 
-    let reg_state =
-        match crate::auth::webauthn::load_registration_state(&state.db, &input.did).await {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                return ApiError::NoChallengeInProgress.into_response();
-            }
+    let reg_state = match state
+        .user_repo
+        .load_webauthn_challenge(&input.did, "registration")
+        .await
+    {
+        Ok(Some(json)) => match serde_json::from_str(&json) {
+            Ok(s) => s,
             Err(e) => {
-                error!("Error loading registration state: {:?}", e);
+                error!("Error deserializing registration state: {:?}", e);
                 return ApiError::InternalError(None).into_response();
             }
-        };
+        },
+        Ok(None) => {
+            return ApiError::NoChallengeInProgress.into_response();
+        }
+        Err(e) => {
+            error!("Error loading registration state: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
     let credential: webauthn_rs::prelude::RegisterPublicKeyCredential =
         match serde_json::from_value(input.passkey_credential) {
@@ -801,13 +663,23 @@ pub async fn complete_passkey_setup(
         }
     };
 
-    if let Err(e) = crate::auth::webauthn::save_passkey(
-        &state.db,
-        &input.did,
-        &security_key,
-        input.passkey_friendly_name.as_deref(),
-    )
-    .await
+    let credential_id = security_key.cred_id().to_vec();
+    let public_key = match serde_json::to_vec(&security_key) {
+        Ok(pk) => pk,
+        Err(e) => {
+            error!("Error serializing security key: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+    if let Err(e) = state
+        .user_repo
+        .save_passkey(
+            &input.did,
+            &credential_id,
+            &public_key,
+            input.passkey_friendly_name.as_deref(),
+        )
+        .await
     {
         error!("Error saving passkey: {:?}", e);
         return ApiError::InternalError(None).into_response();
@@ -823,44 +695,21 @@ pub async fn complete_passkey_setup(
         }
     };
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
+    let setup_input = tranquil_db_traits::CompletePasskeySetupInput {
+        user_id: user.id,
+        did: input.did.clone(),
+        app_password_name: app_password_name.clone(),
+        app_password_hash: password_hash,
     };
-
-    if let Err(e) = sqlx::query!(
-        "INSERT INTO app_passwords (user_id, name, password_hash, privileged) VALUES ($1, $2, $3, FALSE)",
-        user.id,
-        app_password_name,
-        password_hash
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error creating app password: {:?}", e);
+    if let Err(e) = state.user_repo.complete_passkey_setup(&setup_input).await {
+        error!("Error completing passkey setup: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
 
-    if let Err(e) = sqlx::query!(
-        "UPDATE users SET recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $1",
-        input.did.as_str()
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error clearing setup token: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit setup transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    let _ = crate::auth::webauthn::delete_registration_state(&state.db, &input.did).await;
+    let _ = state
+        .user_repo
+        .delete_webauthn_challenge(&input.did, "registration")
+        .await;
 
     info!(did = %input.did, "Passkey-only account setup completed");
 
@@ -877,15 +726,7 @@ pub async fn start_passkey_registration_for_setup(
     State(state): State<AppState>,
     Json(input): Json<StartPasskeyRegistrationInput>,
 ) -> Response {
-    let user = sqlx::query!(
-        r#"SELECT handle, recovery_token, recovery_token_expires_at, password_required
-           FROM users WHERE did = $1"#,
-        input.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let user = match user {
+    let user = match state.user_repo.get_user_for_passkey_setup(&input.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -926,7 +767,9 @@ pub async fn start_passkey_registration_for_setup(
         }
     };
 
-    let existing_passkeys = crate::auth::webauthn::get_passkeys_for_user(&state.db, &input.did)
+    let existing_passkeys = state
+        .user_repo
+        .get_passkeys_for_user(&input.did)
         .await
         .unwrap_or_default();
 
@@ -950,8 +793,17 @@ pub async fn start_passkey_registration_for_setup(
         }
     };
 
-    if let Err(e) =
-        crate::auth::webauthn::save_registration_state(&state.db, &input.did, &reg_state).await
+    let state_json = match serde_json::to_string(&reg_state) {
+        Ok(json) => json,
+        Err(e) => {
+            error!("Failed to serialize registration state: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+    if let Err(e) = state
+        .user_repo
+        .save_webauthn_challenge(&input.did, "registration", &state_json)
+        .await
     {
         error!("Failed to save registration state: {:?}", e);
         return ApiError::InternalError(None).into_response();
@@ -990,23 +842,16 @@ pub async fn request_passkey_recovery(
     }
 
     let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
     let identifier = input.email.trim().to_lowercase();
     let identifier = identifier.strip_prefix('@').unwrap_or(&identifier);
     let normalized_handle = if identifier.contains('@') || identifier.contains('.') {
         identifier.to_string()
     } else {
-        format!("{}.{}", identifier, pds_hostname)
+        format!("{}.{}", identifier, hostname_for_handles)
     };
 
-    let user = sqlx::query!(
-        "SELECT id, did, handle, password_required FROM users WHERE LOWER(email) = $1 OR handle = $2",
-        identifier,
-        normalized_handle
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let user = match user {
+    let user = match state.user_repo.get_user_for_passkey_recovery(identifier, &normalized_handle).await {
         Ok(Some(u)) if !u.password_required => u,
         _ => {
             return SuccessResponse::ok().into_response();
@@ -1022,15 +867,7 @@ pub async fn request_passkey_recovery(
     };
     let expires_at = Utc::now() + Duration::hours(1);
 
-    if let Err(e) = sqlx::query!(
-        "UPDATE users SET recovery_token = $1, recovery_token_expires_at = $2 WHERE did = $3",
-        recovery_token_hash,
-        expires_at,
-        &user.did
-    )
-    .execute(&state.db)
-    .await
-    {
+    if let Err(e) = state.user_repo.set_recovery_token(&user.did, &recovery_token_hash, expires_at).await {
         error!("Error updating recovery token: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -1043,8 +880,14 @@ pub async fn request_passkey_recovery(
         urlencoding::encode(&recovery_token)
     );
 
-    let _ =
-        crate::comms::enqueue_passkey_recovery(&state.db, user.id, &recovery_url, &hostname).await;
+    let _ = crate::comms::comms_repo::enqueue_passkey_recovery(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        user.id,
+        &recovery_url,
+        &hostname,
+    )
+    .await;
 
     info!(did = %user.did, "Passkey recovery requested");
     SuccessResponse::ok().into_response()
@@ -1066,14 +909,7 @@ pub async fn recover_passkey_account(
         return ApiError::InvalidRequest(e.to_string()).into_response();
     }
 
-    let user = sqlx::query!(
-        "SELECT id, did, recovery_token, recovery_token_expires_at FROM users WHERE did = $1",
-        input.did.as_str()
-    )
-    .fetch_optional(&state.db)
-    .await;
-
-    let user = match user {
+    let user = match state.user_repo.get_user_for_recovery(&input.did).await {
         Ok(Some(u)) => u,
         _ => {
             return ApiError::InvalidRecoveryLink.into_response();
@@ -1104,44 +940,20 @@ pub async fn recover_passkey_account(
         }
     };
 
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            error!("Failed to begin transaction: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    if let Err(e) = sqlx::query!(
-        "UPDATE users SET password_hash = $1, password_required = TRUE, recovery_token = NULL, recovery_token_expires_at = NULL WHERE did = $2",
+    let recover_input = tranquil_db_traits::RecoverPasskeyAccountInput {
+        did: input.did.clone(),
         password_hash,
-        input.did.as_str()
-    )
-    .execute(&mut *tx)
-    .await
-    {
-        error!("Error updating password: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    let deleted = sqlx::query!("DELETE FROM passkeys WHERE did = $1", input.did.as_str())
-        .execute(&mut *tx)
-        .await;
-    let passkeys_deleted = match deleted {
-        Ok(result) => result.rows_affected(),
+    };
+    let result = match state.user_repo.recover_passkey_account(&recover_input).await {
+        Ok(r) => r,
         Err(e) => {
-            error!(did = %input.did, "Failed to delete passkeys during recovery: {:?}", e);
+            error!("Error recovering passkey account: {:?}", e);
             return ApiError::InternalError(None).into_response();
         }
     };
 
-    if let Err(e) = tx.commit().await {
-        error!("Failed to commit recovery transaction: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-
-    if passkeys_deleted > 0 {
-        info!(did = %input.did, count = passkeys_deleted, "Deleted lost passkeys during account recovery");
+    if result.passkeys_deleted > 0 {
+        info!(did = %input.did, count = result.passkeys_deleted, "Deleted lost passkeys during account recovery");
     }
     info!(did = %input.did, "Passkey-only account recovered with temporary password");
     SuccessResponse::ok().into_response()

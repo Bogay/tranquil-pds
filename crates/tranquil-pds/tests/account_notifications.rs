@@ -1,7 +1,7 @@
 mod common;
 use common::{base_url, client, create_account_and_login, get_test_db_pool};
 use serde_json::{Value, json};
-use tranquil_pds::comms::{CommsType, NewComms, enqueue_comms};
+use sqlx::Row;
 
 #[tokio::test]
 async fn test_get_notification_history() {
@@ -10,20 +10,24 @@ async fn test_get_notification_history() {
     let pool = get_test_db_pool().await;
     let (token, did) = create_account_and_login(&client).await;
 
-    let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+    let user_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE did = $1")
+        .bind(&did)
         .fetch_one(pool)
         .await
         .expect("User not found");
 
     for i in 0..3 {
-        let comms = NewComms::email(
-            user_id,
-            CommsType::Welcome,
-            "test@example.com".to_string(),
-            format!("Subject {}", i),
-            format!("Body {}", i),
-        );
-        enqueue_comms(pool, comms).await.expect("Failed to enqueue");
+        sqlx::query(
+            r#"INSERT INTO comms_queue (user_id, channel, comms_type, recipient, subject, body)
+               VALUES ($1, 'email', 'welcome', $2, $3, $4)"#,
+        )
+        .bind(user_id)
+        .bind("test@example.com")
+        .bind(format!("Subject {}", i))
+        .bind(format!("Body {}", i))
+        .execute(pool)
+        .await
+        .expect("Failed to enqueue");
     }
 
     let resp = client
@@ -69,21 +73,22 @@ async fn test_verify_channel_discord() {
     );
 
     let pool = get_test_db_pool().await;
-    let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+    let user_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE did = $1")
+        .bind(&did)
         .fetch_one(pool)
         .await
         .expect("User not found");
 
-    let row = sqlx::query!(
+    let row = sqlx::query(
         "SELECT body, metadata FROM comms_queue WHERE user_id = $1 AND comms_type = 'channel_verification' ORDER BY created_at DESC LIMIT 1",
-        user_id
     )
+    .bind(user_id)
     .fetch_one(pool)
     .await
     .expect("Verification code not found");
 
-    let code = row
-        .metadata
+    let metadata: Option<serde_json::Value> = row.get("metadata");
+    let code = metadata
         .as_ref()
         .and_then(|m| m.get("code"))
         .and_then(|c| c.as_str())
@@ -203,15 +208,16 @@ async fn test_update_email_via_notification_prefs() {
             .contains(&json!("email"))
     );
 
-    let user_id: uuid::Uuid = sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", did)
+    let user_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE did = $1")
+        .bind(&did)
         .fetch_one(pool)
         .await
         .expect("User not found");
 
-    let body_text: String = sqlx::query_scalar!(
+    let body_text: String = sqlx::query_scalar(
         "SELECT body FROM comms_queue WHERE user_id = $1 AND comms_type = 'email_update' ORDER BY created_at DESC LIMIT 1",
-        user_id
     )
+    .bind(user_id)
     .fetch_one(pool)
     .await
     .expect("Verification code not found");

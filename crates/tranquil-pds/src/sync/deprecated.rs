@@ -2,6 +2,7 @@ use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
 use crate::sync::util::assert_repo_availability;
+use tranquil_types::Did;
 use axum::{
     Json,
     extract::{Query, State},
@@ -27,7 +28,8 @@ async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &str) -
     let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
     let http_uri = "/";
     match crate::auth::validate_token_with_dpop(
-        &state.db,
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
         &extracted.token,
         extracted.is_dpop,
         dpop_proof,
@@ -58,18 +60,22 @@ pub async fn get_head(
     headers: HeaderMap,
     Query(params): Query<GetHeadParams>,
 ) -> Response {
-    let did = params.did.trim();
-    if did.is_empty() {
+    let did_str = params.did.trim();
+    if did_str.is_empty() {
         return ApiError::InvalidRequest("did is required".into()).into_response();
     }
-    let is_admin_or_self = check_admin_or_self(&state, &headers, did).await;
-    let account = match assert_repo_availability(&state.db, did, is_admin_or_self).await {
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
+    let is_admin_or_self = check_admin_or_self(&state, &headers, did_str).await;
+    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };
     match account.repo_root_cid {
         Some(root) => (StatusCode::OK, Json(GetHeadOutput { root })).into_response(),
-        None => ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did)))
+        None => ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did_str)))
             .into_response(),
     }
 }
@@ -84,12 +90,16 @@ pub async fn get_checkout(
     headers: HeaderMap,
     Query(params): Query<GetCheckoutParams>,
 ) -> Response {
-    let did = params.did.trim();
-    if did.is_empty() {
+    let did_str = params.did.trim();
+    if did_str.is_empty() {
         return ApiError::InvalidRequest("did is required".into()).into_response();
     }
-    let is_admin_or_self = check_admin_or_self(&state, &headers, did).await;
-    let account = match assert_repo_availability(&state.db, did, is_admin_or_self).await {
+    let did: Did = match did_str.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
+    let is_admin_or_self = check_admin_or_self(&state, &headers, did_str).await;
+    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
         Ok(a) => a,
         Err(e) => return e.into_response(),
     };

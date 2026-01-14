@@ -3,11 +3,12 @@ use cid::Cid;
 use ipld_core::ipld::Ipld;
 use iroh_car::CarReader;
 use serde_json::Value as JsonValue;
-use sqlx::PgPool;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::debug;
+use tranquil_db::{ImportBlock, ImportRecord, ImportRepoError, RepoRepository};
 use uuid::Uuid;
 
 #[derive(Error, Debug)]
@@ -21,7 +22,7 @@ pub enum ImportError {
     #[error("Invalid CBOR: {0}")]
     InvalidCbor(String),
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(String),
     #[error("Block store error: {0}")]
     BlockStore(String),
     #[error("Import size limit exceeded")]
@@ -36,6 +37,16 @@ pub enum ImportError {
     VerificationFailed(#[from] super::verify::VerifyError),
     #[error("DID mismatch: CAR is for {car_did}, but authenticated as {auth_did}")]
     DidMismatch { car_did: String, auth_did: String },
+}
+
+impl From<ImportRepoError> for ImportError {
+    fn from(e: ImportRepoError) -> Self {
+        match e {
+            ImportRepoError::RepoNotFound => ImportError::RepoNotFound,
+            ImportRepoError::ConcurrentModification => ImportError::ConcurrentModification,
+            ImportRepoError::Database(msg) => ImportError::Database(msg),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -307,7 +318,7 @@ fn extract_commit_info(commit: &Ipld) -> Result<(Cid, CommitInfo), ImportError> 
 }
 
 pub async fn apply_import(
-    db: &PgPool,
+    repo_repo: &Arc<dyn RepoRepository>,
     user_id: Uuid,
     root: Cid,
     blocks: HashMap<Cid, Bytes>,
@@ -329,62 +340,33 @@ pub async fn apply_import(
         records.len(),
         user_id
     );
-    let mut tx = db.begin().await?;
-    let repo = sqlx::query!(
-        "SELECT repo_root_cid FROM repos WHERE user_id = $1 FOR UPDATE NOWAIT",
-        user_id
-    )
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|e| {
-        if let sqlx::Error::Database(ref db_err) = e
-            && db_err.code().as_deref() == Some("55P03")
-        {
-            return ImportError::ConcurrentModification;
-        }
-        ImportError::Database(e)
-    })?;
-    if repo.is_none() {
-        return Err(ImportError::RepoNotFound);
-    }
-    let block_chunks: Vec<Vec<(&Cid, &Bytes)>> = blocks
+
+    let import_blocks: Vec<ImportBlock> = blocks
         .iter()
-        .collect::<Vec<_>>()
-        .chunks(100)
-        .map(|c| c.to_vec())
+        .map(|(cid, data)| ImportBlock {
+            cid_bytes: cid.to_bytes(),
+            data: data.to_vec(),
+        })
         .collect();
-    for chunk in block_chunks {
-        for (cid, data) in chunk {
-            let cid_bytes = cid.to_bytes();
-            sqlx::query!(
-                "INSERT INTO blocks (cid, data) VALUES ($1, $2) ON CONFLICT (cid) DO NOTHING",
-                &cid_bytes,
-                data.as_ref()
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
-    sqlx::query!("DELETE FROM records WHERE repo_id = $1", user_id)
-        .execute(&mut *tx)
+
+    let import_records: Vec<ImportRecord> = records
+        .iter()
+        .filter_map(|r| {
+            let collection = r.collection.parse().ok()?;
+            let rkey = r.rkey.parse().ok()?;
+            let record_cid = r.cid.to_string().parse().ok()?;
+            Some(ImportRecord {
+                collection,
+                rkey,
+                record_cid,
+            })
+        })
+        .collect();
+
+    repo_repo
+        .import_repo_data(user_id, &import_blocks, &import_records)
         .await?;
-    for record in &records {
-        let record_cid_str = record.cid.to_string();
-        sqlx::query!(
-            r#"
-            INSERT INTO records (repo_id, collection, rkey, record_cid)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (repo_id, collection, rkey) DO UPDATE SET record_cid = $4
-            "#,
-            user_id,
-            record.collection,
-            record.rkey,
-            record_cid_str
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
-    tx.commit().await?;
+
     debug!(
         "Successfully imported {} blocks and {} records",
         blocks.len(),

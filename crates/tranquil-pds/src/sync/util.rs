@@ -12,7 +12,8 @@ use iroh_car::{CarHeader, CarWriter};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use serde::Serialize;
-use sqlx::PgPool;
+use tranquil_db_traits::RepoRepository;
+use tranquil_types::Did;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
@@ -134,20 +135,10 @@ impl IntoResponse for RepoAvailabilityError {
 }
 
 pub async fn get_account_with_status(
-    db: &PgPool,
-    did: &str,
-) -> Result<Option<RepoAccount>, sqlx::Error> {
-    let row = sqlx::query!(
-        r#"
-        SELECT u.id, u.did, u.deactivated_at, u.takedown_ref, r.repo_root_cid
-        FROM users u
-        LEFT JOIN repos r ON r.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(db)
-    .await?;
+    repo_repo: &dyn RepoRepository,
+    did: &Did,
+) -> Result<Option<RepoAccount>, tranquil_db_traits::DbError> {
+    let row = repo_repo.get_account_with_repo(did).await?;
 
     Ok(row.map(|r| {
         let status = if r.takedown_ref.is_some() {
@@ -159,26 +150,27 @@ pub async fn get_account_with_status(
         };
 
         RepoAccount {
-            did: r.did,
-            user_id: r.id,
+            did: r.did.to_string(),
+            user_id: r.user_id,
             status,
-            repo_root_cid: Some(r.repo_root_cid),
+            repo_root_cid: r.repo_root_cid.map(|c| c.to_string()),
         }
     }))
 }
 
 pub async fn assert_repo_availability(
-    db: &PgPool,
-    did: &str,
+    repo_repo: &dyn RepoRepository,
+    did: &Did,
     is_admin_or_self: bool,
 ) -> Result<RepoAccount, RepoAvailabilityError> {
-    let account = get_account_with_status(db, did)
+    let account = get_account_with_status(repo_repo, did)
         .await
         .map_err(|e| RepoAvailabilityError::Internal(e.to_string()))?;
 
+    let did_str = did.to_string();
     let account = match account {
         Some(a) => a,
-        None => return Err(RepoAvailabilityError::NotFound(did.to_string())),
+        None => return Err(RepoAvailabilityError::NotFound(did_str)),
     };
 
     if is_admin_or_self {
@@ -186,9 +178,9 @@ pub async fn assert_repo_availability(
     }
 
     match account.status {
-        AccountStatus::Takendown => return Err(RepoAvailabilityError::Takendown(did.to_string())),
+        AccountStatus::Takendown => return Err(RepoAvailabilityError::Takendown(did_str)),
         AccountStatus::Deactivated => {
-            return Err(RepoAvailabilityError::Deactivated(did.to_string()));
+            return Err(RepoAvailabilityError::Deactivated(did_str));
         }
         _ => {}
     }
@@ -239,8 +231,8 @@ fn format_atproto_time(dt: chrono::DateTime<chrono::Utc>) -> String {
 
 fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error> {
     let frame = IdentityFrame {
-        did: event.did.clone(),
-        handle: event.handle.clone(),
+        did: event.did.to_string(),
+        handle: event.handle.as_ref().map(|h| h.to_string()),
         seq: event.seq,
         time: format_atproto_time(event.created_at),
     };
@@ -256,7 +248,7 @@ fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Erro
 
 fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error> {
     let frame = AccountFrame {
-        did: event.did.clone(),
+        did: event.did.to_string(),
         active: event.active.unwrap_or(true),
         status: event.status.clone(),
         seq: event.seq,
@@ -303,7 +295,7 @@ async fn format_sync_event(
     };
     let car_bytes = write_car_blocks(commit_cid, Some(commit_bytes), BTreeMap::new()).await?;
     let frame = SyncFrame {
-        did: event.did.clone(),
+        did: event.did.to_string(),
         rev,
         blocks: car_bytes,
         seq: event.seq,
@@ -330,18 +322,18 @@ pub async fn format_event_for_sending(
         _ => {}
     }
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
-    let prev_cid_str = event.prev_cid.clone();
-    let prev_data_cid_str = event.prev_data_cid.clone();
+    let prev_cid_link = event.prev_cid.clone();
+    let prev_data_cid_link = event.prev_data_cid.clone();
     let mut frame: CommitFrame = event
         .try_into()
         .map_err(|e| anyhow::anyhow!("Invalid event: {}", e))?;
-    if let Some(ref pdc) = prev_data_cid_str
-        && let Ok(cid) = Cid::from_str(pdc)
+    if let Some(ref pdc) = prev_data_cid_link
+        && let Ok(cid) = Cid::from_str(pdc.as_str())
     {
         frame.prev_data = Some(cid);
     }
     let commit_cid = frame.commit;
-    let prev_cid = prev_cid_str.as_ref().and_then(|s| Cid::from_str(s).ok());
+    let prev_cid = prev_cid_link.as_ref().and_then(|c| Cid::from_str(c.as_str()).ok());
     let mut all_cids: Vec<Cid> = block_cids_str
         .iter()
         .filter_map(|s| Cid::from_str(s).ok())
@@ -443,7 +435,7 @@ fn format_sync_event_with_prefetched(
         BTreeMap::new(),
     ))?;
     let frame = SyncFrame {
-        did: event.did.clone(),
+        did: event.did.to_string(),
         rev,
         blocks: car_bytes,
         seq: event.seq,
@@ -470,18 +462,18 @@ pub async fn format_event_with_prefetched_blocks(
         _ => {}
     }
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
-    let prev_cid_str = event.prev_cid.clone();
-    let prev_data_cid_str = event.prev_data_cid.clone();
+    let prev_cid_link = event.prev_cid.clone();
+    let prev_data_cid_link = event.prev_data_cid.clone();
     let mut frame: CommitFrame = event
         .try_into()
         .map_err(|e| anyhow::anyhow!("Invalid event: {}", e))?;
-    if let Some(ref pdc) = prev_data_cid_str
-        && let Ok(cid) = Cid::from_str(pdc)
+    if let Some(ref pdc) = prev_data_cid_link
+        && let Ok(cid) = Cid::from_str(pdc.as_str())
     {
         frame.prev_data = Some(cid);
     }
     let commit_cid = frame.commit;
-    let prev_cid = prev_cid_str.as_ref().and_then(|s| Cid::from_str(s).ok());
+    let prev_cid = prev_cid_link.as_ref().and_then(|c| Cid::from_str(c.as_str()).ok());
     let mut all_cids: Vec<Cid> = block_cids_str
         .iter()
         .filter_map(|s| Cid::from_str(s).ok())

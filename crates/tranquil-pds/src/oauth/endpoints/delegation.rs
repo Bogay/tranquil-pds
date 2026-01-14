@@ -1,5 +1,4 @@
-use crate::delegation;
-use crate::oauth::db;
+use crate::delegation::DelegationActionType;
 use crate::state::{AppState, RateLimitKind};
 use crate::types::PlainPassword;
 use crate::util::extract_client_ip;
@@ -10,6 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use tranquil_types::{Did, RequestId};
 
 #[derive(Debug, Deserialize)]
 pub struct DelegationAuthSubmit {
@@ -54,7 +54,12 @@ pub async fn delegation_auth(
             .into_response();
     }
 
-    let request = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let request_id = RequestId::from(form.request_uri.clone());
+    let request = match state
+        .oauth_repo
+        .get_authorization_request(&request_id)
+        .await
+    {
         Ok(Some(r)) => r,
         Ok(None) => {
             return Json(DelegationAuthResponse {
@@ -76,7 +81,7 @@ pub async fn delegation_auth(
         }
     };
 
-    let delegated_did = match form.delegated_did.as_ref().or(request.did.as_ref()) {
+    let delegated_did_str = match form.delegated_did.as_ref().or(request.did.as_ref()) {
         Some(did) => did.clone(),
         None => {
             return Json(DelegationAuthResponse {
@@ -89,48 +94,68 @@ pub async fn delegation_auth(
         }
     };
 
-    if db::set_request_did(&state.db, &form.request_uri, &delegated_did)
+    let delegated_did: Did = match delegated_did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Invalid delegated DID".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    let controller_did: Did = match form.controller_did.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Invalid controller DID".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    if state
+        .oauth_repo
+        .set_request_did(&request_id, &delegated_did)
         .await
         .is_err()
     {
         tracing::warn!("Failed to set delegated DID on authorization request");
     }
 
-    let grant =
-        match delegation::get_delegation(&state.db, &delegated_did, &form.controller_did).await {
-            Ok(Some(g)) => g,
-            Ok(None) => {
-                return Json(DelegationAuthResponse {
-                    success: false,
-                    needs_totp: None,
-                    redirect_uri: None,
-                    error: Some("No delegation grant found for this controller".to_string()),
-                })
-                .into_response();
-            }
-            Err(_) => {
-                return Json(DelegationAuthResponse {
-                    success: false,
-                    needs_totp: None,
-                    redirect_uri: None,
-                    error: Some("Server error".to_string()),
-                })
-                .into_response();
-            }
-        };
-
-    let controller = match sqlx::query!(
-        r#"
-        SELECT id, did, password_hash, deactivated_at, takedown_ref,
-               email_verified, discord_verified, telegram_verified, signal_verified
-        FROM users
-        WHERE did = $1
-        "#,
-        form.controller_did
-    )
-    .fetch_optional(&state.db)
-    .await
+    let grant = match state
+        .delegation_repo
+        .get_delegation(&delegated_did, &controller_did)
+        .await
     {
+        Ok(Some(g)) => g,
+        Ok(None) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("No delegation grant found for this controller".to_string()),
+            })
+            .into_response();
+        }
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Server error".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    let controller = match state.user_repo.get_auth_info_by_did(&controller_did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             return Json(DelegationAuthResponse {
@@ -188,7 +213,9 @@ pub async fn delegation_auth(
         .into_response();
     }
 
-    if db::set_controller_did(&state.db, &form.request_uri, &form.controller_did)
+    if state
+        .oauth_repo
+        .set_controller_did(&request_id, &controller_did)
         .await
         .is_err()
     {
@@ -201,7 +228,7 @@ pub async fn delegation_auth(
         .into_response();
     }
 
-    let has_totp = crate::api::server::has_totp_enabled(&state, &form.controller_did).await;
+    let has_totp = crate::api::server::has_totp_enabled(&state, &controller_did).await;
     if has_totp {
         return Json(DelegationAuthResponse {
             success: true,
@@ -221,20 +248,21 @@ pub async fn delegation_auth(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let _ = delegation::log_delegation_action(
-        &state.db,
-        &delegated_did,
-        &form.controller_did,
-        Some(&form.controller_did),
-        delegation::DelegationActionType::TokenIssued,
-        Some(serde_json::json!({
-            "client_id": request.client_id,
-            "granted_scopes": grant.granted_scopes
-        })),
-        Some(&ip),
-        user_agent.as_deref(),
-    )
-    .await;
+    let _ = state
+        .delegation_repo
+        .log_delegation_action(
+            &delegated_did,
+            &controller_did,
+            Some(&controller_did),
+            DelegationActionType::TokenIssued,
+            Some(serde_json::json!({
+                "client_id": request.client_id,
+                "granted_scopes": grant.granted_scopes
+            })),
+            Some(&ip),
+            user_agent.as_deref(),
+        )
+        .await;
 
     Json(DelegationAuthResponse {
         success: true,
@@ -276,7 +304,12 @@ pub async fn delegation_totp_verify(
             .into_response();
     }
 
-    let request = match db::get_authorization_request(&state.db, &form.request_uri).await {
+    let totp_request_id = RequestId::from(form.request_uri.clone());
+    let request = match state
+        .oauth_repo
+        .get_authorization_request(&totp_request_id)
+        .await
+    {
         Ok(Some(r)) => r,
         Ok(None) => {
             return Json(DelegationAuthResponse {
@@ -298,7 +331,7 @@ pub async fn delegation_totp_verify(
         }
     };
 
-    let controller_did = match &request.controller_did {
+    let controller_did_str = match &request.controller_did {
         Some(did) => did.clone(),
         None => {
             return Json(DelegationAuthResponse {
@@ -311,7 +344,20 @@ pub async fn delegation_totp_verify(
         }
     };
 
-    let delegated_did = match &request.did {
+    let controller_did: Did = match controller_did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Invalid controller DID".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    let delegated_did_str = match &request.did {
         Some(did) => did.clone(),
         None => {
             return Json(DelegationAuthResponse {
@@ -324,7 +370,24 @@ pub async fn delegation_totp_verify(
         }
     };
 
-    let grant = match delegation::get_delegation(&state.db, &delegated_did, &controller_did).await {
+    let delegated_did: Did = match delegated_did_str.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Invalid delegated DID".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    let grant = match state
+        .delegation_repo
+        .get_delegation(&delegated_did, &controller_did)
+        .await
+    {
         Ok(Some(g)) => g,
         _ => {
             return Json(DelegationAuthResponse {
@@ -356,20 +419,21 @@ pub async fn delegation_totp_verify(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let _ = delegation::log_delegation_action(
-        &state.db,
-        &delegated_did,
-        &controller_did,
-        Some(&controller_did),
-        delegation::DelegationActionType::TokenIssued,
-        Some(serde_json::json!({
-            "client_id": request.client_id,
-            "granted_scopes": grant.granted_scopes
-        })),
-        Some(&ip),
-        user_agent.as_deref(),
-    )
-    .await;
+    let _ = state
+        .delegation_repo
+        .log_delegation_action(
+            &delegated_did,
+            &controller_did,
+            Some(&controller_did),
+            DelegationActionType::TokenIssued,
+            Some(serde_json::json!({
+                "client_id": request.client_id,
+                "granted_scopes": grant.granted_scopes
+            })),
+            Some(&ip),
+            user_agent.as_deref(),
+        )
+        .await;
 
     Json(DelegationAuthResponse {
         success: true,

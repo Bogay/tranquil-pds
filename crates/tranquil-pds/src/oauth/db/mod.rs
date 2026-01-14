@@ -1,37 +1,8 @@
-mod client;
-mod device;
-mod dpop;
-mod helpers;
-mod request;
 mod scope_preference;
 mod token;
 mod two_factor;
 
-pub use client::{get_authorized_client, upsert_authorized_client};
-pub use device::{
-    DeviceAccountRow, create_device, delete_device, get_device, get_device_accounts,
-    update_device_last_seen, upsert_account_device, verify_account_on_device,
-};
-pub use dpop::{check_and_record_dpop_jti, cleanup_expired_dpop_jtis};
-pub use request::{
-    consume_authorization_request_by_code, create_authorization_request,
-    delete_authorization_request, delete_expired_authorization_requests, get_authorization_request,
-    get_authorization_request_with_state, mark_request_authenticated, set_authorization_did,
-    set_controller_did, set_request_did, update_authorization_request, update_request_scope,
-};
-pub use scope_preference::{
-    ScopePreference, delete_scope_preferences, get_scope_preferences, should_show_consent,
-    upsert_scope_preferences,
-};
-pub use token::{
-    RefreshTokenLookup, check_refresh_token_used, count_tokens_for_user, create_token,
-    delete_oldest_tokens_for_user, delete_token, delete_token_family, enforce_token_limit_for_user,
-    get_token_by_id, get_token_by_previous_refresh_token, get_token_by_refresh_token,
-    list_tokens_for_user, lookup_refresh_token, revoke_tokens_for_client,
-    revoke_tokens_for_controller, rotate_token,
-};
-pub use two_factor::{
-    TwoFactorChallenge, check_user_2fa_enabled, cleanup_expired_2fa_challenges,
-    create_2fa_challenge, delete_2fa_challenge, delete_2fa_challenge_by_request_uri,
-    generate_2fa_code, get_2fa_challenge, increment_2fa_attempts,
-};
+pub use scope_preference::{ScopePreference, should_show_consent};
+pub use token::{RefreshTokenLookup, enforce_token_limit_for_user, lookup_refresh_token};
+pub use tranquil_db_traits::{DeviceAccountRow, TwoFactorChallenge};
+pub use two_factor::generate_2fa_code;

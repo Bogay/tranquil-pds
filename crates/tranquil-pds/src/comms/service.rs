@@ -3,25 +3,25 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use sqlx::PgPool;
 use tokio::sync::watch;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use tranquil_comms::{
-    CommsChannel, CommsSender, CommsStatus, CommsType, NewComms, QueuedComms, SendError,
-    format_message, get_strings,
+    CommsChannel, CommsSender, CommsStatus, CommsType, NewComms, SendError, format_message,
+    get_strings,
 };
+use tranquil_db_traits::{InfraRepository, QueuedComms, UserRepository};
 use uuid::Uuid;
 
 pub struct CommsService {
-    db: PgPool,
+    infra_repo: Arc<dyn InfraRepository>,
     senders: HashMap<CommsChannel, Arc<dyn CommsSender>>,
     poll_interval: Duration,
     batch_size: i64,
 }
 
 impl CommsService {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(infra_repo: Arc<dyn InfraRepository>) -> Self {
         let poll_interval_ms: u64 = std::env::var("NOTIFICATION_POLL_INTERVAL_MS")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -31,7 +31,7 @@ impl CommsService {
             .and_then(|v| v.parse().ok())
             .unwrap_or(100);
         Self {
-            db,
+            infra_repo,
             senders: HashMap::new(),
             poll_interval: Duration::from_millis(poll_interval_ms),
             batch_size,
@@ -53,24 +53,39 @@ impl CommsService {
         self
     }
 
-    pub async fn enqueue(&self, item: NewComms) -> Result<Uuid, sqlx::Error> {
-        let id = sqlx::query_scalar!(
-            r#"
-            INSERT INTO comms_queue
-                (user_id, channel, comms_type, recipient, subject, body, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id
-            "#,
-            item.user_id,
-            item.channel as CommsChannel,
-            item.comms_type as CommsType,
-            item.recipient,
-            item.subject,
-            item.body,
-            item.metadata
-        )
-        .fetch_one(&self.db)
-        .await?;
+    pub async fn enqueue(&self, item: NewComms) -> Result<Uuid, tranquil_db_traits::DbError> {
+        let channel = match item.channel {
+            CommsChannel::Email => tranquil_db_traits::CommsChannel::Email,
+            CommsChannel::Discord => tranquil_db_traits::CommsChannel::Discord,
+            CommsChannel::Telegram => tranquil_db_traits::CommsChannel::Telegram,
+            CommsChannel::Signal => tranquil_db_traits::CommsChannel::Signal,
+        };
+        let comms_type = match item.comms_type {
+            CommsType::Welcome => tranquil_db_traits::CommsType::Welcome,
+            CommsType::EmailVerification => tranquil_db_traits::CommsType::EmailVerification,
+            CommsType::PasswordReset => tranquil_db_traits::CommsType::PasswordReset,
+            CommsType::EmailUpdate => tranquil_db_traits::CommsType::EmailUpdate,
+            CommsType::AccountDeletion => tranquil_db_traits::CommsType::AccountDeletion,
+            CommsType::AdminEmail => tranquil_db_traits::CommsType::AdminEmail,
+            CommsType::PlcOperation => tranquil_db_traits::CommsType::PlcOperation,
+            CommsType::TwoFactorCode => tranquil_db_traits::CommsType::TwoFactorCode,
+            CommsType::PasskeyRecovery => tranquil_db_traits::CommsType::PasskeyRecovery,
+            CommsType::LegacyLoginAlert => tranquil_db_traits::CommsType::LegacyLoginAlert,
+            CommsType::MigrationVerification => tranquil_db_traits::CommsType::MigrationVerification,
+            CommsType::ChannelVerification => tranquil_db_traits::CommsType::ChannelVerification,
+        };
+        let id = self
+            .infra_repo
+            .enqueue_comms(
+                Some(item.user_id),
+                channel,
+                comms_type,
+                &item.recipient,
+                item.subject.as_deref(),
+                &item.body,
+                item.metadata,
+            )
+            .await?;
         debug!(comms_id = %id, "Comms enqueued");
         Ok(id)
     }
@@ -109,7 +124,7 @@ impl CommsService {
         }
     }
 
-    async fn process_batch(&self) -> Result<(), sqlx::Error> {
+    async fn process_batch(&self) -> Result<(), tranquil_db_traits::DbError> {
         let items = self.fetch_pending().await?;
         if items.is_empty() {
             return Ok(());
@@ -119,43 +134,57 @@ impl CommsService {
         Ok(())
     }
 
-    async fn fetch_pending(&self) -> Result<Vec<QueuedComms>, sqlx::Error> {
+    async fn fetch_pending(&self) -> Result<Vec<QueuedComms>, tranquil_db_traits::DbError> {
         let now = Utc::now();
-        sqlx::query_as!(
-            QueuedComms,
-            r#"
-            UPDATE comms_queue
-            SET status = 'processing', updated_at = NOW()
-            WHERE id IN (
-                SELECT id FROM comms_queue
-                WHERE status = 'pending'
-                  AND scheduled_for <= $1
-                  AND attempts < max_attempts
-                ORDER BY scheduled_for ASC
-                LIMIT $2
-                FOR UPDATE SKIP LOCKED
-            )
-            RETURNING
-                id, user_id,
-                channel as "channel: CommsChannel",
-                comms_type as "comms_type: CommsType",
-                status as "status: CommsStatus",
-                recipient, subject, body, metadata,
-                attempts, max_attempts, last_error,
-                created_at, updated_at, scheduled_for, processed_at
-            "#,
-            now,
-            self.batch_size
-        )
-        .fetch_all(&self.db)
-        .await
+        self.infra_repo.fetch_pending_comms(now, self.batch_size).await
     }
 
     async fn process_item(&self, item: QueuedComms) {
         let comms_id = item.id;
-        let channel = item.channel;
+        let channel = match item.channel {
+            tranquil_db_traits::CommsChannel::Email => CommsChannel::Email,
+            tranquil_db_traits::CommsChannel::Discord => CommsChannel::Discord,
+            tranquil_db_traits::CommsChannel::Telegram => CommsChannel::Telegram,
+            tranquil_db_traits::CommsChannel::Signal => CommsChannel::Signal,
+        };
+        let comms_item = tranquil_comms::QueuedComms {
+            id: item.id,
+            user_id: item.user_id,
+            channel,
+            comms_type: match item.comms_type {
+                tranquil_db_traits::CommsType::Welcome => CommsType::Welcome,
+                tranquil_db_traits::CommsType::EmailVerification => CommsType::EmailVerification,
+                tranquil_db_traits::CommsType::PasswordReset => CommsType::PasswordReset,
+                tranquil_db_traits::CommsType::EmailUpdate => CommsType::EmailUpdate,
+                tranquil_db_traits::CommsType::AccountDeletion => CommsType::AccountDeletion,
+                tranquil_db_traits::CommsType::AdminEmail => CommsType::AdminEmail,
+                tranquil_db_traits::CommsType::PlcOperation => CommsType::PlcOperation,
+                tranquil_db_traits::CommsType::TwoFactorCode => CommsType::TwoFactorCode,
+                tranquil_db_traits::CommsType::PasskeyRecovery => CommsType::PasskeyRecovery,
+                tranquil_db_traits::CommsType::LegacyLoginAlert => CommsType::LegacyLoginAlert,
+                tranquil_db_traits::CommsType::MigrationVerification => CommsType::MigrationVerification,
+                tranquil_db_traits::CommsType::ChannelVerification => CommsType::ChannelVerification,
+            },
+            status: match item.status {
+                tranquil_db_traits::CommsStatus::Pending => CommsStatus::Pending,
+                tranquil_db_traits::CommsStatus::Processing => CommsStatus::Processing,
+                tranquil_db_traits::CommsStatus::Sent => CommsStatus::Sent,
+                tranquil_db_traits::CommsStatus::Failed => CommsStatus::Failed,
+            },
+            recipient: item.recipient,
+            subject: item.subject,
+            body: item.body,
+            metadata: item.metadata,
+            attempts: item.attempts,
+            max_attempts: item.max_attempts,
+            last_error: item.last_error,
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+            scheduled_for: item.scheduled_for,
+            processed_at: item.processed_at,
+        };
         let result = match self.senders.get(&channel) {
-            Some(sender) => sender.send(&item).await,
+            Some(sender) => sender.send(&comms_item).await,
             None => {
                 warn!(
                     comms_id = %comms_id,
@@ -194,334 +223,13 @@ impl CommsService {
         }
     }
 
-    async fn mark_sent(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query!(
-            r#"
-            UPDATE comms_queue
-            SET status = 'sent', processed_at = NOW(), updated_at = NOW()
-            WHERE id = $1
-            "#,
-            id
-        )
-        .execute(&self.db)
-        .await?;
-        Ok(())
+    async fn mark_sent(&self, id: Uuid) -> Result<(), tranquil_db_traits::DbError> {
+        self.infra_repo.mark_comms_sent(id).await
     }
 
-    async fn mark_failed(&self, id: Uuid, error: &str) -> Result<(), sqlx::Error> {
-        sqlx::query!(
-            r#"
-            UPDATE comms_queue
-            SET
-                status = CASE
-                    WHEN attempts + 1 >= max_attempts THEN 'failed'::comms_status
-                    ELSE 'pending'::comms_status
-                END,
-                attempts = attempts + 1,
-                last_error = $2,
-                updated_at = NOW(),
-                scheduled_for = NOW() + (INTERVAL '1 minute' * (attempts + 1))
-            WHERE id = $1
-            "#,
-            id,
-            error
-        )
-        .execute(&self.db)
-        .await?;
-        Ok(())
+    async fn mark_failed(&self, id: Uuid, error: &str) -> Result<(), tranquil_db_traits::DbError> {
+        self.infra_repo.mark_comms_failed(id, error).await
     }
-}
-
-pub async fn enqueue_comms(db: &PgPool, item: NewComms) -> Result<Uuid, sqlx::Error> {
-    sqlx::query_scalar!(
-        r#"
-        INSERT INTO comms_queue
-            (user_id, channel, comms_type, recipient, subject, body, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id
-        "#,
-        item.user_id,
-        item.channel as CommsChannel,
-        item.comms_type as CommsType,
-        item.recipient,
-        item.subject,
-        item.body,
-        item.metadata
-    )
-    .fetch_one(db)
-    .await
-}
-
-pub struct UserCommsPrefs {
-    pub channel: CommsChannel,
-    pub email: Option<String>,
-    pub handle: crate::types::Handle,
-    pub locale: String,
-}
-
-pub async fn get_user_comms_prefs(
-    db: &PgPool,
-    user_id: Uuid,
-) -> Result<UserCommsPrefs, sqlx::Error> {
-    let row = sqlx::query!(
-        r#"
-        SELECT
-            email,
-            handle,
-            preferred_comms_channel as "channel: CommsChannel",
-            preferred_locale
-        FROM users
-        WHERE id = $1
-        "#,
-        user_id
-    )
-    .fetch_one(db)
-    .await?;
-    Ok(UserCommsPrefs {
-        channel: row.channel,
-        email: row.email,
-        handle: row.handle.into(),
-        locale: row.preferred_locale.unwrap_or_else(|| "en".to_string()),
-    })
-}
-
-pub async fn enqueue_welcome(
-    db: &PgPool,
-    user_id: Uuid,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let body = format_message(
-        strings.welcome_body,
-        &[("hostname", hostname), ("handle", &prefs.handle)],
-    );
-    let subject = format_message(strings.welcome_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
-            prefs.channel,
-            CommsType::Welcome,
-            prefs.email.unwrap_or_default(),
-            Some(subject),
-            body,
-        ),
-    )
-    .await
-}
-
-pub async fn enqueue_password_reset(
-    db: &PgPool,
-    user_id: Uuid,
-    code: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let body = format_message(
-        strings.password_reset_body,
-        &[("handle", &prefs.handle), ("code", code)],
-    );
-    let subject = format_message(strings.password_reset_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
-            prefs.channel,
-            CommsType::PasswordReset,
-            prefs.email.unwrap_or_default(),
-            Some(subject),
-            body,
-        ),
-    )
-    .await
-}
-
-pub async fn enqueue_email_update(
-    db: &PgPool,
-    user_id: Uuid,
-    new_email: &str,
-    handle: &str,
-    code: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let encoded_email = urlencoding::encode(new_email);
-    let encoded_token = urlencoding::encode(code);
-    let verify_page = format!("https://{}/app/verify", hostname);
-    let verify_link = format!(
-        "https://{}/app/verify?token={}&identifier={}",
-        hostname, encoded_token, encoded_email
-    );
-    let body = format_message(
-        strings.email_update_body,
-        &[
-            ("handle", handle),
-            ("code", code),
-            ("verify_page", &verify_page),
-            ("verify_link", &verify_link),
-        ],
-    );
-    let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::email(
-            user_id,
-            CommsType::EmailUpdate,
-            new_email.to_string(),
-            subject,
-            body,
-        ),
-    )
-    .await
-}
-
-pub async fn enqueue_email_update_token(
-    db: &PgPool,
-    user_id: Uuid,
-    code: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let current_email = prefs.email.unwrap_or_default();
-    let verify_page = format!("https://{}/app/verify?type=email-update", hostname);
-    let verify_link = format!(
-        "https://{}/app/verify?type=email-update&token={}",
-        hostname,
-        urlencoding::encode(code)
-    );
-    let body = format_message(
-        strings.email_update_body,
-        &[
-            ("handle", &prefs.handle),
-            ("code", code),
-            ("verify_page", &verify_page),
-            ("verify_link", &verify_link),
-        ],
-    );
-    let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::email(
-            user_id,
-            CommsType::EmailUpdate,
-            current_email,
-            subject,
-            body,
-        ),
-    )
-    .await
-}
-
-pub async fn enqueue_account_deletion(
-    db: &PgPool,
-    user_id: Uuid,
-    code: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let body = format_message(
-        strings.account_deletion_body,
-        &[("handle", &prefs.handle), ("code", code)],
-    );
-    let subject = format_message(strings.account_deletion_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
-            prefs.channel,
-            CommsType::AccountDeletion,
-            prefs.email.unwrap_or_default(),
-            Some(subject),
-            body,
-        ),
-    )
-    .await
-}
-
-pub async fn enqueue_plc_operation(
-    db: &PgPool,
-    user_id: Uuid,
-    token: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let body = format_message(
-        strings.plc_operation_body,
-        &[("handle", &prefs.handle), ("token", token)],
-    );
-    let subject = format_message(strings.plc_operation_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
-            prefs.channel,
-            CommsType::PlcOperation,
-            prefs.email.unwrap_or_default(),
-            Some(subject),
-            body,
-        ),
-    )
-    .await
-}
-
-pub async fn enqueue_2fa_code(
-    db: &PgPool,
-    user_id: Uuid,
-    code: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let body = format_message(
-        strings.two_factor_code_body,
-        &[("handle", &prefs.handle), ("code", code)],
-    );
-    let subject = format_message(strings.two_factor_code_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
-            prefs.channel,
-            CommsType::TwoFactorCode,
-            prefs.email.unwrap_or_default(),
-            Some(subject),
-            body,
-        ),
-    )
-    .await
-}
-
-pub async fn enqueue_passkey_recovery(
-    db: &PgPool,
-    user_id: Uuid,
-    recovery_url: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let body = format_message(
-        strings.passkey_recovery_body,
-        &[("handle", &prefs.handle), ("url", recovery_url)],
-    );
-    let subject = format_message(strings.passkey_recovery_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
-            prefs.channel,
-            CommsType::PasskeyRecovery,
-            prefs.email.unwrap_or_default(),
-            Some(subject),
-            body,
-        ),
-    )
-    .await
 }
 
 pub fn channel_display_name(channel: CommsChannel) -> &'static str {
@@ -533,140 +241,372 @@ pub fn channel_display_name(channel: CommsChannel) -> &'static str {
     }
 }
 
-pub async fn enqueue_signup_verification(
-    db: &PgPool,
-    user_id: Uuid,
-    channel: &str,
-    recipient: &str,
-    code: &str,
-    locale: Option<&str>,
-) -> Result<Uuid, sqlx::Error> {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let comms_channel = match channel {
-        "email" => CommsChannel::Email,
-        "discord" => CommsChannel::Discord,
-        "telegram" => CommsChannel::Telegram,
-        "signal" => CommsChannel::Signal,
-        _ => CommsChannel::Email,
-    };
-    let strings = get_strings(locale.unwrap_or("en"));
-    let (verify_page, verify_link) = if comms_channel == CommsChannel::Email {
-        let encoded_email = urlencoding::encode(recipient);
+fn channel_from_str(s: &str) -> tranquil_db_traits::CommsChannel {
+    match s {
+        "discord" => tranquil_db_traits::CommsChannel::Discord,
+        "telegram" => tranquil_db_traits::CommsChannel::Telegram,
+        "signal" => tranquil_db_traits::CommsChannel::Signal,
+        _ => tranquil_db_traits::CommsChannel::Email,
+    }
+}
+
+
+pub mod repo {
+    use super::*;
+    use tranquil_db_traits::DbError;
+
+    pub async fn enqueue_welcome(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let body = format_message(
+            strings.welcome_body,
+            &[("hostname", hostname), ("handle", &prefs.handle)],
+        );
+        let subject = format_message(strings.welcome_subject, &[("hostname", hostname)]);
+        let channel = channel_from_str(&prefs.preferred_channel);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            channel,
+            CommsType::Welcome,
+            &prefs.email.unwrap_or_default(),
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_password_reset(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        code: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let body = format_message(
+            strings.password_reset_body,
+            &[("handle", &prefs.handle), ("code", code)],
+        );
+        let subject = format_message(strings.password_reset_subject, &[("hostname", hostname)]);
+        let channel = channel_from_str(&prefs.preferred_channel);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            channel,
+            CommsType::PasswordReset,
+            &prefs.email.unwrap_or_default(),
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_email_update(
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        new_email: &str,
+        handle: &str,
+        code: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let strings = get_strings("en");
+        let encoded_email = urlencoding::encode(new_email);
         let encoded_token = urlencoding::encode(code);
-        (
-            format!("https://{}/app/verify", hostname),
-            format!(
-                "https://{}/app/verify?token={}&identifier={}",
-                hostname, encoded_token, encoded_email
-            ),
-        )
-    } else {
-        (String::new(), String::new())
-    };
-    let body = format_message(
-        strings.signup_verification_body,
-        &[
-            ("code", code),
-            ("hostname", &hostname),
-            ("verify_page", &verify_page),
-            ("verify_link", &verify_link),
-        ],
-    );
-    let subject = match comms_channel {
-        CommsChannel::Email => Some(format_message(
-            strings.signup_verification_subject,
-            &[("hostname", &hostname)],
-        )),
-        _ => None,
-    };
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
+        let verify_page = format!("https://{}/app/verify", hostname);
+        let verify_link = format!(
+            "https://{}/app/verify?token={}&identifier={}",
+            hostname, encoded_token, encoded_email
+        );
+        let body = format_message(
+            strings.email_update_body,
+            &[
+                ("handle", handle),
+                ("code", code),
+                ("verify_page", &verify_page),
+                ("verify_link", &verify_link),
+            ],
+        );
+        let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            tranquil_db_traits::CommsChannel::Email,
+            CommsType::EmailUpdate,
+            new_email,
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_email_update_token(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        code: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let current_email = prefs.email.unwrap_or_default();
+        let verify_page = format!("https://{}/app/verify?type=email-update", hostname);
+        let verify_link = format!(
+            "https://{}/app/verify?type=email-update&token={}",
+            hostname,
+            urlencoding::encode(code)
+        );
+        let body = format_message(
+            strings.email_update_body,
+            &[
+                ("handle", &prefs.handle),
+                ("code", code),
+                ("verify_page", &verify_page),
+                ("verify_link", &verify_link),
+            ],
+        );
+        let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            tranquil_db_traits::CommsChannel::Email,
+            CommsType::EmailUpdate,
+            &current_email,
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_account_deletion(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        code: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let body = format_message(
+            strings.account_deletion_body,
+            &[("handle", &prefs.handle), ("code", code)],
+        );
+        let subject = format_message(strings.account_deletion_subject, &[("hostname", hostname)]);
+        let channel = channel_from_str(&prefs.preferred_channel);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            channel,
+            CommsType::AccountDeletion,
+            &prefs.email.unwrap_or_default(),
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_plc_operation(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        token: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let body = format_message(
+            strings.plc_operation_body,
+            &[("handle", &prefs.handle), ("token", token)],
+        );
+        let subject = format_message(strings.plc_operation_subject, &[("hostname", hostname)]);
+        let channel = channel_from_str(&prefs.preferred_channel);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            channel,
+            CommsType::PlcOperation,
+            &prefs.email.unwrap_or_default(),
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_passkey_recovery(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        recovery_url: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let body = format_message(
+            strings.passkey_recovery_body,
+            &[("handle", &prefs.handle), ("url", recovery_url)],
+        );
+        let subject = format_message(strings.passkey_recovery_subject, &[("hostname", hostname)]);
+        let channel = channel_from_str(&prefs.preferred_channel);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            channel,
+            CommsType::PasskeyRecovery,
+            &prefs.email.unwrap_or_default(),
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_migration_verification(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        email: &str,
+        token: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let encoded_email = urlencoding::encode(email);
+        let encoded_token = urlencoding::encode(token);
+        let verify_page = format!("https://{}/app/verify", hostname);
+        let verify_link = format!(
+            "https://{}/app/verify?token={}&identifier={}",
+            hostname, encoded_token, encoded_email
+        );
+        let body = format_message(
+            strings.migration_verification_body,
+            &[
+                ("code", token),
+                ("hostname", hostname),
+                ("verify_page", &verify_page),
+                ("verify_link", &verify_link),
+            ],
+        );
+        let subject = format_message(
+            strings.migration_verification_subject,
+            &[("hostname", hostname)],
+        );
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            tranquil_db_traits::CommsChannel::Email,
+            CommsType::MigrationVerification,
+            email,
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
+
+    pub async fn enqueue_signup_verification(
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        channel: &str,
+        recipient: &str,
+        code: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let comms_channel = channel_from_str(channel);
+        let strings = get_strings("en");
+        let (verify_page, verify_link) = match comms_channel {
+            tranquil_db_traits::CommsChannel::Email => {
+                let encoded_email = urlencoding::encode(recipient);
+                let encoded_token = urlencoding::encode(code);
+                (
+                    format!("https://{}/app/verify", hostname),
+                    format!(
+                        "https://{}/app/verify?token={}&identifier={}",
+                        hostname, encoded_token, encoded_email
+                    ),
+                )
+            }
+            _ => (String::new(), String::new()),
+        };
+        let body = format_message(
+            strings.signup_verification_body,
+            &[
+                ("code", code),
+                ("hostname", hostname),
+                ("verify_page", &verify_page),
+                ("verify_link", &verify_link),
+            ],
+        );
+        let subject = match comms_channel {
+            tranquil_db_traits::CommsChannel::Email => Some(format_message(
+                strings.signup_verification_subject,
+                &[("hostname", hostname)],
+            )),
+            _ => None,
+        };
+        infra_repo.enqueue_comms(
+            Some(user_id),
             comms_channel,
             CommsType::EmailVerification,
-            recipient.to_string(),
-            subject,
-            body,
-        ),
-    )
-    .await
-}
+            recipient,
+            subject.as_deref(),
+            &body,
+            None,
+        ).await
+    }
 
-pub async fn enqueue_migration_verification(
-    db: &PgPool,
-    user_id: Uuid,
-    email: &str,
-    token: &str,
-    hostname: &str,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let encoded_email = urlencoding::encode(email);
-    let encoded_token = urlencoding::encode(token);
-    let verify_page = format!("https://{}/app/verify", hostname);
-    let verify_link = format!(
-        "https://{}/app/verify?token={}&identifier={}",
-        hostname, encoded_token, encoded_email
-    );
-    let body = format_message(
-        strings.migration_verification_body,
-        &[
-            ("code", token),
-            ("hostname", hostname),
-            ("verify_page", &verify_page),
-            ("verify_link", &verify_link),
-        ],
-    );
-    let subject = format_message(
-        strings.migration_verification_subject,
-        &[("hostname", hostname)],
-    );
-    enqueue_comms(
-        db,
-        NewComms::email(
-            user_id,
-            CommsType::MigrationVerification,
-            email.to_string(),
-            subject,
-            body,
-        ),
-    )
-    .await
-}
+    pub async fn enqueue_2fa_code(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        code: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let body = format_message(
+            strings.two_factor_code_body,
+            &[("handle", &prefs.handle), ("code", code)],
+        );
+        let subject = format_message(strings.two_factor_code_subject, &[("hostname", hostname)]);
+        let channel = channel_from_str(&prefs.preferred_channel);
+        infra_repo.enqueue_comms(
+            Some(user_id),
+            channel,
+            CommsType::TwoFactorCode,
+            &prefs.email.unwrap_or_default(),
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
 
-pub async fn queue_legacy_login_notification(
-    db: &PgPool,
-    user_id: Uuid,
-    hostname: &str,
-    client_ip: &str,
-    channel: CommsChannel,
-) -> Result<Uuid, sqlx::Error> {
-    let prefs = get_user_comms_prefs(db, user_id).await?;
-    let strings = get_strings(&prefs.locale);
-    let timestamp = chrono::Utc::now()
-        .format("%Y-%m-%d %H:%M:%S UTC")
-        .to_string();
-    let body = format_message(
-        strings.legacy_login_body,
-        &[
-            ("handle", &prefs.handle),
-            ("timestamp", &timestamp),
-            ("ip", client_ip),
-            ("hostname", hostname),
-        ],
-    );
-    let subject = format_message(strings.legacy_login_subject, &[("hostname", hostname)]);
-    enqueue_comms(
-        db,
-        NewComms::new(
-            user_id,
+    pub async fn enqueue_legacy_login(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        hostname: &str,
+        client_ip: &str,
+        channel: tranquil_db_traits::CommsChannel,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let timestamp = chrono::Utc::now()
+            .format("%Y-%m-%d %H:%M:%S UTC")
+            .to_string();
+        let body = format_message(
+            strings.legacy_login_body,
+            &[
+                ("handle", &prefs.handle),
+                ("timestamp", &timestamp),
+                ("ip", client_ip),
+                ("hostname", hostname),
+            ],
+        );
+        let subject = format_message(strings.legacy_login_subject, &[("hostname", hostname)]);
+        infra_repo.enqueue_comms(
+            Some(user_id),
             channel,
             CommsType::LegacyLoginAlert,
-            prefs.email.unwrap_or_default(),
-            Some(subject),
-            body,
-        ),
-    )
-    .await
+            &prefs.email.unwrap_or_default(),
+            Some(&subject),
+            &body,
+            None,
+        ).await
+    }
 }

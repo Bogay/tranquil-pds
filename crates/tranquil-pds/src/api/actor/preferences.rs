@@ -38,23 +38,13 @@ pub async fn get_preferences(
 ) -> Response {
     let auth_user = auth.0;
     let has_full_access = auth_user.permissions().has_full_access();
-    let user_id: uuid::Uuid =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &*auth_user.did)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(id)) => id,
-            _ => {
-                return ApiError::InternalError(Some("User not found".into())).into_response();
-            }
-        };
-    let prefs_result = sqlx::query!(
-        "SELECT name, value_json FROM account_preferences WHERE user_id = $1",
-        user_id
-    )
-    .fetch_all(&state.db)
-    .await;
-    let prefs = match prefs_result {
+    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth_user.did).await {
+        Ok(Some(id)) => id,
+        _ => {
+            return ApiError::InternalError(Some("User not found".into())).into_response();
+        }
+    };
+    let prefs = match state.infra_repo.get_account_preferences(user_id).await {
         Ok(rows) => rows,
         Err(_) => {
             return ApiError::InternalError(Some("Failed to fetch preferences".into()))
@@ -64,21 +54,20 @@ pub async fn get_preferences(
     let mut personal_details_pref: Option<Value> = None;
     let mut preferences: Vec<Value> = prefs
         .into_iter()
-        .filter(|row| {
-            row.name == APP_BSKY_NAMESPACE
-                || row.name.starts_with(&format!("{}.", APP_BSKY_NAMESPACE))
+        .filter(|(name, _)| {
+            name == APP_BSKY_NAMESPACE || name.starts_with(&format!("{}.", APP_BSKY_NAMESPACE))
         })
-        .filter_map(|row| {
-            if row.name == DECLARED_AGE_PREF {
+        .filter_map(|(name, value_json)| {
+            if name == DECLARED_AGE_PREF {
                 return None;
             }
-            if row.name == PERSONAL_DETAILS_PREF {
+            if name == PERSONAL_DETAILS_PREF {
                 if !has_full_access {
                     return None;
                 }
-                personal_details_pref = serde_json::from_value(row.value_json.clone()).ok();
+                personal_details_pref = serde_json::from_value(value_json.clone()).ok();
             }
-            serde_json::from_value(row.value_json).ok()
+            serde_json::from_value(value_json).ok()
         })
         .collect();
     if let Some(age) = personal_details_pref
@@ -109,16 +98,12 @@ pub async fn put_preferences(
 ) -> Response {
     let auth_user = auth.0;
     let has_full_access = auth_user.permissions().has_full_access();
-    let user_id: uuid::Uuid =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &*auth_user.did)
-            .fetch_optional(&state.db)
-            .await
-        {
-            Ok(Some(id)) => id,
-            _ => {
-                return ApiError::InternalError(Some("User not found".into())).into_response();
-            }
-        };
+    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth_user.did).await {
+        Ok(Some(id)) => id,
+        _ => {
+            return ApiError::InternalError(Some("User not found".into())).into_response();
+        }
+    };
     if input.preferences.len() > MAX_PREFERENCES_COUNT {
         return ApiError::InvalidRequest(format!(
             "Too many preferences: {} exceeds limit of {}",
@@ -195,50 +180,24 @@ pub async fn put_preferences(
         ))
         .into_response();
     }
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(_) => {
-            return ApiError::InternalError(Some("Failed to start transaction".into()))
-                .into_response();
-        }
-    };
-    let delete_result = sqlx::query!(
-        "DELETE FROM account_preferences WHERE user_id = $1 AND (name = $2 OR name LIKE $3)",
-        user_id,
-        APP_BSKY_NAMESPACE,
-        format!("{}.%", APP_BSKY_NAMESPACE)
-    )
-    .execute(&mut *tx)
-    .await;
-    if delete_result.is_err() {
-        let _ = tx.rollback().await;
-        return ApiError::InternalError(Some("Failed to clear preferences".into())).into_response();
-    }
-    for pref in input.preferences {
-        let pref_type = match pref.get("$type").and_then(|t| t.as_str()) {
-            Some(t) => t,
-            None => continue,
-        };
-        if pref_type == DECLARED_AGE_PREF {
-            continue;
-        }
-        let insert_result = sqlx::query!(
-            "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)",
-            user_id,
-            pref_type,
-            pref
-        )
-        .execute(&mut *tx)
-        .await;
-        if insert_result.is_err() {
-            let _ = tx.rollback().await;
-            return ApiError::InternalError(Some("Failed to save preference".into()))
-                .into_response();
-        }
-    }
-    if tx.commit().await.is_err() {
-        return ApiError::InternalError(Some("Failed to commit transaction".into()))
-            .into_response();
+    let prefs_to_save: Vec<(String, Value)> = input
+        .preferences
+        .into_iter()
+        .filter_map(|pref| {
+            let pref_type = pref.get("$type").and_then(|t| t.as_str())?;
+            if pref_type == DECLARED_AGE_PREF {
+                return None;
+            }
+            Some((pref_type.to_string(), pref))
+        })
+        .collect();
+
+    if let Err(_) = state
+        .infra_repo
+        .replace_namespace_preferences(user_id, APP_BSKY_NAMESPACE, prefs_to_save)
+        .await
+    {
+        return ApiError::InternalError(Some("Failed to save preferences".into())).into_response();
     }
     StatusCode::OK.into_response()
 }

@@ -8,7 +8,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Row;
 use tracing::info;
 
 #[derive(Serialize)]
@@ -26,47 +25,22 @@ pub struct NotificationPrefsResponse {
 
 pub async fn get_notification_prefs(State(state): State<AppState>, auth: BearerAuth) -> Response {
     let user = auth.0;
-    let row = match sqlx::query(
-        r#"
-        SELECT
-            email,
-            preferred_comms_channel::text as channel,
-            discord_id,
-            discord_verified,
-            telegram_username,
-            telegram_verified,
-            signal_number,
-            signal_verified
-        FROM users
-        WHERE did = $1
-        "#,
-    )
-    .bind(&user.did)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(r) => r,
+    let prefs = match state.user_repo.get_notification_prefs(&user.did).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
         }
     };
-    let email: String = row.get("email");
-    let channel: String = row.get("channel");
-    let discord_id: Option<String> = row.get("discord_id");
-    let discord_verified: bool = row.get("discord_verified");
-    let telegram_username: Option<String> = row.get("telegram_username");
-    let telegram_verified: bool = row.get("telegram_verified");
-    let signal_number: Option<String> = row.get("signal_number");
-    let signal_verified: bool = row.get("signal_verified");
     Json(NotificationPrefsResponse {
-        preferred_channel: channel,
-        email,
-        discord_id,
-        discord_verified,
-        telegram_username,
-        telegram_verified,
-        signal_number,
-        signal_verified,
+        preferred_channel: prefs.preferred_channel,
+        email: prefs.email,
+        discord_id: prefs.discord_id,
+        discord_verified: prefs.discord_verified,
+        telegram_username: prefs.telegram_username,
+        telegram_verified: prefs.telegram_verified,
+        signal_number: prefs.signal_number,
+        signal_verified: prefs.signal_verified,
     })
     .into_response()
 }
@@ -91,37 +65,15 @@ pub struct GetNotificationHistoryResponse {
 pub async fn get_notification_history(State(state): State<AppState>, auth: BearerAuth) -> Response {
     let user = auth.0;
 
-    let user_id: uuid::Uuid =
-        match sqlx::query_scalar!("SELECT id FROM users WHERE did = $1", &user.did)
-            .fetch_one(&state.db)
-            .await
-        {
-            Ok(id) => id,
-            Err(e) => {
-                return ApiError::InternalError(Some(format!("Database error: {}", e)))
-                    .into_response();
-            }
-        };
+    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&user.did).await {
+        Ok(Some(id)) => id,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
+        Err(e) => {
+            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
+        }
+    };
 
-    let rows = match sqlx::query!(
-        r#"
-        SELECT
-            created_at,
-            channel as "channel: String",
-            comms_type as "comms_type: String",
-            status as "status: String",
-            subject,
-            body
-        FROM comms_queue
-        WHERE user_id = $1
-        ORDER BY created_at DESC
-        LIMIT 50
-        "#,
-        user_id
-    )
-    .fetch_all(&state.db)
-    .await
-    {
+    let rows = match state.infra_repo.get_notification_history(user_id, 50).await {
         Ok(r) => r,
         Err(e) => {
             return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
@@ -181,7 +133,7 @@ pub struct UpdateNotificationPrefsResponse {
 }
 
 pub async fn request_channel_verification(
-    db: &sqlx::PgPool,
+    state: &AppState,
     user_id: uuid::Uuid,
     did: &str,
     channel: &str,
@@ -195,8 +147,8 @@ pub async fn request_channel_verification(
     if channel == "email" {
         let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         let handle_str = handle.unwrap_or("user");
-        crate::comms::enqueue_email_update(
-            db,
+        crate::comms::comms_repo::enqueue_email_update(
+            state.infra_repo.as_ref(),
             user_id,
             identifier,
             handle_str,
@@ -206,20 +158,25 @@ pub async fn request_channel_verification(
         .await
         .map_err(|e| format!("Failed to enqueue email notification: {}", e))?;
     } else {
-        sqlx::query!(
-            r#"
-            INSERT INTO comms_queue (user_id, channel, comms_type, recipient, subject, body, metadata)
-            VALUES ($1, $2::comms_channel, 'channel_verification', $3, 'Verify your channel', $4, $5)
-            "#,
-            user_id,
-            channel as _,
-            identifier,
-            format!("Your verification code is: {}", formatted_token),
-            json!({"code": formatted_token})
-        )
-        .execute(db)
-        .await
-        .map_err(|e| format!("Failed to enqueue notification: {}", e))?;
+        let comms_channel = match channel {
+            "discord" => tranquil_db_traits::CommsChannel::Discord,
+            "telegram" => tranquil_db_traits::CommsChannel::Telegram,
+            "signal" => tranquil_db_traits::CommsChannel::Signal,
+            _ => return Err("Invalid channel".to_string()),
+        };
+        state
+            .infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                comms_channel,
+                tranquil_db_traits::CommsType::ChannelVerification,
+                identifier,
+                Some("Verify your channel"),
+                &format!("Your verification code is: {}", formatted_token),
+                Some(json!({"code": formatted_token})),
+            )
+            .await
+            .map_err(|e| format!("Failed to enqueue notification: {}", e))?;
     }
 
     Ok(token)
@@ -232,14 +189,13 @@ pub async fn update_notification_prefs(
 ) -> Response {
     let user = auth.0;
 
-    let user_row = match sqlx::query!(
-        "SELECT id, handle, email FROM users WHERE did = $1",
-        &user.did
-    )
-    .fetch_one(&state.db)
-    .await
+    let user_row = match state
+        .user_repo
+        .get_id_handle_email_by_did(&user.did)
+        .await
     {
-        Ok(row) => row,
+        Ok(Some(row)) => row,
+        Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
             return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
         }
@@ -259,13 +215,10 @@ pub async fn update_notification_prefs(
             )
             .into_response();
         }
-        if let Err(e) = sqlx::query(
-            r#"UPDATE users SET preferred_comms_channel = $1::comms_channel, updated_at = NOW() WHERE did = $2"#
-        )
-        .bind(channel)
-        .bind(&user.did)
-        .execute(&state.db)
-        .await
+        if let Err(e) = state
+            .user_repo
+            .update_preferred_comms_channel(&user.did, channel)
+            .await
         {
             return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
         }
@@ -285,20 +238,17 @@ pub async fn update_notification_prefs(
         if current_email.as_ref().map(|e| e.to_lowercase()) == Some(email_clean.clone()) {
             info!(did = %user.did, "Email unchanged, skipping");
         } else {
-            let exists = sqlx::query!(
-                "SELECT 1 as one FROM users WHERE LOWER(email) = $1 AND id != $2",
-                email_clean,
-                user_id
-            )
-            .fetch_optional(&state.db)
-            .await;
-
-            if let Ok(Some(_)) = exists {
-                return ApiError::EmailTaken.into_response();
+            match state.user_repo.check_email_exists(&email_clean, user_id).await {
+                Ok(true) => return ApiError::EmailTaken.into_response(),
+                Err(e) => {
+                    return ApiError::InternalError(Some(format!("Database error: {}", e)))
+                        .into_response();
+                }
+                Ok(false) => {}
             }
 
             if let Err(e) = request_channel_verification(
-                &state.db,
+                &state,
                 user_id,
                 &user.did,
                 "email",
@@ -316,21 +266,15 @@ pub async fn update_notification_prefs(
 
     if let Some(ref discord_id) = input.discord_id {
         if discord_id.is_empty() {
-            if let Err(e) = sqlx::query!(
-                "UPDATE users SET discord_id = NULL, discord_verified = FALSE, updated_at = NOW() WHERE id = $1",
-                user_id
-            )
-            .execute(&state.db)
-            .await
-            {
-                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
+            if let Err(e) = state.user_repo.clear_discord(user_id).await {
+                return ApiError::InternalError(Some(format!("Database error: {}", e)))
+                    .into_response();
             }
             info!(did = %user.did, "Cleared Discord ID");
         } else {
-            if let Err(e) = request_channel_verification(
-                &state.db, user_id, &user.did, "discord", discord_id, None,
-            )
-            .await
+            if let Err(e) =
+                request_channel_verification(&state, user_id, &user.did, "discord", discord_id, None)
+                    .await
             {
                 return ApiError::InternalError(Some(e)).into_response();
             }
@@ -342,19 +286,14 @@ pub async fn update_notification_prefs(
     if let Some(ref telegram) = input.telegram_username {
         let telegram_clean = telegram.trim_start_matches('@');
         if telegram_clean.is_empty() {
-            if let Err(e) = sqlx::query!(
-                "UPDATE users SET telegram_username = NULL, telegram_verified = FALSE, updated_at = NOW() WHERE id = $1",
-                user_id
-            )
-            .execute(&state.db)
-            .await
-            {
-                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
+            if let Err(e) = state.user_repo.clear_telegram(user_id).await {
+                return ApiError::InternalError(Some(format!("Database error: {}", e)))
+                    .into_response();
             }
             info!(did = %user.did, "Cleared Telegram username");
         } else {
             if let Err(e) = request_channel_verification(
-                &state.db,
+                &state,
                 user_id,
                 &user.did,
                 "telegram",
@@ -372,19 +311,14 @@ pub async fn update_notification_prefs(
 
     if let Some(ref signal) = input.signal_number {
         if signal.is_empty() {
-            if let Err(e) = sqlx::query!(
-                "UPDATE users SET signal_number = NULL, signal_verified = FALSE, updated_at = NOW() WHERE id = $1",
-                user_id
-            )
-            .execute(&state.db)
-            .await
-            {
-                return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
+            if let Err(e) = state.user_repo.clear_signal(user_id).await {
+                return ApiError::InternalError(Some(format!("Database error: {}", e)))
+                    .into_response();
             }
             info!(did = %user.did, "Cleared Signal number");
         } else {
             if let Err(e) =
-                request_channel_verification(&state.db, user_id, &user.did, "signal", signal, None)
+                request_channel_verification(&state, user_id, &user.did, "signal", signal, None)
                     .await
             {
                 return ApiError::InternalError(Some(e)).into_response();

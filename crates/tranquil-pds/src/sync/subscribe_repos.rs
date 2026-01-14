@@ -72,12 +72,7 @@ async fn handle_socket_inner(
     let mut last_seen: i64 = -1;
 
     if let Some(cursor) = params.cursor {
-        let current_seq = sqlx::query_scalar!("SELECT MAX(seq) FROM repo_seq")
-            .fetch_one(&state.db)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(0);
+        let current_seq = state.repo_repo.get_max_seq().await.unwrap_or(0);
 
         if cursor > current_seq {
             if let Ok(error_bytes) =
@@ -91,21 +86,12 @@ async fn handle_socket_inner(
 
         let backfill_time = chrono::Utc::now() - chrono::Duration::hours(get_backfill_hours());
 
-        let first_event = sqlx::query_as!(
-            SequencedEvent,
-            r#"
-            SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
-            FROM repo_seq
-            WHERE seq > $1
-            ORDER BY seq ASC
-            LIMIT 1
-            "#,
-            cursor
-        )
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten();
+        let first_event = state
+            .repo_repo
+            .get_events_since_cursor(cursor, 1)
+            .await
+            .ok()
+            .and_then(|events| events.into_iter().next());
 
         let mut current_cursor = cursor;
 
@@ -119,14 +105,7 @@ async fn handle_socket_inner(
                 let _ = socket.send(Message::Binary(info_bytes.into())).await;
             }
 
-            let earliest = sqlx::query_scalar!(
-                "SELECT MIN(seq) FROM repo_seq WHERE created_at >= $1",
-                backfill_time
-            )
-            .fetch_one(&state.db)
-            .await
-            .ok()
-            .flatten();
+            let earliest = state.repo_repo.get_min_seq_since(backfill_time).await.ok().flatten();
 
             if let Some(earliest_seq) = earliest {
                 current_cursor = earliest_seq - 1;
@@ -136,20 +115,10 @@ async fn handle_socket_inner(
         last_seen = current_cursor;
 
         loop {
-            let events = sqlx::query_as!(
-                SequencedEvent,
-                r#"
-                SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
-                FROM repo_seq
-                WHERE seq > $1
-                ORDER BY seq ASC
-                LIMIT $2
-                "#,
-                current_cursor,
-                BACKFILL_BATCH_SIZE
-            )
-            .fetch_all(&state.db)
-            .await;
+            let events = state
+                .repo_repo
+                .get_events_since_cursor(current_cursor, BACKFILL_BATCH_SIZE)
+                .await;
             match events {
                 Ok(events) => {
                     if events.is_empty() {
@@ -186,25 +155,17 @@ async fn handle_socket_inner(
                     }
                 }
                 Err(e) => {
-                    error!("Failed to fetch backfill events: {}", e);
+                    error!("Failed to fetch backfill events: {:?}", e);
                     socket.close().await.ok();
                     return Err(());
                 }
             }
         }
 
-        let cutover_events = sqlx::query_as!(
-            SequencedEvent,
-            r#"
-            SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid, ops, blobs, blocks_cids, handle, active, status, rev
-            FROM repo_seq
-            WHERE seq > $1
-            ORDER BY seq ASC
-            "#,
-            last_seen
-        )
-        .fetch_all(&state.db)
-        .await;
+        let cutover_events = state
+            .repo_repo
+            .get_events_since_seq(last_seen, None)
+            .await;
 
         if let Ok(events) = cutover_events
             && !events.is_empty()
