@@ -269,13 +269,24 @@ pub async fn delete_passkey(
     auth: BearerAuth,
     Json(input): Json<DeletePasskeyInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
-            .await;
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
+        .await
+    {
+        return crate::api::server::reauth::legacy_mfa_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
+        return crate::api::server::reauth::reauth_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     let id: uuid::Uuid = match input.id.parse() {

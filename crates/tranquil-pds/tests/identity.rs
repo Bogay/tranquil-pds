@@ -51,10 +51,7 @@ async fn test_resolve_handle_not_found() {
     let _base = base_url().await;
     let params = [("handle", "nonexistent.handle.test")];
     let res = client
-        .get(format!(
-            "{}/xrpc/com.atproto.identity.resolveHandle",
-            _base
-        ))
+        .get(format!("{}/xrpc/com.atproto.identity.resolveHandle", _base))
         .query(&params)
         .send()
         .await
@@ -149,10 +146,7 @@ async fn test_create_did_web_account_and_resolve() {
         "signingKey": signing_key
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await
@@ -274,10 +268,7 @@ async fn test_did_web_lifecycle() {
         "signingKey": signing_key
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&create_payload)
         .send()
         .await

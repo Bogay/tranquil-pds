@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tranquil_oauth::{AuthorizedClientData, DeviceData, RequestData, TokenData};
-use tranquil_types::{AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId, TokenId};
+use tranquil_types::{
+    AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
+    TokenId,
+};
 use uuid::Uuid;
 
 use crate::DbError;
@@ -106,7 +109,10 @@ pub trait OAuthRepository: Send + Sync {
         new_refresh_token: &RefreshToken,
         new_expires_at: DateTime<Utc>,
     ) -> Result<(), DbError>;
-    async fn check_refresh_token_used(&self, refresh_token: &RefreshToken) -> Result<Option<i32>, DbError>;
+    async fn check_refresh_token_used(
+        &self,
+        refresh_token: &RefreshToken,
+    ) -> Result<Option<i32>, DbError>;
     async fn delete_token(&self, token_id: &TokenId) -> Result<(), DbError>;
     async fn delete_token_family(&self, db_id: i32) -> Result<(), DbError>;
     async fn list_tokens_for_user(&self, did: &Did) -> Result<Vec<TokenData>, DbError>;
@@ -116,7 +122,11 @@ pub trait OAuthRepository: Send + Sync {
         did: &Did,
         keep_count: i64,
     ) -> Result<u64, DbError>;
-    async fn revoke_tokens_for_client(&self, did: &Did, client_id: &ClientId) -> Result<u64, DbError>;
+    async fn revoke_tokens_for_client(
+        &self,
+        did: &Did,
+        client_id: &ClientId,
+    ) -> Result<u64, DbError>;
     async fn revoke_tokens_for_controller(
         &self,
         delegated_did: &Did,
@@ -157,9 +167,16 @@ pub trait OAuthRepository: Send + Sync {
         did: &Did,
         device_id: Option<&DeviceId>,
     ) -> Result<(), DbError>;
-    async fn update_request_scope(&self, request_id: &RequestId, scope: &str) -> Result<(), DbError>;
-    async fn set_controller_did(&self, request_id: &RequestId, controller_did: &Did)
-        -> Result<(), DbError>;
+    async fn update_request_scope(
+        &self,
+        request_id: &RequestId,
+        scope: &str,
+    ) -> Result<(), DbError>;
+    async fn set_controller_did(
+        &self,
+        request_id: &RequestId,
+        controller_did: &Did,
+    ) -> Result<(), DbError>;
     async fn set_request_did(&self, request_id: &RequestId, did: &Did) -> Result<(), DbError>;
 
     async fn create_device(&self, device_id: &DeviceId, data: &DeviceData) -> Result<(), DbError>;
@@ -167,8 +184,15 @@ pub trait OAuthRepository: Send + Sync {
     async fn update_device_last_seen(&self, device_id: &DeviceId) -> Result<(), DbError>;
     async fn delete_device(&self, device_id: &DeviceId) -> Result<(), DbError>;
     async fn upsert_account_device(&self, did: &Did, device_id: &DeviceId) -> Result<(), DbError>;
-    async fn get_device_accounts(&self, device_id: &DeviceId) -> Result<Vec<DeviceAccountRow>, DbError>;
-    async fn verify_account_on_device(&self, device_id: &DeviceId, did: &Did) -> Result<bool, DbError>;
+    async fn get_device_accounts(
+        &self,
+        device_id: &DeviceId,
+    ) -> Result<Vec<DeviceAccountRow>, DbError>;
+    async fn verify_account_on_device(
+        &self,
+        device_id: &DeviceId,
+        did: &Did,
+    ) -> Result<bool, DbError>;
 
     async fn check_and_record_dpop_jti(&self, jti: &DPoPProofId) -> Result<bool, DbError>;
     async fn cleanup_expired_dpop_jtis(&self, max_age_secs: i64) -> Result<u64, DbError>;
@@ -184,7 +208,10 @@ pub trait OAuthRepository: Send + Sync {
     ) -> Result<Option<TwoFactorChallenge>, DbError>;
     async fn increment_2fa_attempts(&self, id: Uuid) -> Result<i32, DbError>;
     async fn delete_2fa_challenge(&self, id: Uuid) -> Result<(), DbError>;
-    async fn delete_2fa_challenge_by_request_uri(&self, request_uri: &RequestId) -> Result<(), DbError>;
+    async fn delete_2fa_challenge_by_request_uri(
+        &self,
+        request_uri: &RequestId,
+    ) -> Result<(), DbError>;
     async fn cleanup_expired_2fa_challenges(&self) -> Result<u64, DbError>;
     async fn check_user_2fa_enabled(&self, did: &Did) -> Result<bool, DbError>;
 
@@ -199,7 +226,11 @@ pub trait OAuthRepository: Send + Sync {
         client_id: &ClientId,
         prefs: &[ScopePreference],
     ) -> Result<(), DbError>;
-    async fn delete_scope_preferences(&self, did: &Did, client_id: &ClientId) -> Result<(), DbError>;
+    async fn delete_scope_preferences(
+        &self,
+        did: &Did,
+        client_id: &ClientId,
+    ) -> Result<(), DbError>;
 
     async fn upsert_authorized_client(
         &self,
@@ -219,7 +250,11 @@ pub trait OAuthRepository: Send + Sync {
         device_id: &DeviceId,
         did: &Did,
     ) -> Result<Option<DeviceTrustInfo>, DbError>;
-    async fn device_belongs_to_user(&self, device_id: &DeviceId, did: &Did) -> Result<bool, DbError>;
+    async fn device_belongs_to_user(
+        &self,
+        device_id: &DeviceId,
+        did: &Did,
+    ) -> Result<bool, DbError>;
     async fn revoke_device_trust(&self, device_id: &DeviceId) -> Result<(), DbError>;
     async fn update_device_friendly_name(
         &self,
@@ -241,5 +276,9 @@ pub trait OAuthRepository: Send + Sync {
     async fn list_sessions_by_did(&self, did: &Did) -> Result<Vec<OAuthSessionListItem>, DbError>;
     async fn delete_session_by_id(&self, session_id: i32, did: &Did) -> Result<u64, DbError>;
     async fn delete_sessions_by_did(&self, did: &Did) -> Result<u64, DbError>;
-    async fn delete_sessions_by_did_except(&self, did: &Did, except_token_id: &TokenId) -> Result<u64, DbError>;
+    async fn delete_sessions_by_did_except(
+        &self,
+        did: &Did,
+        except_token_id: &TokenId,
+    ) -> Result<u64, DbError>;
 }

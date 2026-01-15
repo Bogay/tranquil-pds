@@ -67,7 +67,7 @@ pub async fn request_password_reset(
     };
     let user_id = match state
         .user_repo
-        .get_id_by_email_or_handle(&normalized, &normalized_handle)
+        .get_id_by_email_or_handle(normalized, &normalized_handle)
         .await
     {
         Ok(Some(id)) => id,
@@ -209,9 +209,15 @@ pub async fn change_password(
     auth: BearerAuth,
     Json(input): Json<ChangePasswordInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
-            .await;
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
+        .await
+    {
+        return crate::api::server::reauth::legacy_mfa_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     let current_password = &input.current_password;
@@ -225,7 +231,11 @@ pub async fn change_password(
     if let Err(e) = validate_password(new_password) {
         return ApiError::InvalidRequest(e.to_string()).into_response();
     }
-    let user = match state.user_repo.get_id_and_password_hash_by_did(&auth.0.did).await {
+    let user = match state
+        .user_repo
+        .get_id_and_password_hash_by_did(&auth.0.did)
+        .await
+    {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -259,7 +269,11 @@ pub async fn change_password(
                 return ApiError::InternalError(None).into_response();
             }
         };
-    if let Err(e) = state.user_repo.update_password_hash(user_id, &new_hash).await {
+    if let Err(e) = state
+        .user_repo
+        .update_password_hash(user_id, &new_hash)
+        .await
+    {
         error!("DB error updating password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -279,9 +293,15 @@ pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth
 }
 
 pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
-            .await;
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
+        .await
+    {
+        return crate::api::server::reauth::legacy_mfa_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     if crate::api::server::reauth::check_reauth_required_cached(
@@ -291,10 +311,19 @@ pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) ->
     )
     .await
     {
-        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
+        return crate::api::server::reauth::reauth_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
-    let has_passkeys = state.user_repo.has_passkeys(&auth.0.did).await.unwrap_or(false);
+    let has_passkeys = state
+        .user_repo
+        .has_passkeys(&auth.0.did)
+        .await
+        .unwrap_or(false);
     if !has_passkeys {
         return ApiError::InvalidRequest(
             "You must have at least one passkey registered before removing your password".into(),
@@ -344,7 +373,12 @@ pub async fn set_password(
     )
     .await
     {
-        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
+        return crate::api::server::reauth::reauth_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     let new_password = &input.new_password;
@@ -387,7 +421,11 @@ pub async fn set_password(
             }
         };
 
-    if let Err(e) = state.user_repo.set_new_user_password(user.id, &new_hash).await {
+    if let Err(e) = state
+        .user_repo
+        .set_new_user_password(user.id, &new_hash)
+        .await
+    {
         error!("DB error setting password: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }

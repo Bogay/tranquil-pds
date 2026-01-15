@@ -696,7 +696,53 @@
       "signingInAs": "サインイン中のアカウント:",
       "permissionsRequested": "リクエストされた権限",
       "required": "必須",
-      "rememberChoiceLabel": "このアプリに対する選択を記憶する"
+      "rememberChoiceLabel": "このアプリに対する選択を記憶する",
+      "scopes": {
+        "atproto": {
+          "name": "フルアクセス",
+          "description": "このアカウントの読み取り、書き込み、管理へのフルアクセス"
+        },
+        "atprotoWithGranular": {
+          "name": "AT Protocol アクセス",
+          "description": "AT Protocol 基本スコープ（権限は以下で選択したオプションによって決まります）"
+        },
+        "transitionGeneric": {
+          "name": "移行アクセス",
+          "description": "互換性のための汎用移行スコープ"
+        },
+        "transitionChat": {
+          "name": "チャットアクセス",
+          "description": "Blueskyチャット機能へのアクセス"
+        },
+        "transitionEmail": {
+          "name": "メールアクセス",
+          "description": "アカウントのメールアドレスを読み取る"
+        },
+        "repoCreate": {
+          "name": "レコード作成",
+          "description": "リポジトリに新しいレコードを作成"
+        },
+        "repoUpdate": {
+          "name": "レコード更新",
+          "description": "リポジトリの既存レコードを更新"
+        },
+        "repoDelete": {
+          "name": "レコード削除",
+          "description": "リポジトリからレコードを削除"
+        },
+        "blobAll": {
+          "name": "メディアアップロード",
+          "description": "画像、動画、その他のメディアファイルをアップロード"
+        },
+        "repoFull": {
+          "name": "リポジトリフルアクセス",
+          "description": "すべてのリポジトリレコードへのフル読み書きアクセス"
+        },
+        "accountManage": {
+          "name": "アカウント管理",
+          "description": "アカウント設定と設定を管理"
+        }
+      }
     },
     "accounts": {
       "title": "アカウントを選択",

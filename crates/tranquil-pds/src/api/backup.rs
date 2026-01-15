@@ -14,8 +14,8 @@ use cid::Cid;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
-use tranquil_db::{BackupRepository, OldBackupInfo};
 use tracing::{error, info, warn};
+use tranquil_db::{BackupRepository, OldBackupInfo};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,16 +36,17 @@ pub struct ListBackupsOutput {
 }
 
 pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let (user_id, backup_enabled) = match state.backup_repo.get_user_backup_status(&auth.0.did).await {
-        Ok(Some(status)) => status,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
-            error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let (user_id, backup_enabled) =
+        match state.backup_repo.get_user_backup_status(&auth.0.did).await {
+            Ok(Some(status)) => status,
+            Ok(None) => {
+                return ApiError::AccountNotFound.into_response();
+            }
+            Err(e) => {
+                error!("DB error fetching user: {:?}", e);
+                return ApiError::InternalError(None).into_response();
+            }
+        };
 
     let backups = match state.backup_repo.list_backups_for_user(user_id).await {
         Ok(rows) => rows,
@@ -94,7 +95,11 @@ pub async fn get_backup(
         }
     };
 
-    let backup_info = match state.backup_repo.get_backup_storage_info(backup_id, &auth.0.did).await {
+    let backup_info = match state
+        .backup_repo
+        .get_backup_storage_info(backup_id, &auth.0.did)
+        .await
+    {
         Ok(Some(b)) => b,
         Ok(None) => {
             return ApiError::BackupNotFound.into_response();
@@ -181,15 +186,21 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         }
     };
 
-    let car_bytes =
-        match generate_full_backup(state.repo_repo.as_ref(), &state.block_store, user.id, &head_cid).await {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                error!("Failed to generate CAR: {:?}", e);
-                return ApiError::InternalError(Some("Failed to generate backup".into()))
-                    .into_response();
-            }
-        };
+    let car_bytes = match generate_full_backup(
+        state.repo_repo.as_ref(),
+        &state.block_store,
+        user.id,
+        &head_cid,
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            error!("Failed to generate CAR: {:?}", e);
+            return ApiError::InternalError(Some("Failed to generate backup".into()))
+                .into_response();
+        }
+    };
 
     let block_count = crate::scheduled::count_car_blocks(&car_bytes);
     let size_bytes = car_bytes.len() as i64;
@@ -205,14 +216,18 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         }
     };
 
-    let backup_id = match state.backup_repo.insert_backup(
-        user.id,
-        &storage_key,
-        &user.repo_root_cid,
-        &repo_rev,
-        block_count,
-        size_bytes,
-    ).await {
+    let backup_id = match state
+        .backup_repo
+        .insert_backup(
+            user.id,
+            &storage_key,
+            &user.repo_root_cid,
+            &repo_rev,
+            block_count,
+            size_bytes,
+        )
+        .await
+    {
         Ok(id) => id,
         Err(e) => {
             error!("DB error inserting backup: {:?}", e);
@@ -235,7 +250,14 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
     );
 
     let retention = BackupStorage::retention_count();
-    if let Err(e) = cleanup_old_backups(state.backup_repo.as_ref(), backup_storage, user.id, retention).await {
+    if let Err(e) = cleanup_old_backups(
+        state.backup_repo.as_ref(),
+        backup_storage,
+        user.id,
+        retention,
+    )
+    .await
+    {
         warn!(did = %user.did, error = %e, "Failed to cleanup old backups after manual backup");
     }
 
@@ -298,7 +320,11 @@ pub async fn delete_backup(
         }
     };
 
-    let backup = match state.backup_repo.get_backup_for_deletion(backup_id, &auth.0.did).await {
+    let backup = match state
+        .backup_repo
+        .get_backup_for_deletion(backup_id, &auth.0.did)
+        .await
+    {
         Ok(Some(b)) => b,
         Ok(None) => {
             return ApiError::BackupNotFound.into_response();
@@ -344,7 +370,11 @@ pub async fn set_backup_enabled(
     auth: BearerAuth,
     Json(input): Json<SetBackupEnabledInput>,
 ) -> Response {
-    let deactivated_at = match state.backup_repo.get_user_deactivated_status(&auth.0.did).await {
+    let deactivated_at = match state
+        .backup_repo
+        .get_user_deactivated_status(&auth.0.did)
+        .await
+    {
         Ok(Some(status)) => status,
         Ok(None) => {
             return ApiError::AccountNotFound.into_response();
@@ -359,7 +389,11 @@ pub async fn set_backup_enabled(
         return ApiError::AccountDeactivated.into_response();
     }
 
-    if let Err(e) = state.backup_repo.update_backup_enabled(&auth.0.did, input.enabled).await {
+    if let Err(e) = state
+        .backup_repo
+        .update_backup_enabled(&auth.0.did, input.enabled)
+        .await
+    {
         error!("DB error updating backup_enabled: {:?}", e);
         return ApiError::InternalError(Some("Failed to update setting".into())).into_response();
     }

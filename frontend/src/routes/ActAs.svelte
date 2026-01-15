@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { getAuthState, logout } from '../lib/auth.svelte'
+  import { getAuthState } from '../lib/auth.svelte'
   import { navigate, routes, getFullUrl } from '../lib/router.svelte'
-  import { generateCodeVerifier, generateCodeChallenge, saveOAuthState, generateState } from '../lib/oauth'
+  import { generateCodeVerifier, generateCodeChallenge, saveOAuthState, generateState, createDPoPProofForRequest } from '../lib/oauth'
   import { _ } from '../lib/i18n'
   import type { Session } from '../lib/types/api'
 
@@ -70,8 +70,6 @@
         return
       }
 
-      await logout()
-
       const hostname = window.location.origin
       const state = generateState()
       const codeVerifier = generateCodeVerifier()
@@ -83,7 +81,7 @@
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: `${hostname}/oauth/client-metadata.json`,
-          redirect_uri: `${hostname}/`,
+          redirect_uri: `${hostname}/app/`,
           response_type: 'code',
           scope: 'atproto',
           state: state,
@@ -100,10 +98,32 @@
       }
 
       const parData = await parResponse.json()
-      if (parData.request_uri) {
-        window.location.href = `/app/oauth/login?request_uri=${encodeURIComponent(parData.request_uri)}`
-      } else {
+      if (!parData.request_uri) {
         error = $_('actAs.invalidResponse')
+        loading = false
+        return
+      }
+
+      const authUrl = `${window.location.origin}/oauth/delegation/auth-token`
+      const dpopProof = await createDPoPProofForRequest('POST', authUrl, session!.accessJwt)
+      const authResponse = await fetch('/oauth/delegation/auth-token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `DPoP ${session!.accessJwt}`,
+          'DPoP': dpopProof
+        },
+        body: JSON.stringify({
+          request_uri: parData.request_uri,
+          delegated_did: did
+        })
+      })
+
+      const authData = await authResponse.json()
+      if (authData.success && authData.redirect_uri) {
+        window.location.href = authData.redirect_uri
+      } else {
+        error = authData.error || $_('actAs.failedToInitiate')
         loading = false
       }
     } catch (e) {

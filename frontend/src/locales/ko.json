@@ -696,7 +696,53 @@
       "signingInAs": "로그인 계정:",
       "permissionsRequested": "요청된 권한",
       "required": "필수",
-      "rememberChoiceLabel": "이 앱에 대한 선택 기억하기"
+      "rememberChoiceLabel": "이 앱에 대한 선택 기억하기",
+      "scopes": {
+        "atproto": {
+          "name": "전체 액세스",
+          "description": "이 계정을 읽고, 쓰고, 관리하는 전체 액세스"
+        },
+        "atprotoWithGranular": {
+          "name": "AT Protocol 액세스",
+          "description": "AT Protocol 기본 범위 (권한은 아래 선택한 옵션에 의해 결정됨)"
+        },
+        "transitionGeneric": {
+          "name": "전환 액세스",
+          "description": "호환성을 위한 일반 전환 범위"
+        },
+        "transitionChat": {
+          "name": "채팅 액세스",
+          "description": "Bluesky 채팅 기능 액세스"
+        },
+        "transitionEmail": {
+          "name": "이메일 액세스",
+          "description": "계정 이메일 주소 읽기"
+        },
+        "repoCreate": {
+          "name": "레코드 생성",
+          "description": "저장소에 새 레코드 생성"
+        },
+        "repoUpdate": {
+          "name": "레코드 업데이트",
+          "description": "저장소의 기존 레코드 업데이트"
+        },
+        "repoDelete": {
+          "name": "레코드 삭제",
+          "description": "저장소에서 레코드 삭제"
+        },
+        "blobAll": {
+          "name": "미디어 업로드",
+          "description": "이미지, 비디오 및 기타 미디어 파일 업로드"
+        },
+        "repoFull": {
+          "name": "전체 저장소 액세스",
+          "description": "모든 저장소 레코드에 대한 전체 읽기 및 쓰기 액세스"
+        },
+        "accountManage": {
+          "name": "계정 관리",
+          "description": "계정 설정 및 환경설정 관리"
+        }
+      }
     },
     "accounts": {
       "title": "계정 선택",

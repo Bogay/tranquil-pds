@@ -53,10 +53,7 @@ pub struct BlobExportInfo {
 
 #[async_trait]
 pub trait BackupRepository: Send + Sync {
-    async fn get_user_backup_status(
-        &self,
-        did: &Did,
-    ) -> Result<Option<(Uuid, bool)>, DbError>;
+    async fn get_user_backup_status(&self, did: &Did) -> Result<Option<(Uuid, bool)>, DbError>;
 
     async fn list_backups_for_user(&self, user_id: Uuid) -> Result<Vec<BackupRow>, DbError>;
 
@@ -92,8 +89,10 @@ pub trait BackupRepository: Send + Sync {
         did: &Did,
     ) -> Result<Option<BackupForDeletion>, DbError>;
 
-    async fn get_user_deactivated_status(&self, did: &Did)
-        -> Result<Option<Option<DateTime<Utc>>>, DbError>;
+    async fn get_user_deactivated_status(
+        &self,
+        did: &Did,
+    ) -> Result<Option<Option<DateTime<Utc>>>, DbError>;
 
     async fn update_backup_enabled(&self, did: &Did, enabled: bool) -> Result<(), DbError>;
 

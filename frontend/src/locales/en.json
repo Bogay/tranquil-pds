@@ -703,7 +703,53 @@
       "signingInAs": "Signing in as:",
       "permissionsRequested": "Permissions Requested",
       "required": "Required",
-      "rememberChoiceLabel": "Remember my choice for this application"
+      "rememberChoiceLabel": "Remember my choice for this application",
+      "scopes": {
+        "atproto": {
+          "name": "Full Account Access",
+          "description": "Full access to read, write, and manage this account"
+        },
+        "atprotoWithGranular": {
+          "name": "AT Protocol Access",
+          "description": "AT Protocol baseline scope (permissions determined by selected options below)"
+        },
+        "transitionGeneric": {
+          "name": "Transition Access",
+          "description": "Generic transition scope for compatibility"
+        },
+        "transitionChat": {
+          "name": "Chat Access",
+          "description": "Access to Bluesky chat features"
+        },
+        "transitionEmail": {
+          "name": "Email Access",
+          "description": "Read your account email address"
+        },
+        "repoCreate": {
+          "name": "Create Records",
+          "description": "Create new records in your repository"
+        },
+        "repoUpdate": {
+          "name": "Update Records",
+          "description": "Update existing records in your repository"
+        },
+        "repoDelete": {
+          "name": "Delete Records",
+          "description": "Delete records from your repository"
+        },
+        "blobAll": {
+          "name": "Upload Media",
+          "description": "Upload images, videos, and other media files"
+        },
+        "repoFull": {
+          "name": "Full Repository Access",
+          "description": "Full read and write access to all repository records"
+        },
+        "accountManage": {
+          "name": "Manage Account",
+          "description": "Manage account settings and preferences"
+        }
+      }
     },
     "accounts": {
       "title": "Choose Account",
@@ -999,6 +1045,12 @@
     "accessLevel": "Access Level",
     "adding": "Adding...",
     "addControllerButton": "+ Add Controller",
+    "addControllerWarningTitle": "Important: This will change how you log in",
+    "addControllerWarningText": "Adding a controller means that only the controller account will be able to log into this account via OAuth. You will no longer be able to log in directly with your own credentials through third-party apps or the web interface.",
+    "addControllerWarningBullet1": "The controller will be able to act on your behalf with the permissions you grant",
+    "addControllerWarningBullet2": "You will need to log in as the controller first, then switch to this account",
+    "addControllerWarningBullet3": "You can remove the controller later to regain direct login access",
+    "addControllerConfirm": "I understand that I will no longer be able to log in directly",
     "controllerAdded": "Controller added successfully",
     "controllerRemoved": "Controller removed successfully",
     "failedToAddController": "Failed to add controller",

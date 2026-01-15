@@ -80,13 +80,11 @@ impl BlobRepository for PostgresBlobRepository {
     }
 
     async fn get_blob_storage_key(&self, cid: &CidLink) -> Result<Option<String>, DbError> {
-        let result = sqlx::query_scalar!(
-            "SELECT storage_key FROM blobs WHERE cid = $1",
-            cid.as_str()
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        let result =
+            sqlx::query_scalar!("SELECT storage_key FROM blobs WHERE cid = $1", cid.as_str())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
 
         Ok(result)
     }
@@ -114,11 +112,7 @@ impl BlobRepository for PostgresBlobRepository {
         Ok(results.into_iter().map(CidLink::from).collect())
     }
 
-    async fn list_blobs_since_rev(
-        &self,
-        did: &Did,
-        since: &str,
-    ) -> Result<Vec<CidLink>, DbError> {
+    async fn list_blobs_since_rev(&self, did: &Did, since: &str) -> Result<Vec<CidLink>, DbError> {
         let results = sqlx::query_scalar!(
             r#"SELECT DISTINCT unnest(blobs) as "cid!"
                FROM repo_seq

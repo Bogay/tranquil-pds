@@ -266,7 +266,12 @@ async fn build_did_document(state: &AppState, did: &crate::types::Did) -> serde_
         });
     }
 
-    let key_info = state.user_repo.get_user_key_by_id(user.id).await.ok().flatten();
+    let key_info = state
+        .user_repo
+        .get_user_key_by_id(user.id)
+        .await
+        .ok()
+        .flatten();
 
     let public_key_multibase = match key_info {
         Some(info) => match crate::config::decrypt_key(&info.key_bytes, info.encryption_version) {

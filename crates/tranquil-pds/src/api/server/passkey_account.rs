@@ -8,7 +8,7 @@ use axum::{
 };
 use bcrypt::{DEFAULT_COST, hash};
 use chrono::{Duration, Utc};
-use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::{mst::Mst, storage::BlockStore};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -183,7 +183,11 @@ pub async fn create_passkey_account(
     }
 
     if let Some(ref code) = input.invite_code {
-        let valid = state.infra_repo.is_invite_code_valid(code).await.unwrap_or(false);
+        let valid = state
+            .infra_repo
+            .is_invite_code_valid(code)
+            .await
+            .unwrap_or(false);
 
         if !valid {
             return ApiError::InvalidInviteCode.into_response();
@@ -226,7 +230,11 @@ pub async fn create_passkey_account(
 
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
-            match state.infra_repo.get_reserved_signing_key(signing_key_did).await {
+            match state
+                .infra_repo
+                .get_reserved_signing_key(signing_key_did)
+                .await
+            {
                 Ok(Some(reserved)) => (reserved.private_key_bytes, Some(reserved.id)),
                 Ok(None) => {
                     return ApiError::InvalidSigningKey.into_response();
@@ -433,9 +441,24 @@ pub async fn create_passkey_account(
         email: email.clone().unwrap_or_default(),
         did: did_typed.clone(),
         preferred_comms_channel,
-        discord_id: input.discord_id.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
-        telegram_username: input.telegram_username.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
-        signal_number: input.signal_number.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        discord_id: input
+            .discord_id
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        telegram_username: input
+            .telegram_username
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        signal_number: input
+            .signal_number
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
         setup_token_hash,
         setup_expires_at,
         deactivated_at,
@@ -715,7 +738,7 @@ pub async fn complete_passkey_setup(
 
     Json(CompletePasskeySetupResponse {
         did: input.did.clone(),
-        handle: user.handle.into(),
+        handle: user.handle,
         app_password,
         app_password_name,
     })
@@ -851,7 +874,11 @@ pub async fn request_passkey_recovery(
         format!("{}.{}", identifier, hostname_for_handles)
     };
 
-    let user = match state.user_repo.get_user_for_passkey_recovery(identifier, &normalized_handle).await {
+    let user = match state
+        .user_repo
+        .get_user_for_passkey_recovery(identifier, &normalized_handle)
+        .await
+    {
         Ok(Some(u)) if !u.password_required => u,
         _ => {
             return SuccessResponse::ok().into_response();
@@ -867,7 +894,11 @@ pub async fn request_passkey_recovery(
     };
     let expires_at = Utc::now() + Duration::hours(1);
 
-    if let Err(e) = state.user_repo.set_recovery_token(&user.did, &recovery_token_hash, expires_at).await {
+    if let Err(e) = state
+        .user_repo
+        .set_recovery_token(&user.did, &recovery_token_hash, expires_at)
+        .await
+    {
         error!("Error updating recovery token: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
@@ -944,7 +975,11 @@ pub async fn recover_passkey_account(
         did: input.did.clone(),
         password_hash,
     };
-    let result = match state.user_repo.recover_passkey_account(&recover_input).await {
+    let result = match state
+        .user_repo
+        .recover_passkey_account(&recover_input)
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             error!("Error recovering passkey account: {:?}", e);

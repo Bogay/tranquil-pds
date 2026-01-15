@@ -186,7 +186,7 @@ impl CommitFrameBuilder {
 }
 
 fn placeholder_rev() -> String {
-    use jacquard::types::{integer::LimitedU32, string::Tid};
+    use jacquard_common::types::{integer::LimitedU32, string::Tid};
     Tid::now(LimitedU32::MIN).to_string()
 }
 

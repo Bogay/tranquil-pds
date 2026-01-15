@@ -434,7 +434,10 @@ pub async fn validate_token_with_dpop(
     .await
     {
         Ok(result) => {
-            let result_did: Did = result.did.parse().map_err(|_| TokenValidationError::InvalidToken)?;
+            let result_did: Did = result
+                .did
+                .parse()
+                .map_err(|_| TokenValidationError::InvalidToken)?;
             let user_info = user_repo
                 .get_user_info_by_did(&result_did)
                 .await

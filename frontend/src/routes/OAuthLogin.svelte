@@ -1,6 +1,7 @@
 <script lang="ts">
   import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
+  import { startOAuthLogin } from '../lib/oauth'
   import {
     prepareRequestOptions,
     serializeAssertionResponse,
@@ -97,10 +98,13 @@
         userDid = data.did || null
         securityStatusChecked = true
 
-        if (!hasPassword && !hasPasskeys && isDelegated && data.did) {
+        if (isDelegated && data.did) {
           const requestUri = getRequestUri()
           if (requestUri) {
             navigate(routes.oauthDelegation, { params: { request_uri: requestUri, delegated_did: data.did } })
+            return
+          } else {
+            await startOAuthLogin(username)
             return
           }
         }

@@ -11,7 +11,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::{mst::Mst, storage::BlockStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -51,8 +51,8 @@ pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -
         controllers: controllers
             .into_iter()
             .map(|c| ControllerInfo {
-                did: c.did.into(),
-                handle: c.handle.into(),
+                did: c.did,
+                handle: c.handle,
                 granted_scopes: c.granted_scopes,
                 granted_at: c.granted_at,
                 is_active: c.is_active,
@@ -89,7 +89,11 @@ pub async fn add_controller(
         return ApiError::ControllerNotFound.into_response();
     }
 
-    match state.delegation_repo.controls_any_accounts(&auth.0.did).await {
+    match state
+        .delegation_repo
+        .controls_any_accounts(&auth.0.did)
+        .await
+    {
         Ok(true) => {
             return ApiError::InvalidDelegation(
                 "Cannot add controllers to an account that controls other accounts".into(),
@@ -309,8 +313,8 @@ pub async fn list_controlled_accounts(State(state): State<AppState>, auth: Beare
         accounts: accounts
             .into_iter()
             .map(|a| DelegatedAccountInfo {
-                did: a.did.into(),
-                handle: a.handle.into(),
+                did: a.did,
+                handle: a.handle,
                 granted_scopes: a.granted_scopes,
                 granted_at: a.granted_at,
             })
@@ -380,9 +384,9 @@ pub async fn get_audit_log(
             .into_iter()
             .map(|e| AuditLogEntry {
                 id: e.id.to_string(),
-                delegated_did: e.delegated_did.into(),
-                actor_did: e.actor_did.into(),
-                controller_did: e.controller_did.map(Into::into),
+                delegated_did: e.delegated_did,
+                actor_did: e.actor_did,
+                controller_did: e.controller_did,
                 action_type: format!("{:?}", e.action_type),
                 action_details: e.action_details,
                 created_at: e.created_at,
@@ -509,7 +513,11 @@ pub async fn create_delegated_account(
     }
 
     if let Some(ref code) = input.invite_code {
-        let valid = state.infra_repo.is_invite_code_valid(code).await.unwrap_or(false);
+        let valid = state
+            .infra_repo
+            .is_invite_code_valid(code)
+            .await
+            .unwrap_or(false);
 
         if !valid {
             return ApiError::InvalidInviteCode.into_response();
@@ -620,7 +628,11 @@ pub async fn create_delegated_account(
         invite_code: input.invite_code.clone(),
     };
 
-    let _user_id = match state.user_repo.create_delegated_account(&create_input).await {
+    let _user_id = match state
+        .user_repo
+        .create_delegated_account(&create_input)
+        .await
+    {
         Ok(id) => id,
         Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
             return ApiError::HandleNotAvailable(None).into_response();

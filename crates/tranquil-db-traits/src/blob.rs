@@ -58,11 +58,7 @@ pub trait BlobRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<CidLink>, DbError>;
 
-    async fn list_blobs_since_rev(
-        &self,
-        did: &Did,
-        since: &str,
-    ) -> Result<Vec<CidLink>, DbError>;
+    async fn list_blobs_since_rev(&self, did: &Did, since: &str) -> Result<Vec<CidLink>, DbError>;
 
     async fn count_blobs_by_user(&self, user_id: Uuid) -> Result<i64, DbError>;
 

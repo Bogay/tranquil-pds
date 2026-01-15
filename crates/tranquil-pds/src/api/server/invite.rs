@@ -137,7 +137,10 @@ pub async fn create_invite_codes(
             infra_repo
                 .create_invite_codes_batch(&codes, use_count, admin_user_id, Some(&account))
                 .await
-                .map(|_| AccountCodes { account: account.to_string(), codes })
+                .map(|_| AccountCodes {
+                    account: account.to_string(),
+                    codes,
+                })
         }
     }))
     .await;
@@ -239,7 +242,10 @@ pub async fn get_account_invite_codes(
                 available: info.available_uses,
                 disabled: false,
                 for_account: info.for_account.map(|d| d.to_string()).unwrap_or_default(),
-                created_by: info.created_by.map(|d| d.to_string()).unwrap_or_else(|| "admin".to_string()),
+                created_by: info
+                    .created_by
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "admin".to_string()),
                 created_at: info.created_at.to_rfc3339(),
                 uses,
             })

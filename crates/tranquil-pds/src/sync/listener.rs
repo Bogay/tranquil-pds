@@ -76,7 +76,12 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
                 });
             }
         }
-        let event = state.repo_repo.get_event_by_seq(seq_id).await.ok().flatten();
+        let event = state
+            .repo_repo
+            .get_event_by_seq(seq_id)
+            .await
+            .ok()
+            .flatten();
         if let Some(event) = event {
             let seq = event.seq;
             let firehose_event = to_firehose_event(event);

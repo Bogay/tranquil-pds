@@ -385,7 +385,10 @@ struct LegacyAuthResult {
     did: String,
 }
 
-async fn try_legacy_auth(user_repo: &dyn UserRepository, token: &str) -> Result<LegacyAuthResult, ()> {
+async fn try_legacy_auth(
+    user_repo: &dyn UserRepository,
+    token: &str,
+) -> Result<LegacyAuthResult, ()> {
     match crate::auth::validate_bearer_token(user_repo, token).await {
         Ok(user) if !user.is_oauth => Ok(LegacyAuthResult {
             did: user.did.to_string(),

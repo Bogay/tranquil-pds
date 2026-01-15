@@ -6,8 +6,14 @@ use tranquil_db_traits::{
     DbError, DeviceAccountRow, DeviceTrustInfo, OAuthRepository, OAuthSessionListItem,
     ScopePreference, TrustedDeviceRow, TwoFactorChallenge,
 };
-use tranquil_oauth::{AuthorizedClientData, ClientAuth, AuthorizationRequestParameters, DeviceData, RequestData, TokenData};
-use tranquil_types::{AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId, TokenId};
+use tranquil_oauth::{
+    AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, DeviceData, RequestData,
+    TokenData,
+};
+use tranquil_types::{
+    AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
+    TokenId,
+};
 use uuid::Uuid;
 
 use super::user::map_sqlx_error;
@@ -236,7 +242,10 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(())
     }
 
-    async fn check_refresh_token_used(&self, refresh_token: &RefreshToken) -> Result<Option<i32>, DbError> {
+    async fn check_refresh_token_used(
+        &self,
+        refresh_token: &RefreshToken,
+    ) -> Result<Option<i32>, DbError> {
         let row = sqlx::query_scalar!(
             r#"
             SELECT token_id FROM oauth_used_refresh_token WHERE refresh_token = $1
@@ -347,7 +356,11 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(result.rows_affected())
     }
 
-    async fn revoke_tokens_for_client(&self, did: &Did, client_id: &ClientId) -> Result<u64, DbError> {
+    async fn revoke_tokens_for_client(
+        &self,
+        did: &Did,
+        client_id: &ClientId,
+    ) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "DELETE FROM oauth_token WHERE did = $1 AND client_id = $2",
             did.as_str(),
@@ -574,7 +587,11 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(())
     }
 
-    async fn update_request_scope(&self, request_id: &RequestId, scope: &str) -> Result<(), DbError> {
+    async fn update_request_scope(
+        &self,
+        request_id: &RequestId,
+        scope: &str,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE oauth_authorization_request
@@ -708,7 +725,10 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(())
     }
 
-    async fn get_device_accounts(&self, device_id: &DeviceId) -> Result<Vec<DeviceAccountRow>, DbError> {
+    async fn get_device_accounts(
+        &self,
+        device_id: &DeviceId,
+    ) -> Result<Vec<DeviceAccountRow>, DbError> {
         let rows = sqlx::query!(
             r#"
             SELECT u.did, u.handle, u.email, ad.updated_at as last_used_at
@@ -735,7 +755,11 @@ impl OAuthRepository for PostgresOAuthRepository {
             .collect())
     }
 
-    async fn verify_account_on_device(&self, device_id: &DeviceId, did: &Did) -> Result<bool, DbError> {
+    async fn verify_account_on_device(
+        &self,
+        device_id: &DeviceId,
+        did: &Did,
+    ) -> Result<bool, DbError> {
         let row = sqlx::query!(
             r#"
             SELECT 1 as "exists!"
@@ -875,7 +899,10 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(())
     }
 
-    async fn delete_2fa_challenge_by_request_uri(&self, request_uri: &RequestId) -> Result<(), DbError> {
+    async fn delete_2fa_challenge_by_request_uri(
+        &self,
+        request_uri: &RequestId,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             DELETE FROM oauth_2fa_challenge WHERE request_uri = $1
@@ -966,7 +993,11 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(())
     }
 
-    async fn delete_scope_preferences(&self, did: &Did, client_id: &ClientId) -> Result<(), DbError> {
+    async fn delete_scope_preferences(
+        &self,
+        did: &Did,
+        client_id: &ClientId,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             DELETE FROM oauth_scope_preference
@@ -1074,7 +1105,11 @@ impl OAuthRepository for PostgresOAuthRepository {
         }))
     }
 
-    async fn device_belongs_to_user(&self, device_id: &DeviceId, did: &Did) -> Result<bool, DbError> {
+    async fn device_belongs_to_user(
+        &self,
+        device_id: &DeviceId,
+        did: &Did,
+    ) -> Result<bool, DbError> {
         let exists = sqlx::query_scalar!(
             r#"SELECT 1 as "one!" FROM oauth_device od
                JOIN oauth_account_device oad ON od.id = oad.device_id

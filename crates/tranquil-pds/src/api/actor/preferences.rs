@@ -150,9 +150,9 @@ pub async fn put_preferences(
             ))
             .into_response(),
         ),
-        PrefValidation::MissingType => Some(
-            ApiError::InvalidRequest("Preference is missing a $type".into()).into_response(),
-        ),
+        PrefValidation::MissingType => {
+            Some(ApiError::InvalidRequest("Preference is missing a $type".into()).into_response())
+        }
         PrefValidation::WrongNamespace => Some(
             ApiError::InvalidRequest(format!(
                 "Some preferences are not in the {} namespace",
@@ -192,10 +192,11 @@ pub async fn put_preferences(
         })
         .collect();
 
-    if let Err(_) = state
+    if state
         .infra_repo
         .replace_namespace_preferences(user_id, APP_BSKY_NAMESPACE, prefs_to_save)
         .await
+        .is_err()
     {
         return ApiError::InternalError(Some("Failed to save preferences".into())).into_response();
     }

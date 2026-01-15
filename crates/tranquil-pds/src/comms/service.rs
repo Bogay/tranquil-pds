@@ -71,7 +71,9 @@ impl CommsService {
             CommsType::TwoFactorCode => tranquil_db_traits::CommsType::TwoFactorCode,
             CommsType::PasskeyRecovery => tranquil_db_traits::CommsType::PasskeyRecovery,
             CommsType::LegacyLoginAlert => tranquil_db_traits::CommsType::LegacyLoginAlert,
-            CommsType::MigrationVerification => tranquil_db_traits::CommsType::MigrationVerification,
+            CommsType::MigrationVerification => {
+                tranquil_db_traits::CommsType::MigrationVerification
+            }
             CommsType::ChannelVerification => tranquil_db_traits::CommsType::ChannelVerification,
         };
         let id = self
@@ -136,7 +138,9 @@ impl CommsService {
 
     async fn fetch_pending(&self) -> Result<Vec<QueuedComms>, tranquil_db_traits::DbError> {
         let now = Utc::now();
-        self.infra_repo.fetch_pending_comms(now, self.batch_size).await
+        self.infra_repo
+            .fetch_pending_comms(now, self.batch_size)
+            .await
     }
 
     async fn process_item(&self, item: QueuedComms) {
@@ -162,8 +166,12 @@ impl CommsService {
                 tranquil_db_traits::CommsType::TwoFactorCode => CommsType::TwoFactorCode,
                 tranquil_db_traits::CommsType::PasskeyRecovery => CommsType::PasskeyRecovery,
                 tranquil_db_traits::CommsType::LegacyLoginAlert => CommsType::LegacyLoginAlert,
-                tranquil_db_traits::CommsType::MigrationVerification => CommsType::MigrationVerification,
-                tranquil_db_traits::CommsType::ChannelVerification => CommsType::ChannelVerification,
+                tranquil_db_traits::CommsType::MigrationVerification => {
+                    CommsType::MigrationVerification
+                }
+                tranquil_db_traits::CommsType::ChannelVerification => {
+                    CommsType::ChannelVerification
+                }
             },
             status: match item.status {
                 tranquil_db_traits::CommsStatus::Pending => CommsStatus::Pending,
@@ -250,7 +258,6 @@ fn channel_from_str(s: &str) -> tranquil_db_traits::CommsChannel {
     }
 }
 
-
 pub mod repo {
     use super::*;
     use tranquil_db_traits::DbError;
@@ -261,7 +268,10 @@ pub mod repo {
         user_id: Uuid,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let body = format_message(
             strings.welcome_body,
@@ -269,15 +279,17 @@ pub mod repo {
         );
         let subject = format_message(strings.welcome_subject, &[("hostname", hostname)]);
         let channel = channel_from_str(&prefs.preferred_channel);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            channel,
-            CommsType::Welcome,
-            &prefs.email.unwrap_or_default(),
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                channel,
+                CommsType::Welcome,
+                &prefs.email.unwrap_or_default(),
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_password_reset(
@@ -287,7 +299,10 @@ pub mod repo {
         code: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let body = format_message(
             strings.password_reset_body,
@@ -295,15 +310,17 @@ pub mod repo {
         );
         let subject = format_message(strings.password_reset_subject, &[("hostname", hostname)]);
         let channel = channel_from_str(&prefs.preferred_channel);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            channel,
-            CommsType::PasswordReset,
-            &prefs.email.unwrap_or_default(),
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                channel,
+                CommsType::PasswordReset,
+                &prefs.email.unwrap_or_default(),
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_email_update(
@@ -332,15 +349,17 @@ pub mod repo {
             ],
         );
         let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            tranquil_db_traits::CommsChannel::Email,
-            CommsType::EmailUpdate,
-            new_email,
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                tranquil_db_traits::CommsChannel::Email,
+                CommsType::EmailUpdate,
+                new_email,
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_email_update_token(
@@ -350,7 +369,10 @@ pub mod repo {
         code: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let current_email = prefs.email.unwrap_or_default();
         let verify_page = format!("https://{}/app/verify?type=email-update", hostname);
@@ -369,15 +391,17 @@ pub mod repo {
             ],
         );
         let subject = format_message(strings.email_update_subject, &[("hostname", hostname)]);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            tranquil_db_traits::CommsChannel::Email,
-            CommsType::EmailUpdate,
-            &current_email,
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                tranquil_db_traits::CommsChannel::Email,
+                CommsType::EmailUpdate,
+                &current_email,
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_account_deletion(
@@ -387,7 +411,10 @@ pub mod repo {
         code: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let body = format_message(
             strings.account_deletion_body,
@@ -395,15 +422,17 @@ pub mod repo {
         );
         let subject = format_message(strings.account_deletion_subject, &[("hostname", hostname)]);
         let channel = channel_from_str(&prefs.preferred_channel);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            channel,
-            CommsType::AccountDeletion,
-            &prefs.email.unwrap_or_default(),
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                channel,
+                CommsType::AccountDeletion,
+                &prefs.email.unwrap_or_default(),
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_plc_operation(
@@ -413,7 +442,10 @@ pub mod repo {
         token: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let body = format_message(
             strings.plc_operation_body,
@@ -421,15 +453,17 @@ pub mod repo {
         );
         let subject = format_message(strings.plc_operation_subject, &[("hostname", hostname)]);
         let channel = channel_from_str(&prefs.preferred_channel);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            channel,
-            CommsType::PlcOperation,
-            &prefs.email.unwrap_or_default(),
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                channel,
+                CommsType::PlcOperation,
+                &prefs.email.unwrap_or_default(),
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_passkey_recovery(
@@ -439,7 +473,10 @@ pub mod repo {
         recovery_url: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let body = format_message(
             strings.passkey_recovery_body,
@@ -447,15 +484,17 @@ pub mod repo {
         );
         let subject = format_message(strings.passkey_recovery_subject, &[("hostname", hostname)]);
         let channel = channel_from_str(&prefs.preferred_channel);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            channel,
-            CommsType::PasskeyRecovery,
-            &prefs.email.unwrap_or_default(),
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                channel,
+                CommsType::PasskeyRecovery,
+                &prefs.email.unwrap_or_default(),
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_migration_verification(
@@ -466,7 +505,10 @@ pub mod repo {
         token: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let encoded_email = urlencoding::encode(email);
         let encoded_token = urlencoding::encode(token);
@@ -488,15 +530,17 @@ pub mod repo {
             strings.migration_verification_subject,
             &[("hostname", hostname)],
         );
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            tranquil_db_traits::CommsChannel::Email,
-            CommsType::MigrationVerification,
-            email,
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                tranquil_db_traits::CommsChannel::Email,
+                CommsType::MigrationVerification,
+                email,
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_signup_verification(
@@ -539,15 +583,17 @@ pub mod repo {
             )),
             _ => None,
         };
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            comms_channel,
-            CommsType::EmailVerification,
-            recipient,
-            subject.as_deref(),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                comms_channel,
+                CommsType::EmailVerification,
+                recipient,
+                subject.as_deref(),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_2fa_code(
@@ -557,7 +603,10 @@ pub mod repo {
         code: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let body = format_message(
             strings.two_factor_code_body,
@@ -565,15 +614,17 @@ pub mod repo {
         );
         let subject = format_message(strings.two_factor_code_subject, &[("hostname", hostname)]);
         let channel = channel_from_str(&prefs.preferred_channel);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            channel,
-            CommsType::TwoFactorCode,
-            &prefs.email.unwrap_or_default(),
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                channel,
+                CommsType::TwoFactorCode,
+                &prefs.email.unwrap_or_default(),
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 
     pub async fn enqueue_legacy_login(
@@ -584,7 +635,10 @@ pub mod repo {
         client_ip: &str,
         channel: tranquil_db_traits::CommsChannel,
     ) -> Result<Uuid, DbError> {
-        let prefs = user_repo.get_comms_prefs(user_id).await?.ok_or(DbError::NotFound)?;
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let timestamp = chrono::Utc::now()
             .format("%Y-%m-%d %H:%M:%S UTC")
@@ -599,14 +653,16 @@ pub mod repo {
             ],
         );
         let subject = format_message(strings.legacy_login_subject, &[("hostname", hostname)]);
-        infra_repo.enqueue_comms(
-            Some(user_id),
-            channel,
-            CommsType::LegacyLoginAlert,
-            &prefs.email.unwrap_or_default(),
-            Some(&subject),
-            &body,
-            None,
-        ).await
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                channel,
+                CommsType::LegacyLoginAlert,
+                &prefs.email.unwrap_or_default(),
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
     }
 }

@@ -2,7 +2,7 @@ mod common;
 use cid::Cid;
 use common::*;
 use ipld_core::ipld::Ipld;
-use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
 use k256::ecdsa::SigningKey;
 use reqwest::StatusCode;
@@ -91,7 +91,7 @@ fn create_did_document(
 
 fn create_signed_commit(did: &str, data_cid: &Cid, signing_key: &SigningKey) -> (Vec<u8>, Cid) {
     let rev = Tid::now(LimitedU32::MIN);
-    let did = jacquard::types::string::Did::new(did).expect("valid DID");
+    let did = jacquard_common::types::string::Did::new(did).expect("valid DID");
     let unsigned = Commit::new_unsigned(did, *data_cid, rev, None);
     let signed = unsigned.sign(signing_key).expect("signing failed");
     let signed_bytes = signed.to_cbor().expect("serialization failed");

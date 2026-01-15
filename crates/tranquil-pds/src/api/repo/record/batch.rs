@@ -378,19 +378,11 @@ pub async fn apply_writes(
         }
     }
 
-    let user_id: uuid::Uuid = match state
-        .user_repo
-        .get_id_by_did(&did)
-        .await
-    {
+    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&did).await {
         Ok(Some(id)) => id,
         _ => return ApiError::InternalError(Some("User not found".into())).into_response(),
     };
-    let root_cid_str = match state
-        .repo_repo
-        .get_repo_root_cid_by_user_id(user_id)
-        .await
-    {
+    let root_cid_str = match state.repo_repo.get_repo_root_cid_by_user_id(user_id).await {
         Ok(Some(cid_str)) => cid_str,
         _ => return ApiError::InternalError(Some("Repo root not found".into())).into_response(),
     };

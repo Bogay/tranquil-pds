@@ -422,7 +422,10 @@ mod tests {
             y: Some(y_b64),
         };
         let result = verify_es256(&jwk, b"test", &[0u8; 64]);
-        assert!(result.is_err(), "Invalid coordinates should return error, not panic");
+        assert!(
+            result.is_err(),
+            "Invalid coordinates should return error, not panic"
+        );
     }
 
     #[test]

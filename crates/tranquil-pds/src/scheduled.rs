@@ -76,7 +76,11 @@ pub async fn backfill_genesis_commit_blocks(
             (s + 1, f)
         }
         Err((seq, reason)) => {
-            warn!(seq = seq, reason = reason, "Failed to process genesis commit");
+            warn!(
+                seq = seq,
+                reason = reason,
+                "Failed to process genesis commit"
+            );
             (s, f + 1)
         }
     });
@@ -94,12 +98,7 @@ async fn process_repo_rev(
     repo_root_cid: String,
 ) -> Result<uuid::Uuid, uuid::Uuid> {
     let cid = Cid::from_str(&repo_root_cid).map_err(|_| user_id)?;
-    let block = block_store
-        .get(&cid)
-        .await
-        .ok()
-        .flatten()
-        .ok_or(user_id)?;
+    let block = block_store.get(&cid).await.ok().flatten().ok_or(user_id)?;
     let commit = Commit::from_cbor(&block).map_err(|_| user_id)?;
     let rev = commit.rev().to_string();
     repo_repo
@@ -135,8 +134,13 @@ pub async fn backfill_repo_rev(
         let repo_repo = repo_repo.clone();
         let block_store = block_store.clone();
         async move {
-            process_repo_rev(repo_repo.as_ref(), &block_store, repo.user_id, repo.repo_root_cid.to_string())
-                .await
+            process_repo_rev(
+                repo_repo.as_ref(),
+                &block_store,
+                repo.user_id,
+                repo.repo_root_cid.to_string(),
+            )
+            .await
         }
     }))
     .await;
@@ -304,8 +308,11 @@ async fn process_record_blobs(
                 blob_refs
                     .into_iter()
                     .map(|blob_ref| {
-                        let record_uri =
-                            AtUri::from_parts(did.as_str(), record.collection.as_str(), record.rkey.as_str());
+                        let record_uri = AtUri::from_parts(
+                            did.as_str(),
+                            record.collection.as_str(),
+                            record.rkey.as_str(),
+                        );
                         (record_uri, CidLink::new_unchecked(blob_ref.cid))
                     })
                     .collect::<Vec<_>>(),
@@ -335,7 +342,8 @@ pub async fn backfill_record_blobs(
     repo_repo: Arc<dyn RepoRepository>,
     block_store: PostgresBlockStore,
 ) {
-    let users_needing_backfill = match repo_repo.get_users_needing_record_blobs_backfill(100).await {
+    let users_needing_backfill = match repo_repo.get_users_needing_record_blobs_backfill(100).await
+    {
         Ok(rows) => rows,
         Err(e) => {
             error!("Failed to query users for record_blobs backfill: {:?}", e);
@@ -449,7 +457,9 @@ async fn process_scheduled_deletions(
     .into_iter()
     .for_each(|(did, handle, result)| match result {
         Ok(()) => info!(did = %did, handle = %handle, "Successfully deleted scheduled account"),
-        Err(e) => warn!(did = %did, handle = %handle, error = %e, "Failed to delete scheduled account"),
+        Err(e) => {
+            warn!(did = %did, handle = %handle, error = %e, "Failed to delete scheduled account")
+        }
     });
 
     Ok(())
@@ -545,6 +555,7 @@ enum BackupOutcome {
     Failed(String, String),
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_single_backup(
     repo_repo: &dyn RepoRepository,
     backup_repo: &dyn BackupRepository,
@@ -657,9 +668,13 @@ async fn process_scheduled_backups(
                     block_count = result.block_count,
                     "Created backup"
                 );
-                if let Err(e) =
-                    cleanup_old_backups(backup_repo, backup_storage, result.user_id, retention_count)
-                        .await
+                if let Err(e) = cleanup_old_backups(
+                    backup_repo,
+                    backup_storage,
+                    result.user_id,
+                    retention_count,
+                )
+                .await
                 {
                     warn!(did = %result.did, error = %e, "Failed to cleanup old backups");
                 }
@@ -810,7 +825,10 @@ async fn cleanup_old_backups(
         match backup_storage.delete_backup(&backup.storage_key).await {
             Ok(()) => match backup_repo.delete_backup(backup.id).await {
                 Ok(()) => Ok(()),
-                Err(e) => Err(format!("DB delete failed for {}: {:?}", backup.storage_key, e)),
+                Err(e) => Err(format!(
+                    "DB delete failed for {}: {:?}",
+                    backup.storage_key, e
+                )),
             },
             Err(e) => {
                 warn!(

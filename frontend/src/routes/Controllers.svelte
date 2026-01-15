@@ -55,6 +55,7 @@
   let addControllerDid = $state('')
   let addControllerScopes = $state('atproto')
   let addingController = $state(false)
+  let addControllerConfirmed = $state(false)
 
   let showCreateDelegated = $state(false)
   let newDelegatedHandle = $state('')
@@ -151,6 +152,7 @@
       toast.success($_('delegation.controllerAdded'))
       addControllerDid = ''
       addControllerScopes = 'atproto'
+      addControllerConfirmed = false
       showAddController = false
       await loadControllers()
     } catch (e) {
@@ -295,6 +297,24 @@
       {:else if showAddController}
         <div class="form-card">
           <h3>{$_('delegation.addController')}</h3>
+
+          <div class="warning-box">
+            <div class="warning-header">
+              <svg class="warning-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              <span>{$_('delegation.addControllerWarningTitle')}</span>
+            </div>
+            <p class="warning-text">{$_('delegation.addControllerWarningText')}</p>
+            <ul class="warning-bullets">
+              <li>{$_('delegation.addControllerWarningBullet1')}</li>
+              <li>{$_('delegation.addControllerWarningBullet2')}</li>
+              <li>{$_('delegation.addControllerWarningBullet3')}</li>
+            </ul>
+          </div>
+
           <div class="field">
             <label for="controllerDid">{$_('delegation.controllerDid')}</label>
             <input
@@ -313,11 +333,15 @@
               {/each}
             </select>
           </div>
+          <label class="confirm-checkbox">
+            <input type="checkbox" bind:checked={addControllerConfirmed} disabled={addingController} />
+            <span>{$_('delegation.addControllerConfirm')}</span>
+          </label>
           <div class="form-actions">
-            <button class="ghost" onclick={() => showAddController = false} disabled={addingController}>
+            <button class="ghost" onclick={() => { showAddController = false; addControllerConfirmed = false }} disabled={addingController}>
               {$_('common.cancel')}
             </button>
-            <button onclick={addController} disabled={addingController || !addControllerDid.trim()}>
+            <button onclick={addController} disabled={addingController || !addControllerDid.trim() || !addControllerConfirmed}>
               {addingController ? $_('delegation.adding') : $_('delegation.addController')}
             </button>
           </div>
@@ -618,6 +642,79 @@
 
   .form-card h3 {
     margin: 0 0 var(--space-4) 0;
+  }
+
+  .warning-box {
+    background: var(--warning-bg, #fef3c7);
+    border: 1px solid var(--warning-border, #f59e0b);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    margin-bottom: var(--space-5);
+  }
+
+  .warning-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: var(--font-semibold);
+    color: var(--warning-text, #92400e);
+    margin-bottom: var(--space-2);
+  }
+
+  .warning-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    stroke: var(--warning-text, #92400e);
+  }
+
+  .warning-text {
+    margin: 0 0 var(--space-3) 0;
+    color: var(--warning-text, #92400e);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+
+  .warning-bullets {
+    margin: 0;
+    padding-left: var(--space-5);
+    color: var(--warning-text, #92400e);
+    font-size: var(--text-sm);
+    line-height: 1.6;
+  }
+
+  .warning-bullets li {
+    margin-bottom: var(--space-1);
+  }
+
+  .warning-bullets li:last-child {
+    margin-bottom: 0;
+  }
+
+  .confirm-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    cursor: pointer;
+    padding: var(--space-3);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-4);
+  }
+
+  .confirm-checkbox input {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .confirm-checkbox span {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--text-primary);
+    line-height: 1.4;
   }
 
   .field {

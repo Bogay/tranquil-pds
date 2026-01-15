@@ -125,14 +125,16 @@ pub async fn enable_totp(
         return ApiError::TotpAlreadyEnabled.into_response();
     }
 
-    let secret =
-        match decrypt_totp_secret(&totp_record.secret_encrypted, totp_record.encryption_version) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to decrypt TOTP secret: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let secret = match decrypt_totp_secret(
+        &totp_record.secret_encrypted,
+        totp_record.encryption_version,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to decrypt TOTP secret: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
@@ -175,7 +177,8 @@ pub async fn disable_totp(
     auth: BearerAuth,
     Json(input): Json<DisableTotpInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
+        .await
     {
         return crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
@@ -333,14 +336,16 @@ pub async fn regenerate_backup_codes(
         }
     };
 
-    let secret =
-        match decrypt_totp_secret(&totp_record.secret_encrypted, totp_record.encryption_version) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to decrypt TOTP secret: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let secret = match decrypt_totp_secret(
+        &totp_record.secret_encrypted,
+        totp_record.encryption_version,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to decrypt TOTP secret: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
@@ -372,7 +377,11 @@ pub async fn regenerate_backup_codes(
     Json(RegenerateBackupCodesResponse { backup_codes }).into_response()
 }
 
-async fn verify_backup_code_for_user(state: &AppState, did: &crate::types::Did, code: &str) -> bool {
+async fn verify_backup_code_for_user(
+    state: &AppState,
+    did: &crate::types::Did,
+    code: &str,
+) -> bool {
     let code = code.trim().to_uppercase();
 
     let backup_codes = match state.user_repo.get_unused_backup_codes(did).await {
@@ -396,7 +405,11 @@ async fn verify_backup_code_for_user(state: &AppState, did: &crate::types::Did, 
     }
 }
 
-pub async fn verify_totp_or_backup_for_user(state: &AppState, did: &crate::types::Did, code: &str) -> bool {
+pub async fn verify_totp_or_backup_for_user(
+    state: &AppState,
+    did: &crate::types::Did,
+    code: &str,
+) -> bool {
     let code = code.trim();
 
     if is_backup_code_format(code) {
@@ -408,11 +421,13 @@ pub async fn verify_totp_or_backup_for_user(state: &AppState, did: &crate::types
         _ => return false,
     };
 
-    let secret =
-        match decrypt_totp_secret(&totp_record.secret_encrypted, totp_record.encryption_version) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+    let secret = match decrypt_totp_secret(
+        &totp_record.secret_encrypted,
+        totp_record.encryption_version,
+    ) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
 
     if verify_totp_code(&secret, code) {
         let _ = state.user_repo.update_totp_last_used(did).await;
@@ -423,9 +438,5 @@ pub async fn verify_totp_or_backup_for_user(state: &AppState, did: &crate::types
 }
 
 pub async fn has_totp_enabled(state: &AppState, did: &crate::types::Did) -> bool {
-    state
-        .user_repo
-        .has_totp_enabled(did)
-        .await
-        .unwrap_or(false)
+    state.user_repo.has_totp_enabled(did).await.unwrap_or(false)
 }

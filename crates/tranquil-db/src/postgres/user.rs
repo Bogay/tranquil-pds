@@ -8,11 +8,12 @@ use tranquil_db_traits::{
     AccountSearchResult, CommsChannel, DbError, DidWebOverrides, NotificationPrefs,
     OAuthTokenWithUser, PasswordResetResult, StoredBackupCode, StoredPasskey, TotpRecord,
     User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo,
-    UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup,
-    UserForRecovery, UserForVerification, UserIdAndHandle, UserIdAndPasswordHash, UserIdHandleEmail,
-    UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref, UserLoginCheck, UserLoginFull,
-    UserLoginInfo, UserPasswordInfo, UserRepository, UserResendVerification, UserResetCodeInfo,
-    UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey,
+    UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
+    UserForPasskeySetup, UserForRecovery, UserForVerification, UserIdAndHandle,
+    UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId,
+    UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo, UserPasswordInfo,
+    UserRepository, UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo,
+    UserStatus, UserVerificationInfo, UserWithKey,
 };
 
 pub struct PostgresUserRepository {
@@ -344,14 +345,14 @@ impl UserRepository for PostgresUserRepository {
         }))
     }
 
-    async fn get_id_and_handle_by_did(&self, did: &Did) -> Result<Option<UserIdAndHandle>, DbError> {
-        let row = sqlx::query!(
-            "SELECT id, handle FROM users WHERE did = $1",
-            did.as_str()
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+    async fn get_id_and_handle_by_did(
+        &self,
+        did: &Did,
+    ) -> Result<Option<UserIdAndHandle>, DbError> {
+        let row = sqlx::query!("SELECT id, handle FROM users WHERE did = $1", did.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
         Ok(row.map(|r| UserIdAndHandle {
             id: r.id,
             handle: Handle::from(r.handle),
@@ -376,7 +377,10 @@ impl UserRepository for PostgresUserRepository {
         }))
     }
 
-    async fn get_did_web_overrides(&self, user_id: Uuid) -> Result<Option<DidWebOverrides>, DbError> {
+    async fn get_did_web_overrides(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<DidWebOverrides>, DbError> {
         let row = sqlx::query!(
             "SELECT verification_methods, also_known_as FROM did_web_overrides WHERE user_id = $1",
             user_id
@@ -398,7 +402,11 @@ impl UserRepository for PostgresUserRepository {
         Ok(handle.map(Handle::from))
     }
 
-    async fn check_handle_exists(&self, handle: &Handle, exclude_user_id: Uuid) -> Result<bool, DbError> {
+    async fn check_handle_exists(
+        &self,
+        handle: &Handle,
+        exclude_user_id: Uuid,
+    ) -> Result<bool, DbError> {
         let exists = sqlx::query_scalar!(
             "SELECT EXISTS(SELECT 1 FROM users WHERE handle = $1 AND id != $2) as \"exists!\"",
             handle.as_str(),
@@ -422,10 +430,7 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn get_user_with_key_by_did(
-        &self,
-        did: &Did,
-    ) -> Result<Option<UserKeyWithId>, DbError> {
+    async fn get_user_with_key_by_did(&self, did: &Did) -> Result<Option<UserKeyWithId>, DbError> {
         let row = sqlx::query!(
             r#"SELECT u.id, uk.key_bytes, uk.encryption_version
                FROM users u
@@ -469,7 +474,9 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
         Ok(row
-            .map(|r| r.email_verified || r.discord_verified || r.telegram_verified || r.signal_verified)
+            .map(|r| {
+                r.email_verified || r.discord_verified || r.telegram_verified || r.signal_verified
+            })
             .unwrap_or(false))
     }
 
@@ -497,7 +504,11 @@ impl UserRepository for PostgresUserRepository {
         }))
     }
 
-    async fn check_email_exists(&self, email: &str, exclude_user_id: Uuid) -> Result<bool, DbError> {
+    async fn check_email_exists(
+        &self,
+        email: &str,
+        exclude_user_id: Uuid,
+    ) -> Result<bool, DbError> {
         let row = sqlx::query!(
             "SELECT 1 as one FROM users WHERE LOWER(email) = $1 AND id != $2",
             email.to_lowercase(),
@@ -583,7 +594,10 @@ impl UserRepository for PostgresUserRepository {
         Ok(result.rows_affected())
     }
 
-    async fn get_notification_prefs(&self, did: &Did) -> Result<Option<NotificationPrefs>, DbError> {
+    async fn get_notification_prefs(
+        &self,
+        did: &Did,
+    ) -> Result<Option<NotificationPrefs>, DbError> {
         let row = sqlx::query!(
             r#"SELECT
                 email,
@@ -630,7 +644,11 @@ impl UserRepository for PostgresUserRepository {
         }))
     }
 
-    async fn update_preferred_comms_channel(&self, did: &Did, channel: &str) -> Result<(), DbError> {
+    async fn update_preferred_comms_channel(
+        &self,
+        did: &Did,
+        channel: &str,
+    ) -> Result<(), DbError> {
         sqlx::query(
             "UPDATE users SET preferred_comms_channel = $1::comms_channel, updated_at = NOW() WHERE did = $2",
         )
@@ -1349,10 +1367,7 @@ impl UserRepository for PostgresUserRepository {
         })
     }
 
-    async fn get_session_info_by_did(
-        &self,
-        did: &Did,
-    ) -> Result<Option<UserSessionInfo>, DbError> {
+    async fn get_session_info_by_did(&self, did: &Did) -> Result<Option<UserSessionInfo>, DbError> {
         sqlx::query!(
             r#"
             SELECT handle, email, email_verified, is_admin, deactivated_at, takedown_ref,
@@ -1647,7 +1662,11 @@ impl UserRepository for PostgresUserRepository {
         })
     }
 
-    async fn update_password_hash(&self, user_id: Uuid, password_hash: &str) -> Result<(), DbError> {
+    async fn update_password_hash(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE users SET password_hash = $1 WHERE id = $2",
             password_hash,
@@ -1769,7 +1788,11 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn set_new_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<(), DbError> {
+    async fn set_new_user_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE users SET password_hash = $1, password_required = TRUE WHERE id = $2",
             password_hash,
@@ -1854,10 +1877,13 @@ impl UserRepository for PostgresUserRepository {
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
-        sqlx::query!("DELETE FROM account_deletion_requests WHERE did = $1", did.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
+        sqlx::query!(
+            "DELETE FROM account_deletion_requests WHERE did = $1",
+            did.as_str()
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
         sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
             .execute(&mut *tx)
             .await
@@ -1866,7 +1892,11 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn set_user_takedown(&self, did: &Did, takedown_ref: Option<&str>) -> Result<bool, DbError> {
+    async fn set_user_takedown(
+        &self,
+        did: &Did,
+        takedown_ref: Option<&str>,
+    ) -> Result<bool, DbError> {
         let result = sqlx::query!(
             "UPDATE users SET takedown_ref = $1 WHERE did = $2",
             takedown_ref,
@@ -1949,7 +1979,10 @@ impl UserRepository for PostgresUserRepository {
         }))
     }
 
-    async fn get_user_for_did_doc_build(&self, did: &Did) -> Result<Option<UserForDidDocBuild>, DbError> {
+    async fn get_user_for_did_doc_build(
+        &self,
+        did: &Did,
+    ) -> Result<Option<UserForDidDocBuild>, DbError> {
         let row = sqlx::query!(
             "SELECT id, handle, migrated_to_pds FROM users WHERE did = $1",
             did.as_str()
@@ -2006,7 +2039,10 @@ impl UserRepository for PostgresUserRepository {
         Ok(())
     }
 
-    async fn get_user_for_passkey_setup(&self, did: &Did) -> Result<Option<UserForPasskeySetup>, DbError> {
+    async fn get_user_for_passkey_setup(
+        &self,
+        did: &Did,
+    ) -> Result<Option<UserForPasskeySetup>, DbError> {
         let row = sqlx::query!(
             r#"SELECT id, handle, recovery_token, recovery_token_expires_at, password_required
                FROM users WHERE did = $1"#,
@@ -2111,11 +2147,7 @@ impl UserRepository for PostgresUserRepository {
             .collect())
     }
 
-    async fn delete_account_with_firehose(
-        &self,
-        user_id: Uuid,
-        did: &Did,
-    ) -> Result<i64, DbError> {
+    async fn delete_account_with_firehose(&self, user_id: Uuid, did: &Did) -> Result<i64, DbError> {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
 
         sqlx::query!("DELETE FROM blobs WHERE created_by_user = $1", user_id)
@@ -2173,20 +2205,26 @@ impl UserRepository for PostgresUserRepository {
             .await
             .map_err(map_sqlx_error)?;
 
-        sqlx::query!("DELETE FROM webauthn_challenges WHERE did = $1", did.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
+        sqlx::query!(
+            "DELETE FROM webauthn_challenges WHERE did = $1",
+            did.as_str()
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
 
         sqlx::query!("DELETE FROM account_backups WHERE user_id = $1", user_id)
             .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
 
-        sqlx::query!("DELETE FROM account_deletion_requests WHERE did = $1", did.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_error)?;
+        sqlx::query!(
+            "DELETE FROM account_deletion_requests WHERE did = $1",
+            did.as_str()
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
 
         sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
             .execute(&mut *tx)
@@ -2231,11 +2269,9 @@ impl UserRepository for PostgresUserRepository {
         tranquil_db_traits::CreatePasswordAccountResult,
         tranquil_db_traits::CreateAccountError,
     > {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         let is_first_user: bool = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
             .fetch_one(&mut *tx)
@@ -2279,7 +2315,9 @@ impl UserRepository for PostgresUserRepository {
                         return Err(tranquil_db_traits::CreateAccountError::DidExists);
                     }
                 }
-                return Err(tranquil_db_traits::CreateAccountError::Database(e.to_string()));
+                return Err(tranquil_db_traits::CreateAccountError::Database(
+                    e.to_string(),
+                ));
             }
         };
 
@@ -2300,7 +2338,9 @@ impl UserRepository for PostgresUserRepository {
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+            .map_err(|e: sqlx::Error| {
+                tranquil_db_traits::CreateAccountError::Database(e.to_string())
+            })?;
         }
 
         sqlx::query!(
@@ -2311,7 +2351,9 @@ impl UserRepository for PostgresUserRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         sqlx::query(
             r#"
@@ -2325,7 +2367,9 @@ impl UserRepository for PostgresUserRepository {
         .bind(&input.repo_rev)
         .execute(&mut *tx)
         .await
-        .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         if let Some(code) = &input.invite_code {
             let _ = sqlx::query!(
@@ -2356,9 +2400,9 @@ impl UserRepository for PostgresUserRepository {
             .await;
         }
 
-        tx.commit()
-            .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        tx.commit().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         Ok(tranquil_db_traits::CreatePasswordAccountResult {
             user_id,
@@ -2370,11 +2414,9 @@ impl UserRepository for PostgresUserRepository {
         &self,
         input: &tranquil_db_traits::CreateDelegatedAccountInput,
     ) -> Result<uuid::Uuid, tranquil_db_traits::CreateAccountError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
             r#"INSERT INTO users (
@@ -2401,7 +2443,9 @@ impl UserRepository for PostgresUserRepository {
                         return Err(tranquil_db_traits::CreateAccountError::EmailTaken);
                     }
                 }
-                return Err(tranquil_db_traits::CreateAccountError::Database(e.to_string()));
+                return Err(tranquil_db_traits::CreateAccountError::Database(
+                    e.to_string(),
+                ));
             }
         };
 
@@ -2435,7 +2479,9 @@ impl UserRepository for PostgresUserRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         sqlx::query(
             r#"
@@ -2449,7 +2495,9 @@ impl UserRepository for PostgresUserRepository {
         .bind(&input.repo_rev)
         .execute(&mut *tx)
         .await
-        .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         if let Some(code) = &input.invite_code {
             let _ = sqlx::query!(
@@ -2468,9 +2516,9 @@ impl UserRepository for PostgresUserRepository {
             .await;
         }
 
-        tx.commit()
-            .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        tx.commit().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         Ok(user_id)
     }
@@ -2482,11 +2530,9 @@ impl UserRepository for PostgresUserRepository {
         tranquil_db_traits::CreatePasswordAccountResult,
         tranquil_db_traits::CreateAccountError,
     > {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         let is_first_user: bool = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
             .fetch_one(&mut *tx)
@@ -2530,7 +2576,9 @@ impl UserRepository for PostgresUserRepository {
                         return Err(tranquil_db_traits::CreateAccountError::EmailTaken);
                     }
                 }
-                return Err(tranquil_db_traits::CreateAccountError::Database(e.to_string()));
+                return Err(tranquil_db_traits::CreateAccountError::Database(
+                    e.to_string(),
+                ));
             }
         };
 
@@ -2551,7 +2599,9 @@ impl UserRepository for PostgresUserRepository {
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+            .map_err(|e: sqlx::Error| {
+                tranquil_db_traits::CreateAccountError::Database(e.to_string())
+            })?;
         }
 
         sqlx::query!(
@@ -2562,7 +2612,9 @@ impl UserRepository for PostgresUserRepository {
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         sqlx::query(
             r#"
@@ -2576,7 +2628,9 @@ impl UserRepository for PostgresUserRepository {
         .bind(&input.repo_rev)
         .execute(&mut *tx)
         .await
-        .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         if let Some(code) = &input.invite_code {
             let _ = sqlx::query!(
@@ -2607,9 +2661,9 @@ impl UserRepository for PostgresUserRepository {
             .await;
         }
 
-        tx.commit()
-            .await
-            .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+        tx.commit().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
 
         Ok(tranquil_db_traits::CreatePasswordAccountResult {
             user_id,
@@ -2624,23 +2678,22 @@ impl UserRepository for PostgresUserRepository {
         tranquil_db_traits::ReactivatedAccountInfo,
         tranquil_db_traits::MigrationReactivationError,
     > {
-        let mut tx = self
-            .pool
-            .begin()
+        let mut tx =
+            self.pool.begin().await.map_err(|e| {
+                tranquil_db_traits::MigrationReactivationError::Database(e.to_string())
+            })?;
+
+        let existing: Option<(uuid::Uuid, String, Option<chrono::DateTime<chrono::Utc>>)> =
+            sqlx::query_as(
+                "SELECT id, handle, deactivated_at FROM users WHERE did = $1 FOR UPDATE",
+            )
+            .bind(input.did.as_str())
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|e| tranquil_db_traits::MigrationReactivationError::Database(e.to_string()))?;
 
-        let existing: Option<(uuid::Uuid, String, Option<chrono::DateTime<chrono::Utc>>)> =
-            sqlx::query_as("SELECT id, handle, deactivated_at FROM users WHERE did = $1 FOR UPDATE")
-                .bind(input.did.as_str())
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|e| {
-                    tranquil_db_traits::MigrationReactivationError::Database(e.to_string())
-                })?;
-
-        let (account_id, old_handle, deactivated_at) = existing
-            .ok_or(tranquil_db_traits::MigrationReactivationError::NotFound)?;
+        let (account_id, old_handle, deactivated_at) =
+            existing.ok_or(tranquil_db_traits::MigrationReactivationError::NotFound)?;
 
         if deactivated_at.is_none() {
             return Err(tranquil_db_traits::MigrationReactivationError::NotDeactivated);
@@ -2677,7 +2730,10 @@ impl UserRepository for PostgresUserRepository {
         })
     }
 
-    async fn check_handle_available_for_new_account(&self, handle: &Handle) -> Result<bool, DbError> {
+    async fn check_handle_available_for_new_account(
+        &self,
+        handle: &Handle,
+    ) -> Result<bool, DbError> {
         let exists: Option<(i32,)> =
             sqlx::query_as("SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL")
                 .bind(handle.as_str())

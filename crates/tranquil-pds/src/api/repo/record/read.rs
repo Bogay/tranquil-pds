@@ -65,11 +65,7 @@ pub async fn get_record(
             Ok(d) => d,
             Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
         };
-        state
-            .user_repo
-            .get_id_by_did(&did)
-            .await
-            .map_err(|_| ())
+        state.user_repo.get_id_by_did(&did).await.map_err(|_| ())
     } else {
         let repo_str = input.repo.as_str();
         let handle_str = if !repo_str.contains('.') {
@@ -79,7 +75,9 @@ pub async fn get_record(
         };
         let handle: crate::types::Handle = match handle_str.parse() {
             Ok(h) => h,
-            Err(_) => return ApiError::InvalidRequest("Invalid handle format".into()).into_response(),
+            Err(_) => {
+                return ApiError::InvalidRequest("Invalid handle format".into()).into_response();
+            }
         };
         state
             .user_repo
@@ -166,11 +164,7 @@ pub async fn list_records(
             Ok(d) => d,
             Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
         };
-        state
-            .user_repo
-            .get_id_by_did(&did)
-            .await
-            .map_err(|_| ())
+        state.user_repo.get_id_by_did(&did).await.map_err(|_| ())
     } else {
         let repo_str = input.repo.as_str();
         let handle_str = if !repo_str.contains('.') {
@@ -180,7 +174,9 @@ pub async fn list_records(
         };
         let handle: crate::types::Handle = match handle_str.parse() {
             Ok(h) => h,
-            Err(_) => return ApiError::InvalidRequest("Invalid handle format".into()).into_response(),
+            Err(_) => {
+                return ApiError::InvalidRequest("Invalid handle format".into()).into_response();
+            }
         };
         state
             .user_repo
@@ -200,7 +196,10 @@ pub async fn list_records(
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
     let reverse = input.reverse.unwrap_or(false);
     let limit_i64 = limit as i64;
-    let cursor_rkey = input.cursor.as_ref().and_then(|c| c.parse::<crate::types::Rkey>().ok());
+    let cursor_rkey = input
+        .cursor
+        .as_ref()
+        .and_then(|c| c.parse::<crate::types::Rkey>().ok());
     let rows = match state
         .repo_repo
         .list_records(

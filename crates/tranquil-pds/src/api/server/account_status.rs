@@ -110,13 +110,18 @@ pub async fn check_account_status(
         String::new()
     };
     let record_count: i64 = state.repo_repo.count_records(user_id).await.unwrap_or(0);
-    let imported_blobs: i64 = state.blob_repo.count_blobs_by_user(user_id).await.unwrap_or(0);
+    let imported_blobs: i64 = state
+        .blob_repo
+        .count_blobs_by_user(user_id)
+        .await
+        .unwrap_or(0);
     let expected_blobs: i64 = state
         .blob_repo
         .count_distinct_record_blobs(user_id)
         .await
         .unwrap_or(0);
-    let valid_did = is_valid_did_for_service(state.user_repo.as_ref(), state.cache.clone(), &did).await;
+    let valid_did =
+        is_valid_did_for_service(state.user_repo.as_ref(), state.cache.clone(), &did).await;
     (
         StatusCode::OK,
         Json(CheckAccountStatusOutput {
@@ -134,7 +139,11 @@ pub async fn check_account_status(
         .into_response()
 }
 
-async fn is_valid_did_for_service(user_repo: &dyn tranquil_db_traits::UserRepository, cache: Arc<dyn Cache>, did: &crate::types::Did) -> bool {
+async fn is_valid_did_for_service(
+    user_repo: &dyn tranquil_db_traits::UserRepository,
+    cache: Arc<dyn Cache>,
+    did: &crate::types::Did,
+) -> bool {
     assert_valid_did_document_for_service(user_repo, cache, did, false)
         .await
         .is_ok()
@@ -235,20 +244,18 @@ async fn assert_valid_did_document_for_service(
             .and_then(|v| v.get("atproto"))
             .and_then(|k| k.as_str());
 
-        let user_key = user_repo
-            .get_user_key_by_did(&did)
-            .await
-            .map_err(|e| {
-                error!("Failed to fetch user key: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+        let user_key = user_repo.get_user_key_by_did(did).await.map_err(|e| {
+            error!("Failed to fetch user key: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
         if let Some(key_info) = user_key {
-            let key_bytes = crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version)
-                .map_err(|e| {
-                    error!("Failed to decrypt user key: {}", e);
-                    ApiError::InternalError(None)
-                })?;
+            let key_bytes =
+                crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version)
+                    .map_err(|e| {
+                        error!("Failed to decrypt user key: {}", e);
+                        ApiError::InternalError(None)
+                    })?;
             let signing_key = SigningKey::from_slice(&key_bytes).map_err(|e| {
                 error!("Failed to create signing key: {:?}", e);
                 ApiError::InternalError(None)
@@ -382,9 +389,13 @@ pub async fn activate_account(
         did
     );
     let did_validation_start = std::time::Instant::now();
-    if let Err(e) =
-        assert_valid_did_document_for_service(state.user_repo.as_ref(), state.cache.clone(), &did, true)
-            .await
+    if let Err(e) = assert_valid_did_document_for_service(
+        state.user_repo.as_ref(),
+        state.cache.clone(),
+        &did,
+        true,
+    )
+    .await
     {
         info!(
             "[MIGRATION] activateAccount: DID document validation FAILED for {} (took {:?})",
@@ -399,12 +410,7 @@ pub async fn activate_account(
         did_validation_start.elapsed()
     );
 
-    let handle = state
-        .user_repo
-        .get_handle_by_did(&did)
-        .await
-        .ok()
-        .flatten();
+    let handle = state.user_repo.get_handle_by_did(&did).await.ok().flatten();
     info!(
         "[MIGRATION] activateAccount: Activating account did={} handle={:?}",
         did, handle
@@ -562,17 +568,9 @@ pub async fn deactivate_account(
 
     let did = auth_user.did;
 
-    let handle = state
-        .user_repo
-        .get_handle_by_did(&did)
-        .await
-        .ok()
-        .flatten();
+    let handle = state.user_repo.get_handle_by_did(&did).await.ok().flatten();
 
-    let result = state
-        .user_repo
-        .deactivate_account(&did, delete_after)
-        .await;
+    let result = state.user_repo.deactivate_account(&did, delete_after).await;
 
     match result {
         Ok(true) => {
@@ -591,9 +589,7 @@ pub async fn deactivate_account(
             }
             EmptyResponse::ok().into_response()
         }
-        Ok(false) => {
-            EmptyResponse::ok().into_response()
-        }
+        Ok(false) => EmptyResponse::ok().into_response(),
         Err(e) => {
             error!("DB error deactivating account: {:?}", e);
             ApiError::InternalError(None).into_response()
@@ -635,8 +631,12 @@ pub async fn request_account_delete(
     let did = validated.did.clone();
 
     if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &did)
-            .await;
+        return crate::api::server::reauth::legacy_mfa_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &did,
+        )
+        .await;
     }
 
     let user_id = match state.user_repo.get_id_by_did(&did).await {
@@ -742,28 +742,15 @@ pub async fn delete_account(
         let _ = state.infra_repo.delete_deletion_request(token).await;
         return ApiError::ExpiredToken(None).into_response();
     }
-    if let Err(e) = state
-        .user_repo
-        .delete_account_complete(user_id, did)
-        .await
-    {
+    if let Err(e) = state.user_repo.delete_account_complete(user_id, did).await {
         error!("DB error deleting account: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
-    let account_seq = crate::api::repo::record::sequence_account_event(
-        &state,
-        did,
-        false,
-        Some("deleted"),
-    )
-    .await;
+    let account_seq =
+        crate::api::repo::record::sequence_account_event(&state, did, false, Some("deleted")).await;
     match account_seq {
         Ok(seq) => {
-            if let Err(e) = state
-                .repo_repo
-                .delete_sequences_except(did, seq)
-                .await
-            {
+            if let Err(e) = state.repo_repo.delete_sequences_except(did, seq).await {
                 warn!(
                     "Failed to cleanup sequences for deleted account {}: {}",
                     did, e

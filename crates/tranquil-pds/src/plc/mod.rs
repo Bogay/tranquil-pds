@@ -526,11 +526,9 @@ pub fn verify_operation_signature(op: &Value, rotation_keys: &[String]) -> Resul
     }
     let cbor_bytes = serde_ipld_dagcbor::to_vec(&unsigned_op)
         .map_err(|e| PlcError::Serialization(e.to_string()))?;
-    let verified = rotation_keys
-        .iter()
-        .any(|key_did| {
-            verify_signature_with_did_key(key_did, &cbor_bytes, &signature).unwrap_or(false)
-        });
+    let verified = rotation_keys.iter().any(|key_did| {
+        verify_signature_with_did_key(key_did, &cbor_bytes, &signature).unwrap_or(false)
+    });
     Ok(verified)
 }
 

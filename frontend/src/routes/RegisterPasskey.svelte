@@ -4,6 +4,7 @@
   import { _ } from '../lib/i18n'
   import {
     createRegistrationFlow,
+    restoreRegistrationFlow,
     VerificationStep,
     KeyChoiceStep,
     DidDocStep,
@@ -12,7 +13,7 @@
   import {
     prepareCreationOptions,
     serializeAttestationResponse,
-    type PublicKeyCredentialCreationOptionsJSON,
+    type WebAuthnCreationOptionsResponse,
   } from '../lib/webauthn'
   import AccountTypeSwitcher from '../components/AccountTypeSwitcher.svelte'
 
@@ -51,9 +52,15 @@
 
   async function loadServerInfo() {
     try {
-      serverInfo = await api.describeServer()
-      const hostname = serverInfo?.availableUserDomains?.[0] || window.location.hostname
-      flow = createRegistrationFlow('passkey', hostname)
+      const restored = restoreRegistrationFlow()
+      if (restored && restored.state.mode === 'passkey') {
+        flow = restored
+        serverInfo = await api.describeServer()
+      } else {
+        serverInfo = await api.describeServer()
+        const hostname = serverInfo?.availableUserDomains?.[0] || window.location.hostname
+        flow = createRegistrationFlow('passkey', hostname)
+      }
     } catch (e) {
       console.error('Failed to load server info:', e)
     } finally {
@@ -127,7 +134,7 @@
         passkeyName || undefined
       )
 
-      const publicKeyOptions = prepareCreationOptions({ publicKey: options as unknown as PublicKeyCredentialCreationOptionsJSON })
+      const publicKeyOptions = prepareCreationOptions(options as unknown as WebAuthnCreationOptionsResponse)
       const credential = await navigator.credentials.create({
         publicKey: publicKeyOptions
       })

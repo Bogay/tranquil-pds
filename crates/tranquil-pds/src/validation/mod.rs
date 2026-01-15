@@ -91,18 +91,18 @@ impl RecordValidator {
             validate_datetime(created_at, "createdAt")?;
         }
         match record_type {
-            "app.bsky.feed.post" => self.validate_post(obj)?,
-            "app.bsky.actor.profile" => self.validate_profile(obj)?,
-            "app.bsky.feed.like" => self.validate_like(obj)?,
-            "app.bsky.feed.repost" => self.validate_repost(obj)?,
-            "app.bsky.graph.follow" => self.validate_follow(obj)?,
-            "app.bsky.graph.block" => self.validate_block(obj)?,
-            "app.bsky.graph.list" => self.validate_list(obj)?,
-            "app.bsky.graph.listitem" => self.validate_list_item(obj)?,
-            "app.bsky.feed.generator" => self.validate_feed_generator(obj, rkey)?,
-            "app.bsky.feed.threadgate" => self.validate_threadgate(obj)?,
-            "app.bsky.labeler.service" => self.validate_labeler_service(obj)?,
-            "app.bsky.graph.starterpack" => self.validate_starterpack(obj)?,
+            "app.bsky.feed.post" => Self::validate_post(obj)?,
+            "app.bsky.actor.profile" => Self::validate_profile(obj)?,
+            "app.bsky.feed.like" => Self::validate_like(obj)?,
+            "app.bsky.feed.repost" => Self::validate_repost(obj)?,
+            "app.bsky.graph.follow" => Self::validate_follow(obj)?,
+            "app.bsky.graph.block" => Self::validate_block(obj)?,
+            "app.bsky.graph.list" => Self::validate_list(obj)?,
+            "app.bsky.graph.listitem" => Self::validate_list_item(obj)?,
+            "app.bsky.feed.generator" => Self::validate_feed_generator(obj, rkey)?,
+            "app.bsky.feed.threadgate" => Self::validate_threadgate(obj)?,
+            "app.bsky.labeler.service" => Self::validate_labeler_service(obj)?,
+            "app.bsky.graph.starterpack" => Self::validate_starterpack(obj)?,
             _ => {
                 if self.require_lexicon {
                     return Err(ValidationError::UnknownType(record_type.to_string()));
@@ -113,7 +113,7 @@ impl RecordValidator {
         Ok(ValidationStatus::Valid)
     }
 
-    fn validate_post(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_post(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("text") {
             return Err(ValidationError::MissingField("text".to_string()));
         }
@@ -186,10 +186,7 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_profile(
-        &self,
-        obj: &serde_json::Map<String, Value>,
-    ) -> Result<(), ValidationError> {
+    fn validate_profile(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if let Some(display_name) = obj.get("displayName").and_then(|v| v.as_str()) {
             let grapheme_count = display_name.chars().count();
             if grapheme_count > 640 {
@@ -227,47 +224,29 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_like(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_like(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
         }
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        self.validate_strong_ref(obj.get("subject"), "subject")?;
+        Self::validate_strong_ref(obj.get("subject"), "subject")?;
         Ok(())
     }
 
-    fn validate_repost(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_repost(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
         }
         if !obj.contains_key("createdAt") {
             return Err(ValidationError::MissingField("createdAt".to_string()));
         }
-        self.validate_strong_ref(obj.get("subject"), "subject")?;
+        Self::validate_strong_ref(obj.get("subject"), "subject")?;
         Ok(())
     }
 
-    fn validate_follow(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
-        if !obj.contains_key("subject") {
-            return Err(ValidationError::MissingField("subject".to_string()));
-        }
-        if !obj.contains_key("createdAt") {
-            return Err(ValidationError::MissingField("createdAt".to_string()));
-        }
-        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
-            && !subject.starts_with("did:")
-        {
-            return Err(ValidationError::InvalidField {
-                path: "subject".to_string(),
-                message: "Subject must be a DID".to_string(),
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_block(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_follow(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
         }
@@ -285,7 +264,25 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_list(&self, obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+    fn validate_block(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
+        if !obj.contains_key("subject") {
+            return Err(ValidationError::MissingField("subject".to_string()));
+        }
+        if !obj.contains_key("createdAt") {
+            return Err(ValidationError::MissingField("createdAt".to_string()));
+        }
+        if let Some(subject) = obj.get("subject").and_then(|v| v.as_str())
+            && !subject.starts_with("did:")
+        {
+            return Err(ValidationError::InvalidField {
+                path: "subject".to_string(),
+                message: "Subject must be a DID".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_list(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("name") {
             return Err(ValidationError::MissingField("name".to_string()));
         }
@@ -311,10 +308,7 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_list_item(
-        &self,
-        obj: &serde_json::Map<String, Value>,
-    ) -> Result<(), ValidationError> {
+    fn validate_list_item(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("subject") {
             return Err(ValidationError::MissingField("subject".to_string()));
         }
@@ -328,7 +322,6 @@ impl RecordValidator {
     }
 
     fn validate_feed_generator(
-        &self,
         obj: &serde_json::Map<String, Value>,
         rkey: Option<&str>,
     ) -> Result<(), ValidationError> {
@@ -364,10 +357,7 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_starterpack(
-        &self,
-        obj: &serde_json::Map<String, Value>,
-    ) -> Result<(), ValidationError> {
+    fn validate_starterpack(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("name") {
             return Err(ValidationError::MissingField("name".to_string()));
         }
@@ -403,10 +393,7 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_threadgate(
-        &self,
-        obj: &serde_json::Map<String, Value>,
-    ) -> Result<(), ValidationError> {
+    fn validate_threadgate(obj: &serde_json::Map<String, Value>) -> Result<(), ValidationError> {
         if !obj.contains_key("post") {
             return Err(ValidationError::MissingField("post".to_string()));
         }
@@ -417,7 +404,6 @@ impl RecordValidator {
     }
 
     fn validate_labeler_service(
-        &self,
         obj: &serde_json::Map<String, Value>,
     ) -> Result<(), ValidationError> {
         if !obj.contains_key("policies") {
@@ -429,11 +415,7 @@ impl RecordValidator {
         Ok(())
     }
 
-    fn validate_strong_ref(
-        &self,
-        value: Option<&Value>,
-        path: &str,
-    ) -> Result<(), ValidationError> {
+    fn validate_strong_ref(value: Option<&Value>, path: &str) -> Result<(), ValidationError> {
         let obj =
             value
                 .and_then(|v| v.as_object())

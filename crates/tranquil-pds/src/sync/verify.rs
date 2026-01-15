@@ -1,8 +1,8 @@
 use bytes::Bytes;
 use cid::Cid;
-use jacquard::common::IntoStatic;
-use jacquard::common::types::crypto::PublicKey;
-use jacquard::common::types::did_doc::DidDocument;
+use jacquard_common::IntoStatic;
+use jacquard_common::types::crypto::PublicKey;
+use jacquard_common::types::did_doc::DidDocument;
 use jacquard_repo::commit::Commit;
 use reqwest::Client;
 use std::collections::HashMap;

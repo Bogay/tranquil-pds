@@ -45,10 +45,6 @@ pub fn intersect_scopes(requested: &str, granted: &str) -> String {
     let granted_has_atproto = granted_set.contains("atproto");
     let requested_has_atproto = requested_set.contains("atproto");
 
-    if granted_has_atproto && requested_has_atproto {
-        return "atproto".to_string();
-    }
-
     if granted_has_atproto {
         return requested_set.into_iter().collect::<Vec<_>>().join(" ");
     }
@@ -116,16 +112,14 @@ pub fn validate_delegation_scopes(scopes: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    scopes
-        .split_whitespace()
-        .try_for_each(|scope| {
-            let (base, _) = split_scope(scope);
-            if is_valid_scope_prefix(base) {
-                Ok(())
-            } else {
-                Err(format!("Invalid scope: {}", scope))
-            }
-        })
+    scopes.split_whitespace().try_for_each(|scope| {
+        let (base, _) = split_scope(scope);
+        if is_valid_scope_prefix(base) {
+            Ok(())
+        } else {
+            Err(format!("Invalid scope: {}", scope))
+        }
+    })
 }
 
 fn is_valid_scope_prefix(base: &str) -> bool {

@@ -147,22 +147,19 @@ impl RepoRepository for PostgresRepoRepository {
     }
 
     async fn count_repos(&self) -> Result<i64, DbError> {
-        let count =
-            sqlx::query_scalar!(r#"SELECT COUNT(*) as "count!" FROM repos"#)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let count = sqlx::query_scalar!(r#"SELECT COUNT(*) as "count!" FROM repos"#)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
         Ok(count)
     }
 
     async fn get_repos_without_rev(&self) -> Result<Vec<RepoWithoutRev>, DbError> {
-        let rows = sqlx::query!(
-            "SELECT user_id, repo_root_cid FROM repos WHERE repo_rev IS NULL"
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        let rows = sqlx::query!("SELECT user_id, repo_root_cid FROM repos WHERE repo_rev IS NULL")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
         Ok(rows
             .into_iter()
@@ -522,7 +519,10 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(count)
     }
 
-    async fn get_record_by_cid(&self, cid: &CidLink) -> Result<Option<RecordWithTakedown>, DbError> {
+    async fn get_record_by_cid(
+        &self,
+        cid: &CidLink,
+    ) -> Result<Option<RecordWithTakedown>, DbError> {
         let row = sqlx::query!(
             "SELECT id, takedown_ref FROM records WHERE record_cid = $1",
             cid.as_str()
@@ -651,7 +651,11 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(seq)
     }
 
-    async fn insert_identity_event(&self, did: &Did, handle: Option<&Handle>) -> Result<i64, DbError> {
+    async fn insert_identity_event(
+        &self,
+        did: &Did,
+        handle: Option<&Handle>,
+    ) -> Result<i64, DbError> {
         let handle_str = handle.map(|h| h.as_str());
         let seq = sqlx::query_scalar!(
             r#"
@@ -1061,7 +1065,10 @@ impl RepoRepository for PostgresRepoRepository {
             .collect())
     }
 
-    async fn get_repo_root_cid_by_user_id(&self, user_id: Uuid) -> Result<Option<CidLink>, DbError> {
+    async fn get_repo_root_cid_by_user_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<CidLink>, DbError> {
         let cid = sqlx::query_scalar!(
             "SELECT repo_root_cid FROM repos WHERE user_id = $1",
             user_id
@@ -1203,25 +1210,22 @@ impl RepoRepository for PostgresRepoRepository {
             }
         }
 
-        let is_account_active: bool = sqlx::query_scalar(
-            "SELECT deactivated_at IS NULL FROM users WHERE id = $1",
-        )
-        .bind(input.user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| ApplyCommitError::Database(e.to_string()))?
-        .flatten()
-        .unwrap_or(false);
+        let is_account_active: bool =
+            sqlx::query_scalar("SELECT deactivated_at IS NULL FROM users WHERE id = $1")
+                .bind(input.user_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| ApplyCommitError::Database(e.to_string()))?
+                .flatten()
+                .unwrap_or(false);
 
-        sqlx::query(
-            "UPDATE repos SET repo_root_cid = $1, repo_rev = $2 WHERE user_id = $3",
-        )
-        .bind(&input.new_root_cid)
-        .bind(&input.new_rev)
-        .bind(input.user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
+        sqlx::query("UPDATE repos SET repo_root_cid = $1, repo_rev = $2 WHERE user_id = $3")
+            .bind(&input.new_root_cid)
+            .bind(&input.new_rev)
+            .bind(input.user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| ApplyCommitError::Database(e.to_string()))?;
 
         if !input.new_block_cids.is_empty() {
             sqlx::query(
@@ -1260,8 +1264,16 @@ impl RepoRepository for PostgresRepoRepository {
                 .iter()
                 .map(|r| r.collection.as_str())
                 .collect();
-            let rkeys: Vec<&str> = input.record_upserts.iter().map(|r| r.rkey.as_str()).collect();
-            let cids: Vec<&str> = input.record_upserts.iter().map(|r| r.cid.as_str()).collect();
+            let rkeys: Vec<&str> = input
+                .record_upserts
+                .iter()
+                .map(|r| r.rkey.as_str())
+                .collect();
+            let cids: Vec<&str> = input
+                .record_upserts
+                .iter()
+                .map(|r| r.cid.as_str())
+                .collect();
 
             sqlx::query(
                 r#"
@@ -1287,7 +1299,11 @@ impl RepoRepository for PostgresRepoRepository {
                 .iter()
                 .map(|r| r.collection.as_str())
                 .collect();
-            let rkeys: Vec<&str> = input.record_deletes.iter().map(|r| r.rkey.as_str()).collect();
+            let rkeys: Vec<&str> = input
+                .record_deletes
+                .iter()
+                .map(|r| r.rkey.as_str())
+                .collect();
 
             sqlx::query(
                 r#"
@@ -1366,9 +1382,7 @@ impl RepoRepository for PostgresRepoRepository {
             .collect())
     }
 
-    async fn get_users_without_blocks(
-        &self,
-    ) -> Result<Vec<UserWithoutBlocks>, DbError> {
+    async fn get_users_without_blocks(&self) -> Result<Vec<UserWithoutBlocks>, DbError> {
         let rows: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(
             r#"
             SELECT u.id as user_id, r.repo_root_cid, r.repo_rev

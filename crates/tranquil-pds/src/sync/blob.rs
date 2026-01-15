@@ -47,22 +47,20 @@ pub async fn get_blob(
 
     let blob_result = state.blob_repo.get_blob_metadata(&cid).await;
     match blob_result {
-        Ok(Some(metadata)) => {
-            match state.blob_store.get(&metadata.storage_key).await {
-                Ok(data) => Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, &metadata.mime_type)
-                    .header(header::CONTENT_LENGTH, metadata.size_bytes.to_string())
-                    .header("x-content-type-options", "nosniff")
-                    .header("content-security-policy", "default-src 'none'; sandbox")
-                    .body(Body::from(data))
-                    .unwrap(),
-                Err(e) => {
-                    error!("Failed to fetch blob from storage: {:?}", e);
-                    ApiError::BlobNotFound(Some("Blob not found in storage".into())).into_response()
-                }
+        Ok(Some(metadata)) => match state.blob_store.get(&metadata.storage_key).await {
+            Ok(data) => Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, &metadata.mime_type)
+                .header(header::CONTENT_LENGTH, metadata.size_bytes.to_string())
+                .header("x-content-type-options", "nosniff")
+                .header("content-security-policy", "default-src 'none'; sandbox")
+                .body(Body::from(data))
+                .unwrap(),
+            Err(e) => {
+                error!("Failed to fetch blob from storage: {:?}", e);
+                ApiError::BlobNotFound(Some("Blob not found in storage".into())).into_response()
             }
-        }
+        },
         Ok(None) => ApiError::BlobNotFound(Some("Blob not found".into())).into_response(),
         Err(e) => {
             error!("DB error in get_blob: {:?}", e);

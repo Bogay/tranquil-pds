@@ -560,6 +560,10 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/delegation/auth", post(oauth::endpoints::delegation_auth))
         .route(
+            "/delegation/auth-token",
+            post(oauth::endpoints::delegation_auth_token),
+        )
+        .route(
             "/delegation/totp",
             post(oauth::endpoints::delegation_totp_verify),
         )

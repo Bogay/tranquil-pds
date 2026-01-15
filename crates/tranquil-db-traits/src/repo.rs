@@ -233,6 +233,7 @@ pub trait RepoRepository: Send + Sync {
         rkey: &Rkey,
     ) -> Result<Option<CidLink>, DbError>;
 
+    #[allow(clippy::too_many_arguments)]
     async fn list_records(
         &self,
         repo_id: Uuid,
@@ -252,10 +253,14 @@ pub trait RepoRepository: Send + Sync {
 
     async fn count_all_records(&self) -> Result<i64, DbError>;
 
-    async fn get_record_by_cid(&self, cid: &CidLink) -> Result<Option<RecordWithTakedown>, DbError>;
+    async fn get_record_by_cid(&self, cid: &CidLink)
+    -> Result<Option<RecordWithTakedown>, DbError>;
 
-    async fn set_record_takedown(&self, cid: &CidLink, takedown_ref: Option<&str>)
-        -> Result<(), DbError>;
+    async fn set_record_takedown(
+        &self,
+        cid: &CidLink,
+        takedown_ref: Option<&str>,
+    ) -> Result<(), DbError>;
 
     async fn insert_user_blocks(
         &self,
@@ -264,8 +269,11 @@ pub trait RepoRepository: Send + Sync {
         repo_rev: &str,
     ) -> Result<(), DbError>;
 
-    async fn delete_user_blocks(&self, user_id: Uuid, block_cids: &[Vec<u8>])
-        -> Result<(), DbError>;
+    async fn delete_user_blocks(
+        &self,
+        user_id: Uuid,
+        block_cids: &[Vec<u8>],
+    ) -> Result<(), DbError>;
 
     async fn get_user_block_cids_since_rev(
         &self,
@@ -277,7 +285,11 @@ pub trait RepoRepository: Send + Sync {
 
     async fn insert_commit_event(&self, data: &CommitEventData) -> Result<i64, DbError>;
 
-    async fn insert_identity_event(&self, did: &Did, handle: Option<&Handle>) -> Result<i64, DbError>;
+    async fn insert_identity_event(
+        &self,
+        did: &Did,
+        handle: Option<&Handle>,
+    ) -> Result<i64, DbError>;
 
     async fn insert_account_event(
         &self,
@@ -302,7 +314,7 @@ pub trait RepoRepository: Send + Sync {
     ) -> Result<i64, DbError>;
 
     async fn update_seq_blocks_cids(&self, seq: i64, blocks_cids: &[String])
-        -> Result<(), DbError>;
+    -> Result<(), DbError>;
 
     async fn delete_sequences_except(&self, did: &Did, keep_seq: i64) -> Result<(), DbError>;
 
@@ -344,7 +356,8 @@ pub trait RepoRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<RepoListItem>, DbError>;
 
-    async fn get_repo_root_cid_by_user_id(&self, user_id: Uuid) -> Result<Option<CidLink>, DbError>;
+    async fn get_repo_root_cid_by_user_id(&self, user_id: Uuid)
+    -> Result<Option<CidLink>, DbError>;
 
     async fn notify_update(&self, seq: i64) -> Result<(), DbError>;
 

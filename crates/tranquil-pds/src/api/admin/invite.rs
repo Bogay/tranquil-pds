@@ -24,16 +24,14 @@ pub async fn disable_invite_codes(
     _auth: BearerAuthAdmin,
     Json(input): Json<DisableInviteCodesInput>,
 ) -> Response {
-    if let Some(codes) = &input.codes {
-        if let Err(e) = state.infra_repo.disable_invite_codes_by_code(codes).await {
-            error!("DB error disabling invite codes: {:?}", e);
-        }
+    if let Some(codes) = &input.codes
+        && let Err(e) = state.infra_repo.disable_invite_codes_by_code(codes).await
+    {
+        error!("DB error disabling invite codes: {:?}", e);
     }
     if let Some(accounts) = &input.accounts {
-        let accounts_typed: Vec<tranquil_types::Did> = accounts
-            .iter()
-            .filter_map(|a| a.parse().ok())
-            .collect();
+        let accounts_typed: Vec<tranquil_types::Did> =
+            accounts.iter().filter_map(|a| a.parse().ok()).collect();
         if let Err(e) = state
             .infra_repo
             .disable_invite_codes_by_account(&accounts_typed)
@@ -112,25 +110,26 @@ pub async fn get_invite_codes(
         .into_iter()
         .collect();
 
-    let uses_by_code: std::collections::HashMap<String, Vec<InviteCodeUseInfo>> = if code_strings
-        .is_empty()
-    {
-        std::collections::HashMap::new()
-    } else {
-        state
-            .infra_repo
-            .get_invite_code_uses_batch(&code_strings)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .fold(std::collections::HashMap::new(), |mut acc, u| {
-                acc.entry(u.code.clone()).or_default().push(InviteCodeUseInfo {
-                    used_by: u.used_by_did.to_string(),
-                    used_at: u.used_at.to_rfc3339(),
-                });
-                acc
-            })
-    };
+    let uses_by_code: std::collections::HashMap<String, Vec<InviteCodeUseInfo>> =
+        if code_strings.is_empty() {
+            std::collections::HashMap::new()
+        } else {
+            state
+                .infra_repo
+                .get_invite_code_uses_batch(&code_strings)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .fold(std::collections::HashMap::new(), |mut acc, u| {
+                    acc.entry(u.code.clone())
+                        .or_default()
+                        .push(InviteCodeUseInfo {
+                            used_by: u.used_by_did.to_string(),
+                            used_at: u.used_at.to_rfc3339(),
+                        });
+                    acc
+                })
+        };
 
     let codes: Vec<InviteCodeInfo> = codes_rows
         .iter()
@@ -184,7 +183,11 @@ pub async fn disable_account_invites(
         Ok(d) => d,
         Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
     };
-    match state.user_repo.set_invites_disabled(&account_did, true).await {
+    match state
+        .user_repo
+        .set_invites_disabled(&account_did, true)
+        .await
+    {
         Ok(true) => EmptyResponse::ok().into_response(),
         Ok(false) => ApiError::AccountNotFound.into_response(),
         Err(e) => {
@@ -212,7 +215,11 @@ pub async fn enable_account_invites(
         Ok(d) => d,
         Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
     };
-    match state.user_repo.set_invites_disabled(&account_did, false).await {
+    match state
+        .user_repo
+        .set_invites_disabled(&account_did, false)
+        .await
+    {
         Ok(true) => EmptyResponse::ok().into_response(),
         Ok(false) => ApiError::AccountNotFound.into_response(),
         Err(e) => {

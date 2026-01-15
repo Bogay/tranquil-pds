@@ -193,10 +193,11 @@ mod tests {
         assert_eq!(parts[0].len(), 5);
         assert_eq!(parts[1].len(), 5);
 
-        assert!(code
-            .chars()
-            .filter(|&c| c != '-')
-            .all(|c| BASE32_ALPHABET.contains(c)));
+        assert!(
+            code.chars()
+                .filter(|&c| c != '-')
+                .all(|c| BASE32_ALPHABET.contains(c))
+        );
     }
 
     #[test]

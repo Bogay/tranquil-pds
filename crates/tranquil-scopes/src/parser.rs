@@ -57,11 +57,9 @@ impl BlobScope {
         }
         self.accept.iter().any(|pattern| {
             pattern == mime
-                || pattern
-                    .strip_suffix("/*")
-                    .is_some_and(|prefix| {
-                        mime.starts_with(prefix) && mime.chars().nth(prefix.len()) == Some('/')
-                    })
+                || pattern.strip_suffix("/*").is_some_and(|prefix| {
+                    mime.starts_with(prefix) && mime.chars().nth(prefix.len()) == Some('/')
+                })
         })
     }
 }
@@ -84,6 +82,7 @@ pub enum AccountAttr {
     Handle,
     Repo,
     Status,
+    Wildcard,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +103,7 @@ impl AccountAttr {
             "handle" => Some(Self::Handle),
             "repo" => Some(Self::Repo),
             "status" => Some(Self::Status),
+            "*" => Some(Self::Wildcard),
             _ => None,
         }
     }

@@ -5,16 +5,16 @@ use crate::delegation::intersect_scopes;
 use crate::oauth::{
     AuthFlowState, ClientAuth, ClientMetadataCache, DPoPVerifier, OAuthError, RefreshToken,
     TokenData, TokenId,
-    db::{lookup_refresh_token, enforce_token_limit_for_user},
+    db::{enforce_token_limit_for_user, lookup_refresh_token},
     scopes::expand_include_scopes,
     verify_client_auth,
 };
 use crate::state::AppState;
-use tranquil_db_traits::RefreshTokenLookup;
-use tranquil_types::{AuthorizationCode, Did, RefreshToken as RefreshTokenType};
 use axum::Json;
 use axum::http::HeaderMap;
 use chrono::{Duration, Utc};
+use tranquil_db_traits::RefreshTokenLookup;
+use tranquil_types::{AuthorizationCode, Did, RefreshToken as RefreshTokenType};
 
 const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 300;
 const REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL: i64 = 60;
@@ -136,12 +136,12 @@ pub async fn handle_authorization_code_grant(
     let now = Utc::now();
 
     let (raw_scope, controller_did) = if let Some(ref controller) = auth_request.controller_did {
-        let did_parsed: Did = did.parse().map_err(|_| {
-            OAuthError::InvalidRequest("Invalid DID format".to_string())
-        })?;
-        let controller_parsed: Did = controller.parse().map_err(|_| {
-            OAuthError::InvalidRequest("Invalid controller DID format".to_string())
-        })?;
+        let did_parsed: Did = did
+            .parse()
+            .map_err(|_| OAuthError::InvalidRequest("Invalid DID format".to_string()))?;
+        let controller_parsed: Did = controller
+            .parse()
+            .map_err(|_| OAuthError::InvalidRequest("Invalid controller DID format".to_string()))?;
         let grant = state
             .delegation_repo
             .get_delegation(&did_parsed, &controller_parsed)
@@ -216,10 +216,10 @@ pub async fn handle_authorization_code_grant(
         let oauth_repo = state.oauth_repo.clone();
         let did_clone = did.clone();
         async move {
-            if let Ok(did_typed) = did_clone.parse::<tranquil_types::Did>() {
-                if let Err(e) = enforce_token_limit_for_user(oauth_repo.as_ref(), &did_typed).await {
-                    tracing::warn!("Failed to enforce token limit for user: {:?}", e);
-                }
+            if let Ok(did_typed) = did_clone.parse::<tranquil_types::Did>()
+                && let Err(e) = enforce_token_limit_for_user(oauth_repo.as_ref(), &did_typed).await
+            {
+                tracing::warn!("Failed to enforce token limit for user: {:?}", e);
             }
         }
     });

@@ -696,7 +696,53 @@
       "signingInAs": "Loggar in som:",
       "permissionsRequested": "Begärda behörigheter",
       "required": "Krävs",
-      "rememberChoiceLabel": "Kom ihåg mitt val för denna applikation"
+      "rememberChoiceLabel": "Kom ihåg mitt val för denna applikation",
+      "scopes": {
+        "atproto": {
+          "name": "Full åtkomst",
+          "description": "Full åtkomst för att läsa, skriva och hantera detta konto"
+        },
+        "atprotoWithGranular": {
+          "name": "AT Protocol-åtkomst",
+          "description": "AT Protocol basomfattning (behörigheter bestäms av valda alternativ nedan)"
+        },
+        "transitionGeneric": {
+          "name": "Övergångsåtkomst",
+          "description": "Generisk övergångsomfattning för kompatibilitet"
+        },
+        "transitionChat": {
+          "name": "Chattåtkomst",
+          "description": "Åtkomst till Bluesky-chattfunktioner"
+        },
+        "transitionEmail": {
+          "name": "E-poståtkomst",
+          "description": "Läs din kontots e-postadress"
+        },
+        "repoCreate": {
+          "name": "Skapa poster",
+          "description": "Skapa nya poster i ditt arkiv"
+        },
+        "repoUpdate": {
+          "name": "Uppdatera poster",
+          "description": "Uppdatera befintliga poster i ditt arkiv"
+        },
+        "repoDelete": {
+          "name": "Ta bort poster",
+          "description": "Ta bort poster från ditt arkiv"
+        },
+        "blobAll": {
+          "name": "Ladda upp media",
+          "description": "Ladda upp bilder, videor och andra mediefiler"
+        },
+        "repoFull": {
+          "name": "Full arkivåtkomst",
+          "description": "Full läs- och skrivåtkomst till alla arkivposter"
+        },
+        "accountManage": {
+          "name": "Hantera konto",
+          "description": "Hantera kontoinställningar och preferenser"
+        }
+      }
     },
     "accounts": {
       "title": "Välj konto",

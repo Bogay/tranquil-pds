@@ -71,33 +71,32 @@ async fn proxy_to_report_service(
 
     let key_bytes = match &auth_user.key_bytes {
         Some(kb) => kb.clone(),
-        None => {
-            match state.user_repo.get_with_key_by_did(&auth_user.did).await {
-                Ok(Some(user_with_key)) => {
-                    match crate::config::decrypt_key(&user_with_key.key_bytes, user_with_key.encryption_version) {
-                        Ok(key) => key,
-                        Err(e) => {
-                            error!(error = ?e, "Failed to decrypt user key for report service auth");
-                            return ApiError::AuthenticationFailed(Some(
-                                "Failed to get signing key".into(),
-                            ))
-                            .into_response();
-                        }
+        None => match state.user_repo.get_with_key_by_did(&auth_user.did).await {
+            Ok(Some(user_with_key)) => {
+                match crate::config::decrypt_key(
+                    &user_with_key.key_bytes,
+                    user_with_key.encryption_version,
+                ) {
+                    Ok(key) => key,
+                    Err(e) => {
+                        error!(error = ?e, "Failed to decrypt user key for report service auth");
+                        return ApiError::AuthenticationFailed(Some(
+                            "Failed to get signing key".into(),
+                        ))
+                        .into_response();
                     }
                 }
-                Ok(None) => {
-                    return ApiError::AuthenticationFailed(Some("User has no signing key".into()))
-                        .into_response();
-                }
-                Err(e) => {
-                    error!(error = ?e, "DB error fetching user key for report");
-                    return ApiError::AuthenticationFailed(Some(
-                        "Failed to get signing key".into(),
-                    ))
-                    .into_response();
-                }
             }
-        }
+            Ok(None) => {
+                return ApiError::AuthenticationFailed(Some("User has no signing key".into()))
+                    .into_response();
+            }
+            Err(e) => {
+                error!(error = ?e, "DB error fetching user key for report");
+                return ApiError::AuthenticationFailed(Some("Failed to get signing key".into()))
+                    .into_response();
+            }
+        },
     };
 
     let service_token = match crate::auth::create_service_token(
@@ -205,14 +204,18 @@ async fn create_report_locally(
     let report_id = (uuid::Uuid::now_v7().as_u128() & 0x7FFF_FFFF_FFFF_FFFF) as i64;
     let subject_json = json!(input.subject);
 
-    if let Err(e) = state.infra_repo.insert_report(
-        report_id,
-        &input.reason_type,
-        input.reason.as_deref(),
-        subject_json,
-        did,
-        created_at,
-    ).await {
+    if let Err(e) = state
+        .infra_repo
+        .insert_report(
+            report_id,
+            &input.reason_type,
+            input.reason.as_deref(),
+            subject_json,
+            did,
+            created_at,
+        )
+        .await
+    {
         error!("Failed to insert report: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }

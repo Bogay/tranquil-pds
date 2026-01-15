@@ -11,6 +11,27 @@
     granted: boolean | null
   }
 
+  const SCOPE_LOCALE_MAP: Record<string, string> = {
+    'atproto': 'atproto',
+    'transition:generic': 'transitionGeneric',
+    'transition:chat.bsky': 'transitionChat',
+    'transition:email': 'transitionEmail',
+    'repo:*?action=create': 'repoCreate',
+    'repo:*?action=update': 'repoUpdate',
+    'repo:*?action=delete': 'repoDelete',
+    'blob:*/*': 'blobAll',
+    'repo:*': 'repoFull',
+    'account:*?action=manage': 'accountManage',
+  }
+
+  function isGranularScope(scope: string): boolean {
+    return scope.startsWith('repo:') ||
+           scope.startsWith('blob') ||
+           scope.startsWith('rpc:') ||
+           scope.startsWith('account:') ||
+           scope.startsWith('identity:')
+  }
+
   interface ConsentData {
     request_uri: string
     client_id: string
@@ -20,6 +41,7 @@
     scopes: ScopeInfo[]
     show_consent: boolean
     did: string
+    handle?: string
     is_delegation?: boolean
     controller_did?: string
     controller_handle?: string
@@ -147,14 +169,32 @@
     scopeSelections[scope] = !scopeSelections[scope]
   }
 
-  function groupScopesByCategory(scopes: ScopeInfo[]): Record<string, ScopeInfo[]> {
-    return scopes.reduce(
-      (groups, scope) => ({
-        ...groups,
-        [scope.category]: [...(groups[scope.category] ?? []), scope],
+  const CATEGORY_ORDER = [
+    'Core Access',
+    'Transition',
+    'Account',
+    'Repository',
+    'Media',
+    'API Access',
+    'Reference',
+    'Other'
+  ]
+
+  function groupScopesByCategory(scopes: ScopeInfo[]): [string, ScopeInfo[]][] {
+    const groups = scopes.reduce(
+      (acc, scope) => ({
+        ...acc,
+        [scope.category]: [...(acc[scope.category] ?? []), scope],
       }),
       {} as Record<string, ScopeInfo[]>
     )
+    return Object.entries(groups).sort(([a], [b]) => {
+      const aIndex = CATEGORY_ORDER.indexOf(a)
+      const bIndex = CATEGORY_ORDER.indexOf(b)
+      const aOrder = aIndex === -1 ? CATEGORY_ORDER.length : aIndex
+      const bOrder = bIndex === -1 ? CATEGORY_ORDER.length : bIndex
+      return aOrder - bOrder
+    })
   }
 
   $effect(() => {
@@ -171,7 +211,34 @@
     }
   })
 
-  let scopeGroups = $derived(consentData ? groupScopesByCategory(consentData.scopes) : {})
+  let scopeGroups = $derived(consentData ? groupScopesByCategory(consentData.scopes) : [])
+  let hasGranularScopes = $derived(consentData?.scopes.some(s => isGranularScope(s.scope)) ?? false)
+
+  function getLocalizedScopeName(scope: ScopeInfo): string {
+    const localeKey = SCOPE_LOCALE_MAP[scope.scope]
+    if (!localeKey) return scope.display_name
+
+    if (scope.scope === 'atproto' && hasGranularScopes) {
+      const localized = $_(`oauth.consent.scopes.atprotoWithGranular.name`)
+      return localized !== `oauth.consent.scopes.atprotoWithGranular.name` ? localized : scope.display_name
+    }
+
+    const localized = $_(`oauth.consent.scopes.${localeKey}.name`)
+    return localized !== `oauth.consent.scopes.${localeKey}.name` ? localized : scope.display_name
+  }
+
+  function getLocalizedScopeDescription(scope: ScopeInfo): string {
+    const localeKey = SCOPE_LOCALE_MAP[scope.scope]
+    if (!localeKey) return scope.description
+
+    if (scope.scope === 'atproto' && hasGranularScopes) {
+      const localized = $_(`oauth.consent.scopes.atprotoWithGranular.description`)
+      return localized !== `oauth.consent.scopes.atprotoWithGranular.description` ? localized : scope.description
+    }
+
+    const localized = $_(`oauth.consent.scopes.${localeKey}.description`)
+    return localized !== `oauth.consent.scopes.${localeKey}.description` ? localized : scope.description
+  }
 </script>
 
 <div class="consent-container">
@@ -244,6 +311,9 @@
             {/if}
           {:else}
             <span class="label">{$_('oauth.consent.signingInAs')}</span>
+            {#if consentData.handle}
+              <span class="handle">@{consentData.handle}</span>
+            {/if}
             <span class="did">{consentData.did}</span>
           {/if}
         </div>
@@ -262,7 +332,7 @@
               </div>
             </div>
           {:else}
-            {#each Object.entries(scopeGroups) as [category, scopes]}
+            {#each scopeGroups as [category, scopes]}
               <div class="scope-group">
                 <h3 class="category-title">{category}</h3>
                 {#each scopes as scope}
@@ -274,8 +344,8 @@
                       onchange={() => handleScopeToggle(scope.scope)}
                     />
                     <div class="scope-info">
-                      <span class="scope-name">{scope.display_name}</span>
-                      <span class="scope-description">{scope.description}</span>
+                      <span class="scope-name">{getLocalizedScopeName(scope)}</span>
+                      <span class="scope-description">{getLocalizedScopeDescription(scope)}</span>
                       {#if scope.required}
                         <span class="required-badge">{$_('oauth.consent.required')}</span>
                       {/if}
@@ -419,8 +489,14 @@
   .account-info .did {
     font-family: monospace;
     font-size: var(--text-sm);
-    color: var(--text-primary);
+    color: var(--text-secondary);
     word-break: break-all;
+  }
+
+  .account-info .handle {
+    font-size: var(--text-base);
+    font-weight: var(--font-medium);
+    color: var(--text-primary);
   }
 
   .delegation-badge {

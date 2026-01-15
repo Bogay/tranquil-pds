@@ -70,7 +70,11 @@ pub async fn get_account_info(
     _auth: BearerAuthAdmin,
     Query(params): Query<GetAccountInfoParams>,
 ) -> Response {
-    let account = match state.infra_repo.get_admin_account_info_by_did(&params.did).await {
+    let account = match state
+        .infra_repo
+        .get_admin_account_info_by_did(&params.did)
+        .await
+    {
         Ok(Some(a)) => a,
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
@@ -114,7 +118,10 @@ async fn get_invited_by(state: &AppState, user_id: uuid::Uuid) -> Option<InviteC
     get_invite_code_info(state, &code).await
 }
 
-async fn get_invites_for_user(state: &AppState, user_id: uuid::Uuid) -> Option<Vec<InviteCodeInfo>> {
+async fn get_invites_for_user(
+    state: &AppState,
+    user_id: uuid::Uuid,
+) -> Option<Vec<InviteCodeInfo>> {
     let invite_codes = state
         .infra_repo
         .get_invites_created_by_user(user_id)
@@ -135,10 +142,12 @@ async fn get_invites_for_user(state: &AppState, user_id: uuid::Uuid) -> Option<V
 
     let uses_by_code: HashMap<String, Vec<InviteCodeUseInfo>> =
         uses.into_iter().fold(HashMap::new(), |mut acc, u| {
-            acc.entry(u.code.clone()).or_default().push(InviteCodeUseInfo {
-                used_by: u.used_by_did,
-                used_at: u.used_at.to_rfc3339(),
-            });
+            acc.entry(u.code.clone())
+                .or_default()
+                .push(InviteCodeUseInfo {
+                    used_by: u.used_by_did,
+                    used_at: u.used_at.to_rfc3339(),
+                });
             acc
         });
 
@@ -203,11 +212,12 @@ pub async fn get_account_infos(
         return ApiError::InvalidRequest("dids is required".into()).into_response();
     }
 
-    let dids_typed: Vec<Did> = dids
-        .iter()
-        .filter_map(|d| d.parse().ok())
-        .collect();
-    let accounts = match state.infra_repo.get_admin_account_infos_by_dids(&dids_typed).await {
+    let dids_typed: Vec<Did> = dids.iter().filter_map(|d| d.parse().ok()).collect();
+    let accounts = match state
+        .infra_repo
+        .get_admin_account_infos_by_dids(&dids_typed)
+        .await
+    {
         Ok(accounts) => accounts,
         Err(e) => {
             error!("Failed to fetch account infos: {:?}", e);
@@ -223,7 +233,10 @@ pub async fn get_account_infos(
         .await
         .unwrap_or_default();
 
-    let all_codes: Vec<String> = all_invite_codes.iter().map(|(_, c)| c.code.clone()).collect();
+    let all_codes: Vec<String> = all_invite_codes
+        .iter()
+        .map(|(_, c)| c.code.clone())
+        .collect();
 
     let all_invite_uses = if !all_codes.is_empty() {
         state
@@ -247,10 +260,12 @@ pub async fn get_account_infos(
         all_invite_uses
             .into_iter()
             .fold(HashMap::new(), |mut acc, u| {
-                acc.entry(u.code.clone()).or_default().push(InviteCodeUseInfo {
-                    used_by: u.used_by_did,
-                    used_at: u.used_at.to_rfc3339(),
-                });
+                acc.entry(u.code.clone())
+                    .or_default()
+                    .push(InviteCodeUseInfo {
+                        used_by: u.used_by_did,
+                        used_at: u.used_at.to_rfc3339(),
+                    });
                 acc
             });
 

@@ -267,7 +267,7 @@ pub async fn create_session(
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
         handle: handle.into(),
-        did: row.did.into(),
+        did: row.did,
         did_doc,
         email: row.email,
         email_confirmed: Some(row.email_verified),
@@ -292,7 +292,8 @@ pub async fn get_session(
     );
     match db_result {
         Ok(Some(row)) => {
-            let (preferred_channel, preferred_channel_verified) = match row.preferred_comms_channel {
+            let (preferred_channel, preferred_channel_verified) = match row.preferred_comms_channel
+            {
                 tranquil_db_traits::CommsChannel::Email => ("email", row.email_verified),
                 tranquil_db_traits::CommsChannel::Discord => ("discord", row.discord_verified),
                 tranquil_db_traits::CommsChannel::Telegram => ("telegram", row.telegram_verified),
@@ -427,14 +428,16 @@ pub async fn refresh_session(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let key_bytes =
-        match crate::config::decrypt_key(&session_row.key_bytes, Some(session_row.encryption_version)) {
-            Ok(k) => k,
-            Err(e) => {
-                error!("Failed to decrypt user key: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let key_bytes = match crate::config::decrypt_key(
+        &session_row.key_bytes,
+        Some(session_row.encryption_version),
+    ) {
+        Ok(k) => k,
+        Err(e) => {
+            error!("Failed to decrypt user key: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
     if crate::auth::verify_refresh_token(&refresh_token, &key_bytes).is_err() {
         return ApiError::AuthenticationFailed(Some("Invalid refresh token".into()))
             .into_response();
@@ -482,7 +485,10 @@ pub async fn refresh_session(
             .into_response();
         }
         Ok(tranquil_db_traits::RefreshSessionResult::ConcurrentRefresh) => {
-            warn!("Concurrent refresh detected for session_id: {}", session_row.id);
+            warn!(
+                "Concurrent refresh detected for session_id: {}",
+                session_row.id
+            );
             return ApiError::AuthenticationFailed(Some(
                 "Refresh token has been revoked due to suspected compromise".into(),
             ))
@@ -569,11 +575,7 @@ pub async fn confirm_signup(
     Json(input): Json<ConfirmSignupInput>,
 ) -> Response {
     info!("confirm_signup called for DID: {}", input.did);
-    let row = match state
-        .user_repo
-        .get_confirm_signup_by_did(&input.did)
-        .await
-    {
+    let row = match state.user_repo.get_confirm_signup_by_did(&input.did).await {
         Ok(Some(row)) => row,
         Ok(None) => {
             warn!("User not found for confirm_signup: {}", input.did);
@@ -653,7 +655,7 @@ pub async fn confirm_signup(
 
     if let Err(e) = state
         .user_repo
-        .set_channel_verified(&input.did, row.channel.clone())
+        .set_channel_verified(&input.did, row.channel)
         .await
     {
         error!("Failed to update verification status: {:?}", e);
@@ -698,8 +700,8 @@ pub async fn confirm_signup(
     Json(ConfirmSignupOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
-        handle: row.handle.into(),
-        did: row.did.into(),
+        handle: row.handle,
+        did: row.did,
         email: row.email,
         email_verified,
         preferred_channel: preferred_channel.to_string(),
@@ -830,7 +832,7 @@ pub async fn list_sessions(
     let is_oauth = auth.0.is_oauth;
     let oauth_sessions = oauth_rows.into_iter().map(|row| {
         let client_name = extract_client_name(&row.client_id);
-        let is_current_oauth = is_oauth && current_jti.as_ref().map(|s| s.as_str()) == Some(row.token_id.as_str());
+        let is_current_oauth = is_oauth && current_jti.as_deref() == Some(row.token_id.as_str());
         SessionInfo {
             id: format!("oauth:{}", row.id),
             session_type: "oauth".to_string(),
@@ -1003,13 +1005,24 @@ pub async fn update_legacy_login_preference(
     auth: BearerAuth,
     Json(input): Json<UpdateLegacyLoginInput>,
 ) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did)
-            .await;
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
+        .await
+    {
+        return crate::api::server::reauth::legacy_mfa_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::reauth_required_response(&*state.user_repo, &*state.session_repo, &auth.0.did).await;
+        return crate::api::server::reauth::reauth_required_response(
+            &*state.user_repo,
+            &*state.session_repo,
+            &auth.0.did,
+        )
+        .await;
     }
 
     match state

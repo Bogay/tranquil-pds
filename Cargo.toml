@@ -63,8 +63,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 infer = "0.19"
 ipld-core = "0.4"
 iroh-car = "0.5"
-jacquard = { version = "0.9", default-features = false, features = ["api", "api_bluesky", "api_full", "derive", "dns"] }
-jacquard-axum = "0.9"
+jacquard-common = { version = "0.9", features = ["crypto-k256"] }
 jacquard-repo = "0.9"
 jsonwebtoken = { version = "10.2", features = ["rust_crypto"] }
 k256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }

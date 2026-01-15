@@ -149,10 +149,7 @@ async fn test_external_did_web_no_local_doc() {
         "signingKey": signing_key
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&payload)
         .send()
         .await
@@ -431,10 +428,7 @@ async fn test_did_web_byod_flow() {
         "did": did
     });
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .header("Authorization", format!("Bearer {}", service_jwt))
         .json(&payload)
         .send()
@@ -494,10 +488,7 @@ async fn test_did_web_byod_flow() {
     );
 
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.activateAccount",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.activateAccount", base))
         .bearer_auth(&access_jwt)
         .send()
         .await
@@ -525,10 +516,7 @@ async fn test_did_web_byod_flow() {
     );
 
     let res = client
-        .post(format!(
-            "{}/xrpc/com.atproto.repo.createRecord",
-            base
-        ))
+        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base))
         .bearer_auth(&access_jwt)
         .json(&json!({
             "repo": did,

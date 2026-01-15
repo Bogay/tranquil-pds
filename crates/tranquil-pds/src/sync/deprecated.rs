@@ -2,7 +2,6 @@ use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::sync::car::encode_car_header;
 use crate::sync::util::assert_repo_availability;
-use tranquil_types::Did;
 use axum::{
     Json,
     extract::{Query, State},
@@ -15,6 +14,7 @@ use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::str::FromStr;
+use tranquil_types::Did;
 
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
 
@@ -69,10 +69,11 @@ pub async fn get_head(
         Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
     };
     let is_admin_or_self = check_admin_or_self(&state, &headers, did_str).await;
-    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
-        Ok(a) => a,
-        Err(e) => return e.into_response(),
-    };
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
     match account.repo_root_cid {
         Some(root) => (StatusCode::OK, Json(GetHeadOutput { root })).into_response(),
         None => ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did_str)))
@@ -99,10 +100,11 @@ pub async fn get_checkout(
         Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
     };
     let is_admin_or_self = check_admin_or_self(&state, &headers, did_str).await;
-    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
-        Ok(a) => a,
-        Err(e) => return e.into_response(),
-    };
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
     let Some(head_str) = account.repo_root_cid else {
         return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
     };

@@ -18,6 +18,11 @@ import type {
   RegistrationStep,
   SessionState,
 } from "./types.ts";
+import {
+  saveRegistrationState,
+  loadRegistrationState,
+  clearRegistrationState,
+} from "./storage.ts";
 
 export interface RegistrationFlowState {
   mode: RegistrationMode;
@@ -76,6 +81,20 @@ export function createRegistrationFlow(
     return did.replace("did:web:", "").replace(/%3A/g, ":");
   }
 
+  function persistState() {
+    if (state.step !== "info" && state.step !== "creating") {
+      saveRegistrationState(
+        state.mode,
+        state.step,
+        state.pdsHostname,
+        state.info,
+        state.externalDidWeb,
+        state.account,
+        state.session,
+      );
+    }
+  }
+
   function setError(err: unknown) {
     if (err instanceof ApiError) {
       state.error = err.message || "An error occurred";
@@ -129,6 +148,7 @@ export function createRegistrationFlow(
         "\t",
       );
       state.step = "initial-did-doc";
+      persistState();
     } catch (err) {
       setError(err);
     } finally {
@@ -184,6 +204,7 @@ export function createRegistrationFlow(
         handle: result.handle,
       };
       state.step = "verify";
+      persistState();
     } catch (err) {
       setError(err);
     } finally {
@@ -237,6 +258,7 @@ export function createRegistrationFlow(
         setupToken: result.setupToken,
       };
       state.step = "passkey";
+      persistState();
     } catch (err) {
       setError(err);
     } finally {
@@ -250,10 +272,12 @@ export function createRegistrationFlow(
       state.account.appPasswordName = appPasswordName;
     }
     state.step = "app-password";
+    persistState();
   }
 
   function proceedFromAppPassword() {
     state.step = "verify";
+    persistState();
   }
 
   async function verifyAccount(code: string) {
@@ -296,6 +320,7 @@ export function createRegistrationFlow(
             "\t",
           );
           state.step = "updated-did-doc";
+          persistState();
         } else {
           await api.activateAccount(session.accessJwt);
           await finalizeSession();
@@ -349,6 +374,7 @@ export function createRegistrationFlow(
 
   async function finalizeSession() {
     if (!state.session || !state.account) return;
+    clearRegistrationState();
     setSession({
       did: state.account.did,
       handle: state.account.handle,
@@ -404,3 +430,22 @@ export function createRegistrationFlow(
 }
 
 export type RegistrationFlow = ReturnType<typeof createRegistrationFlow>;
+
+export function restoreRegistrationFlow(): RegistrationFlow | null {
+  const saved = loadRegistrationState();
+  if (!saved || saved.step === "info" || saved.step === "redirect-to-dashboard") {
+    return null;
+  }
+
+  const flow = createRegistrationFlow(saved.mode, saved.pdsHostname);
+
+  flow.state.step = saved.step;
+  flow.state.info = { ...flow.state.info, ...saved.info };
+  flow.state.externalDidWeb = { ...flow.state.externalDidWeb, ...saved.externalDidWeb };
+  flow.state.account = saved.account;
+  flow.state.session = saved.session;
+
+  return flow;
+}
+
+export { hasPendingRegistration, getRegistrationResumeInfo, clearRegistrationState } from "./storage.ts";

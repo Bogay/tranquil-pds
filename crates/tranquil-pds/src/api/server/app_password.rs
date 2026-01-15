@@ -11,8 +11,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tranquil_db_traits::AppPasswordCreate;
 use tracing::{error, warn};
+use tranquil_db_traits::AppPasswordCreate;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +53,10 @@ pub async fn list_app_passwords(
                     created_at: row.created_at.to_rfc3339(),
                     privileged: row.privileged,
                     scopes: row.scopes.clone(),
-                    created_by_controller: row.created_by_controller_did.as_ref().map(|d| d.to_string()),
+                    created_by_controller: row
+                        .created_by_controller_did
+                        .as_ref()
+                        .map(|d| d.to_string()),
                 })
                 .collect();
             Json(ListAppPasswordsOutput { passwords }).into_response()
@@ -112,7 +115,11 @@ pub async fn create_app_password(
         return ApiError::InvalidRequest("name is required".into()).into_response();
     }
 
-    match state.session_repo.get_app_password_by_name(user.id, name).await {
+    match state
+        .session_repo
+        .get_app_password_by_name(user.id, name)
+        .await
+    {
         Ok(Some(_)) => return ApiError::DuplicateAppPassword.into_response(),
         Err(e) => {
             error!("DB error checking app password: {:?}", e);

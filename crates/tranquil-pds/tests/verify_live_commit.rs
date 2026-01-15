@@ -43,7 +43,7 @@ async fn test_verify_live_commit() {
         .expect("Failed to fetch DID doc");
     let did_doc_text = resp.text().await.expect("Failed to read body");
     println!("DID doc: {}", did_doc_text);
-    let did_doc: jacquard::common::types::did_doc::DidDocument<'_> =
+    let did_doc: jacquard_common::types::did_doc::DidDocument<'_> =
         serde_json::from_str(&did_doc_text).expect("Failed to parse DID doc");
     let pubkey = did_doc
         .atproto_public_key()
@@ -68,7 +68,7 @@ fn commit_unsigned_bytes(commit: &jacquard_repo::commit::Commit<'_>) -> Vec<u8> 
         did: &'a str,
         version: i64,
         data: &'a cid::Cid,
-        rev: &'a jacquard::types::string::Tid,
+        rev: &'a jacquard_common::types::string::Tid,
         prev: Option<&'a cid::Cid>,
         #[serde(with = "serde_bytes")]
         sig: &'a [u8],

@@ -1,6 +1,8 @@
 use super::validation::validate_record_with_status;
 use crate::api::error::ApiError;
-use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_backlinks, extract_blob_cids};
+use crate::api::repo::record::utils::{
+    CommitParams, RecordOp, commit_and_log, extract_backlinks, extract_blob_cids,
+};
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -100,7 +102,9 @@ pub async fn prepare_repo_write(
             error!("DB error fetching repo root: {}", e);
             ApiError::InternalError(None).into_response()
         })?
-        .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())).into_response())?;
+        .ok_or_else(|| {
+            ApiError::InternalError(Some("Repo root not found".into())).into_response()
+        })?;
     let current_root_cid = Cid::from_str(&root_cid_str).map_err(|_| {
         ApiError::InternalError(Some("Invalid repo root CID".into())).into_response()
     })?;
@@ -245,14 +249,21 @@ pub async fn create_record(
                     Err(_) => continue,
                 };
 
-                if mst.blocks_for_path(&conflict_key, &mut all_old_mst_blocks).await.is_err() {
+                if mst
+                    .blocks_for_path(&conflict_key, &mut all_old_mst_blocks)
+                    .await
+                    .is_err()
+                {
                     error!("Failed to get old MST blocks for conflict {}", conflict_uri);
                 }
 
                 mst = match mst.delete(&conflict_key).await {
                     Ok(m) => m,
                     Err(e) => {
-                        error!("Failed to delete conflict from MST {}: {:?}", conflict_uri, e);
+                        error!(
+                            "Failed to delete conflict from MST {}: {:?}",
+                            conflict_uri, e
+                        );
                         continue;
                     }
                 };
@@ -281,7 +292,11 @@ pub async fn create_record(
     };
     let key = format!("{}/{}", input.collection, rkey);
 
-    if mst.blocks_for_path(&key, &mut all_old_mst_blocks).await.is_err() {
+    if mst
+        .blocks_for_path(&key, &mut all_old_mst_blocks)
+        .await
+        .is_err()
+    {
         error!("Failed to get old MST blocks for new record path");
     }
 
@@ -355,7 +370,11 @@ pub async fn create_record(
     };
 
     for conflict_uri in conflict_uris_to_cleanup {
-        if let Err(e) = state.backlink_repo.remove_backlinks_by_uri(&conflict_uri).await {
+        if let Err(e) = state
+            .backlink_repo
+            .remove_backlinks_by_uri(&conflict_uri)
+            .await
+        {
             error!("Failed to remove backlinks for {}: {}", conflict_uri, e);
         }
     }
@@ -381,14 +400,10 @@ pub async fn create_record(
 
     let created_uri = AtUri::from_parts(&did, &input.collection, &rkey);
     let backlinks = extract_backlinks(&created_uri, &input.record);
-    if !backlinks.is_empty() {
-        if let Err(e) = state
-            .backlink_repo
-            .add_backlinks(user_id, &backlinks)
-            .await
-        {
-            error!("Failed to add backlinks for {}: {}", created_uri, e);
-        }
+    if !backlinks.is_empty()
+        && let Err(e) = state.backlink_repo.add_backlinks(user_id, &backlinks).await
+    {
+        error!("Failed to add backlinks for {}: {}", created_uri, e);
     }
 
     (

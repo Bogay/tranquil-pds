@@ -14,9 +14,7 @@ pub use backup::{
     BackupForDeletion, BackupRepository, BackupRow, BackupStorageInfo, BlobExportInfo,
     OldBackupInfo, UserBackupInfo,
 };
-pub use blob::{
-    BlobForExport, BlobMetadata, BlobRepository, BlobWithTakedown, MissingBlobInfo,
-};
+pub use blob::{BlobForExport, BlobMetadata, BlobRepository, BlobWithTakedown, MissingBlobInfo};
 pub use delegation::{
     AuditLogEntry, ControllerInfo, DelegatedAccountInfo, DelegationActionType, DelegationGrant,
     DelegationRepository,
@@ -43,16 +41,17 @@ pub use session::{
     SessionMfaStatus, SessionRefreshData, SessionRepository, SessionToken, SessionTokenCreate,
 };
 pub use user::{
-    AccountSearchResult, CompletePasskeySetupInput, CreateAccountError, CreateDelegatedAccountInput,
-    CreatePasskeyAccountInput, CreatePasswordAccountInput, CreatePasswordAccountResult,
-    DidWebOverrides, MigrationReactivationError, MigrationReactivationInput, NotificationPrefs,
-    OAuthTokenWithUser, PasswordResetResult, ReactivatedAccountInfo, RecoverPasskeyAccountInput,
-    RecoverPasskeyAccountResult, ScheduledDeletionAccount, StoredBackupCode, StoredPasskey,
-    TotpRecord, User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo,
-    UserEmailInfo, UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
+    AccountSearchResult, CompletePasskeySetupInput, CreateAccountError,
+    CreateDelegatedAccountInput, CreatePasskeyAccountInput, CreatePasswordAccountInput,
+    CreatePasswordAccountResult, DidWebOverrides, MigrationReactivationError,
+    MigrationReactivationInput, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult,
+    ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
+    ScheduledDeletionAccount, StoredBackupCode, StoredPasskey, TotpRecord, User2faStatus,
+    UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo,
+    UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
     UserForPasskeySetup, UserForRecovery, UserForVerification, UserIdAndHandle,
     UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId,
     UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo, UserPasswordInfo,
-    UserRepository, UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
-    UserVerificationInfo, UserWithKey,
+    UserRepository, UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo,
+    UserStatus, UserVerificationInfo, UserWithKey,
 };

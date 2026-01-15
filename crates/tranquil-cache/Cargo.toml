@@ -10,5 +10,4 @@ tranquil-infra = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 redis = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true }

@@ -1,7 +1,8 @@
+use crate::auth::{extract_auth_token_from_header, validate_token_with_dpop};
 use crate::delegation::DelegationActionType;
 use crate::state::{AppState, RateLimitKind};
 use crate::types::PlainPassword;
-use crate::util::extract_client_ip;
+use crate::util::{build_full_url, extract_client_ip};
 use axum::{
     Json,
     extract::State,
@@ -429,6 +430,201 @@ pub async fn delegation_totp_verify(
             Some(serde_json::json!({
                 "client_id": request.client_id,
                 "granted_scopes": grant.granted_scopes
+            })),
+            Some(&ip),
+            user_agent.as_deref(),
+        )
+        .await;
+
+    Json(DelegationAuthResponse {
+        success: true,
+        needs_totp: None,
+        redirect_uri: Some(format!(
+            "/app/oauth/consent?request_uri={}",
+            urlencoding::encode(&form.request_uri)
+        )),
+        error: None,
+    })
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DelegationTokenAuthSubmit {
+    pub request_uri: String,
+    pub delegated_did: String,
+}
+
+pub async fn delegation_auth_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(form): Json<DelegationTokenAuthSubmit>,
+) -> Response {
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok());
+
+    let extracted = match extract_auth_token_from_header(auth_header) {
+        Some(e) => e,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(DelegationAuthResponse {
+                    success: false,
+                    needs_totp: None,
+                    redirect_uri: None,
+                    error: Some("Missing or invalid authorization header".to_string()),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let dpop_proof = headers.get("dpop").and_then(|h| h.to_str().ok());
+    let uri = build_full_url("/oauth/delegation/auth-token");
+
+    let auth_user = match validate_token_with_dpop(
+        state.user_repo.as_ref(),
+        state.oauth_repo.as_ref(),
+        &extracted.token,
+        extracted.is_dpop,
+        dpop_proof,
+        "POST",
+        &uri,
+        false,
+        false,
+    )
+    .await
+    {
+        Ok(user) => user,
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(DelegationAuthResponse {
+                    success: false,
+                    needs_totp: None,
+                    redirect_uri: None,
+                    error: Some("Invalid or expired access token".to_string()),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let controller_did = auth_user.did;
+
+    let delegated_did: Did = match form.delegated_did.parse() {
+        Ok(d) => d,
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Invalid delegated DID".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    let request_id = RequestId::from(form.request_uri.clone());
+    let request = match state
+        .oauth_repo
+        .get_authorization_request(&request_id)
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Authorization request not found".to_string()),
+            })
+            .into_response();
+        }
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Server error".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    let grant = match state
+        .delegation_repo
+        .get_delegation(&delegated_did, &controller_did)
+        .await
+    {
+        Ok(Some(g)) => g,
+        Ok(None) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("No delegation grant found for this controller".to_string()),
+            })
+            .into_response();
+        }
+        Err(_) => {
+            return Json(DelegationAuthResponse {
+                success: false,
+                needs_totp: None,
+                redirect_uri: None,
+                error: Some("Server error".to_string()),
+            })
+            .into_response();
+        }
+    };
+
+    if state
+        .oauth_repo
+        .set_request_did(&request_id, &delegated_did)
+        .await
+        .is_err()
+    {
+        return Json(DelegationAuthResponse {
+            success: false,
+            needs_totp: None,
+            redirect_uri: None,
+            error: Some("Failed to update authorization request".to_string()),
+        })
+        .into_response();
+    }
+
+    if state
+        .oauth_repo
+        .set_controller_did(&request_id, &controller_did)
+        .await
+        .is_err()
+    {
+        return Json(DelegationAuthResponse {
+            success: false,
+            needs_totp: None,
+            redirect_uri: None,
+            error: Some("Failed to update authorization request".to_string()),
+        })
+        .into_response();
+    }
+
+    let ip = extract_client_ip(&headers);
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let _ = state
+        .delegation_repo
+        .log_delegation_action(
+            &delegated_did,
+            &controller_did,
+            Some(&controller_did),
+            DelegationActionType::TokenIssued,
+            Some(serde_json::json!({
+                "client_id": request.client_id,
+                "granted_scopes": grant.granted_scopes,
+                "auth_method": "token"
             })),
             Some(&ip),
             user_agent.as_deref(),

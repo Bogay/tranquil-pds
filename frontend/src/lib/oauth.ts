@@ -9,6 +9,8 @@ const SCOPES = [
   "repo:*?action=update",
   "repo:*?action=delete",
   "blob:*/*",
+  "identity:*",
+  "account:*",
 ].join(" ");
 
 const CLIENT_ID = !(import.meta.env.DEV)
@@ -259,7 +261,7 @@ function extractDPoPNonceFromResponse(response: Response): void {
   }
 }
 
-export async function startOAuthLogin(): Promise<void> {
+export async function startOAuthLogin(loginHint?: string): Promise<void> {
   clearAllOAuthState();
 
   const state = generateState();
@@ -271,19 +273,24 @@ export async function startOAuthLogin(): Promise<void> {
 
   saveOAuthState({ state, codeVerifier });
 
+  const parParams: Record<string, string> = {
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: "code",
+    scope: SCOPES,
+    state: state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    dpop_jkt: dpopJkt,
+  };
+  if (loginHint) {
+    parParams.login_hint = loginHint;
+  }
+
   const parResponse = await fetch("/oauth/par", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
-      response_type: "code",
-      scope: SCOPES,
-      state: state,
-      code_challenge: codeChallenge,
-      code_challenge_method: "S256",
-      dpop_jkt: dpopJkt,
-    }),
+    body: new URLSearchParams(parParams),
   });
 
   if (!parResponse.ok) {
@@ -414,4 +421,15 @@ export function clearOAuthCallbackParams(): void {
   const url = new URL(globalThis.location.href);
   url.search = "";
   globalThis.history.replaceState({}, "", url.toString());
+}
+
+export async function createDPoPProofForRequest(
+  method: string,
+  url: string,
+  accessToken: string,
+): Promise<string> {
+  const keyPair = await getOrCreateDPoPKeyPair();
+  const tokenHash = await sha256(accessToken);
+  const ath = base64UrlEncode(tokenHash);
+  return createDPoPProof(keyPair, method, url, getDPoPNonce() ?? undefined, ath);
 }

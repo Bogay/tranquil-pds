@@ -188,7 +188,10 @@ pub async fn get_device_trust_state(
     did: &tranquil_types::Did,
 ) -> DeviceTrustState {
     let device_id_typed = DeviceId::from(device_id.to_string());
-    match oauth_repo.get_device_trust_info(&device_id_typed, did).await {
+    match oauth_repo
+        .get_device_trust_info(&device_id_typed, did)
+        .await
+    {
         Ok(Some(info)) => DeviceTrustState::from_timestamps(info.trusted_at, info.trusted_until),
         _ => DeviceTrustState::Untrusted,
     }
@@ -211,7 +214,9 @@ pub async fn trust_device(
     let now = Utc::now();
     let trusted_until = now + Duration::days(TRUST_DURATION_DAYS);
     let device_id_typed = DeviceId::from(device_id.to_string());
-    oauth_repo.trust_device(&device_id_typed, now, trusted_until).await
+    oauth_repo
+        .trust_device(&device_id_typed, now, trusted_until)
+        .await
 }
 
 pub async fn extend_device_trust(
@@ -220,5 +225,7 @@ pub async fn extend_device_trust(
 ) -> Result<(), tranquil_db_traits::DbError> {
     let trusted_until = Utc::now() + Duration::days(TRUST_DURATION_DAYS);
     let device_id_typed = DeviceId::from(device_id.to_string());
-    oauth_repo.extend_device_trust(&device_id_typed, trusted_until).await
+    oauth_repo
+        .extend_device_trust(&device_id_typed, trusted_until)
+        .await
 }

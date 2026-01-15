@@ -62,15 +62,18 @@ impl PostgresDelegationRepository {
 #[async_trait]
 impl DelegationRepository for PostgresDelegationRepository {
     async fn is_delegated_account(&self, did: &Did) -> Result<bool, DbError> {
-        let result = sqlx::query_scalar!(
-            r#"SELECT account_type::text = 'delegated' as "is_delegated!" FROM users WHERE did = $1"#,
+        let exists = sqlx::query_scalar!(
+            r#"SELECT EXISTS(
+                SELECT 1 FROM account_delegations
+                WHERE delegated_did = $1 AND revoked_at IS NULL
+            ) as "exists!""#,
             did.as_str()
         )
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(result.unwrap_or(false))
+        Ok(exists)
     }
 
     async fn create_delegation(

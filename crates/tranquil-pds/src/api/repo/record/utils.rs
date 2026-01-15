@@ -2,7 +2,7 @@ use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, Rkey};
 use bytes::Bytes;
 use cid::Cid;
-use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
@@ -36,8 +36,8 @@ fn extract_blob_cids_recursive(value: &Value, blobs: &mut Vec<String>) {
     }
 }
 
-use tranquil_db_traits::Backlink;
 use crate::types::AtUri;
+use tranquil_db_traits::Backlink;
 
 pub fn extract_backlinks(uri: &AtUri, record: &Value) -> Vec<Backlink> {
     let record_type = record
@@ -50,22 +50,26 @@ pub fn extract_backlinks(uri: &AtUri, record: &Value) -> Vec<Backlink> {
             .get("subject")
             .and_then(|v| v.as_str())
             .filter(|s| s.starts_with("did:"))
-            .map(|subject| vec![Backlink {
-                uri: uri.clone(),
-                path: "subject".to_string(),
-                link_to: subject.to_string(),
-            }])
+            .map(|subject| {
+                vec![Backlink {
+                    uri: uri.clone(),
+                    path: "subject".to_string(),
+                    link_to: subject.to_string(),
+                }]
+            })
             .unwrap_or_default(),
         "app.bsky.feed.like" | "app.bsky.feed.repost" => record
             .get("subject")
             .and_then(|v| v.get("uri"))
             .and_then(|v| v.as_str())
             .filter(|s| s.starts_with("at://"))
-            .map(|subject_uri| vec![Backlink {
-                uri: uri.clone(),
-                path: "subject.uri".to_string(),
-                link_to: subject_uri.to_string(),
-            }])
+            .map(|subject_uri| {
+                vec![Backlink {
+                    uri: uri.clone(),
+                    path: "subject.uri".to_string(),
+                    link_to: subject_uri.to_string(),
+                }]
+            })
             .unwrap_or_default(),
         _ => Vec::new(),
     }
@@ -78,10 +82,10 @@ pub fn create_signed_commit(
     prev: Option<Cid>,
     signing_key: &SigningKey,
 ) -> Result<(Vec<u8>, Bytes), String> {
-    let did = jacquard::types::string::Did::new(did.as_str())
+    let did = jacquard_common::types::string::Did::new(did.as_str())
         .map_err(|e| format!("Invalid DID: {:?}", e))?;
-    let rev =
-        jacquard::types::string::Tid::from_str(rev).map_err(|e| format!("Invalid TID: {:?}", e))?;
+    let rev = jacquard_common::types::string::Tid::from_str(rev)
+        .map_err(|e| format!("Invalid TID: {:?}", e))?;
     let unsigned = Commit::new_unsigned(did, data, rev, prev);
     let signed = unsigned
         .sign(signing_key)
@@ -133,7 +137,9 @@ pub async fn commit_and_log(
     state: &AppState,
     params: CommitParams<'_>,
 ) -> Result<CommitResult, String> {
-    use tranquil_db_traits::{ApplyCommitError, ApplyCommitInput, CommitEventData, RecordDelete, RecordUpsert};
+    use tranquil_db_traits::{
+        ApplyCommitError, ApplyCommitInput, CommitEventData, RecordDelete, RecordUpsert,
+    };
 
     let CommitParams {
         did,
@@ -179,15 +185,26 @@ pub async fn commit_and_log(
         (Vec::new(), Vec::new()),
         |(mut upserts, mut deletes), op| {
             match op {
-                RecordOp::Create { collection, rkey, cid }
-                | RecordOp::Update { collection, rkey, cid, .. } => {
+                RecordOp::Create {
+                    collection,
+                    rkey,
+                    cid,
+                }
+                | RecordOp::Update {
+                    collection,
+                    rkey,
+                    cid,
+                    ..
+                } => {
                     upserts.push(RecordUpsert {
                         collection: collection.clone(),
                         rkey: rkey.clone(),
-                        cid: crate::types::CidLink::new_unchecked(&cid.to_string()),
+                        cid: crate::types::CidLink::new_unchecked(cid.to_string()),
                     });
                 }
-                RecordOp::Delete { collection, rkey, .. } => {
+                RecordOp::Delete {
+                    collection, rkey, ..
+                } => {
                     deletes.push(RecordDelete {
                         collection: collection.clone(),
                         rkey: rkey.clone(),
@@ -201,12 +218,21 @@ pub async fn commit_and_log(
     let ops_json: Vec<serde_json::Value> = ops
         .iter()
         .map(|op| match op {
-            RecordOp::Create { collection, rkey, cid } => json!({
+            RecordOp::Create {
+                collection,
+                rkey,
+                cid,
+            } => json!({
                 "action": "create",
                 "path": format!("{}/{}", collection, rkey),
                 "cid": cid.to_string()
             }),
-            RecordOp::Update { collection, rkey, cid, prev } => {
+            RecordOp::Update {
+                collection,
+                rkey,
+                cid,
+                prev,
+            } => {
                 let mut obj = json!({
                     "action": "update",
                     "path": format!("{}/{}", collection, rkey),
@@ -217,7 +243,11 @@ pub async fn commit_and_log(
                 }
                 obj
             }
-            RecordOp::Delete { collection, rkey, prev } => {
+            RecordOp::Delete {
+                collection,
+                rkey,
+                prev,
+            } => {
                 let mut obj = json!({
                     "action": "delete",
                     "path": format!("{}/{}", collection, rkey),
@@ -234,20 +264,23 @@ pub async fn commit_and_log(
     let commit_event = CommitEventData {
         did: did.clone(),
         event_type: "commit".to_string(),
-        commit_cid: Some(crate::types::CidLink::new_unchecked(&new_root_cid.to_string())),
-        prev_cid: current_root_cid.map(|c| crate::types::CidLink::new_unchecked(&c.to_string())),
+        commit_cid: Some(crate::types::CidLink::new_unchecked(
+            new_root_cid.to_string(),
+        )),
+        prev_cid: current_root_cid.map(|c| crate::types::CidLink::new_unchecked(c.to_string())),
         ops: Some(json!(ops_json)),
         blobs: Some(blobs.to_vec()),
         blocks_cids: Some(blocks_cids.to_vec()),
-        prev_data_cid: prev_data_cid.map(|c| crate::types::CidLink::new_unchecked(&c.to_string())),
+        prev_data_cid: prev_data_cid.map(|c| crate::types::CidLink::new_unchecked(c.to_string())),
         rev: Some(rev_str.clone()),
     };
 
     let input = ApplyCommitInput {
         user_id,
         did: did.clone(),
-        expected_root_cid: current_root_cid.map(|c| crate::types::CidLink::new_unchecked(&c.to_string())),
-        new_root_cid: crate::types::CidLink::new_unchecked(&new_root_cid.to_string()),
+        expected_root_cid: current_root_cid
+            .map(|c| crate::types::CidLink::new_unchecked(c.to_string())),
+        new_root_cid: crate::types::CidLink::new_unchecked(new_root_cid.to_string()),
         new_rev: rev_str.clone(),
         new_block_cids: all_block_cids,
         obsolete_block_cids: obsolete_bytes,
@@ -424,8 +457,8 @@ pub async fn sequence_genesis_commit(
     mst_root_cid: &Cid,
     rev: &str,
 ) -> Result<i64, String> {
-    let commit_cid_link = crate::types::CidLink::new_unchecked(&commit_cid.to_string());
-    let mst_root_cid_link = crate::types::CidLink::new_unchecked(&mst_root_cid.to_string());
+    let commit_cid_link = crate::types::CidLink::new_unchecked(commit_cid.to_string());
+    let mst_root_cid_link = crate::types::CidLink::new_unchecked(mst_root_cid.to_string());
     state
         .repo_repo
         .insert_genesis_commit_event(did, &commit_cid_link, &mst_root_cid_link, rev)

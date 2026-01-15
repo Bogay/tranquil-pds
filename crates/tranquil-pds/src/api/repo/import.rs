@@ -6,17 +6,17 @@ use crate::state::AppState;
 use crate::sync::import::{ImportError, apply_import, parse_car};
 use crate::sync::verify::CarVerifier;
 use crate::types::Did;
-use tranquil_types::{AtUri, CidLink};
 use axum::{
     body::Bytes,
     extract::State,
     response::{IntoResponse, Response},
 };
-use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
+use tranquil_types::{AtUri, CidLink};
 
 const DEFAULT_MAX_IMPORT_SIZE: usize = 1024 * 1024 * 1024;
 const DEFAULT_MAX_BLOCKS: usize = 500000;
@@ -196,11 +196,14 @@ pub async fn import_repo(
                 .records
                 .iter()
                 .flat_map(|record| {
-                    let record_uri = AtUri::from_parts(did.as_str(), &record.collection, &record.rkey);
-                    record
-                        .blob_refs
-                        .iter()
-                        .map(move |blob_ref| (record_uri.clone(), CidLink::new_unchecked(blob_ref.cid.clone())))
+                    let record_uri =
+                        AtUri::from_parts(did.as_str(), &record.collection, &record.rkey);
+                    record.blob_refs.iter().map(move |blob_ref| {
+                        (
+                            record_uri.clone(),
+                            CidLink::new_unchecked(blob_ref.cid.clone()),
+                        )
+                    })
                 })
                 .collect();
 
@@ -273,7 +276,7 @@ pub async fn import_repo(
                     return ApiError::InternalError(None).into_response();
                 }
             };
-            let new_root_cid_link = CidLink::new_unchecked(&new_root_cid.to_string());
+            let new_root_cid_link = CidLink::new_unchecked(new_root_cid.to_string());
             if let Err(e) = state
                 .repo_repo
                 .update_repo_root(user_id, &new_root_cid_link, &new_rev_str)

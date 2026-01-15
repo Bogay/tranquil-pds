@@ -310,77 +310,69 @@ impl InfraRepository for PostgresInfraRepository {
         sort: InviteCodeSortOrder,
     ) -> Result<Vec<InviteCodeRow>, DbError> {
         let results = match (cursor, sort) {
-            (Some(cursor_code), InviteCodeSortOrder::Recent) => {
-                sqlx::query_as!(
-                    InviteCodeRow,
-                    r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
+            (Some(cursor_code), InviteCodeSortOrder::Recent) => sqlx::query_as!(
+                InviteCodeRow,
+                r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        WHERE ic.created_at < (SELECT created_at FROM invite_codes WHERE code = $1)
                        ORDER BY created_at DESC
                        LIMIT $2"#,
-                    cursor_code,
-                    limit
-                )
-                .fetch_all(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?
-            }
-            (None, InviteCodeSortOrder::Recent) => {
-                sqlx::query_as!(
-                    InviteCodeRow,
-                    r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
+                cursor_code,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+            (None, InviteCodeSortOrder::Recent) => sqlx::query_as!(
+                InviteCodeRow,
+                r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        ORDER BY created_at DESC
                        LIMIT $1"#,
-                    limit
-                )
-                .fetch_all(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?
-            }
-            (Some(cursor_code), InviteCodeSortOrder::Usage) => {
-                sqlx::query_as!(
-                    InviteCodeRow,
-                    r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+            (Some(cursor_code), InviteCodeSortOrder::Usage) => sqlx::query_as!(
+                InviteCodeRow,
+                r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        WHERE ic.created_at < (SELECT created_at FROM invite_codes WHERE code = $1)
                        ORDER BY available_uses DESC
                        LIMIT $2"#,
-                    cursor_code,
-                    limit
-                )
-                .fetch_all(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?
-            }
-            (None, InviteCodeSortOrder::Usage) => {
-                sqlx::query_as!(
-                    InviteCodeRow,
-                    r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
+                cursor_code,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+            (None, InviteCodeSortOrder::Usage) => sqlx::query_as!(
+                InviteCodeRow,
+                r#"SELECT ic.code, ic.available_uses, ic.disabled, ic.created_by_user, ic.created_at
                        FROM invite_codes ic
                        ORDER BY available_uses DESC
                        LIMIT $1"#,
-                    limit
-                )
-                .fetch_all(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?
-            }
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
         };
 
         Ok(results)
     }
 
     async fn get_user_dids_by_ids(&self, user_ids: &[Uuid]) -> Result<Vec<(Uuid, Did)>, DbError> {
-        let results = sqlx::query!(
-            "SELECT id, did FROM users WHERE id = ANY($1)",
-            user_ids
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        let results = sqlx::query!("SELECT id, did FROM users WHERE id = ANY($1)", user_ids)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
 
-        Ok(results.into_iter().map(|r| (r.id, Did::from(r.did))).collect())
+        Ok(results
+            .into_iter()
+            .map(|r| (r.id, Did::from(r.did)))
+            .collect())
     }
 
     async fn get_invite_code_uses_batch(
@@ -688,11 +680,10 @@ impl InfraRepository for PostgresInfraRepository {
     }
 
     async fn get_server_config(&self, key: &str) -> Result<Option<String>, DbError> {
-        let row =
-            sqlx::query_scalar!("SELECT value FROM server_config WHERE key = $1", key)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let row = sqlx::query_scalar!("SELECT value FROM server_config WHERE key = $1", key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
         Ok(row)
     }
 
@@ -881,13 +872,12 @@ impl InfraRepository for PostgresInfraRepository {
 
     async fn get_server_configs(&self, keys: &[&str]) -> Result<Vec<(String, String)>, DbError> {
         let keys_vec: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT key, value FROM server_config WHERE key = ANY($1)",
-        )
-        .bind(&keys_vec)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT key, value FROM server_config WHERE key = ANY($1)")
+                .bind(&keys_vec)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
 
         Ok(rows)
     }
@@ -917,10 +907,11 @@ impl InfraRepository for PostgresInfraRepository {
     }
 
     async fn get_blob_storage_key_by_cid(&self, cid: &CidLink) -> Result<Option<String>, DbError> {
-        let result = sqlx::query_scalar!("SELECT storage_key FROM blobs WHERE cid = $1", cid.as_str())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(map_sqlx_error)?;
+        let result =
+            sqlx::query_scalar!("SELECT storage_key FROM blobs WHERE cid = $1", cid.as_str())
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_sqlx_error)?;
 
         Ok(result)
     }

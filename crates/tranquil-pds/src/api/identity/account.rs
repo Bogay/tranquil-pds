@@ -13,7 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcrypt::{DEFAULT_COST, hash};
-use jacquard::types::{integer::LimitedU32, string::Tid};
+use jacquard_common::types::{integer::LimitedU32, string::Tid};
 use jacquard_repo::{mst::Mst, storage::BlockStore};
 use k256::{SecretKey, ecdsa::SigningKey};
 use rand::rngs::OsRng;
@@ -255,7 +255,11 @@ pub async fn create_account(
     };
     let (secret_key_bytes, reserved_key_id): (Vec<u8>, Option<uuid::Uuid>) =
         if let Some(signing_key_did) = &input.signing_key {
-            match state.infra_repo.get_reserved_signing_key(signing_key_did).await {
+            match state
+                .infra_repo
+                .get_reserved_signing_key(signing_key_did)
+                .await
+            {
                 Ok(Some(key)) => (key.private_key_bytes, Some(key.id)),
                 Ok(None) => {
                     return ApiError::InvalidSigningKey.into_response();
@@ -407,12 +411,23 @@ pub async fn create_account(
             did: Did::new_unchecked(&did),
             new_handle: Handle::new_unchecked(&handle),
         };
-        match state.user_repo.reactivate_migration_account(&reactivate_input).await {
+        match state
+            .user_repo
+            .reactivate_migration_account(&reactivate_input)
+            .await
+        {
             Ok(reactivated) => {
                 info!(did = %did, old_handle = %reactivated.old_handle, new_handle = %handle, "Preparing existing account for inbound migration");
-                let secret_key_bytes = match state.user_repo.get_user_key_by_id(reactivated.user_id).await {
+                let secret_key_bytes = match state
+                    .user_repo
+                    .get_user_key_by_id(reactivated.user_id)
+                    .await
+                {
                     Ok(Some(key_info)) => {
-                        match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
+                        match crate::config::decrypt_key(
+                            &key_info.key_bytes,
+                            key_info.encryption_version,
+                        ) {
                             Ok(k) => k,
                             Err(e) => {
                                 error!("Error decrypting key for reactivated account: {:?}", e);
@@ -476,8 +491,7 @@ pub async fn create_account(
                 )
                     .into_response();
             }
-            Err(tranquil_db_traits::MigrationReactivationError::NotFound) => {
-            }
+            Err(tranquil_db_traits::MigrationReactivationError::NotFound) => {}
             Err(tranquil_db_traits::MigrationReactivationError::NotDeactivated) => {
                 return ApiError::AccountAlreadyExists.into_response();
             }
@@ -492,7 +506,11 @@ pub async fn create_account(
     }
 
     let handle_typed = Handle::new_unchecked(&handle);
-    let handle_available = match state.user_repo.check_handle_available_for_new_account(&handle_typed).await {
+    let handle_available = match state
+        .user_repo
+        .check_handle_available_for_new_account(&handle_typed)
+        .await
+    {
         Ok(available) => available,
         Err(e) => {
             error!("Error checking handle availability: {:?}", e);
@@ -612,9 +630,24 @@ pub async fn create_account(
         did: Did::new_unchecked(&did),
         password_hash,
         preferred_comms_channel,
-        discord_id: input.discord_id.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
-        telegram_username: input.telegram_username.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
-        signal_number: input.signal_number.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()).map(String::from),
+        discord_id: input
+            .discord_id
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        telegram_username: input
+            .telegram_username
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        signal_number: input
+            .signal_number
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from),
         deactivated_at,
         encrypted_key_bytes,
         encryption_version: crate::config::ENCRYPTION_VERSION,

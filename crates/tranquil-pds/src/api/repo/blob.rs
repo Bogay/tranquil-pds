@@ -67,7 +67,9 @@ pub async fn upload_blob(
                 debug!("Service token verified for DID: {}", claims.iss);
                 let did: Did = match claims.iss.parse() {
                     Ok(d) => d,
-                    Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
+                    Err(_) => {
+                        return ApiError::InvalidDid("Invalid DID format".into()).into_response();
+                    }
                 };
                 (did, false, None)
             }
@@ -217,12 +219,10 @@ pub async fn upload_blob(
         }
     };
 
-    if was_inserted {
-        if let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
-            let _ = state.blob_store.delete(&temp_key).await;
-            error!("Failed to copy blob to final location: {:?}", e);
-            return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
-        }
+    if was_inserted && let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
+        let _ = state.blob_store.delete(&temp_key).await;
+        error!("Failed to copy blob to final location: {:?}", e);
+        return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
     }
 
     let _ = state.blob_store.delete(&temp_key).await;

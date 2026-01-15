@@ -105,7 +105,12 @@ async fn handle_socket_inner(
                 let _ = socket.send(Message::Binary(info_bytes.into())).await;
             }
 
-            let earliest = state.repo_repo.get_min_seq_since(backfill_time).await.ok().flatten();
+            let earliest = state
+                .repo_repo
+                .get_min_seq_since(backfill_time)
+                .await
+                .ok()
+                .flatten();
 
             if let Some(earliest_seq) = earliest {
                 current_cursor = earliest_seq - 1;
@@ -162,10 +167,7 @@ async fn handle_socket_inner(
             }
         }
 
-        let cutover_events = state
-            .repo_repo
-            .get_events_since_seq(last_seen, None)
-            .await;
+        let cutover_events = state.repo_repo.get_events_since_seq(last_seen, None).await;
 
         if let Ok(events) = cutover_events
             && !events.is_empty()

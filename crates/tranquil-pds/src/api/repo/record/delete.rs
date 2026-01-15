@@ -202,7 +202,11 @@ pub async fn delete_record(
     }
 
     let deleted_uri = AtUri::from_parts(&did, &input.collection, &input.rkey);
-    if let Err(e) = state.backlink_repo.remove_backlinks_by_uri(&deleted_uri).await {
+    if let Err(e) = state
+        .backlink_repo
+        .remove_backlinks_by_uri(&deleted_uri)
+        .await
+    {
         error!("Failed to remove backlinks for {}: {}", deleted_uri, e);
     }
 
@@ -245,8 +249,8 @@ pub async fn delete_record_internal(
         .map_err(|e| format!("Failed to fetch commit: {:?}", e))?
         .ok_or_else(|| "Commit block not found".to_string())?;
 
-    let commit = Commit::from_cbor(&commit_bytes)
-        .map_err(|e| format!("Failed to parse commit: {:?}", e))?;
+    let commit =
+        Commit::from_cbor(&commit_bytes).map_err(|e| format!("Failed to parse commit: {:?}", e))?;
 
     let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let key = format!("{}/{}", collection, rkey);

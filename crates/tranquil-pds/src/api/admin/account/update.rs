@@ -31,7 +31,11 @@ pub async fn update_account_email(
         Ok(d) => d,
         Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
     };
-    match state.user_repo.admin_update_email(&account_did, email).await {
+    match state
+        .user_repo
+        .admin_update_email(&account_did, email)
+        .await
+    {
         Ok(0) => ApiError::AccountNotFound.into_response(),
         Ok(_) => EmptyResponse::ok().into_response(),
         Err(e) => {
@@ -70,30 +74,36 @@ pub async fn update_account_handle(
     } else {
         input_handle.to_string()
     };
-    let old_handle = state
-        .user_repo
-        .get_handle_by_did(did)
-        .await
-        .ok()
-        .flatten();
+    let old_handle = state.user_repo.get_handle_by_did(did).await.ok().flatten();
     let user_id = match state.user_repo.get_id_by_did(did).await {
         Ok(Some(id)) => id,
         _ => return ApiError::AccountNotFound.into_response(),
     };
     let handle_for_check = Handle::new_unchecked(&handle);
-    if let Ok(true) = state.user_repo.check_handle_exists(&handle_for_check, user_id).await {
+    if let Ok(true) = state
+        .user_repo
+        .check_handle_exists(&handle_for_check, user_id)
+        .await
+    {
         return ApiError::HandleTaken.into_response();
     }
-    match state.user_repo.admin_update_handle(did, &handle_for_check).await {
+    match state
+        .user_repo
+        .admin_update_handle(did, &handle_for_check)
+        .await
+    {
         Ok(0) => ApiError::AccountNotFound.into_response(),
         Ok(_) => {
             if let Some(old) = old_handle {
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
             }
             let _ = state.cache.delete(&format!("handle:{}", handle)).await;
-            if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, did, Some(&handle_for_check))
-                    .await
+            if let Err(e) = crate::api::repo::record::sequence_identity_event(
+                &state,
+                did,
+                Some(&handle_for_check),
+            )
+            .await
             {
                 warn!(
                     "Failed to sequence identity event for admin handle update: {}",
@@ -137,7 +147,11 @@ pub async fn update_account_password(
             return ApiError::InternalError(None).into_response();
         }
     };
-    match state.user_repo.admin_update_password(did, &password_hash).await {
+    match state
+        .user_repo
+        .admin_update_password(did, &password_hash)
+        .await
+    {
         Ok(0) => ApiError::AccountNotFound.into_response(),
         Ok(_) => EmptyResponse::ok().into_response(),
         Err(e) => {

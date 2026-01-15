@@ -39,7 +39,9 @@ pub async fn describe_repo(
         };
         let handle: crate::types::Handle = match handle_str.parse() {
             Ok(h) => h,
-            Err(_) => return ApiError::InvalidRequest("Invalid handle format".into()).into_response(),
+            Err(_) => {
+                return ApiError::InvalidRequest("Invalid handle format".into()).into_response();
+            }
         };
         state
             .user_repo

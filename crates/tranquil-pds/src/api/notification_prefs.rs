@@ -189,11 +189,7 @@ pub async fn update_notification_prefs(
 ) -> Response {
     let user = auth.0;
 
-    let user_row = match state
-        .user_repo
-        .get_id_handle_email_by_did(&user.did)
-        .await
-    {
+    let user_row = match state.user_repo.get_id_handle_email_by_did(&user.did).await {
         Ok(Some(row)) => row,
         Ok(None) => return ApiError::AccountNotFound.into_response(),
         Err(e) => {
@@ -238,7 +234,11 @@ pub async fn update_notification_prefs(
         if current_email.as_ref().map(|e| e.to_lowercase()) == Some(email_clean.clone()) {
             info!(did = %user.did, "Email unchanged, skipping");
         } else {
-            match state.user_repo.check_email_exists(&email_clean, user_id).await {
+            match state
+                .user_repo
+                .check_email_exists(&email_clean, user_id)
+                .await
+            {
                 Ok(true) => return ApiError::EmailTaken.into_response(),
                 Err(e) => {
                     return ApiError::InternalError(Some(format!("Database error: {}", e)))
@@ -272,9 +272,10 @@ pub async fn update_notification_prefs(
             }
             info!(did = %user.did, "Cleared Discord ID");
         } else {
-            if let Err(e) =
-                request_channel_verification(&state, user_id, &user.did, "discord", discord_id, None)
-                    .await
+            if let Err(e) = request_channel_verification(
+                &state, user_id, &user.did, "discord", discord_id, None,
+            )
+            .await
             {
                 return ApiError::InternalError(Some(e)).into_response();
             }

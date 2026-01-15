@@ -109,6 +109,7 @@ pub struct DeletionRequest {
 
 #[async_trait]
 pub trait InfraRepository: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     async fn enqueue_comms(
         &self,
         user_id: Option<Uuid>,
@@ -287,10 +288,7 @@ pub trait InfraRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<NotificationHistoryRow>, DbError>;
 
-    async fn get_server_configs(
-        &self,
-        keys: &[&str],
-    ) -> Result<Vec<(String, String)>, DbError>;
+    async fn get_server_configs(&self, keys: &[&str]) -> Result<Vec<(String, String)>, DbError>;
 
     async fn upsert_server_config(&self, key: &str, value: &str) -> Result<(), DbError>;
 

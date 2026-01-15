@@ -703,7 +703,53 @@
       "signingInAs": "Kirjaudutaan käyttäjänä:",
       "permissionsRequested": "Pyydetyt oikeudet",
       "required": "Vaaditaan",
-      "rememberChoiceLabel": "Muista valintani tälle sovellukselle"
+      "rememberChoiceLabel": "Muista valintani tälle sovellukselle",
+      "scopes": {
+        "atproto": {
+          "name": "Täysi käyttöoikeus",
+          "description": "Täysi oikeus lukea, kirjoittaa ja hallita tätä tiliä"
+        },
+        "atprotoWithGranular": {
+          "name": "AT Protocol -käyttöoikeus",
+          "description": "AT Protocol -peruslaajuus (oikeudet määräytyvät alla valittujen vaihtoehtojen mukaan)"
+        },
+        "transitionGeneric": {
+          "name": "Siirtymäkäyttöoikeus",
+          "description": "Yleinen siirtymälaajuus yhteensopivuutta varten"
+        },
+        "transitionChat": {
+          "name": "Chat-käyttöoikeus",
+          "description": "Pääsy Bluesky-chat-ominaisuuksiin"
+        },
+        "transitionEmail": {
+          "name": "Sähköpostikäyttöoikeus",
+          "description": "Lue tilisi sähköpostiosoite"
+        },
+        "repoCreate": {
+          "name": "Luo tietueita",
+          "description": "Luo uusia tietueita tietovarastoosi"
+        },
+        "repoUpdate": {
+          "name": "Päivitä tietueita",
+          "description": "Päivitä olemassa olevia tietueita tietovarastossasi"
+        },
+        "repoDelete": {
+          "name": "Poista tietueita",
+          "description": "Poista tietueita tietovarastostasi"
+        },
+        "blobAll": {
+          "name": "Lataa mediaa",
+          "description": "Lataa kuvia, videoita ja muita mediatiedostoja"
+        },
+        "repoFull": {
+          "name": "Täysi tietovarastokäyttö",
+          "description": "Täysi luku- ja kirjoitusoikeus kaikkiin tietovaraston tietueisiin"
+        },
+        "accountManage": {
+          "name": "Hallitse tiliä",
+          "description": "Hallitse tilin asetuksia ja asetuksia"
+        }
+      }
     },
     "accounts": {
       "title": "Valitse tili",

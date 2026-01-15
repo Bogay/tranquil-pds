@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use sqlx::postgres::PgListener;
 use sqlx::PgPool;
+use sqlx::postgres::PgListener;
 use tranquil_db_traits::{DbError, RepoEventNotifier, RepoEventReceiver};
 
 use super::user::map_sqlx_error;
@@ -21,7 +21,10 @@ impl RepoEventNotifier for PostgresRepoEventNotifier {
         let mut listener = PgListener::connect_with(&self.pool)
             .await
             .map_err(map_sqlx_error)?;
-        listener.listen("repo_updates").await.map_err(map_sqlx_error)?;
+        listener
+            .listen("repo_updates")
+            .await
+            .map_err(map_sqlx_error)?;
         Ok(Box::new(PostgresRepoEventReceiver { listener }))
     }
 }

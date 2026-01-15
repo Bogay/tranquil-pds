@@ -696,7 +696,53 @@
       "signingInAs": "登录账户：",
       "permissionsRequested": "请求的权限",
       "required": "必需",
-      "rememberChoiceLabel": "记住对此应用的授权选择"
+      "rememberChoiceLabel": "记住对此应用的授权选择",
+      "scopes": {
+        "atproto": {
+          "name": "完全访问",
+          "description": "完全访问权限以读取、写入和管理此账户"
+        },
+        "atprotoWithGranular": {
+          "name": "AT Protocol 访问",
+          "description": "AT Protocol 基础范围（权限由下方选择的选项决定）"
+        },
+        "transitionGeneric": {
+          "name": "过渡访问",
+          "description": "用于兼容性的通用过渡范围"
+        },
+        "transitionChat": {
+          "name": "聊天访问",
+          "description": "访问 Bluesky 聊天功能"
+        },
+        "transitionEmail": {
+          "name": "邮箱访问",
+          "description": "读取您的账户邮箱地址"
+        },
+        "repoCreate": {
+          "name": "创建记录",
+          "description": "在您的仓库中创建新记录"
+        },
+        "repoUpdate": {
+          "name": "更新记录",
+          "description": "更新您仓库中的现有记录"
+        },
+        "repoDelete": {
+          "name": "删除记录",
+          "description": "从您的仓库中删除记录"
+        },
+        "blobAll": {
+          "name": "上传媒体",
+          "description": "上传图片、视频和其他媒体文件"
+        },
+        "repoFull": {
+          "name": "完全仓库访问",
+          "description": "对所有仓库记录的完全读写访问权限"
+        },
+        "accountManage": {
+          "name": "管理账户",
+          "description": "管理账户设置和偏好"
+        }
+      }
     },
     "accounts": {
       "title": "选择账户",

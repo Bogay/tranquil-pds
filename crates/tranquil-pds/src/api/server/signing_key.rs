@@ -52,12 +52,7 @@ pub async fn reserve_signing_key(
     let private_bytes: &[u8] = &private_key_bytes;
     match state
         .infra_repo
-        .reserve_signing_key(
-            did.as_ref(),
-            &public_key_did_key,
-            private_bytes,
-            expires_at,
-        )
+        .reserve_signing_key(did.as_ref(), &public_key_did_key, private_bytes, expires_at)
         .await
     {
         Ok(key_id) => {

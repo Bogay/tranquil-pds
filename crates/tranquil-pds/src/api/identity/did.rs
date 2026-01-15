@@ -44,7 +44,9 @@ pub async fn resolve_handle(
     }
     let handle: Handle = match handle_str.parse() {
         Ok(h) => h,
-        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+        Err(_) => {
+            return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
+        }
     };
     let user = state.user_repo.get_by_handle(&handle).await;
     match user {
@@ -131,14 +133,20 @@ pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -
     .into_response()
 }
 
-async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str) -> Response {
+async fn serve_subdomain_did_doc(state: &AppState, subdomain: &str, hostname: &str) -> Response {
     let hostname_for_handles = hostname.split(':').next().unwrap_or(hostname);
-    let full_handle = format!("{}.{}", handle, hostname_for_handles);
-    let full_handle_typed: Handle = match full_handle.parse() {
-        Ok(h) => h,
-        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+    let subdomain_host = format!("{}.{}", subdomain, hostname_for_handles);
+    let encoded_subdomain = subdomain_host.replace(':', "%3A");
+    let expected_did = format!("did:web:{}", encoded_subdomain);
+    let expected_did_typed: crate::types::Did = match expected_did.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("Invalid DID format".into()).into_response(),
     };
-    let user = match state.user_repo.get_did_web_info_by_handle(&full_handle_typed).await {
+    let user = match state
+        .user_repo
+        .get_user_for_did_doc_build(&expected_did_typed)
+        .await
+    {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::NotFoundMsg("User not found".into()).into_response();
@@ -148,17 +156,8 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
             return ApiError::InternalError(None).into_response();
         }
     };
-    let (user_id, did, migrated_to_pds) = (user.id, user.did, user.migrated_to_pds);
-    if !did.starts_with("did:web:") {
-        return ApiError::NotFoundMsg("User is not did:web".into()).into_response();
-    }
-    let subdomain_host = format!("{}.{}", handle, hostname_for_handles);
-    let encoded_subdomain = subdomain_host.replace(':', "%3A");
-    let expected_self_hosted = format!("did:web:{}", encoded_subdomain);
-    if did != expected_self_hosted {
-        return ApiError::NotFoundMsg("External did:web - DID document hosted by user".into())
-            .into_response();
-    }
+    let (user_id, current_handle, migrated_to_pds) = (user.id, user.handle, user.migrated_to_pds);
+    let did = expected_did;
 
     let overrides = state
         .user_repo
@@ -178,7 +177,7 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
         let also_known_as = if !ovr.also_known_as.is_empty() {
             ovr.also_known_as.clone()
         } else {
-            vec![format!("at://{}", full_handle)]
+            vec![format!("at://{}", current_handle)]
         };
 
         return Json(json!({
@@ -209,12 +208,13 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
         Ok(None) => return ApiError::InternalError(None).into_response(),
         Err(_) => return ApiError::InternalError(None).into_response(),
     };
-    let key_bytes: Vec<u8> = match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
-        Ok(k) => k,
-        Err(_) => {
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let key_bytes: Vec<u8> =
+        match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
+            Ok(k) => k,
+            Err(_) => {
+                return ApiError::InternalError(None).into_response();
+            }
+        };
     let public_key_multibase = match get_public_key_multibase(&key_bytes) {
         Ok(pk) => pk,
         Err(e) => {
@@ -227,10 +227,10 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
         if !ovr.also_known_as.is_empty() {
             ovr.also_known_as.clone()
         } else {
-            vec![format!("at://{}", full_handle)]
+            vec![format!("at://{}", current_handle)]
         }
     } else {
-        vec![format!("at://{}", full_handle)]
+        vec![format!("at://{}", current_handle)]
     };
 
     Json(json!({
@@ -259,12 +259,18 @@ async fn serve_subdomain_did_doc(state: &AppState, handle: &str, hostname: &str)
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
-    let full_handle = format!("{}.{}", handle, hostname_for_handles);
-    let full_handle_typed: Handle = match full_handle.parse() {
+    let current_handle = format!("{}.{}", handle, hostname_for_handles);
+    let current_handle_typed: Handle = match current_handle.parse() {
         Ok(h) => h,
-        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+        Err(_) => {
+            return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
+        }
     };
-    let user = match state.user_repo.get_did_web_info_by_handle(&full_handle_typed).await {
+    let user = match state
+        .user_repo
+        .get_did_web_info_by_handle(&current_handle_typed)
+        .await
+    {
         Ok(Some(u)) => u,
         Ok(None) => {
             return ApiError::NotFoundMsg("User not found".into()).into_response();
@@ -306,7 +312,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         let also_known_as = if !ovr.also_known_as.is_empty() {
             ovr.also_known_as.clone()
         } else {
-            vec![format!("at://{}", full_handle)]
+            vec![format!("at://{}", current_handle)]
         };
 
         return Json(json!({
@@ -337,12 +343,13 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         Ok(None) => return ApiError::InternalError(None).into_response(),
         Err(_) => return ApiError::InternalError(None).into_response(),
     };
-    let key_bytes: Vec<u8> = match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
-        Ok(k) => k,
-        Err(_) => {
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let key_bytes: Vec<u8> =
+        match crate::config::decrypt_key(&key_info.key_bytes, key_info.encryption_version) {
+            Ok(k) => k,
+            Err(_) => {
+                return ApiError::InternalError(None).into_response();
+            }
+        };
     let public_key_multibase = match get_public_key_multibase(&key_bytes) {
         Ok(pk) => pk,
         Err(e) => {
@@ -355,10 +362,10 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         if !ovr.also_known_as.is_empty() {
             ovr.also_known_as.clone()
         } else {
-            vec![format!("at://{}", full_handle)]
+            vec![format!("at://{}", current_handle)]
         }
     } else {
-        vec![format!("at://{}", full_handle)]
+        vec![format!("at://{}", current_handle)]
     };
 
     Json(json!({
@@ -639,8 +646,9 @@ pub async fn update_handle(
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
     let suffix = format!(".{}", hostname_for_handles);
-    let is_service_domain = crate::handle::is_service_domain_handle(&new_handle, hostname_for_handles);
-    let handle = if is_service_domain {
+    let is_service_domain =
+        crate::handle::is_service_domain_handle(&new_handle, hostname_for_handles);
+    let handle = if is_service_domain && new_handle != hostname_for_handles {
         let short_part = if new_handle.ends_with(&suffix) {
             new_handle.strip_suffix(&suffix).unwrap_or(&new_handle)
         } else {
@@ -710,9 +718,15 @@ pub async fn update_handle(
     };
     let handle_typed: Handle = match handle.parse() {
         Ok(h) => h,
-        Err(_) => return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response(),
+        Err(_) => {
+            return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
+        }
     };
-    let handle_exists = match state.user_repo.check_handle_exists(&handle_typed, user_id).await {
+    let handle_exists = match state
+        .user_repo
+        .check_handle_exists(&handle_typed, user_id)
+        .await
+    {
         Ok(exists) => exists,
         Err(_) => return ApiError::InternalError(None).into_response(),
     };

@@ -9,7 +9,6 @@ use std::collections::HashSet;
 pub struct ScopePermissions {
     scopes: HashSet<String>,
     parsed: Vec<ParsedScope>,
-    has_atproto: bool,
     has_transition_generic: bool,
     has_transition_chat: bool,
     has_transition_email: bool,
@@ -26,7 +25,7 @@ impl ScopePermissions {
         let parsed = parse_scope_string(scope_str);
 
         let has_atproto = parsed.iter().any(|p| matches!(p, ParsedScope::Atproto));
-        let has_transition_generic = parsed
+        let mut has_transition_generic = parsed
             .iter()
             .any(|p| matches!(p, ParsedScope::TransitionGeneric));
         let has_transition_chat = parsed
@@ -36,10 +35,24 @@ impl ScopePermissions {
             .iter()
             .any(|p| matches!(p, ParsedScope::TransitionEmail));
 
+        let has_granular_scopes = parsed.iter().any(|p| {
+            matches!(
+                p,
+                ParsedScope::Repo(_)
+                    | ParsedScope::Blob(_)
+                    | ParsedScope::Rpc(_)
+                    | ParsedScope::Account(_)
+                    | ParsedScope::Identity(_)
+            )
+        });
+
+        if has_atproto && !has_granular_scopes {
+            has_transition_generic = true;
+        }
+
         Self {
             scopes,
             parsed,
-            has_atproto,
             has_transition_generic,
             has_transition_chat,
             has_transition_email,
@@ -55,7 +68,7 @@ impl ScopePermissions {
     }
 
     pub fn has_full_access(&self) -> bool {
-        self.has_atproto
+        self.has_transition_generic
     }
 
     fn find_repo_scopes(&self) -> impl Iterator<Item = &RepoScope> {
@@ -109,7 +122,7 @@ impl ScopePermissions {
     }
 
     pub fn assert_repo(&self, action: RepoAction, collection: &str) -> Result<(), ScopeError> {
-        if self.has_atproto || self.has_transition_generic {
+        if self.has_transition_generic {
             return Ok(());
         }
 
@@ -142,11 +155,14 @@ impl ScopePermissions {
     }
 
     pub fn assert_blob(&self, mime: &str) -> Result<(), ScopeError> {
-        if self.has_atproto || self.has_transition_generic {
+        if self.has_transition_generic {
             return Ok(());
         }
 
-        if self.find_blob_scopes().any(|blob_scope| blob_scope.matches_mime(mime)) {
+        if self
+            .find_blob_scopes()
+            .any(|blob_scope| blob_scope.matches_mime(mime))
+        {
             Ok(())
         } else {
             Err(ScopeError::InsufficientScope {
@@ -157,7 +173,7 @@ impl ScopePermissions {
     }
 
     pub fn assert_rpc(&self, aud: &str, lxm: &str) -> Result<(), ScopeError> {
-        if self.has_atproto || self.has_transition_generic {
+        if self.has_transition_generic {
             return Ok(());
         }
 
@@ -200,7 +216,7 @@ impl ScopePermissions {
         attr: AccountAttr,
         action: AccountAction,
     ) -> Result<(), ScopeError> {
-        if self.has_atproto || self.has_transition_generic {
+        if self.has_transition_generic {
             return Ok(());
         }
 
@@ -210,9 +226,8 @@ impl ScopePermissions {
         }
 
         let has_permission = self.find_account_scopes().any(|account_scope| {
-            account_scope.attr == attr
-                && (account_scope.action == action
-                    || account_scope.action == AccountAction::Manage)
+            (account_scope.attr == attr || account_scope.attr == AccountAttr::Wildcard)
+                && (account_scope.action == action || account_scope.action == AccountAction::Manage)
         });
 
         if has_permission {
@@ -234,12 +249,11 @@ impl ScopePermissions {
     }
 
     pub fn allows_email_read(&self) -> bool {
-        self.has_atproto
-            || self.has_transition_generic
+        self.has_transition_generic
             || self.has_transition_email
             || self
                 .find_account_scopes()
-                .any(|a| a.attr == AccountAttr::Email)
+                .any(|a| a.attr == AccountAttr::Email || a.attr == AccountAttr::Wildcard)
     }
 
     pub fn allows_repo(&self, action: RepoAction, collection: &str) -> bool {
@@ -259,15 +273,13 @@ impl ScopePermissions {
     }
 
     pub fn assert_identity(&self, attr: IdentityAttr) -> Result<(), ScopeError> {
-        if self.has_atproto || self.has_transition_generic {
+        if self.has_transition_generic {
             return Ok(());
         }
 
-        let has_permission = self
-            .find_identity_scopes()
-            .any(|identity_scope| {
-                identity_scope.attr == IdentityAttr::Wildcard || identity_scope.attr == attr
-            });
+        let has_permission = self.find_identity_scopes().any(|identity_scope| {
+            identity_scope.attr == IdentityAttr::Wildcard || identity_scope.attr == attr
+        });
 
         if has_permission {
             Ok(())
@@ -301,6 +313,7 @@ fn attr_str(attr: AccountAttr) -> &'static str {
         AccountAttr::Handle => "handle",
         AccountAttr::Repo => "repo",
         AccountAttr::Status => "status",
+        AccountAttr::Wildcard => "*",
     }
 }
 
@@ -484,5 +497,28 @@ mod tests {
         let perms = ScopePermissions::from_scope_string(Some("account:status?action=read"));
         assert!(perms.allows_account(AccountAttr::Status, AccountAction::Read));
         assert!(!perms.allows_account(AccountAttr::Status, AccountAction::Manage));
+    }
+
+    #[test]
+    fn test_atproto_with_granular_scopes_uses_granular() {
+        let perms =
+            ScopePermissions::from_scope_string(Some("atproto repo:*?action=create blob:*/*"));
+        assert!(!perms.has_full_access());
+        assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
+        assert!(!perms.allows_repo(RepoAction::Delete, "any.collection"));
+        assert!(!perms.allows_repo(RepoAction::Update, "any.collection"));
+        assert!(perms.allows_blob("image/png"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+    }
+
+    #[test]
+    fn test_atproto_alone_has_full_access() {
+        let perms = ScopePermissions::from_scope_string(Some("atproto"));
+        assert!(perms.has_full_access());
+        assert!(perms.allows_repo(RepoAction::Create, "any.collection"));
+        assert!(perms.allows_repo(RepoAction::Delete, "any.collection"));
+        assert!(perms.allows_repo(RepoAction::Update, "any.collection"));
+        assert!(perms.allows_blob("image/png"));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
     }
 }

@@ -1,7 +1,7 @@
 use super::super::OAuthError;
 use tranquil_db_traits::OAuthRepository;
-use tranquil_types::{Did, RefreshToken};
 pub use tranquil_db_traits::RefreshTokenLookup;
+use tranquil_types::{Did, RefreshToken};
 
 pub async fn lookup_refresh_token(
     oauth_repo: &dyn OAuthRepository,

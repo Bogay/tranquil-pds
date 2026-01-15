@@ -119,7 +119,9 @@ pub async fn get_service_auth(
             }
         }
     } else {
-        match crate::auth::validate_bearer_token_for_service_auth(state.user_repo.as_ref(), &token).await {
+        match crate::auth::validate_bearer_token_for_service_auth(state.user_repo.as_ref(), &token)
+            .await
+        {
             Ok(user) => user,
             Err(e) => {
                 warn!(error = ?e, "getServiceAuth auth validation failed");

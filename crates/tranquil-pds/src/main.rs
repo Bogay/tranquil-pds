@@ -36,7 +36,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let backfill_block_store = state.block_store.clone();
     tokio::spawn(async move {
         tokio::join!(
-            backfill_genesis_commit_blocks(backfill_repo_repo.clone(), backfill_block_store.clone()),
+            backfill_genesis_commit_blocks(
+                backfill_repo_repo.clone(),
+                backfill_block_store.clone()
+            ),
             backfill_repo_rev(backfill_repo_repo.clone(), backfill_block_store.clone()),
             backfill_user_blocks(backfill_repo_repo.clone(), backfill_block_store.clone()),
             backfill_record_blobs(backfill_repo_repo, backfill_block_store),

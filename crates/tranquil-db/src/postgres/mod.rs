@@ -21,11 +21,11 @@ pub use infra::PostgresInfraRepository;
 pub use oauth::PostgresOAuthRepository;
 pub use repo::PostgresRepoRepository;
 pub use session::PostgresSessionRepository;
-pub use user::PostgresUserRepository;
 use tranquil_db_traits::{
     BacklinkRepository, BackupRepository, BlobRepository, DelegationRepository, InfraRepository,
     OAuthRepository, RepoEventNotifier, RepoRepository, SessionRepository, UserRepository,
 };
+pub use user::PostgresUserRepository;
 
 pub struct PostgresRepositories {
     pub pool: PgPool,

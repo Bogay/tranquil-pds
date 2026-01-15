@@ -187,11 +187,7 @@ pub async fn update_subject_status(
                     } else {
                         None
                     };
-                    if let Err(e) = state
-                        .user_repo
-                        .set_user_takedown(&did, takedown_ref)
-                        .await
-                    {
+                    if let Err(e) = state.user_repo.set_user_takedown(&did, takedown_ref).await {
                         error!("Failed to update user takedown status for {}: {:?}", did, e);
                         return ApiError::InternalError(Some(
                             "Failed to update takedown status".into(),
@@ -274,7 +270,10 @@ pub async fn update_subject_status(
             if let Some(uri_str) = uri_str {
                 let cid: CidLink = match uri_str.parse() {
                     Ok(c) => c,
-                    Err(_) => return ApiError::InvalidRequest("Invalid CID format".into()).into_response(),
+                    Err(_) => {
+                        return ApiError::InvalidRequest("Invalid CID format".into())
+                            .into_response();
+                    }
                 };
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.applied {
@@ -315,7 +314,10 @@ pub async fn update_subject_status(
             if let Some(cid_str) = cid_str {
                 let cid: CidLink = match cid_str.parse() {
                     Ok(c) => c,
-                    Err(_) => return ApiError::InvalidRequest("Invalid CID format".into()).into_response(),
+                    Err(_) => {
+                        return ApiError::InvalidRequest("Invalid CID format".into())
+                            .into_response();
+                    }
                 };
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.applied {
@@ -328,7 +330,10 @@ pub async fn update_subject_status(
                         .update_blob_takedown(&cid, takedown_ref)
                         .await
                     {
-                        error!("Failed to update blob takedown status for {}: {:?}", cid_str, e);
+                        error!(
+                            "Failed to update blob takedown status for {}: {:?}",
+                            cid_str, e
+                        );
                         return ApiError::InternalError(Some(
                             "Failed to update takedown status".into(),
                         ))

@@ -112,6 +112,7 @@ pub trait DelegationRepository: Send + Sync {
 
     async fn controls_any_accounts(&self, did: &Did) -> Result<bool, DbError>;
 
+    #[allow(clippy::too_many_arguments)]
     async fn log_delegation_action(
         &self,
         delegated_did: &Did,

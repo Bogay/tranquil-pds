@@ -4,11 +4,11 @@ use crate::oauth::{
     scopes::{ParsedScope, parse_scope},
 };
 use crate::state::{AppState, RateLimitKind};
-use tranquil_types::RequestId as RequestIdType;
 use axum::body::Bytes;
 use axum::{Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+use tranquil_types::RequestId as RequestIdType;
 
 const PAR_EXPIRY_SECONDS: i64 = 600;
 

@@ -4,6 +4,7 @@
   import { _ } from '../lib/i18n'
   import {
     createRegistrationFlow,
+    restoreRegistrationFlow,
     VerificationStep,
     KeyChoiceStep,
     DidDocStep,
@@ -45,9 +46,15 @@
 
   async function loadServerInfo() {
     try {
-      serverInfo = await api.describeServer()
-      const hostname = serverInfo?.availableUserDomains?.[0] || window.location.hostname
-      flow = createRegistrationFlow('password', hostname)
+      const restored = restoreRegistrationFlow()
+      if (restored && restored.state.mode === 'password') {
+        flow = restored
+        serverInfo = await api.describeServer()
+      } else {
+        serverInfo = await api.describeServer()
+        const hostname = serverInfo?.availableUserDomains?.[0] || window.location.hostname
+        flow = createRegistrationFlow('password', hostname)
+      }
     } catch (e) {
       console.error('Failed to load server info:', e)
     } finally {

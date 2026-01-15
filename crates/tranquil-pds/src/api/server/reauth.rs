@@ -372,7 +372,10 @@ async fn get_available_reauth_methods(
     methods
 }
 
-pub async fn check_reauth_required(session_repo: &dyn SessionRepository, did: &crate::types::Did) -> bool {
+pub async fn check_reauth_required(
+    session_repo: &dyn SessionRepository,
+    did: &crate::types::Did,
+) -> bool {
     match session_repo.get_last_reauth_at(did).await {
         Ok(last_reauth_at) => is_reauth_required(last_reauth_at),
         _ => true,
@@ -427,7 +430,10 @@ pub async fn reauth_required_response(
         .into_response()
 }
 
-pub async fn check_legacy_session_mfa(session_repo: &dyn SessionRepository, did: &crate::types::Did) -> bool {
+pub async fn check_legacy_session_mfa(
+    session_repo: &dyn SessionRepository,
+    did: &crate::types::Did,
+) -> bool {
     match session_repo.get_session_mfa_status(did).await {
         Ok(Some(status)) => {
             if !status.legacy_login {

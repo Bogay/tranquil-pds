@@ -12,12 +12,12 @@ use iroh_car::{CarHeader, CarWriter};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
 use serde::Serialize;
-use tranquil_db_traits::RepoRepository;
-use tranquil_types::Did;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
+use tranquil_db_traits::RepoRepository;
+use tranquil_types::Did;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -333,7 +333,9 @@ pub async fn format_event_for_sending(
         frame.prev_data = Some(cid);
     }
     let commit_cid = frame.commit;
-    let prev_cid = prev_cid_link.as_ref().and_then(|c| Cid::from_str(c.as_str()).ok());
+    let prev_cid = prev_cid_link
+        .as_ref()
+        .and_then(|c| Cid::from_str(c.as_str()).ok());
     let mut all_cids: Vec<Cid> = block_cids_str
         .iter()
         .filter_map(|s| Cid::from_str(s).ok())
@@ -473,7 +475,9 @@ pub async fn format_event_with_prefetched_blocks(
         frame.prev_data = Some(cid);
     }
     let commit_cid = frame.commit;
-    let prev_cid = prev_cid_link.as_ref().and_then(|c| Cid::from_str(c.as_str()).ok());
+    let prev_cid = prev_cid_link
+        .as_ref()
+        .and_then(|c| Cid::from_str(c.as_str()).ok());
     let mut all_cids: Vec<Cid> = block_cids_str
         .iter()
         .filter_map(|s| Cid::from_str(s).ok())

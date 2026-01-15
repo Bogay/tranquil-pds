@@ -139,32 +139,34 @@ pub trait UserRepository: Send + Sync {
 
     async fn get_user_key_by_id(&self, user_id: Uuid) -> Result<Option<UserKeyInfo>, DbError>;
 
-    async fn get_id_and_handle_by_did(&self, did: &Did) -> Result<Option<UserIdAndHandle>, DbError>;
+    async fn get_id_and_handle_by_did(&self, did: &Did)
+    -> Result<Option<UserIdAndHandle>, DbError>;
 
     async fn get_did_web_info_by_handle(
         &self,
         handle: &Handle,
     ) -> Result<Option<UserDidWebInfo>, DbError>;
 
-    async fn get_did_web_overrides(&self, user_id: Uuid) -> Result<Option<DidWebOverrides>, DbError>;
+    async fn get_did_web_overrides(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<DidWebOverrides>, DbError>;
 
     async fn get_handle_by_did(&self, did: &Did) -> Result<Option<Handle>, DbError>;
 
     async fn is_account_active_by_did(&self, did: &Did) -> Result<Option<bool>, DbError>;
 
-    async fn get_user_for_deletion(
-        &self,
-        did: &Did,
-    ) -> Result<Option<UserForDeletion>, DbError>;
+    async fn get_user_for_deletion(&self, did: &Did) -> Result<Option<UserForDeletion>, DbError>;
 
-    async fn check_handle_exists(&self, handle: &Handle, exclude_user_id: Uuid) -> Result<bool, DbError>;
+    async fn check_handle_exists(
+        &self,
+        handle: &Handle,
+        exclude_user_id: Uuid,
+    ) -> Result<bool, DbError>;
 
     async fn update_handle(&self, user_id: Uuid, handle: &Handle) -> Result<(), DbError>;
 
-    async fn get_user_with_key_by_did(
-        &self,
-        did: &Did,
-    ) -> Result<Option<UserKeyWithId>, DbError>;
+    async fn get_user_with_key_by_did(&self, did: &Did) -> Result<Option<UserKeyWithId>, DbError>;
 
     async fn is_account_migrated(&self, did: &Did) -> Result<bool, DbError>;
 
@@ -174,7 +176,8 @@ pub trait UserRepository: Send + Sync {
 
     async fn get_email_info_by_did(&self, did: &Did) -> Result<Option<UserEmailInfo>, DbError>;
 
-    async fn check_email_exists(&self, email: &str, exclude_user_id: Uuid) -> Result<bool, DbError>;
+    async fn check_email_exists(&self, email: &str, exclude_user_id: Uuid)
+    -> Result<bool, DbError>;
 
     async fn update_email(&self, user_id: Uuid, email: &str) -> Result<(), DbError>;
 
@@ -191,14 +194,16 @@ pub trait UserRepository: Send + Sync {
 
     async fn admin_update_password(&self, did: &Did, password_hash: &str) -> Result<u64, DbError>;
 
-    async fn get_notification_prefs(&self, did: &Did) -> Result<Option<NotificationPrefs>, DbError>;
+    async fn get_notification_prefs(&self, did: &Did)
+    -> Result<Option<NotificationPrefs>, DbError>;
 
     async fn get_id_handle_email_by_did(
         &self,
         did: &Did,
     ) -> Result<Option<UserIdHandleEmail>, DbError>;
 
-    async fn update_preferred_comms_channel(&self, did: &Did, channel: &str) -> Result<(), DbError>;
+    async fn update_preferred_comms_channel(&self, did: &Did, channel: &str)
+    -> Result<(), DbError>;
 
     async fn clear_discord(&self, user_id: Uuid) -> Result<(), DbError>;
 
@@ -221,8 +226,11 @@ pub trait UserRepository: Send + Sync {
         telegram_username: &str,
     ) -> Result<(), DbError>;
 
-    async fn verify_signal_channel(&self, user_id: Uuid, signal_number: &str)
-        -> Result<(), DbError>;
+    async fn verify_signal_channel(
+        &self,
+        user_id: Uuid,
+        signal_number: &str,
+    ) -> Result<(), DbError>;
 
     async fn set_email_verified_flag(&self, user_id: Uuid) -> Result<(), DbError>;
 
@@ -276,8 +284,11 @@ pub trait UserRepository: Send + Sync {
         challenge_type: &str,
     ) -> Result<Option<String>, DbError>;
 
-    async fn delete_webauthn_challenge(&self, did: &Did, challenge_type: &str)
-        -> Result<(), DbError>;
+    async fn delete_webauthn_challenge(
+        &self,
+        did: &Did,
+        challenge_type: &str,
+    ) -> Result<(), DbError>;
 
     async fn get_totp_record(&self, did: &Did) -> Result<Option<TotpRecord>, DbError>;
 
@@ -316,7 +327,10 @@ pub trait UserRepository: Send + Sync {
 
     async fn get_session_info_by_did(&self, did: &Did) -> Result<Option<UserSessionInfo>, DbError>;
 
-    async fn get_legacy_login_pref(&self, did: &Did) -> Result<Option<UserLegacyLoginPref>, DbError>;
+    async fn get_legacy_login_pref(
+        &self,
+        did: &Did,
+    ) -> Result<Option<UserLegacyLoginPref>, DbError>;
 
     async fn update_legacy_login(&self, did: &Did, allow: bool) -> Result<bool, DbError>;
 
@@ -364,7 +378,8 @@ pub trait UserRepository: Send + Sync {
         did: &Did,
     ) -> Result<Option<UserIdAndPasswordHash>, DbError>;
 
-    async fn update_password_hash(&self, user_id: Uuid, password_hash: &str) -> Result<(), DbError>;
+    async fn update_password_hash(&self, user_id: Uuid, password_hash: &str)
+    -> Result<(), DbError>;
 
     async fn reset_password_with_sessions(
         &self,
@@ -389,23 +404,30 @@ pub trait UserRepository: Send + Sync {
 
     async fn remove_user_password(&self, user_id: Uuid) -> Result<(), DbError>;
 
-    async fn set_new_user_password(&self, user_id: Uuid, password_hash: &str) -> Result<(), DbError>;
+    async fn set_new_user_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<(), DbError>;
 
     async fn get_user_key_by_did(&self, did: &Did) -> Result<Option<UserKeyInfo>, DbError>;
 
-    async fn delete_account_complete(
-        &self,
-        user_id: Uuid,
-        did: &Did,
-    ) -> Result<(), DbError>;
+    async fn delete_account_complete(&self, user_id: Uuid, did: &Did) -> Result<(), DbError>;
 
-    async fn set_user_takedown(&self, did: &Did, takedown_ref: Option<&str>) -> Result<bool, DbError>;
+    async fn set_user_takedown(
+        &self,
+        did: &Did,
+        takedown_ref: Option<&str>,
+    ) -> Result<bool, DbError>;
 
     async fn admin_delete_account_complete(&self, user_id: Uuid, did: &Did) -> Result<(), DbError>;
 
     async fn get_user_for_did_doc(&self, did: &Did) -> Result<Option<UserForDidDoc>, DbError>;
 
-    async fn get_user_for_did_doc_build(&self, did: &Did) -> Result<Option<UserForDidDocBuild>, DbError>;
+    async fn get_user_for_did_doc_build(
+        &self,
+        did: &Did,
+    ) -> Result<Option<UserForDidDocBuild>, DbError>;
 
     async fn upsert_did_web_overrides(
         &self,
@@ -414,13 +436,12 @@ pub trait UserRepository: Send + Sync {
         also_known_as: Option<Vec<String>>,
     ) -> Result<(), DbError>;
 
-    async fn update_migrated_to_pds(
+    async fn update_migrated_to_pds(&self, did: &Did, endpoint: &str) -> Result<(), DbError>;
+
+    async fn get_user_for_passkey_setup(
         &self,
         did: &Did,
-        endpoint: &str,
-    ) -> Result<(), DbError>;
-
-    async fn get_user_for_passkey_setup(&self, did: &Did) -> Result<Option<UserForPasskeySetup>, DbError>;
+    ) -> Result<Option<UserForPasskeySetup>, DbError>;
 
     async fn get_user_for_passkey_recovery(
         &self,
@@ -442,11 +463,7 @@ pub trait UserRepository: Send + Sync {
         limit: i64,
     ) -> Result<Vec<ScheduledDeletionAccount>, DbError>;
 
-    async fn delete_account_with_firehose(
-        &self,
-        user_id: Uuid,
-        did: &Did,
-    ) -> Result<i64, DbError>;
+    async fn delete_account_with_firehose(&self, user_id: Uuid, did: &Did) -> Result<i64, DbError>;
 
     async fn create_password_account(
         &self,
@@ -468,7 +485,10 @@ pub trait UserRepository: Send + Sync {
         input: &MigrationReactivationInput,
     ) -> Result<ReactivatedAccountInfo, MigrationReactivationError>;
 
-    async fn check_handle_available_for_new_account(&self, handle: &Handle) -> Result<bool, DbError>;
+    async fn check_handle_available_for_new_account(
+        &self,
+        handle: &Handle,
+    ) -> Result<bool, DbError>;
 
     async fn check_and_consume_invite_code(&self, code: &str) -> Result<bool, DbError>;
 

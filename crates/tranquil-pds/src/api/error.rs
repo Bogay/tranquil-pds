@@ -398,6 +398,11 @@ impl ApiError {
             Self::UpstreamError { message, .. } => message.clone(),
             Self::UpstreamTimeout => Some("Upstream service timed out".to_string()),
             Self::AdminRequired => Some("This action requires admin privileges".to_string()),
+            Self::EmailTaken => Some("This email address is already registered".to_string()),
+            Self::HandleTaken => Some("This handle is already taken".to_string()),
+            Self::InvalidEmail => Some("Please provide a valid email address".to_string()),
+            Self::InvalidInviteCode => Some("The invite code provided is invalid".to_string()),
+            Self::DuplicateCreate => Some("Account creation failed: duplicate request".to_string()),
             _ => None,
         }
     }
@@ -482,7 +487,6 @@ impl From<crate::auth::TokenValidationError> for ApiError {
     }
 }
 
-
 impl From<crate::auth::extractor::AuthError> for ApiError {
     fn from(e: crate::auth::extractor::AuthError) -> Self {
         match e {
@@ -566,8 +570,8 @@ impl From<crate::api::validation::HandleValidationError> for ApiError {
     }
 }
 
-impl From<jacquard::types::string::AtStrError> for ApiError {
-    fn from(e: jacquard::types::string::AtStrError) -> Self {
+impl From<jacquard_common::types::string::AtStrError> for ApiError {
+    fn from(e: jacquard_common::types::string::AtStrError) -> Self {
         Self::InvalidRequest(format!("Invalid {}: {}", e.spec, e.kind))
     }
 }
@@ -637,11 +641,13 @@ impl From<crate::storage::StorageError> for ApiError {
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn parse_did(s: &str) -> Result<tranquil_types::Did, Response> {
     s.parse()
         .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()).into_response())
 }
 
+#[allow(clippy::result_large_err)]
 pub fn parse_did_option(s: Option<&str>) -> Result<Option<tranquil_types::Did>, Response> {
     s.map(parse_did).transpose()
 }

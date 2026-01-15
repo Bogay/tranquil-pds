@@ -74,7 +74,9 @@ async fn handle_migration_verification(
         return Err(ApiError::InvalidChannel);
     }
 
-    let did_typed: Did = did.parse().map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+    let did_typed: Did = did
+        .parse()
+        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
     let user = state
         .user_repo
         .get_verification_info(&did_typed)
@@ -116,7 +118,9 @@ async fn handle_channel_update(
     channel: &str,
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    let did_typed: Did = did.parse().map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+    let did_typed: Did = did
+        .parse()
+        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
     let user_id = state
         .user_repo
         .get_id_by_did(&did_typed)
@@ -189,7 +193,9 @@ async fn handle_signup_verification(
     channel: &str,
     _identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    let did_typed: Did = did.parse().map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+    let did_typed: Did = did
+        .parse()
+        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
     let user = state
         .user_repo
         .get_verification_info(&did_typed)

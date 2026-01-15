@@ -254,7 +254,11 @@ pub async fn update_email(
         }
     }
 
-    if let Ok(true) = state.user_repo.check_email_exists(&new_email, user_id).await {
+    if let Ok(true) = state
+        .user_repo
+        .check_email_exists(&new_email, user_id)
+        .await
+    {
         return ApiError::InvalidRequest("Email is already in use".into()).into_response();
     }
 
@@ -264,7 +268,7 @@ pub async fn update_email(
     }
 
     let verification_token =
-        crate::auth::verification_token::generate_signup_token(&did, "email", &new_email);
+        crate::auth::verification_token::generate_signup_token(did, "email", &new_email);
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());

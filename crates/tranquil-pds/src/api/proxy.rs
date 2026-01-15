@@ -150,10 +150,9 @@ impl<S: Service<Request, Response = Response, Error = Infallible>> Service<Reque
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        if req
-            .headers()
-            .contains_key(http::HeaderName::from(jacquard::xrpc::Header::AtprotoProxy))
-        {
+        if req.headers().contains_key(http::HeaderName::from(
+            jacquard_common::xrpc::Header::AtprotoProxy,
+        )) {
             let path = req.uri().path();
             let method = path.trim_start_matches("/");
 
