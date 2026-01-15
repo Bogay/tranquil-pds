@@ -425,6 +425,11 @@ pub async fn activate_account(
             if let Some(ref h) = handle {
                 let _ = state.cache.delete(&format!("handle:{}", h)).await;
             }
+            let _ = state.cache.delete(&format!("plc:doc:{}", did)).await;
+            let _ = state.cache.delete(&format!("plc:data:{}", did)).await;
+            if state.did_resolver.refresh_did(did.as_str()).await.is_none() {
+                warn!("[MIGRATION] activateAccount: Failed to refresh DID cache for {}", did);
+            }
             info!(
                 "[MIGRATION] activateAccount: Sequencing account event (active=true) for did={}",
                 did

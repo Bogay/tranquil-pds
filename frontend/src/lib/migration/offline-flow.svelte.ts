@@ -497,12 +497,14 @@ export function createOfflineInboundMigrationFlow() {
       const { verified } = await api.checkEmailVerified(state.targetEmail);
       if (!verified) return false;
 
-      const session = await api.createSession(
-        state.targetEmail,
-        state.targetPassword,
-      );
-      state.localAccessToken = session.accessJwt;
-      state.localRefreshToken = session.refreshJwt;
+      if (!state.localAccessToken) {
+        const session = await api.createSession(
+          state.targetEmail,
+          state.targetPassword,
+        );
+        state.localAccessToken = session.accessJwt;
+        state.localRefreshToken = session.refreshJwt;
+      }
       saveOfflineState(state);
 
       setStep("plc-signing");

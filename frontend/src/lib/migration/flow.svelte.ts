@@ -77,6 +77,7 @@ export function createInboundMigrationFlow() {
     authMethod: "password",
     passkeySetupToken: null,
     oauthCodeVerifier: null,
+    localAccessToken: null,
     generatedAppPassword: null,
     generatedAppPasswordName: null,
   });
@@ -276,6 +277,9 @@ export function createInboundMigrationFlow() {
 
       if (postEmailSteps.includes(targetStep)) {
         localClient = createLocalClient();
+        if (state.localAccessToken) {
+          localClient.setAccessToken(state.localAccessToken);
+        }
         if (state.authMethod === "passkey" && state.passkeySetupToken) {
           setStep("passkey-setup");
           migrationLog(
@@ -289,6 +293,9 @@ export function createInboundMigrationFlow() {
         }
       } else if (targetStep === "email-verify") {
         localClient = createLocalClient();
+        if (state.localAccessToken) {
+          localClient.setAccessToken(state.localAccessToken);
+        }
         setStep("email-verify");
         migrationLog("handleOAuthCallback: Resuming at email-verify");
       } else {
@@ -389,6 +396,7 @@ export function createInboundMigrationFlow() {
         state.passkeySetupToken = passkeySetup.setupToken;
         if (passkeySetup.accessJwt) {
           localClient.setAccessToken(passkeySetup.accessJwt);
+          state.localAccessToken = passkeySetup.accessJwt;
         }
       } else {
         const accountParams = {
@@ -408,6 +416,7 @@ export function createInboundMigrationFlow() {
           did: session.did,
         });
         localClient.setAccessToken(session.accessJwt);
+        state.localAccessToken = session.accessJwt;
       }
 
       setProgress({ currentOperation: "Exporting repository..." });
@@ -599,10 +608,12 @@ export function createInboundMigrationFlow() {
         return true;
       }
 
-      await localClient.loginDeactivated(
-        state.targetEmail,
-        state.targetPassword,
-      );
+      if (!localClient.getAccessToken()) {
+        await localClient.loginDeactivated(
+          state.targetEmail,
+          state.targetPassword,
+        );
+      }
 
       if (!sourceClient) {
         setStep("source-handle");
@@ -916,6 +927,7 @@ export function createInboundMigrationFlow() {
     state.targetHandle = stored.targetHandle;
     state.targetEmail = stored.targetEmail;
     state.authMethod = stored.authMethod ?? "password";
+    state.localAccessToken = stored.localAccessToken ?? null;
     state.progress = {
       ...createInitialProgress(),
       ...stored.progress,

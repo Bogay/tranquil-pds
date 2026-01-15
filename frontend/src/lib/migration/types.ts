@@ -69,6 +69,7 @@ export interface InboundMigrationState {
   authMethod: AuthMethod;
   passkeySetupToken: string | null;
   oauthCodeVerifier: string | null;
+  localAccessToken: string | null;
   generatedAppPassword: string | null;
   generatedAppPasswordName: string | null;
   needsReauth?: boolean;
@@ -117,6 +118,7 @@ export interface StoredMigrationState {
   targetEmail: string;
   authMethod?: AuthMethod;
   passkeySetupToken?: string;
+  localAccessToken?: string;
   progress: {
     repoExported: boolean;
     repoImported: boolean;

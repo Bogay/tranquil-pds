@@ -905,6 +905,7 @@ pub struct RecoverPasskeyAccountResult {
 pub struct MigrationReactivationInput {
     pub did: Did,
     pub new_handle: Handle,
+    pub new_email: Option<String>,
 }
 
 #[derive(Debug, Clone)]

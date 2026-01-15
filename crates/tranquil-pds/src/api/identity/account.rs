@@ -410,6 +410,7 @@ pub async fn create_account(
         let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
             did: Did::new_unchecked(&did),
             new_handle: Handle::new_unchecked(&handle),
+            new_email: email.clone(),
         };
         match state
             .user_repo
@@ -477,6 +478,29 @@ pub async fn create_account(
                     error!("Error creating session: {:?}", e);
                     return ApiError::InternalError(None).into_response();
                 }
+                let hostname =
+                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let verification_required = if let Some(ref user_email) = email {
+                    let token =
+                        crate::auth::verification_token::generate_migration_token(&did, user_email);
+                    let formatted_token =
+                        crate::auth::verification_token::format_token_for_display(&token);
+                    if let Err(e) = crate::comms::comms_repo::enqueue_migration_verification(
+                        state.user_repo.as_ref(),
+                        state.infra_repo.as_ref(),
+                        reactivated.user_id,
+                        user_email,
+                        &formatted_token,
+                        &hostname,
+                    )
+                    .await
+                    {
+                        warn!("Failed to enqueue migration verification email: {:?}", e);
+                    }
+                    true
+                } else {
+                    false
+                };
                 return (
                     axum::http::StatusCode::OK,
                     Json(CreateAccountOutput {
@@ -485,7 +509,7 @@ pub async fn create_account(
                         did_doc: state.did_resolver.resolve_did_document(&did).await,
                         access_jwt: access_meta.token,
                         refresh_jwt: refresh_meta.token,
-                        verification_required: false,
+                        verification_required,
                         verification_channel: "email".to_string(),
                     }),
                 )

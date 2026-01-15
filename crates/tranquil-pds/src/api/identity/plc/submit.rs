@@ -151,6 +151,8 @@ pub async fn submit_plc_operation(
         }
     }
     let _ = state.cache.delete(&format!("handle:{}", user.handle)).await;
+    let _ = state.cache.delete(&format!("plc:doc:{}", did)).await;
+    let _ = state.cache.delete(&format!("plc:data:{}", did)).await;
     if state.did_resolver.refresh_did(did).await.is_none() {
         warn!(did = %did, "Failed to refresh DID cache after PLC update");
     }

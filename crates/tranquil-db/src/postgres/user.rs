@@ -2699,12 +2699,22 @@ impl UserRepository for PostgresUserRepository {
             return Err(tranquil_db_traits::MigrationReactivationError::NotDeactivated);
         }
 
-        let update_result: Result<_, sqlx::Error> =
+        let update_result: Result<_, sqlx::Error> = if let Some(ref new_email) = input.new_email {
+            sqlx::query(
+                "UPDATE users SET handle = $1, email = $2, email_verified = false WHERE id = $3",
+            )
+            .bind(input.new_handle.as_str())
+            .bind(new_email)
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await
+        } else {
             sqlx::query("UPDATE users SET handle = $1 WHERE id = $2")
                 .bind(input.new_handle.as_str())
                 .bind(account_id)
                 .execute(&mut *tx)
-                .await;
+                .await
+        };
 
         if let Err(e) = update_result {
             if let Some(db_err) = e.as_database_error()
