@@ -61,7 +61,8 @@ describe("AppPasswords", () => {
           ),
       );
       const { container } = render(AppPasswords);
-      expect(container.querySelectorAll(".skeleton-item").length).toBeGreaterThan(0);
+      expect(container.querySelectorAll(".skeleton-item").length)
+        .toBeGreaterThan(0);
     });
   });
   describe("empty state", () => {
@@ -392,7 +393,9 @@ describe("AppPasswords", () => {
       render(AppPasswords);
       await waitFor(() => {
         const errors = getErrorToasts();
-        expect(errors.some((e) => /database connection failed/i.test(e))).toBe(true);
+        expect(errors.some((e) => /database connection failed/i.test(e))).toBe(
+          true,
+        );
       });
     });
   });

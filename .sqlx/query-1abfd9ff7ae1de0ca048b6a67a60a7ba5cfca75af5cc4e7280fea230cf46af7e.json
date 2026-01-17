@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE external_identities\n            SET provider_username = COALESCE($2, provider_username),\n                provider_email = COALESCE($3, provider_email),\n                last_login_at = NOW(),\n                updated_at = NOW()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1abfd9ff7ae1de0ca048b6a67a60a7ba5cfca75af5cc4e7280fea230cf46af7e"
+}

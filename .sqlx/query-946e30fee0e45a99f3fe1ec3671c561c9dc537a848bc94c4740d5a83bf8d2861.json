@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sso_pending_registration\n            WHERE expires_at < $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "946e30fee0e45a99f3fe1ec3671c561c9dc537a848bc94c4740d5a83bf8d2861"
+}

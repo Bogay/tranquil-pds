@@ -40,7 +40,9 @@ const migrateSingleBlob = async (
 ): Promise<MigrateBlobResult> => {
   try {
     console.log(
-      `[blob-migration] Fetching blob ${cid} from source (attempt ${attempt + 1})`,
+      `[blob-migration] Fetching blob ${cid} from source (attempt ${
+        attempt + 1
+      })`,
     );
     const { data: blobData, contentType } = await sourceClient
       .getBlobWithContentType(userDid, cid);
@@ -59,7 +61,9 @@ const migrateSingleBlob = async (
   } catch (e) {
     const errorMessage = (e as Error).message || String(e);
     console.error(
-      `[blob-migration] Failed to migrate blob ${cid} (attempt ${attempt + 1}):`,
+      `[blob-migration] Failed to migrate blob ${cid} (attempt ${
+        attempt + 1
+      }):`,
       errorMessage,
     );
 
@@ -115,15 +119,22 @@ export async function migrateBlobs(
   console.log("[blob-migration] Starting blob migration for", userDid);
   console.log(
     "[blob-migration] Source client:",
-    sourceClient ? `available (baseUrl: ${sourceClient.getBaseUrl()})` : "NOT AVAILABLE",
+    sourceClient
+      ? `available (baseUrl: ${sourceClient.getBaseUrl()})`
+      : "NOT AVAILABLE",
   );
-  console.log("[blob-migration] Local client baseUrl:", localClient.getBaseUrl());
+  console.log(
+    "[blob-migration] Local client baseUrl:",
+    localClient.getBaseUrl(),
+  );
   console.log(
     "[blob-migration] Local client has access token:",
     localClient.getAccessToken() ? "yes" : "NO",
   );
 
-  safeProgress(onProgress, { currentOperation: "Checking for missing blobs..." });
+  safeProgress(onProgress, {
+    currentOperation: "Checking for missing blobs...",
+  });
 
   const missingBlobs = await collectMissingBlobs(localClient);
 
@@ -137,7 +148,9 @@ export async function migrateBlobs(
   }
 
   if (!sourceClient) {
-    console.warn("[blob-migration] No source client available, cannot fetch blobs");
+    console.warn(
+      "[blob-migration] No source client available, cannot fetch blobs",
+    );
     safeProgress(onProgress, {
       currentOperation:
         `${missingBlobs.length} media files missing. No source PDS URL available - your old server may have shut down. Posts will work, but some images/media may be unavailable.`,
@@ -161,7 +174,9 @@ export async function migrateBlobs(
       const acc = await accPromise;
 
       safeProgress(onProgress, {
-        currentOperation: `Migrating blob ${index + 1}/${missingBlobs.length}...`,
+        currentOperation: `Migrating blob ${
+          index + 1
+        }/${missingBlobs.length}...`,
         blobsMigrated: acc.migrated,
       });
 
@@ -186,12 +201,14 @@ export async function migrateBlobs(
   const statusMessage = migrated === missingBlobs.length
     ? `All ${migrated} blobs migrated successfully`
     : migrated > 0
-      ? `${migrated}/${missingBlobs.length} blobs migrated. ${failed.length} failed.`
-      : `Could not migrate blobs (${failed.length} missing)`;
+    ? `${migrated}/${missingBlobs.length} blobs migrated. ${failed.length} failed.`
+    : `Could not migrate blobs (${failed.length} missing)`;
 
   safeProgress(onProgress, { currentOperation: statusMessage });
 
-  console.log(`[blob-migration] Complete: ${migrated} migrated, ${failed.length} failed`);
+  console.log(
+    `[blob-migration] Complete: ${migrated} migrated, ${failed.length} failed`,
+  );
   failed.length > 0 && console.log("[blob-migration] Failed CIDs:", failed);
 
   return {

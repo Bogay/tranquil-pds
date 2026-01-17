@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sso_auth_state\n            WHERE expires_at < $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5dc0d09cea2415c4053518b7cb5c41da4a8cae66c8c9cd151eee4ea29c0e1c45"
+}

@@ -19,6 +19,7 @@
   } | null>(null)
   let loadingServerInfo = $state(true)
   let serverInfoLoaded = false
+  let ssoAvailable = $state(false)
 
   let flow = $state<ReturnType<typeof createRegistrationFlow> | null>(null)
   let confirmPassword = $state('')
@@ -27,8 +28,21 @@
     if (!serverInfoLoaded) {
       serverInfoLoaded = true
       loadServerInfo()
+      checkSsoAvailable()
     }
   })
+
+  async function checkSsoAvailable() {
+    try {
+      const response = await fetch('/oauth/sso/providers')
+      if (response.ok) {
+        const data = await response.json()
+        ssoAvailable = (data.providers?.length ?? 0) > 0
+      }
+    } catch {
+      ssoAvailable = false
+    }
+  }
 
   $effect(() => {
     if (flow?.state.step === 'redirect-to-dashboard') {
@@ -187,7 +201,7 @@
       </div>
     </div>
 
-    <AccountTypeSwitcher active="password" />
+    <AccountTypeSwitcher active="password" {ssoAvailable} />
 
     <div class="split-layout sidebar-right">
       <div class="form-section">

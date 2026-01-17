@@ -12,7 +12,7 @@ import {
   setupAuthenticatedUser,
   setupDefaultMocks,
   setupUnauthenticatedUser,
-} from "./mocks";
+} from "./mocks.ts";
 describe("Comms", () => {
   beforeEach(() => {
     clearMocks();
@@ -85,7 +85,8 @@ describe("Comms", () => {
           ),
       );
       const { container } = render(Comms);
-      expect(container.querySelectorAll(".skeleton-section").length).toBeGreaterThan(0);
+      expect(container.querySelectorAll(".skeleton-section").length)
+        .toBeGreaterThan(0);
     });
   });
   describe("channel options", () => {
@@ -375,7 +376,9 @@ describe("Comms", () => {
       );
       await waitFor(() => {
         const toasts = getToasts();
-        expect(toasts.some((t) => t.type === "success" && /saved/i.test(t.message))).toBe(true);
+        expect(
+          toasts.some((t) => t.type === "success" && /saved/i.test(t.message)),
+        ).toBe(true);
       });
     });
     it("shows error toast when save fails", async () => {
@@ -398,7 +401,8 @@ describe("Comms", () => {
       );
       await waitFor(() => {
         const errors = getErrorToasts();
-        expect(errors.some((e) => /invalid channel configuration/i.test(e))).toBe(true);
+        expect(errors.some((e) => /invalid channel configuration/i.test(e)))
+          .toBe(true);
       });
     });
     it("reloads preferences after successful save", async () => {
@@ -495,7 +499,9 @@ describe("Comms", () => {
       render(Comms);
       await waitFor(() => {
         const errors = getErrorToasts();
-        expect(errors.some((e) => /database connection failed/i.test(e))).toBe(true);
+        expect(errors.some((e) => /database connection failed/i.test(e))).toBe(
+          true,
+        );
       });
     });
   });

@@ -143,10 +143,13 @@ async function xrpc<T>(method: string, options?: XrpcOptions): Promise<T> {
         return xrpc(method, { ...options, token: newToken, skipRetry: true });
       }
     }
+    const message = res.status === 429
+      ? (errData.message || "Too many requests. Please try again later.")
+      : errData.message;
     throw new ApiError(
       res.status,
       errData.error as ApiErrorCode,
-      errData.message,
+      message,
       errData.did,
       errData.reauthMethods,
     );
@@ -382,10 +385,14 @@ export const api = {
     });
   },
 
-  requestEmailUpdate(token: AccessToken): Promise<EmailUpdateResponse> {
+  requestEmailUpdate(
+    token: AccessToken,
+    newEmail?: string,
+  ): Promise<EmailUpdateResponse> {
     return xrpc("com.atproto.server.requestEmailUpdate", {
       method: "POST",
       token,
+      body: newEmail ? { newEmail } : undefined,
     });
   },
 
@@ -398,6 +405,15 @@ export const api = {
       method: "POST",
       token,
       body: { email, token: emailToken },
+    });
+  },
+
+  checkEmailUpdateStatus(
+    token: AccessToken,
+  ): Promise<{ pending: boolean; authorized: boolean; newEmail?: string }> {
+    return xrpc("_account.checkEmailUpdateStatus", {
+      method: "GET",
+      token,
     });
   },
 
@@ -540,7 +556,10 @@ export const api = {
     });
   },
 
-  setPassword(token: AccessToken, newPassword: string): Promise<SuccessResponse> {
+  setPassword(
+    token: AccessToken,
+    newPassword: string,
+  ): Promise<SuccessResponse> {
     return xrpc("_account.setPassword", {
       method: "POST",
       token,

@@ -31,6 +31,10 @@
         pdsHostname = info.availableUserDomains[0]
       }
     }).catch(() => {})
+
+    return () => {
+      stopEmailPolling()
+    }
   })
 
   let localeLoading = $state(false)
@@ -51,6 +55,8 @@
   let newEmail = $state('')
   let emailToken = $state('')
   let emailTokenRequired = $state(false)
+  let emailUpdateAuthorized = $state(false)
+  let emailPollingInterval = $state<ReturnType<typeof setInterval> | null>(null)
   let handleLoading = $state(false)
   let newHandle = $state('')
   let deleteLoading = $state(false)
@@ -97,16 +103,58 @@
   }
 
   async function handleRequestEmailUpdate() {
-    if (!session) return
+    if (!session || !newEmail.trim()) return
     emailLoading = true
     try {
-      const result = await api.requestEmailUpdate(session.accessJwt)
+      const result = await api.requestEmailUpdate(session.accessJwt, newEmail.trim())
       emailTokenRequired = result.tokenRequired
       if (emailTokenRequired) {
         toast.success($_('settings.messages.emailCodeSentToCurrent'))
+        startEmailPolling()
       } else {
         emailTokenRequired = true
       }
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
+    } finally {
+      emailLoading = false
+    }
+  }
+
+  function startEmailPolling() {
+    if (emailPollingInterval) return
+    emailPollingInterval = setInterval(async () => {
+      if (!session) return
+      try {
+        const status = await api.checkEmailUpdateStatus(session.accessJwt)
+        if (status.authorized) {
+          emailUpdateAuthorized = true
+          stopEmailPolling()
+          await completeAuthorizedEmailUpdate()
+        }
+      } catch {
+      }
+    }, 3000)
+  }
+
+  function stopEmailPolling() {
+    if (emailPollingInterval) {
+      clearInterval(emailPollingInterval)
+      emailPollingInterval = null
+    }
+  }
+
+  async function completeAuthorizedEmailUpdate() {
+    if (!session || !newEmail.trim()) return
+    emailLoading = true
+    try {
+      await api.updateEmail(session.accessJwt, newEmail.trim())
+      await refreshSession()
+      toast.success($_('settings.messages.emailUpdated'))
+      newEmail = ''
+      emailToken = ''
+      emailTokenRequired = false
+      emailUpdateAuthorized = false
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('settings.messages.emailUpdateFailed'))
     } finally {
@@ -474,17 +522,43 @@
     {/if}
     {#if emailTokenRequired}
       <form onsubmit={handleConfirmEmailUpdate}>
+        {#if emailUpdateAuthorized}
+          <p class="hint success">{$_('settings.emailUpdateAuthorized')}</p>
+        {:else}
+          <div class="field">
+            <label for="email-token">{$_('settings.verificationCode')}</label>
+            <input
+              id="email-token"
+              type="text"
+              bind:value={emailToken}
+              placeholder={$_('settings.verificationCodePlaceholder')}
+              disabled={emailLoading}
+            />
+            <p class="hint">{$_('settings.emailTokenHint')}</p>
+          </div>
+        {/if}
         <div class="field">
-          <label for="email-token">{$_('settings.verificationCode')}</label>
+          <label for="new-email">{$_('settings.newEmail')}</label>
           <input
-            id="email-token"
-            type="text"
-            bind:value={emailToken}
-            placeholder={$_('settings.verificationCodePlaceholder')}
-            disabled={emailLoading}
+            id="new-email"
+            type="email"
+            bind:value={newEmail}
+            placeholder={$_('settings.newEmailPlaceholder')}
+            disabled={emailLoading || emailUpdateAuthorized}
             required
           />
         </div>
+        <div class="actions">
+          <button type="submit" disabled={emailLoading || (!emailToken && !emailUpdateAuthorized) || !newEmail}>
+            {emailLoading ? $_('settings.updating') : $_('settings.confirmEmailChange')}
+          </button>
+          <button type="button" class="secondary" onclick={() => { emailTokenRequired = false; emailToken = ''; newEmail = ''; emailUpdateAuthorized = false; stopEmailPolling() }}>
+            {$_('common.cancel')}
+          </button>
+        </div>
+      </form>
+    {:else}
+      <form onsubmit={(e) => { e.preventDefault(); handleRequestEmailUpdate() }}>
         <div class="field">
           <label for="new-email">{$_('settings.newEmail')}</label>
           <input
@@ -496,19 +570,10 @@
             required
           />
         </div>
-        <div class="actions">
-          <button type="submit" disabled={emailLoading || !emailToken || !newEmail}>
-            {emailLoading ? $_('settings.updating') : $_('settings.confirmEmailChange')}
-          </button>
-          <button type="button" class="secondary" onclick={() => { emailTokenRequired = false; emailToken = ''; newEmail = '' }}>
-            {$_('common.cancel')}
-          </button>
-        </div>
+        <button type="submit" disabled={emailLoading || !newEmail.trim()}>
+          {emailLoading ? $_('settings.requesting') : $_('settings.changeEmailButton')}
+        </button>
       </form>
-    {:else}
-      <button onclick={handleRequestEmailUpdate} disabled={emailLoading}>
-        {emailLoading ? $_('settings.requesting') : $_('settings.changeEmailButton')}
-      </button>
     {/if}
   </section>
   <section>

@@ -16,6 +16,7 @@ pub mod plc;
 pub mod rate_limit;
 pub mod repo;
 pub mod scheduled;
+pub mod sso;
 pub mod state;
 pub mod storage;
 pub mod sync;
@@ -286,6 +287,14 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/com.atproto.server.updateEmail",
             post(api::server::update_email),
+        )
+        .route(
+            "/_account.authorizeEmailUpdate",
+            get(api::server::authorize_email_update),
+        )
+        .route(
+            "/_account.checkEmailUpdateStatus",
+            get(api::server::check_email_update_status),
         )
         .route(
             "/com.atproto.server.reserveSigningKey",
@@ -569,7 +578,27 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/token", post(oauth::endpoints::token_endpoint))
         .route("/revoke", post(oauth::endpoints::revoke_token))
-        .route("/introspect", post(oauth::endpoints::introspect_token));
+        .route("/introspect", post(oauth::endpoints::introspect_token))
+        .route("/sso/providers", get(sso::endpoints::get_sso_providers))
+        .route("/sso/initiate", post(sso::endpoints::sso_initiate))
+        .route(
+            "/sso/callback",
+            get(sso::endpoints::sso_callback).post(sso::endpoints::sso_callback_post),
+        )
+        .route("/sso/linked", get(sso::endpoints::get_linked_accounts))
+        .route("/sso/unlink", post(sso::endpoints::unlink_account))
+        .route(
+            "/sso/pending-registration",
+            get(sso::endpoints::get_pending_registration),
+        )
+        .route(
+            "/sso/complete-registration",
+            post(sso::endpoints::complete_registration),
+        )
+        .route(
+            "/sso/check-handle-available",
+            get(sso::endpoints::check_handle_available),
+        );
 
     let well_known_router = Router::new()
         .route("/did.json", get(api::identity::well_known_did))

@@ -4,10 +4,11 @@
   import { routes } from '../lib/types/routes'
 
   interface Props {
-    active: 'passkey' | 'password'
+    active: 'passkey' | 'password' | 'sso'
+    ssoAvailable?: boolean
   }
 
-  let { active }: Props = $props()
+  let { active, ssoAvailable = true }: Props = $props()
 </script>
 
 <div class="account-type-switcher">
@@ -17,6 +18,15 @@
   <a href={getFullUrl(routes.registerPassword)} class="switcher-option" class:active={active === 'password'}>
     {$_('register.passwordAccount')}
   </a>
+  {#if ssoAvailable || active === 'sso'}
+    <a href={getFullUrl(routes.registerSso)} class="switcher-option" class:active={active === 'sso'}>
+      {$_('register.ssoAccount')}
+    </a>
+  {:else}
+    <span class="switcher-option disabled">
+      {$_('register.ssoAccount')}
+    </span>
+  {/if}
 </div>
 
 <style>
@@ -52,5 +62,15 @@
     background: var(--bg-primary);
     color: var(--text-primary);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .switcher-option.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .switcher-option.disabled:hover {
+    color: var(--text-secondary);
+    background: transparent;
   }
 </style>

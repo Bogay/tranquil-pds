@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM handle_reservations WHERE handle = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4d0d7fbb138a2c3c285d829ffd3a760a5036640291666daf6f51d32ab4f3d2d"
+}

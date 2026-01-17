@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 import type { AppPassword, InviteCode, Session } from "../lib/api.ts";
-import { _testSetState, _testResetState } from "../lib/auth.svelte.ts";
-import { toast, clearAllToasts, getToasts } from "../lib/toast.svelte.ts";
+import { _testResetState, _testSetState } from "../lib/auth.svelte.ts";
+import { clearAllToasts, getToasts, toast } from "../lib/toast.svelte.ts";
 import {
   unsafeAsAccessToken,
   unsafeAsDid,
@@ -81,7 +81,7 @@ export function getErrorToasts(): string[] {
     .map((t) => t.message);
 }
 
-export { toast, getToasts };
+export { getToasts, toast };
 function extractEndpoint(url: string): string {
   const match = url.match(/\/xrpc\/([^?]+)/);
   return match ? match[1] : url;

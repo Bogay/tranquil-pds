@@ -2,6 +2,7 @@ export const routes = {
   login: "/login",
   register: "/register",
   registerPassword: "/register-password",
+  registerSso: "/register-sso",
   dashboard: "/dashboard",
   settings: "/settings",
   security: "/security",
@@ -29,6 +30,7 @@ export const routes = {
   oauthPasskey: "/oauth/passkey",
   oauthDelegation: "/oauth/delegation",
   oauthError: "/oauth/error",
+  oauthSsoRegister: "/oauth/sso-register",
 } as const;
 
 export type Route = (typeof routes)[keyof typeof routes];
@@ -52,6 +54,7 @@ export interface RouteParams {
   [routes.oauthDelegation]: { request_uri?: string; delegated_did?: string };
   [routes.oauthError]: { error?: string; error_description?: string };
   [routes.migrate]: { code?: string; state?: string };
+  [routes.oauthSsoRegister]: { token?: string };
 }
 
 export type RoutesWithParams = keyof RouteParams;

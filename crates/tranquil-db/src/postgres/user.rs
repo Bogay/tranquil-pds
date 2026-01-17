@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use tranquil_db_traits::{
     AccountSearchResult, CommsChannel, DbError, DidWebOverrides, NotificationPrefs,
-    OAuthTokenWithUser, PasswordResetResult, StoredBackupCode, StoredPasskey, TotpRecord,
-    User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo,
-    UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
+    OAuthTokenWithUser, PasswordResetResult, SsoProviderType, StoredBackupCode, StoredPasskey,
+    TotpRecord, User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo,
+    UserEmailInfo, UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
     UserForPasskeySetup, UserForRecovery, UserForVerification, UserIdAndHandle,
     UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId,
     UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo, UserPasswordInfo,
@@ -2671,6 +2671,173 @@ impl UserRepository for PostgresUserRepository {
         })
     }
 
+    async fn create_sso_account(
+        &self,
+        input: &tranquil_db_traits::CreateSsoAccountInput,
+    ) -> Result<
+        tranquil_db_traits::CreatePasswordAccountResult,
+        tranquil_db_traits::CreateAccountError,
+    > {
+        let mut tx = self.pool.begin().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
+
+        let token_consumed: Option<(String,)> = sqlx::query_as(
+            r#"
+            DELETE FROM sso_pending_registration
+            WHERE token = $1 AND expires_at > NOW()
+            RETURNING token
+            "#,
+        )
+        .bind(&input.pending_registration_token)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
+
+        if token_consumed.is_none() {
+            return Err(tranquil_db_traits::CreateAccountError::InvalidToken);
+        }
+
+        let is_first_user: bool = sqlx::query_scalar!("SELECT COUNT(*) as count FROM users")
+            .fetch_one(&mut *tx)
+            .await
+            .map(|c| c.unwrap_or(0) == 0)
+            .unwrap_or(false);
+
+        let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
+            r#"INSERT INTO users (
+                handle, email, did, password_hash, password_required,
+                preferred_comms_channel, discord_id, telegram_username, signal_number,
+                is_admin
+            ) VALUES ($1, $2, $3, NULL, FALSE, $4, $5, $6, $7, $8) RETURNING id"#,
+        )
+        .bind(input.handle.as_str())
+        .bind(&input.email)
+        .bind(input.did.as_str())
+        .bind(input.preferred_comms_channel)
+        .bind(&input.discord_id)
+        .bind(&input.telegram_username)
+        .bind(&input.signal_number)
+        .bind(is_first_user)
+        .fetch_one(&mut *tx)
+        .await;
+
+        let user_id = match user_insert {
+            Ok((id,)) => id,
+            Err(e) => {
+                if let Some(db_err) = e.as_database_error()
+                    && db_err.code().as_deref() == Some("23505")
+                {
+                    let constraint = db_err.constraint().unwrap_or("");
+                    if constraint.contains("handle") {
+                        return Err(tranquil_db_traits::CreateAccountError::HandleTaken);
+                    } else if constraint.contains("email") {
+                        return Err(tranquil_db_traits::CreateAccountError::EmailTaken);
+                    }
+                }
+                return Err(tranquil_db_traits::CreateAccountError::Database(
+                    e.to_string(),
+                ));
+            }
+        };
+
+        sqlx::query!(
+            "INSERT INTO user_keys (user_id, key_bytes, encryption_version, encrypted_at) VALUES ($1, $2, $3, NOW())",
+            user_id,
+            &input.encrypted_key_bytes[..],
+            input.encryption_version
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e: sqlx::Error| tranquil_db_traits::CreateAccountError::Database(e.to_string()))?;
+
+        sqlx::query!(
+            "INSERT INTO repos (user_id, repo_root_cid, repo_rev) VALUES ($1, $2, $3)",
+            user_id,
+            input.commit_cid,
+            input.repo_rev
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO user_blocks (user_id, block_cid, repo_rev)
+            SELECT $1, block_cid, $3 FROM UNNEST($2::bytea[]) AS t(block_cid)
+            ON CONFLICT (user_id, block_cid) DO NOTHING
+            "#,
+        )
+        .bind(user_id)
+        .bind(&input.genesis_block_cids)
+        .bind(&input.repo_rev)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
+
+        if let Some(code) = &input.invite_code {
+            let _ = sqlx::query!(
+                "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
+                code
+            )
+            .execute(&mut *tx)
+            .await;
+
+            let _ = sqlx::query!(
+                "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
+                code,
+                user_id
+            )
+            .execute(&mut *tx)
+            .await;
+        }
+
+        if let Some(birthdate_pref) = &input.birthdate_pref {
+            let _ = sqlx::query!(
+                "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, name) DO NOTHING",
+                user_id,
+                "app.bsky.actor.defs#personalDetailsPref",
+                birthdate_pref
+            )
+            .execute(&mut *tx)
+            .await;
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO external_identities (did, provider, provider_user_id, provider_username, provider_email, provider_email_verified)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+            input.did.as_str(),
+            input.sso_provider as SsoProviderType,
+            &input.sso_provider_user_id,
+            input.sso_provider_username.as_deref(),
+            input.sso_provider_email.as_deref(),
+            input.sso_provider_email_verified,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
+
+        tx.commit().await.map_err(|e: sqlx::Error| {
+            tranquil_db_traits::CreateAccountError::Database(e.to_string())
+        })?;
+
+        Ok(tranquil_db_traits::CreatePasswordAccountResult {
+            user_id,
+            is_admin: is_first_user,
+        })
+    }
+
     async fn reactivate_migration_account(
         &self,
         input: &tranquil_db_traits::MigrationReactivationInput,
@@ -2744,14 +2911,68 @@ impl UserRepository for PostgresUserRepository {
         &self,
         handle: &Handle,
     ) -> Result<bool, DbError> {
-        let exists: Option<(i32,)> =
-            sqlx::query_as("SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL")
-                .bind(handle.as_str())
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(map_sqlx_error)?;
+        let exists: Option<(i32,)> = sqlx::query_as(
+            r#"
+            SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL
+            UNION ALL
+            SELECT 1 FROM handle_reservations WHERE handle = $1 AND expires_at > NOW()
+            LIMIT 1
+            "#,
+        )
+        .bind(handle.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         Ok(exists.is_none())
+    }
+
+    async fn reserve_handle(&self, handle: &Handle, reserved_by: &str) -> Result<bool, DbError> {
+        sqlx::query!("DELETE FROM handle_reservations WHERE expires_at <= NOW()")
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO handle_reservations (handle, reserved_by)
+            SELECT $1, $2
+            WHERE NOT EXISTS (
+                SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM handle_reservations WHERE handle = $1 AND expires_at > NOW()
+            )
+            "#,
+            handle.as_str(),
+            reserved_by,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn release_handle_reservation(&self, handle: &Handle) -> Result<(), DbError> {
+        sqlx::query!(
+            "DELETE FROM handle_reservations WHERE handle = $1",
+            handle.as_str()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
+    async fn cleanup_expired_handle_reservations(&self) -> Result<u64, DbError> {
+        let result = sqlx::query!("DELETE FROM handle_reservations WHERE expires_at <= NOW()")
+            .execute(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(result.rows_affected())
     }
 
     async fn check_and_consume_invite_code(&self, code: &str) -> Result<bool, DbError> {

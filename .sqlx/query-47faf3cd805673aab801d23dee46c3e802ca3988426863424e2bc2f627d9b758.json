@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO handle_reservations (handle, reserved_by)\n            SELECT $1, $2\n            WHERE NOT EXISTS (\n                SELECT 1 FROM users WHERE handle = $1 AND deactivated_at IS NULL\n            )\n            AND NOT EXISTS (\n                SELECT 1 FROM handle_reservations WHERE handle = $1 AND expires_at > NOW()\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "47faf3cd805673aab801d23dee46c3e802ca3988426863424e2bc2f627d9b758"
+}

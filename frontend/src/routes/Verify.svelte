@@ -15,7 +15,7 @@
     channel: string
   }
 
-  type VerificationMode = 'signup' | 'token' | 'email-update'
+  type VerificationMode = 'signup' | 'token' | 'email-update' | 'email-authorize-success'
 
   let mode = $state<VerificationMode>('signup')
   let newEmail = $state('')
@@ -30,6 +30,7 @@
   let autoSubmitting = $state(false)
   let successPurpose = $state<string | null>(null)
   let successChannel = $state<string | null>(null)
+  let tokenFromUrl = $state(false)
 
   const auth = $derived(getAuthState())
 
@@ -46,10 +47,15 @@
   onMount(async () => {
     const params = parseQueryParams()
 
-    if (params.type === 'email-update') {
+    if (params.type === 'email-authorize-success') {
+      mode = 'email-authorize-success'
+      success = true
+      successPurpose = 'email-authorize'
+    } else if (params.type === 'email-update') {
       mode = 'email-update'
       if (params.token) {
         verificationCode = params.token
+        tokenFromUrl = true
       }
     } else if (params.token) {
       mode = 'token'
@@ -231,7 +237,10 @@
   {:else if success}
     <div class="success-container">
       <h1>{$_('verify.verified')}</h1>
-      {#if successPurpose === 'email-update'}
+      {#if successPurpose === 'email-authorize'}
+        <p class="subtitle">{$_('verify.emailAuthorizeSuccess')}</p>
+        <p class="info-text">{$_('verify.emailAuthorizeInfo')}</p>
+      {:else if successPurpose === 'email-update'}
         <p class="subtitle">{$_('verify.emailUpdated')}</p>
         <p class="info-text">{$_('verify.emailUpdatedInfo')}</p>
         <div class="actions">
@@ -283,20 +292,22 @@
           />
         </div>
 
-        <div class="field">
-          <label for="verification-code">{$_('verify.codeLabel')}</label>
-          <input
-            id="verification-code"
-            type="text"
-            bind:value={verificationCode}
-            placeholder={$_('verify.codePlaceholder')}
-            disabled={submitting}
-            required
-            autocomplete="off"
-            class="token-input"
-          />
-          <p class="field-help">{$_('verify.emailUpdateCodeHelp')}</p>
-        </div>
+        {#if !tokenFromUrl}
+          <div class="field">
+            <label for="verification-code">{$_('verify.codeLabel')}</label>
+            <input
+              id="verification-code"
+              type="text"
+              bind:value={verificationCode}
+              placeholder={$_('verify.codePlaceholder')}
+              disabled={submitting}
+              required
+              autocomplete="off"
+              class="token-input"
+            />
+            <p class="field-help">{$_('verify.emailUpdateCodeHelp')}</p>
+          </div>
+        {/if}
 
         <button type="submit" disabled={submitting || !verificationCode.trim() || !newEmail.trim()}>
           {submitting ? $_('verify.updating') : $_('verify.updateEmail')}

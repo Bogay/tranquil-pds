@@ -19,9 +19,9 @@ import type {
   SessionState,
 } from "./types.ts";
 import {
-  saveRegistrationState,
-  loadRegistrationState,
   clearRegistrationState,
+  loadRegistrationState,
+  saveRegistrationState,
 } from "./storage.ts";
 
 export interface RegistrationFlowState {
@@ -433,7 +433,9 @@ export type RegistrationFlow = ReturnType<typeof createRegistrationFlow>;
 
 export function restoreRegistrationFlow(): RegistrationFlow | null {
   const saved = loadRegistrationState();
-  if (!saved || saved.step === "info" || saved.step === "redirect-to-dashboard") {
+  if (
+    !saved || saved.step === "info" || saved.step === "redirect-to-dashboard"
+  ) {
     return null;
   }
 
@@ -441,11 +443,18 @@ export function restoreRegistrationFlow(): RegistrationFlow | null {
 
   flow.state.step = saved.step;
   flow.state.info = { ...flow.state.info, ...saved.info };
-  flow.state.externalDidWeb = { ...flow.state.externalDidWeb, ...saved.externalDidWeb };
+  flow.state.externalDidWeb = {
+    ...flow.state.externalDidWeb,
+    ...saved.externalDidWeb,
+  };
   flow.state.account = saved.account;
   flow.state.session = saved.session;
 
   return flow;
 }
 
-export { hasPendingRegistration, getRegistrationResumeInfo, clearRegistrationState } from "./storage.ts";
+export {
+  clearRegistrationState,
+  getRegistrationResumeInfo,
+  hasPendingRegistration,
+} from "./storage.ts";

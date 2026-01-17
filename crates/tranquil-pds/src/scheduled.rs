@@ -9,7 +9,8 @@ use tokio::sync::watch;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use tranquil_db_traits::{
-    BackupRepository, BlobRepository, BrokenGenesisCommit, RepoRepository, UserRepository,
+    BackupRepository, BlobRepository, BrokenGenesisCommit, RepoRepository, SsoRepository,
+    UserRepository,
 };
 use tranquil_types::{AtUri, CidLink, Did};
 
@@ -390,6 +391,7 @@ pub async fn start_scheduled_tasks(
     user_repo: Arc<dyn UserRepository>,
     blob_repo: Arc<dyn BlobRepository>,
     blob_store: Arc<dyn BlobStorage>,
+    sso_repo: Arc<dyn SsoRepository>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let check_interval = Duration::from_secs(
@@ -422,6 +424,36 @@ pub async fn start_scheduled_tasks(
                     blob_store.as_ref(),
                 ).await {
                     error!("Error processing scheduled deletions: {}", e);
+                }
+
+                match sso_repo.cleanup_expired_sso_auth_states().await {
+                    Ok(count) if count > 0 => {
+                        info!(count = count, "Cleaned up expired SSO auth states");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Error cleaning up SSO auth states: {:?}", e);
+                    }
+                }
+
+                match sso_repo.cleanup_expired_pending_registrations().await {
+                    Ok(count) if count > 0 => {
+                        info!(count = count, "Cleaned up expired SSO pending registrations");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Error cleaning up SSO pending registrations: {:?}", e);
+                    }
+                }
+
+                match user_repo.cleanup_expired_handle_reservations().await {
+                    Ok(count) if count > 0 => {
+                        info!(count = count, "Cleaned up expired handle reservations");
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Error cleaning up handle reservations: {:?}", e);
+                    }
                 }
             }
         }

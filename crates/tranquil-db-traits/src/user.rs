@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use tranquil_types::{Did, Handle};
 use uuid::Uuid;
 
-use crate::{CommsChannel, DbError};
+use crate::{CommsChannel, DbError, SsoProviderType};
 
 #[derive(Debug, Clone)]
 pub struct UserRow {
@@ -480,6 +480,11 @@ pub trait UserRepository: Send + Sync {
         input: &CreatePasskeyAccountInput,
     ) -> Result<CreatePasswordAccountResult, CreateAccountError>;
 
+    async fn create_sso_account(
+        &self,
+        input: &CreateSsoAccountInput,
+    ) -> Result<CreatePasswordAccountResult, CreateAccountError>;
+
     async fn reactivate_migration_account(
         &self,
         input: &MigrationReactivationInput,
@@ -489,6 +494,12 @@ pub trait UserRepository: Send + Sync {
         &self,
         handle: &Handle,
     ) -> Result<bool, DbError>;
+
+    async fn reserve_handle(&self, handle: &Handle, reserved_by: &str) -> Result<bool, DbError>;
+
+    async fn release_handle_reservation(&self, handle: &Handle) -> Result<(), DbError>;
+
+    async fn cleanup_expired_handle_reservations(&self) -> Result<u64, DbError>;
 
     async fn check_and_consume_invite_code(&self, code: &str) -> Result<bool, DbError>;
 
@@ -842,6 +853,7 @@ pub enum CreateAccountError {
     HandleTaken,
     EmailTaken,
     DidExists,
+    InvalidToken,
     Database(String),
 }
 
@@ -880,6 +892,30 @@ pub struct CreatePasskeyAccountInput {
     pub genesis_block_cids: Vec<Vec<u8>>,
     pub invite_code: Option<String>,
     pub birthdate_pref: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateSsoAccountInput {
+    pub handle: Handle,
+    pub email: Option<String>,
+    pub did: Did,
+    pub preferred_comms_channel: CommsChannel,
+    pub discord_id: Option<String>,
+    pub telegram_username: Option<String>,
+    pub signal_number: Option<String>,
+    pub encrypted_key_bytes: Vec<u8>,
+    pub encryption_version: i32,
+    pub commit_cid: String,
+    pub repo_rev: String,
+    pub genesis_block_cids: Vec<Vec<u8>>,
+    pub invite_code: Option<String>,
+    pub birthdate_pref: Option<serde_json::Value>,
+    pub sso_provider: SsoProviderType,
+    pub sso_provider_user_id: String,
+    pub sso_provider_username: Option<String>,
+    pub sso_provider_email: Option<String>,
+    pub sso_provider_email_verified: bool,
+    pub pending_registration_token: String,
 }
 
 #[derive(Debug, Clone)]

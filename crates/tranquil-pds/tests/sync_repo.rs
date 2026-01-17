@@ -110,49 +110,77 @@ async fn test_list_repos_pagination() {
     let (_, did2) = create_account_and_login(&client).await;
     let (_, did3) = create_account_and_login(&client).await;
     let our_dids: std::collections::HashSet<String> = [did1, did2, did3].into_iter().collect();
-    let mut all_dids_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut cursor: Option<String> = None;
-    let mut page_count = 0;
-    let max_pages = 100;
-    loop {
-        let mut params: Vec<(&str, String)> = vec![("limit", "10".into())];
-        if let Some(ref c) = cursor {
-            params.push(("cursor", c.clone()));
-        }
-        let res = client
-            .get(format!(
-                "{}/xrpc/com.atproto.sync.listRepos",
-                base_url().await
-            ))
-            .query(&params)
-            .send()
-            .await
-            .expect("Failed to send request");
-        assert_eq!(res.status(), StatusCode::OK);
-        let body: Value = res.json().await.expect("Response was not valid JSON");
-        let repos = body["repos"].as_array().unwrap();
-        for repo in repos {
-            let did = repo["did"].as_str().unwrap().to_string();
-            assert!(
-                !all_dids_seen.contains(&did),
-                "Pagination returned duplicate DID: {}",
+    let base = base_url().await;
+    let verify_futures = our_dids.iter().map(|did| {
+        let client = &client;
+        let base = &base;
+        async move {
+            let res = client
+                .get(format!("{}/xrpc/com.atproto.sync.getRepoStatus", base))
+                .query(&[("did", did.as_str())])
+                .send()
+                .await
+                .expect("Failed to send request");
+            assert_eq!(
+                res.status(),
+                StatusCode::OK,
+                "Account {} should exist and be queryable via getRepoStatus",
                 did
             );
-            all_dids_seen.insert(did);
         }
-        cursor = body["cursor"].as_str().map(String::from);
-        page_count += 1;
-        if cursor.is_none() || page_count >= max_pages {
-            break;
+    });
+    futures::future::join_all(verify_futures).await;
+    async fn paginate_repos(
+        client: &reqwest::Client,
+        base: &str,
+    ) -> std::collections::HashSet<String> {
+        let mut all_dids = std::collections::HashSet::new();
+        let mut cursor: Option<String> = None;
+        let mut pages = 0;
+        while pages < 1000 {
+            let params: Vec<(&str, String)> = cursor
+                .as_ref()
+                .map(|c| vec![("limit", "100".into()), ("cursor", c.clone())])
+                .unwrap_or_else(|| vec![("limit", "100".into())]);
+            let res = client
+                .get(format!("{}/xrpc/com.atproto.sync.listRepos", base))
+                .query(&params)
+                .send()
+                .await
+                .expect("Failed to send request");
+            assert_eq!(res.status(), StatusCode::OK);
+            let body: Value = res.json().await.expect("Response was not valid JSON");
+            body["repos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["did"].as_str().unwrap().to_string())
+                .for_each(|did| {
+                    assert!(
+                        !all_dids.contains(&did),
+                        "Pagination returned duplicate DID: {}",
+                        did
+                    );
+                    all_dids.insert(did);
+                });
+            cursor = body["cursor"].as_str().map(String::from);
+            pages += 1;
+            if cursor.is_none() {
+                break;
+            }
         }
+        all_dids
     }
-    for did in &our_dids {
-        assert!(
-            all_dids_seen.contains(did),
-            "Our created DID {} was not found in paginated results",
-            did
-        );
-    }
+    let all_dids_seen = paginate_repos(&client, base).await;
+    let missing: Vec<_> = our_dids
+        .iter()
+        .filter(|did| !all_dids_seen.contains(*did))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "DIDs not found in paginated results: {:?}",
+        missing
+    );
 }
 
 #[tokio::test]

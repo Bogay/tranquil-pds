@@ -163,6 +163,11 @@
     "signIn": "立即登录",
     "passkeyAccount": "通行密钥",
     "passwordAccount": "密码",
+    "ssoAccount": "SSO",
+    "ssoSubtitle": "使用外部提供商创建账户",
+    "noSsoProviders": "此服务器未配置SSO提供商。",
+    "ssoHint": "选择一个提供商来创建您的账户:",
+    "continueWith": "使用{provider}继续",
     "validation": {
       "handleRequired": "请输入用户名",
       "handleNoDots": "用户名不能包含点号。您可以在创建账户后设置自定义域名。",
@@ -268,6 +273,8 @@
     "verificationCode": "验证码",
     "verificationCodePlaceholder": "输入验证码",
     "confirmEmailChange": "确认更改邮箱",
+    "emailTokenHint": "输入邮件中的验证码，或在任意设备上点击邮件中的链接。",
+    "emailUpdateAuthorized": "邮箱更改已授权！点击确认完成。",
     "updating": "更新中...",
     "changeHandle": "更改用户名",
     "currentHandle": "当前：@{handle}",
@@ -678,7 +685,21 @@
       "passkeyHintNotAvailable": "此账户未注册通行密钥",
       "passkeyHint": "使用设备的生物识别或安全密钥",
       "passwordPlaceholder": "输入您的密码",
-      "usePasskey": "使用通行密钥"
+      "usePasskey": "使用通行密钥",
+      "orContinueWith": "或使用以下方式继续",
+      "orUseCredentials": "或使用凭证登录"
+    },
+    "sso": {
+      "linkedAccounts": "已关联账户",
+      "linkedAccountsDesc": "已关联到您身份的外部账户，用于单点登录。",
+      "noLinkedAccounts": "暂无关联账户",
+      "noLinkedAccountsDesc": "关联外部账户以启用该服务商的快速登录。",
+      "linkAccount": "关联账户",
+      "unlinkAccount": "取消关联",
+      "unlinkConfirm": "确定要取消关联此账户吗？",
+      "unlinked": "已取消关联 {provider}",
+      "lastLoginAt": "上次使用",
+      "linkedAt": "关联时间"
     },
     "consent": {
       "title": "授权应用",
@@ -791,6 +812,18 @@
       "backToApp": "返回应用"
     }
   },
+  "sso_register": {
+    "title": "完成注册",
+    "subtitle": "使用{provider}创建账户",
+    "handle_label": "选择您的昵称",
+    "handle_available": "可用",
+    "handle_taken": "已被使用",
+    "submit": "创建账户",
+    "error_expired": "注册会话已过期。请重试。",
+    "error_handle_required": "请选择一个昵称",
+    "emailVerifiedByProvider": "此邮箱已由{provider}验证。无需额外验证。",
+    "emailChangedNeedsVerification": "如果您使用其他邮箱，则需要进行验证。"
+  },
   "verify": {
     "title": "验证账户",
     "subtitle": "我们已将验证码发送到您的{channel}。请在下方输入以完成注册。",
@@ -824,6 +857,8 @@
     "emailUpdateTitle": "更新邮箱地址",
     "emailUpdated": "您的邮箱地址已成功更新。",
     "emailUpdatedInfo": "您可能需要验证新的邮箱地址。",
+    "emailAuthorizeSuccess": "您的邮箱更新已授权。",
+    "emailAuthorizeInfo": "您现在可以在原设备上完成更改。",
     "newEmailLabel": "新邮箱地址",
     "newEmailPlaceholder": "new@example.com",
     "updateEmail": "更新邮箱",

@@ -107,6 +107,13 @@ pub enum ApiError {
         error: Option<String>,
         message: Option<String>,
     },
+    SsoProviderNotFound,
+    SsoProviderNotEnabled,
+    SsoInvalidAction,
+    SsoNotAuthenticated,
+    SsoSessionExpired,
+    SsoAlreadyLinked,
+    SsoLinkNotFound,
 }
 
 impl ApiError {
@@ -197,8 +204,14 @@ impl ApiError {
             | Self::InvalidVerificationChannel
             | Self::SelfHostedDidWebDisabled
             | Self::AccountAlreadyExists
-            | Self::TokenRequired => StatusCode::BAD_REQUEST,
-            Self::PasskeyNotFound => StatusCode::NOT_FOUND,
+            | Self::TokenRequired
+            | Self::SsoProviderNotFound
+            | Self::SsoProviderNotEnabled
+            | Self::SsoInvalidAction
+            | Self::SsoNotAuthenticated
+            | Self::SsoSessionExpired
+            | Self::SsoAlreadyLinked => StatusCode::BAD_REQUEST,
+            Self::PasskeyNotFound | Self::SsoLinkNotFound => StatusCode::NOT_FOUND,
         }
     }
     fn error_name(&self) -> Cow<'static, str> {
@@ -293,6 +306,13 @@ impl ApiError {
             Self::AccountAlreadyExists => Cow::Borrowed("AccountAlreadyExists"),
             Self::HandleNotFound => Cow::Borrowed("HandleNotFound"),
             Self::SubjectNotFound => Cow::Borrowed("SubjectNotFound"),
+            Self::SsoProviderNotFound => Cow::Borrowed("SsoProviderNotFound"),
+            Self::SsoProviderNotEnabled => Cow::Borrowed("SsoProviderNotEnabled"),
+            Self::SsoInvalidAction => Cow::Borrowed("SsoInvalidAction"),
+            Self::SsoNotAuthenticated => Cow::Borrowed("SsoNotAuthenticated"),
+            Self::SsoSessionExpired => Cow::Borrowed("SsoSessionExpired"),
+            Self::SsoAlreadyLinked => Cow::Borrowed("SsoAlreadyLinked"),
+            Self::SsoLinkNotFound => Cow::Borrowed("SsoLinkNotFound"),
         }
     }
     fn message(&self) -> Option<String> {
@@ -392,6 +412,19 @@ impl ApiError {
             Self::AccountAlreadyExists => Some("Account already exists".to_string()),
             Self::HandleNotFound => Some("Unable to resolve handle".to_string()),
             Self::SubjectNotFound => Some("Subject not found".to_string()),
+            Self::SsoProviderNotFound => Some("Unknown SSO provider".to_string()),
+            Self::SsoProviderNotEnabled => Some("SSO provider is not enabled".to_string()),
+            Self::SsoInvalidAction => {
+                Some("Action must be login, link, or register".to_string())
+            }
+            Self::SsoNotAuthenticated => {
+                Some("Must be authenticated to link SSO account".to_string())
+            }
+            Self::SsoSessionExpired => Some("SSO session expired or invalid".to_string()),
+            Self::SsoAlreadyLinked => {
+                Some("This SSO account is already linked to a different user".to_string())
+            }
+            Self::SsoLinkNotFound => Some("Linked account not found".to_string()),
             Self::IdentifierMismatch => {
                 Some("The identifier does not match the verification token".to_string())
             }
@@ -462,6 +495,13 @@ impl IntoResponse for ApiError {
 
 impl From<sqlx::Error> for ApiError {
     fn from(e: sqlx::Error) -> Self {
+        tracing::error!("Database error: {:?}", e);
+        Self::DatabaseError
+    }
+}
+
+impl From<tranquil_db_traits::DbError> for ApiError {
+    fn from(e: tranquil_db_traits::DbError) -> Self {
         tracing::error!("Database error: {:?}", e);
         Self::DatabaseError
     }

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  checkForOAuthCallback,
+  clearOAuthCallbackParams,
   generateCodeChallenge,
   generateCodeVerifier,
   generateState,
   saveOAuthState,
-  checkForOAuthCallback,
-  clearOAuthCallbackParams,
-} from "../lib/oauth";
+} from "../lib/oauth.ts";
 
 describe("OAuth utilities", () => {
   beforeEach(() => {
@@ -21,7 +21,9 @@ describe("OAuth utilities", () => {
     });
 
     it("generates unique values", () => {
-      const states = new Set(Array.from({ length: 100 }, () => generateState()));
+      const states = new Set(
+        Array.from({ length: 100 }, () => generateState()),
+      );
       expect(states.size).toBe(100);
     });
   });
@@ -67,7 +69,9 @@ describe("OAuth utilities", () => {
     });
 
     it("produces correct S256 challenge", async () => {
-      const challenge = await generateCodeChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
+      const challenge = await generateCodeChallenge(
+        "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      );
       expect(challenge).toBe("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
     });
   });
@@ -191,9 +195,10 @@ describe("OAuth utilities", () => {
 describe("DPoP proof generation", () => {
   it("base64url encoding produces valid output", async () => {
     const testData = new Uint8Array([72, 101, 108, 108, 111]);
-    const buffer = testData.buffer;
+    const _buffer = testData.buffer;
 
-    const binary = Array.from(testData, (byte) => String.fromCharCode(byte)).join("");
+    const binary = Array.from(testData, (byte) => String.fromCharCode(byte))
+      .join("");
     const base64url = btoa(binary)
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
@@ -220,7 +225,9 @@ describe("DPoP proof generation", () => {
       y: jwk.y,
     });
 
-    expect(canonical).toBe('{"crv":"P-256","kty":"EC","x":"test-x","y":"test-y"}');
+    expect(canonical).toBe(
+      '{"crv":"P-256","kty":"EC","x":"test-x","y":"test-y"}',
+    );
 
     const keys = Object.keys(JSON.parse(canonical));
     expect(keys).toEqual(["crv", "kty", "x", "y"]);

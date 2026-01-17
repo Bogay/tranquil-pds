@@ -366,7 +366,8 @@ pub mod repo {
         user_repo: &dyn UserRepository,
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
-        code: &str,
+        raw_token: &str,
+        display_code: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
         let prefs = user_repo
@@ -375,17 +376,17 @@ pub mod repo {
             .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let current_email = prefs.email.unwrap_or_default();
-        let verify_page = format!("https://{}/app/verify?type=email-update", hostname);
+        let verify_page = format!("https://{}/app/settings", hostname);
         let verify_link = format!(
-            "https://{}/app/verify?type=email-update&token={}",
+            "https://{}/xrpc/_account.authorizeEmailUpdate?token={}",
             hostname,
-            urlencoding::encode(code)
+            urlencoding::encode(raw_token)
         );
         let body = format_message(
             strings.email_update_body,
             &[
                 ("handle", &prefs.handle),
-                ("code", code),
+                ("code", display_code),
                 ("verify_page", &verify_page),
                 ("verify_link", &verify_link),
             ],

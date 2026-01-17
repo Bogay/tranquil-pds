@@ -163,6 +163,11 @@
     "signIn": "Logga in",
     "passkeyAccount": "Nyckel",
     "passwordAccount": "Lösenord",
+    "ssoAccount": "SSO",
+    "ssoSubtitle": "Skapa ett konto med en extern leverantör",
+    "noSsoProviders": "Inga SSO-leverantörer är konfigurerade på denna server.",
+    "ssoHint": "Välj en leverantör för att skapa ditt konto:",
+    "continueWith": "Fortsätt med {provider}",
     "validation": {
       "handleRequired": "Användarnamn krävs",
       "handleNoDots": "Användarnamn kan inte innehålla punkter. Du kan konfigurera ett eget domännamn efter att kontot skapats.",
@@ -268,6 +273,8 @@
     "verificationCode": "Verifieringskod",
     "verificationCodePlaceholder": "Ange verifieringskod",
     "confirmEmailChange": "Bekräfta e-poständring",
+    "emailTokenHint": "Ange koden från e-postmeddelandet, eller klicka på länken i e-postmeddelandet på valfri enhet.",
+    "emailUpdateAuthorized": "E-poständring godkänd! Klicka på bekräfta för att slutföra.",
     "updating": "Uppdaterar...",
     "changeHandle": "Ändra användarnamn",
     "currentHandle": "Nuvarande: @{handle}",
@@ -678,7 +685,21 @@
       "passkeyHintNotAvailable": "Inga nycklar registrerade för detta konto",
       "passkeyHint": "Använd enhetens biometri eller säkerhetsnyckel",
       "passwordPlaceholder": "Ange ditt lösenord",
-      "usePasskey": "Använd nyckel"
+      "usePasskey": "Använd nyckel",
+      "orContinueWith": "Eller fortsätt med",
+      "orUseCredentials": "Eller logga in med uppgifter"
+    },
+    "sso": {
+      "linkedAccounts": "Länkade konton",
+      "linkedAccountsDesc": "Externa konton länkade till din identitet för enkel inloggning.",
+      "noLinkedAccounts": "Inga länkade konton",
+      "noLinkedAccountsDesc": "Länka ett externt konto för att aktivera snabb inloggning med den leverantören.",
+      "linkAccount": "Länka konto",
+      "unlinkAccount": "Ta bort länk",
+      "unlinkConfirm": "Är du säker på att du vill ta bort länken till detta konto?",
+      "unlinked": "Länk till {provider} borttagen",
+      "lastLoginAt": "Senast använd",
+      "linkedAt": "Länkad"
     },
     "consent": {
       "title": "Auktorisera applikation",
@@ -791,6 +812,18 @@
       "backToApp": "Tillbaka till applikationen"
     }
   },
+  "sso_register": {
+    "title": "Slutför registrering",
+    "subtitle": "Skapar konto med {provider}",
+    "handle_label": "Välj ditt användarnamn",
+    "handle_available": "Tillgängligt",
+    "handle_taken": "Redan taget",
+    "submit": "Skapa konto",
+    "error_expired": "Registreringssessionen har löpt ut. Försök igen.",
+    "error_handle_required": "Välj ett användarnamn",
+    "emailVerifiedByProvider": "Denna e-post är verifierad av {provider}. Ingen ytterligare verifiering behövs.",
+    "emailChangedNeedsVerification": "Om du använder en annan e-post måste du verifiera den."
+  },
   "verify": {
     "title": "Verifiera ditt konto",
     "subtitle": "Vi har skickat en verifieringskod till din {channel}. Ange den nedan för att slutföra registreringen.",
@@ -824,6 +857,8 @@
     "emailUpdateTitle": "Uppdatera e-postadress",
     "emailUpdated": "Din e-postadress har uppdaterats.",
     "emailUpdatedInfo": "Du kan behöva verifiera din nya e-postadress.",
+    "emailAuthorizeSuccess": "Din e-postuppdatering har auktoriserats.",
+    "emailAuthorizeInfo": "Du kan nu slutföra ändringen på din ursprungliga enhet.",
     "newEmailLabel": "Ny e-postadress",
     "newEmailPlaceholder": "ny@exempel.se",
     "updateEmail": "Uppdatera e-post",

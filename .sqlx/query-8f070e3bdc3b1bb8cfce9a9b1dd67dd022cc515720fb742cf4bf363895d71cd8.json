@@ -1,0 +1,84 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sso_pending_registration\n            WHERE token = $1 AND expires_at > NOW()\n            RETURNING token, request_uri, provider as \"provider: SsoProviderType\",\n                      provider_user_id, provider_username, provider_email, provider_email_verified,\n                      created_at, expires_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: SsoProviderType",
+        "type_info": {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "provider_email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8f070e3bdc3b1bb8cfce9a9b1dd67dd022cc515720fb742cf4bf363895d71cd8"
+}

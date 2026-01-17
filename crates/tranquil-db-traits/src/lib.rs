@@ -7,6 +7,7 @@ mod infra;
 mod oauth;
 mod repo;
 mod session;
+mod sso;
 mod user;
 
 pub use backlink::{Backlink, BacklinkRepository};
@@ -40,15 +41,18 @@ pub use session::{
     AppPasswordCreate, AppPasswordRecord, RefreshSessionResult, SessionForRefresh, SessionListItem,
     SessionMfaStatus, SessionRefreshData, SessionRepository, SessionToken, SessionTokenCreate,
 };
+pub use sso::{
+    ExternalIdentity, SsoAuthState, SsoPendingRegistration, SsoProviderType, SsoRepository,
+};
 pub use user::{
     AccountSearchResult, CompletePasskeySetupInput, CreateAccountError,
     CreateDelegatedAccountInput, CreatePasskeyAccountInput, CreatePasswordAccountInput,
-    CreatePasswordAccountResult, DidWebOverrides, MigrationReactivationError,
-    MigrationReactivationInput, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult,
-    ReactivatedAccountInfo, RecoverPasskeyAccountInput, RecoverPasskeyAccountResult,
-    ScheduledDeletionAccount, StoredBackupCode, StoredPasskey, TotpRecord, User2faStatus,
-    UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo,
-    UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
+    CreatePasswordAccountResult, CreateSsoAccountInput, DidWebOverrides,
+    MigrationReactivationError, MigrationReactivationInput, NotificationPrefs, OAuthTokenWithUser,
+    PasswordResetResult, ReactivatedAccountInfo, RecoverPasskeyAccountInput,
+    RecoverPasskeyAccountResult, ScheduledDeletionAccount, StoredBackupCode, StoredPasskey,
+    TotpRecord, User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo,
+    UserEmailInfo, UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
     UserForPasskeySetup, UserForRecovery, UserForVerification, UserIdAndHandle,
     UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId,
     UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo, UserPasswordInfo,

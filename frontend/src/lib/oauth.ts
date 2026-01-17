@@ -10,7 +10,7 @@ const SCOPES = [
   "repo:*?action=delete",
   "blob:*/*",
   "identity:*",
-  "account:*",
+  "account:*?action=manage",
 ].join(" ");
 
 const CLIENT_ID = !(import.meta.env.DEV)
@@ -346,7 +346,9 @@ async function tokenRequest(
   extractDPoPNonceFromResponse(response);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Unknown error" }));
+    const error = await response.json().catch(() => ({
+      error: "Unknown error",
+    }));
 
     if (retryWithNonce && error.error === "use_dpop_nonce" && getDPoPNonce()) {
       return tokenRequest(params, false);
@@ -431,5 +433,11 @@ export async function createDPoPProofForRequest(
   const keyPair = await getOrCreateDPoPKeyPair();
   const tokenHash = await sha256(accessToken);
   const ath = base64UrlEncode(tokenHash);
-  return createDPoPProof(keyPair, method, url, getDPoPNonce() ?? undefined, ath);
+  return createDPoPProof(
+    keyPair,
+    method,
+    url,
+    getDPoPNonce() ?? undefined,
+    ath,
+  );
 }

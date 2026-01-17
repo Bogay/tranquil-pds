@@ -8,6 +8,7 @@
   import Login from './routes/Login.svelte'
   import Register from './routes/Register.svelte'
   import RegisterPasskey from './routes/RegisterPasskey.svelte'
+  import RegisterSso from './routes/RegisterSso.svelte'
   import Verify from './routes/Verify.svelte'
   import ResetPassword from './routes/ResetPassword.svelte'
   import RecoverPasskey from './routes/RecoverPasskey.svelte'
@@ -28,6 +29,7 @@
   import OAuthPasskey from './routes/OAuthPasskey.svelte'
   import OAuthDelegation from './routes/OAuthDelegation.svelte'
   import OAuthError from './routes/OAuthError.svelte'
+  import OAuthSsoRegister from './routes/OAuthSsoRegister.svelte'
   import Security from './routes/Security.svelte'
   import TrustedDevices from './routes/TrustedDevices.svelte'
   import Controllers from './routes/Controllers.svelte'
@@ -100,6 +102,8 @@
         return RegisterPasskey
       case '/register-password':
         return Register
+      case '/register-sso':
+        return RegisterSso
       case '/verify':
         return Verify
       case '/reset-password':
@@ -140,6 +144,8 @@
         return OAuthDelegation
       case '/oauth/error':
         return OAuthError
+      case '/oauth/sso-register':
+        return OAuthSsoRegister
       case '/security':
         return Security
       case '/trusted-devices':

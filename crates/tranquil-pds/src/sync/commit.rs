@@ -114,21 +114,10 @@ pub async fn list_repos(
             let mut repos: Vec<RepoInfo> = Vec::new();
             for row in rows.iter().take(limit as usize) {
                 let cid_str = row.repo_root_cid.to_string();
-                let rev = match get_rev_from_commit(&state, &cid_str).await {
-                    Some(r) => r,
-                    None => {
-                        if let Some(ref stored_rev) = row.repo_rev {
-                            stored_rev.clone()
-                        } else {
-                            tracing::warn!(
-                                "Failed to parse commit for DID {} in list_repos: CID {}",
-                                row.did,
-                                row.repo_root_cid
-                            );
-                            continue;
-                        }
-                    }
-                };
+                let rev = get_rev_from_commit(&state, &cid_str)
+                    .await
+                    .or_else(|| row.repo_rev.clone())
+                    .unwrap_or_default();
                 let status = if row.takedown_ref.is_some() {
                     AccountStatus::Takendown
                 } else if row.deactivated_at.is_some() {

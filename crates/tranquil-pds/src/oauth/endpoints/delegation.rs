@@ -459,9 +459,7 @@ pub async fn delegation_auth_token(
     headers: HeaderMap,
     Json(form): Json<DelegationTokenAuthSubmit>,
 ) -> Response {
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok());
+    let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok());
 
     let extracted = match extract_auth_token_from_header(auth_header) {
         Some(e) => e,

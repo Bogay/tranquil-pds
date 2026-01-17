@@ -170,6 +170,11 @@
     "signIn": "Kirjaudu sisään",
     "passkeyAccount": "Pääsyavain",
     "passwordAccount": "Salasana",
+    "ssoAccount": "SSO",
+    "ssoSubtitle": "Luo tili ulkoisen palveluntarjoajan kautta",
+    "noSsoProviders": "Tälle palvelimelle ei ole määritetty SSO-palveluntarjoajia.",
+    "ssoHint": "Valitse palveluntarjoaja tilin luomiseksi:",
+    "continueWith": "Jatka palvelulla {provider}",
     "validation": {
       "handleRequired": "Käyttäjänimi vaaditaan",
       "handleNoDots": "Käyttäjänimi ei voi sisältää pisteitä. Voit määrittää oman verkkotunnuksen tilin luomisen jälkeen.",
@@ -275,6 +280,8 @@
     "verificationCode": "Vahvistuskoodi",
     "verificationCodePlaceholder": "Syötä vahvistuskoodi",
     "confirmEmailChange": "Vahvista sähköpostin vaihto",
+    "emailTokenHint": "Syötä sähköpostissa oleva koodi tai napsauta linkkiä sähköpostissa millä tahansa laitteella.",
+    "emailUpdateAuthorized": "Sähköpostin vaihto hyväksytty! Napsauta vahvista viimeistelläksesi.",
     "updating": "Päivitetään...",
     "changeHandle": "Vaihda käyttäjänimi",
     "currentHandle": "Nykyinen: @{handle}",
@@ -685,7 +692,21 @@
       "passkeyHintNotAvailable": "Ei rekisteröityjä pääsyavaimia tälle tilille",
       "passkeyHint": "Käytä laitteesi biometriikkaa tai suojausavainta",
       "passwordPlaceholder": "Syötä salasanasi",
-      "usePasskey": "Käytä pääsyavainta"
+      "usePasskey": "Käytä pääsyavainta",
+      "orContinueWith": "Tai jatka käyttäen",
+      "orUseCredentials": "Tai kirjaudu tunnuksilla"
+    },
+    "sso": {
+      "linkedAccounts": "Linkitetyt tilit",
+      "linkedAccountsDesc": "Ulkoiset tilit, jotka on linkitetty identiteettiisi kertakirjautumista varten.",
+      "noLinkedAccounts": "Ei linkitettyjä tilejä",
+      "noLinkedAccountsDesc": "Linkitä ulkoinen tili ottaaksesi käyttöön nopean kirjautumisen kyseisellä palveluntarjoajalla.",
+      "linkAccount": "Linkitä tili",
+      "unlinkAccount": "Poista linkitys",
+      "unlinkConfirm": "Haluatko varmasti poistaa tämän tilin linkityksen?",
+      "unlinked": "Linkitys poistettu: {provider}",
+      "lastLoginAt": "Viimeksi käytetty",
+      "linkedAt": "Linkitetty"
     },
     "consent": {
       "title": "Valtuuta sovellus",
@@ -798,6 +819,18 @@
       "backToApp": "Takaisin sovellukseen"
     }
   },
+  "sso_register": {
+    "title": "Viimeistele rekisteröinti",
+    "subtitle": "Luo tili käyttäen {provider}",
+    "handle_label": "Valitse käsittelynimi",
+    "handle_available": "Saatavilla",
+    "handle_taken": "Jo käytössä",
+    "submit": "Luo tili",
+    "error_expired": "Rekisteröintisessio on vanhentunut. Yritä uudelleen.",
+    "error_handle_required": "Valitse käsittelynimi",
+    "emailVerifiedByProvider": "Tämä sähköposti on vahvistettu {provider} kautta. Lisävahvistusta ei tarvita.",
+    "emailChangedNeedsVerification": "Jos käytät eri sähköpostia, sinun täytyy vahvistaa se."
+  },
   "verify": {
     "title": "Vahvista tilisi",
     "subtitle": "Olemme lähettäneet vahvistuskoodin {channel}. Syötä se alla viimeistelläksesi rekisteröinnin.",
@@ -831,6 +864,8 @@
     "emailUpdateTitle": "Päivitä sähköpostiosoite",
     "emailUpdated": "Sähköpostiosoitteesi on päivitetty.",
     "emailUpdatedInfo": "Sinun on ehkä vahvistettava uusi sähköpostiosoitteesi.",
+    "emailAuthorizeSuccess": "Sähköpostipäivityksesi on valtuutettu.",
+    "emailAuthorizeInfo": "Voit nyt viimeistellä muutoksen alkuperäisellä laitteellasi.",
     "newEmailLabel": "Uusi sähköpostiosoite",
     "newEmailPlaceholder": "uusi@esimerkki.fi",
     "updateEmail": "Päivitä sähköposti",

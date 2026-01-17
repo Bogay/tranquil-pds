@@ -33,6 +33,9 @@ pub struct RateLimiters {
     pub handle_update: Arc<KeyedRateLimiter>,
     pub handle_update_daily: Arc<KeyedRateLimiter>,
     pub verification_check: Arc<KeyedRateLimiter>,
+    pub sso_initiate: Arc<KeyedRateLimiter>,
+    pub sso_callback: Arc<KeyedRateLimiter>,
+    pub sso_unlink: Arc<KeyedRateLimiter>,
 }
 
 impl Default for RateLimiters {
@@ -95,6 +98,15 @@ impl RateLimiters {
             verification_check: Arc::new(RateLimiter::keyed(Quota::per_minute(
                 NonZeroU32::new(60).unwrap(),
             ))),
+            sso_initiate: Arc::new(RateLimiter::keyed(Quota::per_minute(
+                NonZeroU32::new(10).unwrap(),
+            ))),
+            sso_callback: Arc::new(RateLimiter::keyed(Quota::per_minute(
+                NonZeroU32::new(30).unwrap(),
+            ))),
+            sso_unlink: Arc::new(RateLimiter::keyed(Quota::per_minute(
+                NonZeroU32::new(10).unwrap(),
+            ))),
         }
     }
 
@@ -136,6 +148,13 @@ impl RateLimiters {
     pub fn with_email_update_limit(mut self, per_hour: u32) -> Self {
         self.email_update = Arc::new(RateLimiter::keyed(Quota::per_hour(
             NonZeroU32::new(per_hour).unwrap_or(NonZeroU32::new(5).unwrap()),
+        )));
+        self
+    }
+
+    pub fn with_sso_initiate_limit(mut self, per_minute: u32) -> Self {
+        self.sso_initiate = Arc::new(RateLimiter::keyed(Quota::per_minute(
+            NonZeroU32::new(per_minute).unwrap_or(NonZeroU32::new(10).unwrap()),
         )));
         self
     }

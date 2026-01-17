@@ -4,6 +4,7 @@ use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
 use crate::rate_limit::RateLimiters;
 use crate::repo::PostgresBlockStore;
+use crate::sso::{SsoConfig, SsoManager};
 use crate::storage::{BackupStorage, BlobStorage, S3BlobStorage};
 use crate::sync::firehose::SequencedEvent;
 use sqlx::PgPool;
@@ -13,7 +14,7 @@ use tokio::sync::broadcast;
 use tranquil_db::{
     BacklinkRepository, BackupRepository, BlobRepository, DelegationRepository, InfraRepository,
     OAuthRepository, PostgresRepositories, RepoEventNotifier, RepoRepository, SessionRepository,
-    UserRepository,
+    SsoRepository, UserRepository,
 };
 
 #[derive(Clone)]
@@ -38,6 +39,8 @@ pub struct AppState {
     pub cache: Arc<dyn Cache>,
     pub distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
     pub did_resolver: Arc<DidResolver>,
+    pub sso_repo: Arc<dyn SsoRepository>,
+    pub sso_manager: SsoManager,
 }
 
 pub enum RateLimitKind {
@@ -56,6 +59,9 @@ pub enum RateLimitKind {
     HandleUpdate,
     HandleUpdateDaily,
     VerificationCheck,
+    SsoInitiate,
+    SsoCallback,
+    SsoUnlink,
 }
 
 impl RateLimitKind {
@@ -76,6 +82,9 @@ impl RateLimitKind {
             Self::HandleUpdate => "handle_update",
             Self::HandleUpdateDaily => "handle_update_daily",
             Self::VerificationCheck => "verification_check",
+            Self::SsoInitiate => "sso_initiate",
+            Self::SsoCallback => "sso_callback",
+            Self::SsoUnlink => "sso_unlink",
         }
     }
 
@@ -96,6 +105,9 @@ impl RateLimitKind {
             Self::HandleUpdate => (10, 300_000),
             Self::HandleUpdateDaily => (50, 86_400_000),
             Self::VerificationCheck => (60, 60_000),
+            Self::SsoInitiate => (10, 60_000),
+            Self::SsoCallback => (30, 60_000),
+            Self::SsoUnlink => (10, 60_000),
         }
     }
 }
@@ -163,6 +175,8 @@ impl AppState {
         let circuit_breakers = Arc::new(CircuitBreakers::new());
         let (cache, distributed_rate_limiter) = create_cache().await;
         let did_resolver = Arc::new(DidResolver::new());
+        let sso_config = SsoConfig::init();
+        let sso_manager = SsoManager::from_config(sso_config);
 
         Self {
             user_repo: repos.user.clone(),
@@ -175,6 +189,7 @@ impl AppState {
             backup_repo: repos.backup.clone(),
             backlink_repo: repos.backlink.clone(),
             event_notifier: repos.event_notifier.clone(),
+            sso_repo: repos.sso.clone(),
             repos,
             block_store,
             blob_store: Arc::new(blob_store),
@@ -185,6 +200,7 @@ impl AppState {
             cache,
             distributed_rate_limiter,
             did_resolver,
+            sso_manager,
         }
     }
 
@@ -232,6 +248,9 @@ impl AppState {
             RateLimitKind::HandleUpdate => &self.rate_limiters.handle_update,
             RateLimitKind::HandleUpdateDaily => &self.rate_limiters.handle_update_daily,
             RateLimitKind::VerificationCheck => &self.rate_limiters.verification_check,
+            RateLimitKind::SsoInitiate => &self.rate_limiters.sso_initiate,
+            RateLimitKind::SsoCallback => &self.rate_limiters.sso_callback,
+            RateLimitKind::SsoUnlink => &self.rate_limiters.sso_unlink,
         };
 
         let ok = limiter.check_key(&client_ip.to_string()).is_ok();

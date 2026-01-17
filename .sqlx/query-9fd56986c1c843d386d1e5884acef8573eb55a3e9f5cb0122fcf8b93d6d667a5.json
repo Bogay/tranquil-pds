@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT token, request_uri, provider as \"provider: SsoProviderType\", provider_user_id,\n               provider_username, provider_email\n        FROM sso_pending_registration\n        WHERE token = $1 AND expires_at > NOW()\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: SsoProviderType",
+        "type_info": {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "provider_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "provider_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "provider_email",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "9fd56986c1c843d386d1e5884acef8573eb55a3e9f5cb0122fcf8b93d6d667a5"
+}

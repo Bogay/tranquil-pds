@@ -12,7 +12,7 @@ import {
   setupAuthenticatedUser,
   setupDefaultMocks,
   setupUnauthenticatedUser,
-} from "./mocks";
+} from "./mocks.ts";
 describe("Settings", () => {
   beforeEach(() => {
     clearMocks();
@@ -68,10 +68,16 @@ describe("Settings", () => {
         requestCalled = true;
         return jsonResponse({ tokenRequired: true });
       });
+      mockEndpoint(
+        "_account.checkEmailUpdateStatus",
+        () => jsonResponse({ pending: false, authorized: false }),
+      );
       render(Settings);
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /change email/i }))
-          .toBeInTheDocument();
+        expect(screen.getByLabelText(/new email/i)).toBeInTheDocument();
+      });
+      await fireEvent.input(screen.getByLabelText(/new email/i), {
+        target: { value: "newemail@example.com" },
       });
       await fireEvent.click(
         screen.getByRole("button", { name: /change email/i }),
@@ -85,10 +91,16 @@ describe("Settings", () => {
         "com.atproto.server.requestEmailUpdate",
         () => jsonResponse({ tokenRequired: true }),
       );
+      mockEndpoint(
+        "_account.checkEmailUpdateStatus",
+        () => jsonResponse({ pending: false, authorized: false }),
+      );
       render(Settings);
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /change email/i }))
-          .toBeInTheDocument();
+        expect(screen.getByLabelText(/new email/i)).toBeInTheDocument();
+      });
+      await fireEvent.input(screen.getByLabelText(/new email/i), {
+        target: { value: "newemail@example.com" },
       });
       await fireEvent.click(
         screen.getByRole("button", { name: /change email/i }),
@@ -107,6 +119,10 @@ describe("Settings", () => {
         "com.atproto.server.requestEmailUpdate",
         () => jsonResponse({ tokenRequired: true }),
       );
+      mockEndpoint(
+        "_account.checkEmailUpdateStatus",
+        () => jsonResponse({ pending: false, authorized: false }),
+      );
       mockEndpoint("com.atproto.server.updateEmail", (_url, options) => {
         updateCalled = true;
         capturedBody = JSON.parse((options?.body as string) || "{}");
@@ -118,8 +134,10 @@ describe("Settings", () => {
       );
       render(Settings);
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /change email/i }))
-          .toBeInTheDocument();
+        expect(screen.getByLabelText(/new email/i)).toBeInTheDocument();
+      });
+      await fireEvent.input(screen.getByLabelText(/new email/i), {
+        target: { value: "newemail@example.com" },
       });
       await fireEvent.click(
         screen.getByRole("button", { name: /change email/i }),
@@ -129,9 +147,6 @@ describe("Settings", () => {
       });
       await fireEvent.input(screen.getByLabelText(/verification code/i), {
         target: { value: "123456" },
-      });
-      await fireEvent.input(screen.getByLabelText(/new email/i), {
-        target: { value: "newemail@example.com" },
       });
       await fireEvent.click(
         screen.getByRole("button", { name: /confirm email change/i }),
@@ -147,6 +162,10 @@ describe("Settings", () => {
         "com.atproto.server.requestEmailUpdate",
         () => jsonResponse({ tokenRequired: true }),
       );
+      mockEndpoint(
+        "_account.checkEmailUpdateStatus",
+        () => jsonResponse({ pending: false, authorized: false }),
+      );
       mockEndpoint("com.atproto.server.updateEmail", () => jsonResponse({}));
       mockEndpoint(
         "com.atproto.server.getSession",
@@ -154,8 +173,10 @@ describe("Settings", () => {
       );
       render(Settings);
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /change email/i }))
-          .toBeInTheDocument();
+        expect(screen.getByLabelText(/new email/i)).toBeInTheDocument();
+      });
+      await fireEvent.input(screen.getByLabelText(/new email/i), {
+        target: { value: "new@test.com" },
       });
       await fireEvent.click(
         screen.getByRole("button", { name: /change email/i }),
@@ -166,15 +187,16 @@ describe("Settings", () => {
       await fireEvent.input(screen.getByLabelText(/verification code/i), {
         target: { value: "123456" },
       });
-      await fireEvent.input(screen.getByLabelText(/new email/i), {
-        target: { value: "new@test.com" },
-      });
       await fireEvent.click(
         screen.getByRole("button", { name: /confirm email change/i }),
       );
       await waitFor(() => {
         const toasts = getToasts();
-        expect(toasts.some((t) => t.type === "success" && /email.*updated/i.test(t.message))).toBe(true);
+        expect(
+          toasts.some((t) =>
+            t.type === "success" && /email.*updated/i.test(t.message)
+          ),
+        ).toBe(true);
       });
     });
     it("shows cancel button to return to initial state", async () => {
@@ -182,10 +204,16 @@ describe("Settings", () => {
         "com.atproto.server.requestEmailUpdate",
         () => jsonResponse({ tokenRequired: true }),
       );
+      mockEndpoint(
+        "_account.checkEmailUpdateStatus",
+        () => jsonResponse({ pending: false, authorized: false }),
+      );
       render(Settings);
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /change email/i }))
-          .toBeInTheDocument();
+        expect(screen.getByLabelText(/new email/i)).toBeInTheDocument();
+      });
+      await fireEvent.input(screen.getByLabelText(/new email/i), {
+        target: { value: "newemail@example.com" },
       });
       await fireEvent.click(
         screen.getByRole("button", { name: /change email/i }),
@@ -214,12 +242,13 @@ describe("Settings", () => {
       );
       render(Settings);
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /change email/i }))
-          .toBeInTheDocument();
+        expect(screen.getByLabelText(/new email/i)).toBeInTheDocument();
       });
-      await fireEvent.click(
-        screen.getByRole("button", { name: /change email/i }),
-      );
+      await fireEvent.input(screen.getByLabelText(/new email/i), {
+        target: { value: "invalid@email.com" },
+      });
+      const button = screen.getByRole("button", { name: /change email/i });
+      await fireEvent.submit(button.closest("form")!);
       await waitFor(() => {
         const errors = getErrorToasts();
         expect(errors.some((e) => /invalid email format/i.test(e))).toBe(true);
@@ -283,7 +312,11 @@ describe("Settings", () => {
       await fireEvent.submit(button.closest("form")!);
       await waitFor(() => {
         const toasts = getToasts();
-        expect(toasts.some((t) => t.type === "success" && /handle.*updated/i.test(t.message))).toBe(true);
+        expect(
+          toasts.some((t) =>
+            t.type === "success" && /handle.*updated/i.test(t.message)
+          ),
+        ).toBe(true);
       });
     });
     it("shows error toast when handle change fails", async () => {
@@ -306,7 +339,9 @@ describe("Settings", () => {
       await fireEvent.submit(button.closest("form")!);
       await waitFor(() => {
         const errors = getErrorToasts();
-        expect(errors.some((e) => /handle is already taken/i.test(e))).toBe(true);
+        expect(errors.some((e) => /handle is already taken/i.test(e))).toBe(
+          true,
+        );
       });
     });
   });
@@ -535,7 +570,9 @@ describe("Settings", () => {
       );
       await waitFor(() => {
         const errors = getErrorToasts();
-        expect(errors.some((e) => /invalid confirmation code/i.test(e))).toBe(true);
+        expect(errors.some((e) => /invalid confirmation code/i.test(e))).toBe(
+          true,
+        );
       });
     });
   });

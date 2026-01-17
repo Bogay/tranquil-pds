@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT provider_user_id, provider_email_verified\n        FROM external_identities\n        WHERE did = $1 AND provider = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "provider_user_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "provider_email_verified",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5e4c0dd92ac3c4b5e2eae5d129f2649cf3a8f068105f44a8dca9625427affc06"
+}

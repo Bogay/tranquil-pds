@@ -1,0 +1,84 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sso_auth_state\n            WHERE state = $1 AND expires_at > NOW()\n            RETURNING state, request_uri, provider as \"provider: SsoProviderType\", action,\n                      nonce, code_verifier, did, created_at, expires_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "request_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "provider: SsoProviderType",
+        "type_info": {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "action",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "nonce",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "code_verifier",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "9468c5af2fb0e06e600e6c67e236bd4e368b06ce4af15fed16b8a0bfc5328c36"
+}

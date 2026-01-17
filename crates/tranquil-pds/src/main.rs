@@ -4,6 +4,13 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
+
+const BUILD_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (built ",
+    env!("BUILD_TIMESTAMP"),
+    ")"
+);
 use tranquil_pds::crawlers::{Crawlers, start_crawlers_service};
 use tranquil_pds::scheduled::{
     backfill_genesis_commit_blocks, backfill_record_blobs, backfill_repo_rev, backfill_user_blocks,
@@ -106,6 +113,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state.user_repo.clone(),
         state.blob_repo.clone(),
         state.blob_store.clone(),
+        state.sso_repo.clone(),
         shutdown_rx,
     ));
 
@@ -121,7 +129,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .parse()
         .map_err(|e| format!("Invalid SERVER_HOST or SERVER_PORT: {}", e))?;
 
-    info!("listening on {}", addr);
+    info!("tranquil-pds {} listening on {}", BUILD_VERSION, addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await

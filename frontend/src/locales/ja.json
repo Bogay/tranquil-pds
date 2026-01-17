@@ -163,6 +163,11 @@
     "signIn": "サインイン",
     "passkeyAccount": "パスキー",
     "passwordAccount": "パスワード",
+    "ssoAccount": "SSO",
+    "ssoSubtitle": "外部プロバイダーを使用してアカウントを作成",
+    "noSsoProviders": "このサーバーにはSSOプロバイダーが設定されていません。",
+    "ssoHint": "プロバイダーを選択してアカウントを作成:",
+    "continueWith": "{provider}で続行",
     "validation": {
       "handleRequired": "ハンドルは必須です",
       "handleNoDots": "ハンドルにドットは使用できません。アカウント作成後にカスタムドメインを設定できます。",
@@ -268,6 +273,8 @@
     "verificationCode": "確認コード",
     "verificationCodePlaceholder": "認証コードを入力",
     "confirmEmailChange": "メール変更を確認",
+    "emailTokenHint": "メールに記載されたコードを入力するか、任意のデバイスでメール内のリンクをクリックしてください。",
+    "emailUpdateAuthorized": "メール変更が承認されました！確認をクリックして完了してください。",
     "updating": "更新中...",
     "changeHandle": "ハンドル変更",
     "currentHandle": "現在: @{handle}",
@@ -678,7 +685,21 @@
       "passkeyHintNotAvailable": "このアカウントにはパスキーが登録されていません",
       "passkeyHint": "デバイスの生体認証またはセキュリティキーを使用",
       "passwordPlaceholder": "パスワードを入力",
-      "usePasskey": "パスキーを使用"
+      "usePasskey": "パスキーを使用",
+      "orContinueWith": "または次の方法で続行",
+      "orUseCredentials": "または認証情報でサインイン"
+    },
+    "sso": {
+      "linkedAccounts": "連携アカウント",
+      "linkedAccountsDesc": "シングルサインオン用に連携された外部アカウント。",
+      "noLinkedAccounts": "連携アカウントなし",
+      "noLinkedAccountsDesc": "外部アカウントを連携して、そのプロバイダーでのクイックサインインを有効にします。",
+      "linkAccount": "アカウントを連携",
+      "unlinkAccount": "連携解除",
+      "unlinkConfirm": "このアカウントの連携を解除しますか？",
+      "unlinked": "{provider} の連携を解除しました",
+      "lastLoginAt": "最終使用",
+      "linkedAt": "連携日時"
     },
     "consent": {
       "title": "アプリを承認",
@@ -791,6 +812,18 @@
       "backToApp": "アプリに戻る"
     }
   },
+  "sso_register": {
+    "title": "登録を完了",
+    "subtitle": "{provider}でアカウントを作成",
+    "handle_label": "ハンドルを選択",
+    "handle_available": "利用可能",
+    "handle_taken": "既に使用されています",
+    "submit": "アカウント作成",
+    "error_expired": "登録セッションが期限切れです。もう一度お試しください。",
+    "error_handle_required": "ハンドルを選択してください",
+    "emailVerifiedByProvider": "このメールアドレスは{provider}で確認済みです。追加の確認は不要です。",
+    "emailChangedNeedsVerification": "別のメールアドレスを使用する場合は、確認が必要です。"
+  },
   "verify": {
     "title": "アカウント確認",
     "subtitle": "{channel} に確認コードを送信しました。以下に入力して登録を完了してください。",
@@ -824,6 +857,8 @@
     "emailUpdateTitle": "メールアドレスの更新",
     "emailUpdated": "メールアドレスが正常に更新されました。",
     "emailUpdatedInfo": "新しいメールアドレスの確認が必要な場合があります。",
+    "emailAuthorizeSuccess": "メールアドレスの更新が承認されました。",
+    "emailAuthorizeInfo": "元のデバイスで変更を完了できます。",
     "newEmailLabel": "新しいメールアドレス",
     "newEmailPlaceholder": "new@example.com",
     "updateEmail": "メールを更新",

@@ -176,7 +176,7 @@ pub async fn frontend_client_metadata(
             "refresh_token".to_string(),
         ],
         response_types: vec!["code".to_string()],
-        scope: "atproto transition:generic repo:* blob:*/* rpc:* rpc:com.atproto.server.createAccount?aud=* account:* identity:*"
+        scope: "atproto transition:generic repo:* blob:*/* rpc:* rpc:com.atproto.server.createAccount?aud=* account:*?action=manage identity:*"
             .to_string(),
         token_endpoint_auth_method: "none".to_string(),
         application_type: "web".to_string(),

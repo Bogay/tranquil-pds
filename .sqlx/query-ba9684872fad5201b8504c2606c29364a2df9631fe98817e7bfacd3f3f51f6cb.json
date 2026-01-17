@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO sso_pending_registration (token, request_uri, provider, provider_user_id, expires_at)\n        VALUES ($1, $2, $3, $4, NOW() - INTERVAL '1 hour')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "sso_provider_type",
+            "kind": {
+              "Enum": [
+                "github",
+                "discord",
+                "google",
+                "gitlab",
+                "oidc",
+                "apple"
+              ]
+            }
+          }
+        },
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ba9684872fad5201b8504c2606c29364a2df9631fe98817e7bfacd3f3f51f6cb"
+}

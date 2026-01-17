@@ -7,14 +7,45 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use serde::Deserialize;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
+
+const EMAIL_UPDATE_TTL: Duration = Duration::from_secs(30 * 60);
+
+fn email_update_cache_key(did: &str) -> String {
+    format!("email_update:{}", did)
+}
+
+fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    URL_SAFE_NO_PAD.encode(hasher.finalize())
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingEmailUpdate {
+    new_email: String,
+    token_hash: String,
+    authorized: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestEmailUpdateInput {
+    #[serde(default)]
+    pub new_email: Option<String>,
+}
 
 pub async fn request_email_update(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     auth: BearerAuth,
+    input: Option<Json<RequestEmailUpdateInput>>,
 ) -> Response {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
     if !state
@@ -60,11 +91,30 @@ pub async fn request_email_update(
         );
         let formatted_code = crate::auth::verification_token::format_token_for_display(&code);
 
+        if let Some(Json(ref inp)) = input
+            && let Some(ref new_email) = inp.new_email {
+                let new_email = new_email.trim().to_lowercase();
+                if !new_email.is_empty() && crate::api::validation::is_valid_email(&new_email) {
+                    let pending = PendingEmailUpdate {
+                        new_email,
+                        token_hash: hash_token(&code),
+                        authorized: false,
+                    };
+                    if let Ok(json) = serde_json::to_string(&pending) {
+                        let cache_key = email_update_cache_key(&auth.0.did);
+                        if let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
+                            warn!("Failed to cache pending email update: {:?}", e);
+                        }
+                    }
+                }
+            }
+
         let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         if let Err(e) = crate::comms::comms_repo::enqueue_email_update_token(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
             user.id,
+            &code,
             &formatted_code,
             &hostname,
         )
@@ -223,33 +273,47 @@ pub async fn update_email(
     }
 
     if email_verified {
-        let Some(ref t) = input.token else {
-            return ApiError::TokenRequired.into_response();
-        };
-        let confirmation_token = crate::auth::verification_token::normalize_token_input(t.trim());
+        let mut authorized_via_link = false;
 
-        let current_email_lower = current_email
-            .as_ref()
-            .map(|e| e.to_lowercase())
-            .unwrap_or_default();
+        let cache_key = email_update_cache_key(did);
+        if let Some(pending_json) = state.cache.get(&cache_key).await
+            && let Ok(pending) = serde_json::from_str::<PendingEmailUpdate>(&pending_json)
+                && pending.authorized && pending.new_email == new_email {
+                    authorized_via_link = true;
+                    let _ = state.cache.delete(&cache_key).await;
+                    info!(did = %did, "Email update completed via link authorization");
+                }
 
-        let verified = crate::auth::verification_token::verify_channel_update_token(
-            &confirmation_token,
-            "email_update",
-            &current_email_lower,
-        );
+        if !authorized_via_link {
+            let Some(ref t) = input.token else {
+                return ApiError::TokenRequired.into_response();
+            };
+            let confirmation_token =
+                crate::auth::verification_token::normalize_token_input(t.trim());
 
-        match verified {
-            Ok(token_data) => {
-                if token_data.did != did.as_str() {
+            let current_email_lower = current_email
+                .as_ref()
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+
+            let verified = crate::auth::verification_token::verify_channel_update_token(
+                &confirmation_token,
+                "email_update",
+                &current_email_lower,
+            );
+
+            match verified {
+                Ok(token_data) => {
+                    if token_data.did != did.as_str() {
+                        return ApiError::InvalidToken(None).into_response();
+                    }
+                }
+                Err(crate::auth::verification_token::VerifyError::Expired) => {
+                    return ApiError::ExpiredToken(None).into_response();
+                }
+                Err(_) => {
                     return ApiError::InvalidToken(None).into_response();
                 }
-            }
-            Err(crate::auth::verification_token::VerifyError::Expired) => {
-                return ApiError::ExpiredToken(None).into_response();
-            }
-            Err(_) => {
-                return ApiError::InvalidToken(None).into_response();
             }
         }
     }
@@ -331,4 +395,149 @@ pub async fn check_email_verified(
             ApiError::InternalError(None).into_response()
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct AuthorizeEmailUpdateQuery {
+    pub token: String,
+}
+
+pub async fn authorize_email_update(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<AuthorizeEmailUpdateQuery>,
+) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state
+        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
+        .await
+    {
+        return ApiError::RateLimitExceeded(None).into_response();
+    }
+
+    let verified = crate::auth::verification_token::verify_token_signature(&query.token);
+
+    let token_data = match verified {
+        Ok(data) => data,
+        Err(crate::auth::verification_token::VerifyError::Expired) => {
+            warn!("authorize_email_update: token expired");
+            return ApiError::ExpiredToken(None).into_response();
+        }
+        Err(e) => {
+            warn!("authorize_email_update: token verification failed: {:?}", e);
+            return ApiError::InvalidToken(None).into_response();
+        }
+    };
+
+    if token_data.purpose != crate::auth::verification_token::VerificationPurpose::ChannelUpdate {
+        warn!(
+            "authorize_email_update: wrong purpose: {:?}",
+            token_data.purpose
+        );
+        return ApiError::InvalidToken(None).into_response();
+    }
+    if token_data.channel != "email_update" {
+        warn!(
+            "authorize_email_update: wrong channel: {}",
+            token_data.channel
+        );
+        return ApiError::InvalidToken(None).into_response();
+    }
+
+    let did = token_data.did;
+    info!("authorize_email_update: token valid for did={}", did);
+
+    let cache_key = email_update_cache_key(&did);
+    let pending_json = match state.cache.get(&cache_key).await {
+        Some(json) => json,
+        None => {
+            warn!(
+                "authorize_email_update: no pending email update in cache for did={}",
+                did
+            );
+            return ApiError::InvalidRequest("No pending email update found".into())
+                .into_response();
+        }
+    };
+
+    let mut pending: PendingEmailUpdate = match serde_json::from_str(&pending_json) {
+        Ok(p) => p,
+        Err(_) => {
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    let token_hash = hash_token(&query.token);
+    if pending
+        .token_hash
+        .as_bytes()
+        .ct_eq(token_hash.as_bytes())
+        .unwrap_u8()
+        != 1
+    {
+        warn!("authorize_email_update: token hash mismatch");
+        return ApiError::InvalidToken(None).into_response();
+    }
+
+    pending.authorized = true;
+    if let Ok(json) = serde_json::to_string(&pending)
+        && let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
+            warn!("Failed to update pending email authorization: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+
+    info!(did = %did, "Email update authorized via link click");
+
+    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let redirect_url = format!(
+        "https://{}/app/verify?type=email-authorize-success",
+        hostname
+    );
+
+    axum::response::Redirect::to(&redirect_url).into_response()
+}
+
+pub async fn check_email_update_status(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    auth: BearerAuth,
+) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state
+        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
+        .await
+    {
+        return ApiError::RateLimitExceeded(None).into_response();
+    }
+
+    if let Err(e) = crate::auth::scope_check::check_account_scope(
+        auth.0.is_oauth,
+        auth.0.scope.as_deref(),
+        crate::oauth::scopes::AccountAttr::Email,
+        crate::oauth::scopes::AccountAction::Read,
+    ) {
+        return e;
+    }
+
+    let cache_key = email_update_cache_key(&auth.0.did);
+    let pending_json = match state.cache.get(&cache_key).await {
+        Some(json) => json,
+        None => {
+            return Json(json!({ "pending": false, "authorized": false })).into_response();
+        }
+    };
+
+    let pending: PendingEmailUpdate = match serde_json::from_str(&pending_json) {
+        Ok(p) => p,
+        Err(_) => {
+            return Json(json!({ "pending": false, "authorized": false })).into_response();
+        }
+    };
+
+    Json(json!({
+        "pending": true,
+        "authorized": pending.authorized,
+        "newEmail": pending.new_email,
+    }))
+    .into_response()
 }

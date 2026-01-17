@@ -3,6 +3,7 @@
   import { navigate, routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import ReauthModal from '../components/ReauthModal.svelte'
+  import SsoIcon from '../components/SsoIcon.svelte'
   import { _ } from '../lib/i18n'
   import { formatDate as formatDateUtil } from '../lib/date'
   import type { Session } from '../lib/types/api'
@@ -12,6 +13,22 @@
     type WebAuthnCreationOptionsResponse,
   } from '../lib/webauthn'
   import { toast } from '../lib/toast.svelte'
+
+  interface SsoProvider {
+    provider: string
+    name: string
+    icon: string
+  }
+
+  interface LinkedAccount {
+    id: string
+    provider: string
+    provider_name: string
+    provider_username: string | null
+    provider_email: string | null
+    created_at: string
+    last_login_at: string | null
+  }
 
   const auth = $derived(getAuthState())
 
@@ -69,6 +86,12 @@
   let legacyLoginLoading = $state(true)
   let legacyLoginUpdating = $state(false)
 
+  let ssoProviders = $state<SsoProvider[]>([])
+  let linkedAccounts = $state<LinkedAccount[]>([])
+  let linkedAccountsLoading = $state(true)
+  let linkingProvider = $state<string | null>(null)
+  let unlinkingId = $state<string | null>(null)
+
   let showReauthModal = $state(false)
   let reauthMethods = $state<string[]>(['password'])
   let pendingAction = $state<(() => Promise<void>) | null>(null)
@@ -85,8 +108,124 @@
       loadPasskeys()
       loadPasswordStatus()
       loadLegacyLoginPreference()
+      loadSsoProviders()
+      loadLinkedAccounts()
     }
   })
+
+  async function loadSsoProviders() {
+    try {
+      const response = await fetch('/oauth/sso/providers')
+      if (response.ok) {
+        const data = await response.json()
+        ssoProviders = data.providers || []
+      }
+    } catch {
+      ssoProviders = []
+    }
+  }
+
+  async function loadLinkedAccounts() {
+    if (!session) return
+    linkedAccountsLoading = true
+    try {
+      const response = await fetch('/oauth/sso/linked', {
+        headers: { 'Authorization': `Bearer ${session.accessJwt}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        linkedAccounts = data.accounts || []
+      }
+    } catch {
+      linkedAccounts = []
+    } finally {
+      linkedAccountsLoading = false
+    }
+  }
+
+  async function handleLinkAccount(provider: string) {
+    linkingProvider = provider
+
+    const linkRequestUri = `urn:tranquil:sso:link:${Date.now()}`
+
+    try {
+      const response = await fetch('/oauth/sso/initiate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${session?.accessJwt}`
+        },
+        body: JSON.stringify({
+          provider,
+          request_uri: linkRequestUri,
+          action: 'link'
+        })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        if (data.error === 'ReauthRequired') {
+          reauthMethods = data.reauthMethods || ['password']
+          pendingAction = () => handleLinkAccount(provider)
+          showReauthModal = true
+        } else {
+          toast.error(data.error_description || data.error || 'Failed to start SSO linking')
+        }
+        linkingProvider = null
+        return
+      }
+
+      if (data.redirect_url) {
+        window.location.href = data.redirect_url
+        return
+      }
+
+      toast.error($_('common.error'))
+      linkingProvider = null
+    } catch {
+      toast.error($_('common.error'))
+      linkingProvider = null
+    }
+  }
+
+  async function handleUnlinkAccount(id: string) {
+    const account = linkedAccounts.find(a => a.id === id)
+    if (!confirm($_('oauth.sso.unlinkConfirm'))) return
+
+    unlinkingId = id
+    try {
+      const response = await fetch('/oauth/sso/unlink', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.accessJwt}`
+        },
+        body: JSON.stringify({ id })
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        if (data.error === 'ReauthRequired') {
+          reauthMethods = data.reauthMethods || ['password']
+          pendingAction = () => handleUnlinkAccount(id)
+          showReauthModal = true
+        } else {
+          toast.error(data.error_description || data.error || 'Failed to unlink account')
+        }
+        unlinkingId = null
+        return
+      }
+
+      await loadLinkedAccounts()
+      toast.success($_('oauth.sso.unlinked', { values: { provider: account?.provider_name || 'account' } }))
+    } catch {
+      toast.error($_('common.error'))
+    } finally {
+      unlinkingId = null
+    }
+  }
 
   async function loadPasswordStatus() {
     if (!session) return
@@ -696,6 +835,80 @@
         {$_('security.manageTrustedDevices')} &rarr;
       </a>
     </section>
+
+    {#if ssoProviders.length > 0}
+      <section>
+        <h2>{$_('oauth.sso.linkedAccounts')}</h2>
+        <p class="description">
+          {$_('oauth.sso.linkedAccountsDesc')}
+        </p>
+
+        {#if !linkedAccountsLoading}
+          {#if linkedAccounts.length > 0}
+            <div class="linked-accounts-list">
+              {#each linkedAccounts as account}
+                <div class="linked-account-item">
+                  <div class="linked-account-icon">
+                    <SsoIcon provider={account.provider} size={24} />
+                  </div>
+                  <div class="linked-account-info">
+                    <span class="linked-account-provider">{account.provider_name}</span>
+                    <span class="linked-account-meta">
+                      {#if account.provider_username}
+                        {account.provider_username}
+                      {:else if account.provider_email}
+                        {account.provider_email}
+                      {/if}
+                      {#if account.last_login_at}
+                        &middot; {$_('oauth.sso.lastLoginAt')} {formatDate(account.last_login_at)}
+                      {/if}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    class="small danger-outline"
+                    onclick={() => handleUnlinkAccount(account.id)}
+                    disabled={unlinkingId !== null}
+                  >
+                    {unlinkingId === account.id ? $_('common.loading') : $_('oauth.sso.unlinkAccount')}
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="status disabled">
+              <span>{$_('oauth.sso.noLinkedAccounts')}</span>
+            </div>
+            <p class="hint">{$_('oauth.sso.noLinkedAccountsDesc')}</p>
+          {/if}
+
+          {#if ssoProviders.some(p => !linkedAccounts.some(a => a.provider === p.provider))}
+            <div class="link-account-section">
+              <h3>{$_('oauth.sso.linkAccount')}</h3>
+              <div class="sso-link-buttons">
+                {#each ssoProviders.filter(p => !linkedAccounts.some(a => a.provider === p.provider)) as provider}
+                  <button
+                    type="button"
+                    class="sso-link-btn"
+                    onclick={() => handleLinkAccount(provider.provider)}
+                    disabled={linkingProvider !== null}
+                  >
+                    {#if linkingProvider === provider.provider}
+                      <span class="loading-spinner small"></span>
+                    {:else}
+                      <SsoIcon provider={provider.icon} size={18} />
+                    {/if}
+                    <span>{provider.name}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        {:else}
+          <div class="loading-text">{$_('common.loading')}</div>
+        {/if}
+      </section>
+    {/if}
     </div>
 
     {#if hasMfa}
@@ -1207,5 +1420,119 @@
     .skeleton-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  .linked-accounts-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+  }
+
+  .linked-account-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+  }
+
+  .linked-account-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+  }
+
+  .linked-account-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .linked-account-provider {
+    font-weight: var(--font-medium);
+  }
+
+  .linked-account-meta {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .link-account-section {
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-color);
+  }
+
+  .link-account-section h3 {
+    margin: 0 0 var(--space-3) 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--text-secondary);
+  }
+
+  .sso-link-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .sso-link-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  }
+
+  .sso-link-btn:hover:not(:disabled) {
+    background: var(--bg-secondary);
+    border-color: var(--accent);
+  }
+
+  .sso-link-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .loading-spinner.small {
+    width: 18px;
+    height: 18px;
+    border-width: 2px;
+  }
+
+  .loading-spinner {
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .loading-text {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    text-align: center;
+    padding: var(--space-4);
   }
 </style>

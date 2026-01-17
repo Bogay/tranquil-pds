@@ -9,7 +9,7 @@ import {
   setupAuthenticatedUser,
   setupFetchMock,
   setupUnauthenticatedUser,
-} from "./mocks";
+} from "./mocks.ts";
 const STORAGE_KEY = "tranquil_pds_session";
 describe("Dashboard", () => {
   beforeEach(() => {
@@ -27,7 +27,8 @@ describe("Dashboard", () => {
     it("shows loading state while checking auth", () => {
       const { container } = render(Dashboard);
       expect(container.querySelector(".skeleton-section")).toBeInTheDocument();
-      expect(container.querySelectorAll(".skeleton-card").length).toBeGreaterThan(0);
+      expect(container.querySelectorAll(".skeleton-card").length)
+        .toBeGreaterThan(0);
     });
   });
   describe("authenticated view", () => {

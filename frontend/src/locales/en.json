@@ -170,6 +170,11 @@
     "signIn": "Sign in",
     "passkeyAccount": "Passkey",
     "passwordAccount": "Password",
+    "ssoAccount": "SSO",
+    "ssoSubtitle": "Create an account using an external provider",
+    "noSsoProviders": "No SSO providers are configured on this server.",
+    "ssoHint": "Choose a provider to create your account:",
+    "continueWith": "Continue with {provider}",
     "validation": {
       "handleRequired": "Handle is required",
       "handleNoDots": "Handle cannot contain dots. You can set up a custom domain handle after creating your account.",
@@ -275,6 +280,8 @@
     "verificationCode": "Verification Code",
     "verificationCodePlaceholder": "Enter verification code",
     "confirmEmailChange": "Confirm Email Change",
+    "emailTokenHint": "Enter the code from the email, or click the link in the email on any device.",
+    "emailUpdateAuthorized": "Email change authorized! Click confirm to complete.",
     "updating": "Updating...",
     "changeHandle": "Change Handle",
     "currentHandle": "Current: @{handle}",
@@ -677,7 +684,7 @@
       "checkingPasskey": "Checking passkey...",
       "signInWithPasskey": "Sign in with passkey",
       "passkeyNotSetUp": "Passkey not set up",
-      "orUsePassword": "or use password",
+      "orUsePassword": "Or use password",
       "password": "Password",
       "rememberDevice": "Remember this device",
       "passkeyHintChecking": "Checking passkey status...",
@@ -685,7 +692,21 @@
       "passkeyHintNotAvailable": "No passkeys registered for this account",
       "passkeyHint": "Use your device's biometrics or security key",
       "passwordPlaceholder": "Enter your password",
-      "usePasskey": "Use Passkey"
+      "usePasskey": "Use Passkey",
+      "orContinueWith": "Or continue with",
+      "orUseCredentials": "Or sign in with credentials"
+    },
+    "sso": {
+      "linkedAccounts": "Linked Accounts",
+      "linkedAccountsDesc": "External accounts linked to your identity for single sign-on.",
+      "noLinkedAccounts": "No linked accounts",
+      "noLinkedAccountsDesc": "Link an external account to enable quick sign-in with that provider.",
+      "linkAccount": "Link Account",
+      "unlinkAccount": "Unlink",
+      "unlinkConfirm": "Are you sure you want to unlink this account?",
+      "unlinked": "Unlinked {provider}",
+      "lastLoginAt": "Last used",
+      "linkedAt": "Linked"
     },
     "consent": {
       "title": "Authorize Application",
@@ -798,6 +819,24 @@
       "backToApp": "Back to Application"
     }
   },
+  "sso_register": {
+    "title": "Complete Registration",
+    "subtitle": "Creating account with {provider}",
+    "handle_label": "Choose your handle",
+    "handle_available": "Available",
+    "handle_taken": "Already taken",
+    "submit": "Create Account",
+    "error_expired": "Registration session expired. Please try again.",
+    "error_handle_required": "Please choose a handle",
+    "emailVerifiedByProvider": "This email is verified by {provider}. No additional verification needed.",
+    "emailChangedNeedsVerification": "If you use a different email, you will need to verify it.",
+    "infoAfterTitle": "After creating your account",
+    "infoAddPassword": "Add a password for traditional login",
+    "infoAddPasskey": "Set up a passkey for passwordless sign-in",
+    "infoLinkProviders": "Link additional SSO providers",
+    "infoChangeHandle": "Change your handle or use a custom domain",
+    "tryAgain": "Try again"
+  },
   "verify": {
     "title": "Verify Your Account",
     "subtitle": "We've sent a verification code to your {channel}. Enter it below to complete registration.",
@@ -834,7 +873,9 @@
     "updateEmail": "Update Email",
     "updating": "Updating...",
     "emailUpdated": "Your email has been updated successfully.",
-    "emailUpdatedInfo": "You may need to verify your new email address."
+    "emailUpdatedInfo": "You may need to verify your new email address.",
+    "emailAuthorizeSuccess": "Your email update has been authorized.",
+    "emailAuthorizeInfo": "You can now complete the change on your original device."
   },
   "resetPassword": {
     "title": "Reset Password",

@@ -479,18 +479,24 @@ export function createInboundMigrationFlow() {
 
   async function migrateBlobs(): Promise<void> {
     if (!sourceClient) {
-      console.error("[migration] migrateBlobs: sourceClient is null, skipping blob migration");
+      console.error(
+        "[migration] migrateBlobs: sourceClient is null, skipping blob migration",
+      );
       migrationLog("migrateBlobs SKIPPED: sourceClient is null");
       setProgress({
-        currentOperation: "Warning: Could not migrate blobs - source PDS connection lost",
+        currentOperation:
+          "Warning: Could not migrate blobs - source PDS connection lost",
       });
       return;
     }
     if (!localClient) {
-      console.error("[migration] migrateBlobs: localClient is null, skipping blob migration");
+      console.error(
+        "[migration] migrateBlobs: localClient is null, skipping blob migration",
+      );
       migrationLog("migrateBlobs SKIPPED: localClient is null");
       setProgress({
-        currentOperation: "Warning: Could not migrate blobs - local PDS connection lost",
+        currentOperation:
+          "Warning: Could not migrate blobs - local PDS connection lost",
       });
       return;
     }

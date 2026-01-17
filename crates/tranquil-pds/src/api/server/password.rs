@@ -366,12 +366,33 @@ pub async fn set_password(
     auth: BearerAuth,
     Json(input): Json<SetPasswordInput>,
 ) -> Response {
-    if crate::api::server::reauth::check_reauth_required_cached(
-        &*state.session_repo,
-        &state.cache,
-        &auth.0.did,
-    )
-    .await
+    let has_password = state
+        .user_repo
+        .has_password_by_did(&auth.0.did)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+    let has_passkeys = state
+        .user_repo
+        .has_passkeys(&auth.0.did)
+        .await
+        .unwrap_or(false);
+    let has_totp = state
+        .user_repo
+        .has_totp_enabled(&auth.0.did)
+        .await
+        .unwrap_or(false);
+
+    let has_any_reauth_method = has_password || has_passkeys || has_totp;
+
+    if has_any_reauth_method
+        && crate::api::server::reauth::check_reauth_required_cached(
+            &*state.session_repo,
+            &state.cache,
+            &auth.0.did,
+        )
+        .await
     {
         return crate::api::server::reauth::reauth_required_response(
             &*state.user_repo,
