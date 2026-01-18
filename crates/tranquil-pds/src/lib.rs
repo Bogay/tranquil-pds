@@ -38,7 +38,6 @@ use state::AppState;
 pub use sync::util::AccountStatus;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::{ServeDir, ServeFile};
 pub use types::{AccountState, AtIdentifier, AtUri, Did, Handle, Nsid, Rkey};
 
 pub fn app(state: AppState) -> Router {
@@ -525,10 +524,6 @@ pub fn app(state: AppState) -> Router {
 
     let oauth_router = Router::new()
         .route("/jwks", get(oauth::endpoints::oauth_jwks))
-        .route(
-            "/client-metadata.json",
-            get(oauth::endpoints::frontend_client_metadata),
-        )
         .route("/par", post(oauth::endpoints::pushed_authorization_request))
         .route("/authorize", get(oauth::endpoints::authorize_get))
         .route("/authorize", post(oauth::endpoints::authorize_post))
@@ -612,7 +607,7 @@ pub fn app(state: AppState) -> Router {
             get(oauth::endpoints::oauth_authorization_server),
         );
 
-    let router = Router::new()
+    Router::new()
         .nest_service("/xrpc", xrpc_service)
         .nest("/oauth", oauth_router)
         .nest("/.well-known", well_known_router)
@@ -644,33 +639,5 @@ pub fn app(state: AppState) -> Router {
                     "atproto-content-labelers".parse().unwrap(),
                 ]),
         )
-        .with_state(state);
-
-    let frontend_dir =
-        std::env::var("FRONTEND_DIR").unwrap_or_else(|_| "./frontend/dist".to_string());
-    if std::path::Path::new(&frontend_dir)
-        .join("index.html")
-        .exists()
-    {
-        let index_path = format!("{}/index.html", frontend_dir);
-        let homepage_path = format!("{}/homepage.html", frontend_dir);
-
-        let homepage_exists = std::path::Path::new(&homepage_path).exists();
-        let homepage_file = if homepage_exists {
-            homepage_path
-        } else {
-            index_path.clone()
-        };
-
-        let spa_router = Router::new().fallback_service(ServeFile::new(&index_path));
-
-        let serve_dir = ServeDir::new(&frontend_dir).not_found_service(ServeFile::new(&index_path));
-
-        return router
-            .route_service("/", ServeFile::new(&homepage_file))
-            .nest("/app", spa_router)
-            .fallback_service(serve_dir);
-    }
-
-    router
+        .with_state(state)
 }

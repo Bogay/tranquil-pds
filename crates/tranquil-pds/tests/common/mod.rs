@@ -162,7 +162,7 @@ async fn setup_with_external_infra() -> String {
 
 #[cfg(not(feature = "external-infra"))]
 async fn setup_with_testcontainers() -> String {
-    let s3_container = GenericImage::new("minio/minio", "latest")
+    let s3_container = GenericImage::new("cgr.dev/chainguard/minio", "latest")
         .with_exposed_port(ContainerPort::Tcp(9000))
         .with_env_var("MINIO_ROOT_USER", "minioadmin")
         .with_env_var("MINIO_ROOT_PASSWORD", "minioadmin")

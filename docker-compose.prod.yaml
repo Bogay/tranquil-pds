@@ -5,8 +5,6 @@ services:
       dockerfile: Dockerfile
     image: tranquil-pds:latest
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:3000"
     environment:
       SERVER_HOST: "0.0.0.0"
       SERVER_PORT: "3000"
@@ -22,7 +20,6 @@ services:
       DPOP_SECRET: "${DPOP_SECRET:?DPOP_SECRET is required (min 32 chars)}"
       MASTER_KEY: "${MASTER_KEY:?MASTER_KEY is required (min 32 chars)}"
       CRAWLERS: "${CRAWLERS:-https://bsky.network}"
-      FRONTEND_DIR: "/app/frontend/dist"
     depends_on:
       db:
         condition: service_healthy
@@ -42,6 +39,26 @@ services:
           memory: 1G
         reservations:
           memory: 256M
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: tranquil-pds-frontend:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
   db:
     image: postgres:18-alpine
     restart: unless-stopped
@@ -63,8 +80,9 @@ services:
           memory: 512M
         reservations:
           memory: 128M
+
   minio:
-    image: minio/minio:RELEASE.2025-10-15T17-29-55Z
+    image: cgr.dev/chainguard/minio:latest
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -72,33 +90,32 @@ services:
       MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
     deploy:
       resources:
         limits:
           memory: 512M
         reservations:
           memory: 128M
+
   minio-init:
-    image: minio/mc:RELEASE.2025-07-16T15-35-03Z
+    image: cgr.dev/chainguard/minio-client:latest-dev
     depends_on:
-      minio:
-        condition: service_healthy
+      - minio
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      for i in 1 2 3 4 5 6 7 8 9 10; do
+        mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} && break;
+        echo 'Waiting for minio...'; sleep 2;
+      done;
       mc mb --ignore-existing local/pds-blobs;
+      mc mb --ignore-existing local/pds-backups;
       mc anonymous set none local/pds-blobs;
       exit 0;
       "
     environment:
       MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
       MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
+
   valkey:
     image: valkey/valkey:9-alpine
     restart: unless-stopped
@@ -117,45 +134,50 @@ services:
           memory: 300M
         reservations:
           memory: 64M
+
   nginx:
-    image: nginx:1.28-alpine
+    image: nginx:1.29-alpine
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.frontend.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
       - acme_challenge:/var/www/acme:ro
     depends_on:
       - tranquil-pds
+      - frontend
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
       timeout: 10s
       retries: 3
+
   certbot:
     image: certbot/certbot:v5.2.2
     volumes:
       - ./certs:/etc/letsencrypt
       - acme_challenge:/var/www/acme
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/acme; sleep 12h & wait $${!}; done'"
+
   prometheus:
     image: prom/prometheus:v3.8.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
       - prometheus_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--config.file=/etc/prometheus/prometheus.yaml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=30d'
     deploy:
       resources:
         limits:
           memory: 256M
+
 volumes:
   postgres_data:
   minio_data:

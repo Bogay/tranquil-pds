@@ -48,15 +48,15 @@ start_infra() {
         --name "${CONTAINER_PREFIX}-minio" \
         -e MINIO_ROOT_USER=minioadmin \
         -e MINIO_ROOT_PASSWORD=minioadmin \
-        -P \
+        -p 9000 \
         --label tranquil_pds_test=true \
-        minio/minio:latest server /data >/dev/null
+        cgr.dev/chainguard/minio:latest server /data >/dev/null
     echo "Starting Valkey..."
     $CONTAINER_CMD run -d \
         --name "${CONTAINER_PREFIX}-valkey" \
         -P \
         --label tranquil_pds_test=true \
-        valkey/valkey:8-alpine >/dev/null
+        valkey/valkey:9-alpine >/dev/null
     echo "Waiting for services to be ready..."
     sleep 2
     PG_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-postgres" 5432 | head -1 | cut -d: -f2)
@@ -86,10 +86,10 @@ start_infra() {
     echo "Creating MinIO buckets..."
     $CONTAINER_CMD run --rm --network host \
         -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
-        minio/mc:latest mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
+        cgr.dev/chainguard/minio-client:latest-dev mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
     $CONTAINER_CMD run --rm --network host \
         -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
-        minio/mc:latest mb minio/test-backups --ignore-existing >/dev/null 2>&1 || true
+        cgr.dev/chainguard/minio-client:latest-dev mb minio/test-backups --ignore-existing >/dev/null 2>&1 || true
     cat > "$INFRA_FILE" << EOF
 export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
 export TEST_DB_PORT="${PG_PORT}"

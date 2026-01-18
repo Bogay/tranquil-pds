@@ -1,15 +1,21 @@
 # Tranquil PDS Containerized Production Deployment
-> **Warning**: These instructions are untested and theoretical, written from the top of Lewis' head. They may contain errors or omissions. This warning will be removed once the guide has been verified.
+
 This guide covers deploying Tranquil PDS using containers with podman.
+
 - **Debian 13+**: Uses systemd quadlets (modern, declarative container management)
 - **Alpine 3.23+**: Uses OpenRC service script with podman-compose
+
 ## Prerequisites
+
 - A VPS with at least 2GB RAM and 20GB disk
 - A domain name pointing to your server's IP
 - A **wildcard TLS certificate** for `*.pds.example.com` (user handles are served as subdomains)
 - Root or sudo access
+
 ## Quick Start (Docker/Podman Compose)
+
 If you just want to get running quickly:
+
 ```sh
 cp .env.example .env
 ```
@@ -18,64 +24,139 @@ Edit `.env` with your values. Generate secrets with `openssl rand -base64 48`.
 
 Build and start:
 ```sh
-podman-compose -f docker-compose.prod.yml up -d
+podman build -t tranquil-pds:latest .
+podman build -t tranquil-pds-frontend:latest ./frontend
+podman-compose -f docker-compose.prod.yaml up -d
 ```
 
 Get initial certificate (after DNS is configured):
 ```sh
-podman-compose -f docker-compose.prod.yml run --rm certbot certonly \
-  --webroot -w /var/www/acme -d pds.example.com
-podman-compose -f docker-compose.prod.yml restart nginx
+podman-compose -f docker-compose.prod.yaml run --rm certbot certonly \
+  --webroot -w /var/www/acme -d pds.example.com -d '*.pds.example.com'
+ln -sf live/pds.example.com/fullchain.pem certs/fullchain.pem
+ln -sf live/pds.example.com/privkey.pem certs/privkey.pem
+podman-compose -f docker-compose.prod.yaml restart nginx
 ```
+
 For production setups with proper service management, continue to either the Debian or Alpine section below.
+
+## Standalone Containers (No Compose)
+
+If you already have postgres, valkey, and minio running on the host (eg., from the [Debian install guide](install-debian.md)), you can run just the app containers.
+
+Build the images:
+```sh
+podman build -t tranquil-pds:latest .
+podman build -t tranquil-pds-frontend:latest ./frontend
+```
+
+Run the backend with host networking (so it can access postgres/valkey/minio on localhost):
+```sh
+podman run -d --name tranquil-pds \
+  --network=host \
+  --env-file /etc/tranquil-pds/tranquil-pds.env \
+  tranquil-pds:latest
+```
+
+Run the frontend with port mapping (the container's nginx listens on port 80):
+```sh
+podman run -d --name tranquil-pds-frontend \
+  -p 8080:80 \
+  tranquil-pds-frontend:latest
+```
+
+Then configure your host nginx to proxy to both containers. Replace the static file `try_files` directives with proxy passes:
+
+```nginx
+# API routes to backend
+location /xrpc/ {
+    proxy_pass http://127.0.0.1:3000;
+    # ... (see Debian guide for full proxy headers)
+}
+
+# Static routes to frontend container
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+See the [Debian install guide](install-debian.md) for the full nginx config with all API routes.
+
 ---
+
 # Debian 13+ with Systemd Quadlets
+
 Quadlets are the modern way to run podman containers under systemd.
-## 1. Install Podman
+
+## Install Podman
+
 ```bash
 apt update
 apt install -y podman
 ```
-## 2. Create Directory Structure
+
+## Create Directory Structure
+
 ```bash
 mkdir -p /etc/containers/systemd
 mkdir -p /srv/tranquil-pds/{postgres,minio,valkey,certs,acme,config}
 ```
-## 3. Create Environment File
+
+## Create Environment File
+
 ```bash
 cp /opt/tranquil-pds/.env.example /srv/tranquil-pds/config/tranquil-pds.env
 chmod 600 /srv/tranquil-pds/config/tranquil-pds.env
 ```
+
 Edit `/srv/tranquil-pds/config/tranquil-pds.env` and fill in your values. Generate secrets with:
 ```bash
 openssl rand -base64 48
 ```
+
 For quadlets, also add `DATABASE_URL` with the full connection string (systemd doesn't support variable expansion).
-## 4. Install Quadlet Definitions
+
+## Install Quadlet Definitions
+
 Copy the quadlet files from the repository:
 ```bash
 cp /opt/tranquil-pds/deploy/quadlets/*.pod /etc/containers/systemd/
 cp /opt/tranquil-pds/deploy/quadlets/*.container /etc/containers/systemd/
 ```
+
 Note: Systemd doesn't support shell-style variable expansion in `Environment=` lines. The quadlet files expect DATABASE_URL to be set in the environment file.
-## 5. Create nginx Configuration
+
+## Create nginx Configuration
+
 ```bash
-cp /opt/tranquil-pds/deploy/nginx/nginx-quadlet.conf /srv/tranquil-pds/config/nginx.conf
+cp /opt/tranquil-pds/nginx.frontend.conf /srv/tranquil-pds/config/nginx.conf
 ```
-## 6. Build Tranquil PDS Image
+
+## Clone and Build Images
+
 ```bash
 cd /opt
-git clone https://tangled.org/lewis.moe/bspds-sandbox tranquil-pds
+git clone https://tangled.org/tranquil.farm/tranquil-pds tranquil-pds
 cd tranquil-pds
 podman build -t tranquil-pds:latest .
+podman build -t tranquil-pds-frontend:latest ./frontend
 ```
-## 7. Create Podman Secrets
+
+## Create Podman Secrets
+
 ```bash
 source /srv/tranquil-pds/config/tranquil-pds.env
 echo "$DB_PASSWORD" | podman secret create tranquil-pds-db-password -
 echo "$MINIO_ROOT_PASSWORD" | podman secret create tranquil-pds-minio-password -
 ```
-## 8. Start Services and Initialize
+
+## Start Services and Initialize
+
 ```bash
 systemctl daemon-reload
 systemctl start tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey
@@ -87,7 +168,7 @@ Create the minio buckets:
 podman run --rm --pod tranquil-pds \
   -e MINIO_ROOT_USER=minioadmin \
   -e MINIO_ROOT_PASSWORD=your-minio-password \
-  docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
+  cgr.dev/chainguard/minio-client:latest-dev \
   sh -c "mc alias set local http://localhost:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs && mc mb --ignore-existing local/pds-backups"
 ```
 
@@ -96,8 +177,10 @@ Run migrations:
 cargo install sqlx-cli --no-default-features --features postgres
 DATABASE_URL="postgres://tranquil_pds:your-db-password@localhost:5432/pds" sqlx migrate run --source /opt/tranquil-pds/migrations
 ```
-## 9. Obtain Wildcard SSL Certificate
-User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
+
+## Obtain Wildcard SSL Certificate
+
+User handles are served as subdomains (eg., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
 
 Create temporary self-signed cert to start services:
 ```bash
@@ -105,7 +188,7 @@ openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
   -keyout /srv/tranquil-pds/certs/privkey.pem \
   -out /srv/tranquil-pds/certs/fullchain.pem \
   -subj "/CN=pds.example.com"
-systemctl start tranquil-pds-app tranquil-pds-nginx
+systemctl start tranquil-pds-app tranquil-pds-frontend tranquil-pds-nginx
 ```
 
 Get a wildcard certificate using DNS validation:
@@ -117,9 +200,10 @@ podman run --rm -it \
   -d pds.example.com -d '*.pds.example.com' \
   --agree-tos --email you@example.com
 ```
+
 Follow the prompts to add TXT records to your DNS. Note: manual mode doesn't auto-renew.
 
-For automated renewal, use a DNS provider plugin (e.g., cloudflare, route53).
+For automated renewal, use a DNS provider plugin (eg., cloudflare, route53).
 
 Link certificates and restart:
 ```bash
@@ -127,11 +211,15 @@ ln -sf /srv/tranquil-pds/certs/live/pds.example.com/fullchain.pem /srv/tranquil-
 ln -sf /srv/tranquil-pds/certs/live/pds.example.com/privkey.pem /srv/tranquil-pds/certs/privkey.pem
 systemctl restart tranquil-pds-nginx
 ```
-## 10. Enable All Services
+
+## Enable All Services
+
 ```bash
-systemctl enable tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey tranquil-pds-app tranquil-pds-nginx
+systemctl enable tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey tranquil-pds-app tranquil-pds-frontend tranquil-pds-nginx
 ```
-## 11. Configure Firewall
+
+## Configure Firewall
+
 ```bash
 apt install -y ufw
 ufw allow ssh
@@ -139,59 +227,81 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw enable
 ```
-## 12. Certificate Renewal
+
+## Certificate Renewal
+
 Add to root's crontab (`crontab -e`):
 ```
 0 0 * * * podman run --rm -v /srv/tranquil-pds/certs:/etc/letsencrypt:Z -v /srv/tranquil-pds/acme:/var/www/acme:Z docker.io/certbot/certbot:v5.2.2 renew --quiet && systemctl reload tranquil-pds-nginx
 ```
+
 ---
+
 # Alpine 3.23+ with OpenRC
+
 Alpine uses OpenRC, not systemd. We'll use podman-compose with an OpenRC service wrapper.
-## 1. Install Podman
+
+## Install Podman
+
 ```sh
 apk update
 apk add podman podman-compose fuse-overlayfs cni-plugins
 rc-update add cgroups
 rc-service cgroups start
 ```
+
 Enable podman socket for compose:
 ```sh
 rc-update add podman
 rc-service podman start
 ```
-## 2. Create Directory Structure
+
+## Create Directory Structure
+
 ```sh
 mkdir -p /srv/tranquil-pds/{data,config}
 mkdir -p /srv/tranquil-pds/data/{postgres,minio,valkey,certs,acme}
 ```
-## 3. Clone Repository and Build
+
+## Clone Repository and Build Images
+
 ```sh
 cd /opt
-git clone https://tangled.org/lewis.moe/bspds-sandbox tranquil-pds
+git clone https://tangled.org/tranquil.farm/tranquil-pds tranquil-pds
 cd tranquil-pds
 podman build -t tranquil-pds:latest .
+podman build -t tranquil-pds-frontend:latest ./frontend
 ```
-## 4. Create Environment File
+
+## Create Environment File
+
 ```sh
 cp /opt/tranquil-pds/.env.example /srv/tranquil-pds/config/tranquil-pds.env
 chmod 600 /srv/tranquil-pds/config/tranquil-pds.env
 ```
+
 Edit `/srv/tranquil-pds/config/tranquil-pds.env` and fill in your values. Generate secrets with:
 ```sh
 openssl rand -base64 48
 ```
-## 5. Set Up Compose and nginx
+
+## Set Up Compose and nginx
+
 Copy the production compose and nginx configs:
 ```sh
-cp /opt/tranquil-pds/docker-compose.prod.yml /srv/tranquil-pds/docker-compose.yml
-cp /opt/tranquil-pds/nginx.prod.conf /srv/tranquil-pds/config/nginx.conf
+cp /opt/tranquil-pds/docker-compose.prod.yaml /srv/tranquil-pds/docker-compose.yml
+cp /opt/tranquil-pds/nginx.frontend.conf /srv/tranquil-pds/config/nginx.conf
 ```
+
 Edit `/srv/tranquil-pds/docker-compose.yml` to adjust paths if needed:
 - Update volume mounts to use `/srv/tranquil-pds/data/` paths
-- Update nginx cert paths to match `/srv/tranquil-pds/data/certs/`
+- Update nginx config path to `/srv/tranquil-pds/config/nginx.conf`
+
 Edit `/srv/tranquil-pds/config/nginx.conf` to update cert paths:
 - Change `/etc/nginx/certs/live/${PDS_HOSTNAME}/` to `/etc/nginx/certs/`
-## 6. Create OpenRC Service
+
+## Create OpenRC Service
+
 ```sh
 cat > /etc/init.d/tranquil-pds << 'EOF'
 #!/sbin/openrc-run
@@ -223,7 +333,9 @@ stop() {
 EOF
 chmod +x /etc/init.d/tranquil-pds
 ```
-## 7. Initialize Services
+
+## Initialize Services
+
 Start services:
 ```sh
 rc-service tranquil-pds start
@@ -236,7 +348,7 @@ source /srv/tranquil-pds/config/tranquil-pds.env
 podman run --rm --network tranquil-pds_default \
   -e MINIO_ROOT_USER="$MINIO_ROOT_USER" \
   -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
-  docker.io/minio/mc:RELEASE.2025-07-16T15-35-03Z \
+  cgr.dev/chainguard/minio-client:latest-dev \
   sh -c 'mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs && mc mb --ignore-existing local/pds-backups'
 ```
 
@@ -249,8 +361,10 @@ cargo install sqlx-cli --no-default-features --features postgres
 DB_IP=$(podman inspect tranquil-pds-db-1 --format '{{.NetworkSettings.Networks.tranquil-pds_default.IPAddress}}')
 DATABASE_URL="postgres://tranquil_pds:$DB_PASSWORD@$DB_IP:5432/pds" sqlx migrate run --source /opt/tranquil-pds/migrations
 ```
-## 8. Obtain Wildcard SSL Certificate
-User handles are served as subdomains (e.g., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
+
+## Obtain Wildcard SSL Certificate
+
+User handles are served as subdomains (eg., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
 
 Create temporary self-signed cert to start services:
 ```sh
@@ -270,6 +384,7 @@ podman run --rm -it \
   -d pds.example.com -d '*.pds.example.com' \
   --agree-tos --email you@example.com
 ```
+
 Follow the prompts to add TXT records to your DNS. Note: manual mode doesn't auto-renew.
 
 Link certificates and restart:
@@ -278,11 +393,15 @@ ln -sf /srv/tranquil-pds/data/certs/live/pds.example.com/fullchain.pem /srv/tran
 ln -sf /srv/tranquil-pds/data/certs/live/pds.example.com/privkey.pem /srv/tranquil-pds/data/certs/privkey.pem
 rc-service tranquil-pds restart
 ```
-## 9. Enable Service at Boot
+
+## Enable Service at Boot
+
 ```sh
 rc-update add tranquil-pds
 ```
-## 10. Configure Firewall
+
+## Configure Firewall
+
 ```sh
 apk add iptables ip6tables
 iptables -A INPUT -p tcp --dport 22 -j ACCEPT
@@ -302,50 +421,67 @@ rc-update add ip6tables
 /etc/init.d/iptables save
 /etc/init.d/ip6tables save
 ```
-## 11. Certificate Renewal
+
+## Certificate Renewal
+
 Add to root's crontab (`crontab -e`):
 ```
 0 0 * * * podman run --rm -v /srv/tranquil-pds/data/certs:/etc/letsencrypt -v /srv/tranquil-pds/data/acme:/var/www/acme docker.io/certbot/certbot:v5.2.2 renew --quiet && rc-service tranquil-pds restart
 ```
+
 ---
+
 # Verification and Maintenance
+
 ## Verify Installation
+
 ```sh
 curl -s https://pds.example.com/xrpc/_health | jq
 curl -s https://pds.example.com/.well-known/atproto-did
 ```
+
 ## View Logs
+
 **Debian:**
 ```bash
 journalctl -u tranquil-pds-app -f
 podman logs -f tranquil-pds-app
+podman logs -f tranquil-pds-frontend
 ```
+
 **Alpine:**
 ```sh
 podman-compose -f /srv/tranquil-pds/docker-compose.yml logs -f
 podman logs -f tranquil-pds-tranquil-pds-1
+podman logs -f tranquil-pds-frontend-1
 ```
+
 ## Update Tranquil PDS
+
 ```sh
 cd /opt/tranquil-pds
 git pull
 podman build -t tranquil-pds:latest .
+podman build -t tranquil-pds-frontend:latest ./frontend
 ```
 
 Debian:
 ```bash
-systemctl restart tranquil-pds-app
+systemctl restart tranquil-pds-app tranquil-pds-frontend
 ```
 
 Alpine:
 ```sh
 rc-service tranquil-pds restart
 ```
+
 ## Backup Database
+
 **Debian:**
 ```bash
 podman exec tranquil-pds-db pg_dump -U tranquil_pds pds > /var/backups/pds-$(date +%Y%m%d).sql
 ```
+
 **Alpine:**
 ```sh
 podman exec tranquil-pds-db-1 pg_dump -U tranquil_pds pds > /var/backups/pds-$(date +%Y%m%d).sql
@@ -353,8 +489,12 @@ podman exec tranquil-pds-db-1 pg_dump -U tranquil_pds pds > /var/backups/pds-$(d
 
 ## Custom Homepage
 
-Mount a `homepage.html` into the container's frontend directory and it becomes your landing page. Go nuts with it. Account dashboard is at `/app/` so you won't break anything.
+The frontend container serves `homepage.html` as the landing page. To customize it, either:
 
+1. Build a custom frontend image with your own `homepage.html`
+2. Mount a custom `homepage.html` into the frontend container
+
+Example custom homepage:
 ```html
 <!DOCTYPE html>
 <html>

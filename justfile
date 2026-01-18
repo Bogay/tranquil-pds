@@ -23,7 +23,7 @@ test-unit:
     SQLX_OFFLINE=true cargo test --test dpop_unit --test validation_edge_cases --test scope_edge_cases
 
 test-auth:
-    ./scripts/run-tests.sh --test oauth --test oauth_lifecycle --test oauth_scopes --test oauth_security --test oauth_client_metadata --test jwt_security --test session_management --test change_password --test password_reset
+    ./scripts/run-tests.sh --test oauth --test oauth_lifecycle --test oauth_scopes --test oauth_security --test jwt_security --test session_management --test change_password --test password_reset
 
 test-admin:
     ./scripts/run-tests.sh --test admin_email --test admin_invite --test admin_moderation --test admin_search --test admin_stats
@@ -81,8 +81,9 @@ podman-down:
     podman compose down
 podman-logs:
     podman compose logs -f
-podman-build:
-    podman compose build
+container-build:
+    podman build -t tranquil-pds:latest .
+    podman build -t tranquil-pds-frontend:latest ./frontend
 
 frontend-dev:
     . ~/.deno/env && cd frontend && deno task dev

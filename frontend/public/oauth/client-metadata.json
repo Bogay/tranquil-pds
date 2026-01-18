@@ -1,0 +1,15 @@
+{
+  "client_id": "https://__PDS_HOSTNAME__/oauth/client-metadata.json",
+  "client_name": "PDS Account Manager",
+  "client_uri": "https://__PDS_HOSTNAME__",
+  "redirect_uris": [
+    "https://__PDS_HOSTNAME__/app/",
+    "https://__PDS_HOSTNAME__/app/migrate"
+  ],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "scope": "atproto transition:generic repo:* blob:*/* rpc:* rpc:com.atproto.server.createAccount?aud=* account:*?action=manage identity:*",
+  "token_endpoint_auth_method": "none",
+  "application_type": "web",
+  "dpop_bound_access_tokens": true
+}

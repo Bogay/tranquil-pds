@@ -117,7 +117,7 @@ echo "  IPv4: ${IPV4}"
 [[ -n "$IPV6" ]] && echo "  IPv6: ${IPV6}"
 echo ""
 
-read -p "Enter your PDS domain (e.g., pds.example.com): " PDS_DOMAIN
+read -p "Enter your PDS domain (eg., pds.example.com): " PDS_DOMAIN
 if [[ -z "$PDS_DOMAIN" ]]; then
     log_error "Domain cannot be empty"
     exit 1
@@ -296,7 +296,7 @@ fi
 
 log_info "Cloning Tranquil PDS..."
 if [[ ! -d /opt/tranquil-pds ]]; then
-    git clone https://tangled.org/lewis.moe/bspds-sandbox /opt/tranquil-pds
+    git clone https://tangled.org/tranquil.farm/tranquil-pds /opt/tranquil-pds
 else
     cd /opt/tranquil-pds && git pull
 fi
@@ -417,7 +417,6 @@ Type=simple
 User=tranquil-pds
 Group=tranquil-pds
 EnvironmentFile=/etc/tranquil-pds/tranquil-pds.env
-Environment=FRONTEND_DIR=/var/lib/tranquil-pds/frontend
 ExecStart=/usr/local/bin/tranquil-pds
 Restart=always
 RestartSec=5
@@ -479,7 +478,7 @@ log_success "Firewall configured"
 echo ""
 log_info "Obtaining wildcard SSL certificate..."
 echo ""
-echo "User handles are served as subdomains (e.g., alice.${PDS_DOMAIN}),"
+echo "User handles are served as subdomains (eg., alice.${PDS_DOMAIN}),"
 echo "so you need a wildcard certificate. This requires DNS validation."
 echo ""
 echo "You'll need to add a TXT record to your DNS when prompted."

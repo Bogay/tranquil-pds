@@ -2,17 +2,12 @@
 Description=Tranquil PDS minio object storage
 [Container]
 ContainerName=tranquil-pds-minio
-Image=docker.io/minio/minio:RELEASE.2025-10-15T17-29-55Z
+Image=cgr.dev/chainguard/minio:latest
 Pod=tranquil-pds.pod
 Environment=MINIO_ROOT_USER=minioadmin
 Secret=tranquil-pds-minio-password,type=env,target=MINIO_ROOT_PASSWORD
 Volume=/srv/tranquil-pds/minio:/data:Z
 Exec=server /data --console-address :9001
-HealthCmd=curl -f http://localhost:9000/minio/health/live || exit 1
-HealthInterval=30s
-HealthTimeout=10s
-HealthRetries=3
-HealthStartPeriod=10s
 [Service]
 Restart=always
 RestartSec=10

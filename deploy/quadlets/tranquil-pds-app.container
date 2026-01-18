@@ -12,7 +12,6 @@ Environment=S3_ENDPOINT=http://localhost:9000
 Environment=AWS_REGION=us-east-1
 Environment=S3_BUCKET=pds-blobs
 Environment=VALKEY_URL=redis://localhost:6379
-Environment=FRONTEND_DIR=/app/frontend/dist
 HealthCmd=wget -q --spider http://localhost:3000/xrpc/_health
 HealthInterval=30s
 HealthTimeout=10s

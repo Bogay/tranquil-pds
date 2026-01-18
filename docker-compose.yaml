@@ -16,6 +16,17 @@ services:
       - db
       - objsto
       - cache
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: tranquil-pds-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
+
   db:
     image: postgres:18-alpine
     environment:
@@ -26,8 +37,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+
   objsto:
-    image: minio/minio
+    image: cgr.dev/chainguard/minio:latest
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -37,24 +49,27 @@ services:
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
+
   cache:
-    image: valkey/valkey:8-alpine
+    image: valkey/valkey:9-alpine
     ports:
       - "6379:6379"
     volumes:
       - valkey_data:/data
+
   prometheus:
     image: prom/prometheus:v3.8.0
     ports:
       - "9090:9090"
     volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
       - prometheus_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--config.file=/etc/prometheus/prometheus.yaml'
       - '--storage.tsdb.path=/prometheus'
     depends_on:
       - app
+
 volumes:
   postgres_data:
   minio_data:

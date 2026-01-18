@@ -1,6 +1,6 @@
 [Unit]
 Description=Tranquil PDS nginx reverse proxy
-After=tranquil-pds-app.service
+After=tranquil-pds-app.service tranquil-pds-frontend.service
 [Container]
 ContainerName=tranquil-pds-nginx
 Image=docker.io/library/nginx:1.28-alpine

@@ -1,0 +1,21 @@
+[Unit]
+Description=Tranquil PDS frontend
+After=tranquil-pds-app.service
+
+[Container]
+ContainerName=tranquil-pds-frontend
+Image=localhost/tranquil-pds-frontend:latest
+Pod=tranquil-pds.pod
+Volume=/opt/tranquil-pds/frontend/nginx-quadlet.conf:/etc/nginx/conf.d/default.conf:ro,Z
+HealthCmd=wget -q --spider http://localhost:8080/
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=5s
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
