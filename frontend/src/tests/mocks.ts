@@ -84,7 +84,9 @@ export function getErrorToasts(): string[] {
 export { getToasts, toast };
 function extractEndpoint(url: string): string {
   const match = url.match(/\/xrpc\/([^?]+)/);
-  return match ? match[1] : url;
+  if (match) return match[1];
+  const pathOnly = url.split("?")[0];
+  return pathOnly;
 }
 export function setupFetchMock(): void {
   globalThis.fetch = vi.fn(

@@ -197,12 +197,6 @@
     animation: spin 1s linear infinite;
   }
 
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .loading-indicator p {
     margin: 0;
     color: var(--text-secondary);

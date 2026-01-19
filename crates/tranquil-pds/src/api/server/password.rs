@@ -60,11 +60,22 @@ pub async fn request_password_reset(
     let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
     let normalized = identifier.to_lowercase();
     let normalized = normalized.strip_prefix('@').unwrap_or(&normalized);
+    let is_email_lookup = normalized.contains('@');
     let normalized_handle = if normalized.contains('@') || normalized.contains('.') {
         normalized.to_string()
     } else {
         format!("{}.{}", normalized, hostname_for_handles)
     };
+
+    let multiple_accounts_warning = if is_email_lookup {
+        match state.user_repo.count_accounts_by_email(normalized).await {
+            Ok(count) if count > 1 => Some(count),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     let user_id = match state
         .user_repo
         .get_id_by_email_or_handle(normalized, &normalized_handle)
@@ -73,7 +84,7 @@ pub async fn request_password_reset(
         Ok(Some(id)) => id,
         Ok(None) => {
             info!("Password reset requested for unknown identifier");
-            return EmptyResponse::ok().into_response();
+            return Json(serde_json::json!({ "success": true })).into_response();
         }
         Err(e) => {
             error!("DB error in request_password_reset: {:?}", e);
@@ -103,7 +114,17 @@ pub async fn request_password_reset(
         warn!("Failed to enqueue password reset notification: {:?}", e);
     }
     info!("Password reset requested for user {}", user_id);
-    EmptyResponse::ok().into_response()
+
+    match multiple_accounts_warning {
+        Some(count) => Json(serde_json::json!({
+            "success": true,
+            "multipleAccounts": true,
+            "accountCount": count,
+            "message": "Multiple accounts share this email. Reset link sent to the most recent account. Use your handle for a specific account."
+        }))
+        .into_response(),
+        None => Json(serde_json::json!({ "success": true })).into_response(),
+    }
 }
 
 #[derive(Deserialize)]

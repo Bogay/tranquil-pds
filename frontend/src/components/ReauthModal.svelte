@@ -186,7 +186,7 @@
       <div class="modal-content">
         {#if activeMethod === 'password'}
           <form onsubmit={handlePasswordSubmit}>
-            <div class="form-group">
+            <div class="field">
               <label for="reauth-password">{$_('reauth.password')}</label>
               <input
                 id="reauth-password"
@@ -196,13 +196,13 @@
                 autocomplete="current-password"
               />
             </div>
-            <button type="submit" class="btn-primary" disabled={loading || !password}>
+            <button type="submit" disabled={loading || !password}>
               {loading ? $_('common.verifying') : $_('common.verify')}
             </button>
           </form>
         {:else if activeMethod === 'totp'}
           <form onsubmit={handleTotpSubmit}>
-            <div class="form-group">
+            <div class="field">
               <label for="reauth-totp">{$_('reauth.authenticatorCode')}</label>
               <input
                 id="reauth-totp"
@@ -215,18 +215,14 @@
                 maxlength="6"
               />
             </div>
-            <button type="submit" class="btn-primary" disabled={loading || !totpCode}>
+            <button type="submit" disabled={loading || !totpCode}>
               {loading ? $_('common.verifying') : $_('common.verify')}
             </button>
           </form>
         {:else if activeMethod === 'passkey'}
           <div class="passkey-auth">
             <p>{$_('reauth.passkeyPrompt')}</p>
-            <button
-              class="btn-primary"
-              onclick={handlePasskeyAuth}
-              disabled={loading}
-            >
+            <button onclick={handlePasskeyAuth} disabled={loading}>
               {loading ? $_('reauth.authenticating') : $_('reauth.usePasskey')}
             </button>
           </div>
@@ -234,7 +230,7 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn-secondary" onclick={handleClose} disabled={loading}>
+        <button class="secondary" onclick={handleClose} disabled={loading}>
           {$_('reauth.cancel')}
         </button>
       </div>
@@ -246,18 +242,18 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--overlay-bg);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: var(--z-modal);
   }
 
   .modal {
     background: var(--bg-card);
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-    max-width: 400px;
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    max-width: var(--width-sm);
     width: 90%;
     max-height: 90vh;
     overflow-y: auto;
@@ -267,19 +263,19 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem 1.5rem;
+    padding: var(--space-4) var(--space-6);
     border-bottom: 1px solid var(--border-color);
   }
 
   .modal-header h2 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: var(--text-lg);
   }
 
   .close-btn {
     background: none;
     border: none;
-    font-size: 1.5rem;
+    font-size: var(--text-xl);
     cursor: pointer;
     color: var(--text-secondary);
     padding: 0;
@@ -291,36 +287,36 @@
   }
 
   .modal-description {
-    padding: 1rem 1.5rem 0;
+    padding: var(--space-4) var(--space-6) 0;
     margin: 0;
     color: var(--text-secondary);
   }
 
   .error-message {
-    margin: 1rem 1.5rem 0;
-    padding: 0.75rem;
+    margin: var(--space-4) var(--space-6) 0;
+    padding: var(--space-3);
     background: var(--error-bg);
     border: 1px solid var(--error-border);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     color: var(--error-text);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .method-tabs {
     display: flex;
-    gap: 0.5rem;
-    padding: 1rem 1.5rem 0;
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-6) 0;
   }
 
   .tab {
     flex: 1;
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: var(--bg-input);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
   }
 
   .tab:hover {
@@ -334,32 +330,11 @@
   }
 
   .modal-content {
-    padding: 1.5rem;
+    padding: var(--space-6);
   }
 
-  .form-group {
-    margin-bottom: 1rem;
-  }
-
-  .form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-  }
-
-  .form-group input {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    background: var(--bg-input);
-    color: var(--text-primary);
-    font-size: 1rem;
-  }
-
-  .form-group input:focus {
-    outline: none;
-    border-color: var(--accent);
+  .modal-content .field {
+    margin-bottom: var(--space-4);
   }
 
   .passkey-auth {
@@ -367,52 +342,17 @@
   }
 
   .passkey-auth p {
-    margin-bottom: 1rem;
+    margin-bottom: var(--space-4);
     color: var(--text-secondary);
   }
 
-  .btn-primary {
+  .modal-content button:not(.tab) {
     width: 100%;
-    padding: 0.75rem 1.5rem;
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
   }
 
   .modal-footer {
-    padding: 0 1.5rem 1.5rem;
+    padding: 0 var(--space-6) var(--space-6);
     display: flex;
     justify-content: flex-end;
-  }
-
-  .btn-secondary {
-    padding: 0.5rem 1rem;
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 0.875rem;
-  }
-
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--bg-secondary);
-  }
-
-  .btn-secondary:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
   }
 </style>

@@ -261,7 +261,10 @@ function extractDPoPNonceFromResponse(response: Response): void {
   }
 }
 
-export async function startOAuthLogin(loginHint?: string): Promise<void> {
+async function startOAuthFlow(options?: {
+  loginHint?: string;
+  prompt?: string;
+}): Promise<void> {
   clearAllOAuthState();
 
   const state = generateState();
@@ -283,8 +286,11 @@ export async function startOAuthLogin(loginHint?: string): Promise<void> {
     code_challenge_method: "S256",
     dpop_jkt: dpopJkt,
   };
-  if (loginHint) {
-    parParams.login_hint = loginHint;
+  if (options?.loginHint) {
+    parParams.login_hint = options.loginHint;
+  }
+  if (options?.prompt) {
+    parParams.prompt = options.prompt;
   }
 
   const parResponse = await fetch("/oauth/par", {
@@ -309,6 +315,77 @@ export async function startOAuthLogin(loginHint?: string): Promise<void> {
   authorizeUrl.searchParams.set("request_uri", request_uri);
 
   globalThis.location.href = authorizeUrl.toString();
+}
+
+export async function startOAuthLogin(loginHint?: string): Promise<void> {
+  return startOAuthFlow({ loginHint });
+}
+
+export async function startOAuthRegister(): Promise<void> {
+  return startOAuthFlow({ prompt: "create" });
+}
+
+export async function getOAuthRequestUri(prompt?: string): Promise<string> {
+  clearAllOAuthState();
+
+  const state = generateState();
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  const keyPair = await getOrCreateDPoPKeyPair();
+  const dpopJkt = await computeJwkThumbprint(keyPair.jwk);
+
+  saveOAuthState({ state, codeVerifier });
+
+  const parParams: Record<string, string> = {
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: "code",
+    scope: SCOPES,
+    state: state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    dpop_jkt: dpopJkt,
+  };
+  if (prompt) {
+    parParams.prompt = prompt;
+  }
+
+  const parResponse = await fetch("/oauth/par", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(parParams),
+  });
+
+  if (!parResponse.ok) {
+    const error = await parResponse.json().catch(() => ({
+      error: "Unknown error",
+    }));
+    throw new Error(
+      error.error_description || error.error || "Failed to get request URI",
+    );
+  }
+
+  const { request_uri } = await parResponse.json();
+  return request_uri;
+}
+
+export function getRequestUriFromUrl(): string | null {
+  const params = new URLSearchParams(globalThis.location.search);
+  return params.get("request_uri");
+}
+
+export async function ensureRequestUri(
+  prompt = "create",
+): Promise<string | null> {
+  const existing = getRequestUriFromUrl();
+  if (existing) return existing;
+
+  const newRequestUri = await getOAuthRequestUri(prompt);
+  const url = new URL(globalThis.location.href);
+  url.searchParams.set("request_uri", newRequestUri);
+  globalThis.location.href = url.toString();
+  return null;
 }
 
 export interface OAuthTokens {

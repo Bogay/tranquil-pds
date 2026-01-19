@@ -48,6 +48,9 @@
   --transition-normal: 0.15s ease;
   --transition-slow: 0.25s ease;
 
+  --z-modal: 1000;
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+
   --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
 
   --bg-primary: #f9fafa;

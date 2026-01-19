@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MigrationError } from "../../lib/migration/types";
+import { MigrationError } from "../../lib/migration/types.ts";
 
 describe("migration/types", () => {
   describe("MigrationError", () => {

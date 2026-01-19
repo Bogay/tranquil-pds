@@ -329,6 +329,13 @@ pub async fn authorize_get(
         tracing::info!("No login_hint in request");
     }
 
+    if request_data.parameters.prompt.as_deref() == Some("create") {
+        return redirect_see_other(&format!(
+            "/app/oauth/register?request_uri={}",
+            url_encode(&request_uri)
+        ));
+    }
+
     if !force_new_account
         && let Some(device_id) = extract_device_cookie(&headers)
         && let Ok(accounts) = state
@@ -3207,4 +3214,309 @@ pub async fn authorize_passkey_finish(
         })),
     )
         .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RegisterCompleteInput {
+    pub request_uri: String,
+    pub did: String,
+    pub app_password: String,
+}
+
+pub async fn register_complete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(form): Json<RegisterCompleteInput>,
+) -> Response {
+    let client_ip = extract_client_ip(&headers);
+
+    if !state
+        .check_rate_limit(RateLimitKind::OAuthRegisterComplete, &client_ip)
+        .await
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "error": "RateLimitExceeded",
+                "error_description": "Too many attempts. Please try again later."
+            })),
+        )
+            .into_response();
+    }
+
+    let did = Did::from(form.did.clone());
+
+    let request_id = RequestId::from(form.request_uri.clone());
+    let request_data = match state
+        .oauth_repo
+        .get_authorization_request(&request_id)
+        .await
+    {
+        Ok(Some(data)) => data,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": "Invalid or expired request_uri."
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(
+                request_uri = %form.request_uri,
+                error = ?e,
+                "register_complete: failed to fetch authorization request"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if request_data.expires_at < Utc::now() {
+        let _ = state
+            .oauth_repo
+            .delete_authorization_request(&request_id)
+            .await;
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Authorization request has expired."
+            })),
+        )
+            .into_response();
+    }
+
+    if request_data.parameters.prompt.as_deref() != Some("create") {
+        tracing::warn!(
+            request_uri = %form.request_uri,
+            prompt = ?request_data.parameters.prompt,
+            "register_complete called on non-registration OAuth flow"
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "This endpoint is only for registration flows."
+            })),
+        )
+            .into_response();
+    }
+
+    if request_data.code.is_some() {
+        tracing::warn!(
+            request_uri = %form.request_uri,
+            "register_complete called on already-completed OAuth flow"
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Authorization has already been completed."
+            })),
+        )
+            .into_response();
+    }
+
+    if let Some(existing_did) = &request_data.did
+        && existing_did != &form.did
+    {
+        tracing::warn!(
+            request_uri = %form.request_uri,
+            existing_did = %existing_did,
+            attempted_did = %form.did,
+            "register_complete attempted with different DID than already bound"
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_request",
+                "error_description": "Authorization request is already bound to a different account."
+            })),
+        )
+            .into_response();
+    }
+
+    let password_hashes = match state
+        .session_repo
+        .get_app_password_hashes_by_did(&did)
+        .await
+    {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            tracing::error!(
+                did = %did,
+                error = ?e,
+                "register_complete: failed to fetch app password hashes"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let password_valid = password_hashes
+        .iter()
+        .fold(false, |acc, hash| {
+            acc | bcrypt::verify(&form.app_password, hash).unwrap_or(false)
+        });
+
+    if !password_valid {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "access_denied",
+                "error_description": "Invalid credentials."
+            })),
+        )
+            .into_response();
+    }
+
+    let is_verified = match state.user_repo.get_session_info_by_did(&did).await {
+        Ok(Some(info)) => {
+            info.email_verified
+                || info.discord_verified
+                || info.telegram_verified
+                || info.signal_verified
+        }
+        Ok(None) => {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "access_denied",
+                    "error_description": "Account not found."
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!(
+                did = %did,
+                error = ?e,
+                "register_complete: failed to fetch session info"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "server_error",
+                    "error_description": "An error occurred."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if !is_verified {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "access_denied",
+                "error_description": "Please verify your account before continuing."
+            })),
+        )
+            .into_response();
+    }
+
+    if let Err(e) = state
+        .oauth_repo
+        .set_authorization_did(&request_id, &did, None)
+        .await
+    {
+        tracing::error!(
+            request_uri = %form.request_uri,
+            did = %did,
+            error = ?e,
+            "register_complete: failed to set authorization DID"
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "An error occurred."
+            })),
+        )
+            .into_response();
+    }
+
+    let requested_scope_str = request_data
+        .parameters
+        .scope
+        .as_deref()
+        .unwrap_or("atproto");
+    let requested_scopes: Vec<String> = requested_scope_str
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let client_id_typed = ClientId::from(request_data.parameters.client_id.clone());
+    let needs_consent = should_show_consent(
+        state.oauth_repo.as_ref(),
+        &did,
+        &client_id_typed,
+        &requested_scopes,
+    )
+    .await
+    .unwrap_or(true);
+
+    if needs_consent {
+        tracing::info!(
+            did = %did,
+            client_id = %request_data.parameters.client_id,
+            "OAuth registration complete, redirecting to consent"
+        );
+        let consent_url = format!(
+            "/app/oauth/consent?request_uri={}",
+            url_encode(&form.request_uri)
+        );
+        return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
+    }
+
+    let code = Code::generate();
+    let auth_code = AuthorizationCode::from(code.0.clone());
+    if let Err(e) = state
+        .oauth_repo
+        .update_authorization_request(&request_id, &did, None, &auth_code)
+        .await
+    {
+        tracing::error!(
+            request_uri = %form.request_uri,
+            did = %did,
+            error = ?e,
+            "register_complete: failed to update authorization request with code"
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "server_error",
+                "error_description": "An error occurred."
+            })),
+        )
+            .into_response();
+    }
+
+    tracing::info!(
+        did = %did,
+        client_id = %request_data.parameters.client_id,
+        "OAuth registration flow completed successfully"
+    );
+
+    let redirect_url = build_intermediate_redirect_url(
+        &request_data.parameters.redirect_uri,
+        &code.0,
+        request_data.parameters.state.as_deref(),
+        request_data.parameters.response_mode.as_deref(),
+    );
+    Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
 }

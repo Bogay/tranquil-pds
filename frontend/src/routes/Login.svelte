@@ -349,7 +349,7 @@
   .account-did {
     font-size: var(--text-xs);
     color: var(--text-muted);
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 250px;

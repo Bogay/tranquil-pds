@@ -36,6 +36,7 @@ pub struct RateLimiters {
     pub sso_initiate: Arc<KeyedRateLimiter>,
     pub sso_callback: Arc<KeyedRateLimiter>,
     pub sso_unlink: Arc<KeyedRateLimiter>,
+    pub oauth_register_complete: Arc<KeyedRateLimiter>,
 }
 
 impl Default for RateLimiters {
@@ -107,6 +108,11 @@ impl RateLimiters {
             sso_unlink: Arc::new(RateLimiter::keyed(Quota::per_minute(
                 NonZeroU32::new(10).unwrap(),
             ))),
+            oauth_register_complete: Arc::new(RateLimiter::keyed(
+                Quota::with_period(std::time::Duration::from_secs(60))
+                    .unwrap()
+                    .allow_burst(NonZeroU32::new(5).unwrap()),
+            )),
         }
     }
 

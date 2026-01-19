@@ -12,7 +12,7 @@ use tranquil_types::RequestId;
 use super::config::SsoConfig;
 use crate::api::error::ApiError;
 use crate::auth::extractor::extract_bearer_token_from_header;
-use crate::auth::validate_bearer_token_cached;
+use crate::auth::{generate_app_password, validate_bearer_token_cached};
 use crate::rate_limit::extract_client_ip;
 use crate::state::{AppState, RateLimitKind};
 
@@ -87,13 +87,15 @@ pub async fn sso_initiate(
         return Err(ApiError::SsoProviderNotFound);
     }
     if let Some(ref uri) = input.request_uri
-        && uri.len() > 500 {
-            return Err(ApiError::InvalidRequest("Request URI too long".into()));
-        }
+        && uri.len() > 500
+    {
+        return Err(ApiError::InvalidRequest("Request URI too long".into()));
+    }
     if let Some(ref action) = input.action
-        && action.len() > 20 {
-            return Err(ApiError::SsoInvalidAction);
-        }
+        && action.len() > 20
+    {
+        return Err(ApiError::SsoInvalidAction);
+    }
 
     let provider_type =
         SsoProviderType::parse(&input.provider).ok_or(ApiError::SsoProviderNotFound)?;
@@ -425,6 +427,35 @@ async fn handle_sso_login(
             return redirect_to_error("Database error");
         }
     };
+
+    let is_verified = match state.user_repo.get_session_info_by_did(&identity.did).await {
+        Ok(Some(info)) => {
+            info.email_verified
+                || info.discord_verified
+                || info.telegram_verified
+                || info.signal_verified
+        }
+        Ok(None) => {
+            tracing::error!("User not found for SSO login: {}", identity.did);
+            return redirect_to_error("Account not found");
+        }
+        Err(e) => {
+            tracing::error!("Database error checking verification status: {:?}", e);
+            return redirect_to_error("Database error");
+        }
+    };
+
+    if !is_verified {
+        tracing::warn!(
+            did = %identity.did,
+            provider = %provider.as_str(),
+            "SSO login attempt for unverified account"
+        );
+        return redirect_to_login_with_error(
+            request_uri,
+            "Please verify your account before logging in",
+        );
+    }
 
     if let Err(e) = state
         .sso_repo
@@ -813,6 +844,8 @@ pub struct CompleteRegistrationInput {
     pub discord_id: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_number: Option<String>,
+    pub did_type: Option<String>,
+    pub did: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -825,6 +858,10 @@ pub struct CompleteRegistrationResponse {
     pub access_jwt: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_jwt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_password_name: Option<String>,
 }
 
 pub async fn complete_registration(
@@ -914,14 +951,6 @@ pub async fn complete_registration(
             if !crate::api::validation::is_valid_email(e) {
                 return Err(ApiError::InvalidEmail);
             }
-            let email_exists = state
-                .user_repo
-                .check_email_exists(e, uuid::Uuid::nil())
-                .await
-                .unwrap_or(true);
-            if email_exists {
-                return Err(ApiError::EmailTaken);
-            }
             Some(e.clone())
         }
         None => None,
@@ -967,37 +996,66 @@ pub async fn complete_registration(
     };
 
     let pds_endpoint = format!("https://{}", hostname);
-    let rotation_key = std::env::var("PLC_ROTATION_KEY")
-        .unwrap_or_else(|_| crate::plc::signing_key_to_did_key(&signing_key));
+    let did_type = input.did_type.as_deref().unwrap_or("plc");
 
-    let genesis_result = match crate::plc::create_genesis_operation(
-        &signing_key,
-        &rotation_key,
-        &handle,
-        &pds_endpoint,
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("Error creating PLC genesis operation: {:?}", e);
-            return Err(ApiError::InternalError(Some(
-                "Failed to create PLC operation".into(),
-            )));
+    let did = match did_type {
+        "web" => {
+            let subdomain_host = format!("{}.{}", input.handle, hostname_for_handles);
+            let encoded_subdomain = subdomain_host.replace(':', "%3A");
+            let self_hosted_did = format!("did:web:{}", encoded_subdomain);
+            tracing::info!(did = %self_hosted_did, "Creating self-hosted did:web SSO account");
+            self_hosted_did
+        }
+        "web-external" => {
+            let d = match &input.did {
+                Some(d) if !d.trim().is_empty() => d.trim(),
+                _ => {
+                    return Err(ApiError::InvalidRequest(
+                        "External did:web requires the 'did' field to be provided".into(),
+                    ));
+                }
+            };
+            if !d.starts_with("did:web:") {
+                return Err(ApiError::InvalidDid(
+                    "External DID must be a did:web".into(),
+                ));
+            }
+            tracing::info!(did = %d, "Creating external did:web SSO account");
+            d.to_string()
+        }
+        _ => {
+            let rotation_key = std::env::var("PLC_ROTATION_KEY")
+                .unwrap_or_else(|_| crate::plc::signing_key_to_did_key(&signing_key));
+
+            let genesis_result = match crate::plc::create_genesis_operation(
+                &signing_key,
+                &rotation_key,
+                &handle,
+                &pds_endpoint,
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("Error creating PLC genesis operation: {:?}", e);
+                    return Err(ApiError::InternalError(Some(
+                        "Failed to create PLC operation".into(),
+                    )));
+                }
+            };
+
+            let plc_client = crate::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
+            if let Err(e) = plc_client
+                .send_operation(&genesis_result.did, &genesis_result.signed_operation)
+                .await
+            {
+                tracing::error!("Failed to submit PLC genesis operation: {:?}", e);
+                return Err(ApiError::UpstreamErrorMsg(format!(
+                    "Failed to register DID with PLC directory: {}",
+                    e
+                )));
+            }
+            genesis_result.did
         }
     };
-
-    let plc_client = crate::plc::PlcClient::with_cache(None, Some(state.cache.clone()));
-    if let Err(e) = plc_client
-        .send_operation(&genesis_result.did, &genesis_result.signed_operation)
-        .await
-    {
-        tracing::error!("Failed to submit PLC genesis operation: {:?}", e);
-        return Err(ApiError::UpstreamErrorMsg(format!(
-            "Failed to register DID with PLC directory: {}",
-            e
-        )));
-    }
-
-    let did = genesis_result.did;
     tracing::info!(did = %did, handle = %handle, provider = %pending_preview.provider.as_str(), "Created DID for SSO account");
 
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
@@ -1093,7 +1151,7 @@ pub async fn complete_registration(
         pending_registration_token: input.token.clone(),
     };
 
-    let _create_result = match state.user_repo.create_sso_account(&create_input).await {
+    let create_result = match state.user_repo.create_sso_account(&create_input).await {
         Ok(r) => r,
         Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
             return Err(ApiError::HandleNotAvailable(None));
@@ -1143,6 +1201,28 @@ pub async fn complete_registration(
     .await
     {
         tracing::warn!("Failed to create default profile for {}: {}", did, e);
+    }
+
+    let app_password = generate_app_password();
+    let app_password_name = "bsky.app".to_string();
+    let app_password_hash = match bcrypt::hash(&app_password, bcrypt::DEFAULT_COST) {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::error!("Failed to hash app password: {:?}", e);
+            return Err(ApiError::InternalError(None));
+        }
+    };
+
+    let app_password_data = tranquil_db_traits::AppPasswordCreate {
+        user_id: create_result.user_id,
+        name: app_password_name.clone(),
+        password_hash: app_password_hash,
+        privileged: false,
+        scopes: None,
+        created_by_controller_did: None,
+    };
+    if let Err(e) = state.session_repo.create_app_password(&app_password_data).await {
+        tracing::warn!("Failed to create initial app password: {:?}", e);
     }
 
     let is_standalone = pending_preview.request_uri == "standalone";
@@ -1250,6 +1330,8 @@ pub async fn complete_registration(
                 redirect_url: "/app/dashboard".to_string(),
                 access_jwt: Some(access_meta.token),
                 refresh_jwt: Some(refresh_meta.token),
+                app_password: Some(app_password),
+                app_password_name: Some(app_password_name),
             }));
         }
 
@@ -1262,6 +1344,8 @@ pub async fn complete_registration(
             ),
             access_jwt: None,
             refresh_jwt: None,
+            app_password: Some(app_password),
+            app_password_name: Some(app_password_name),
         }));
     }
 
@@ -1291,7 +1375,8 @@ pub async fn complete_registration(
         format!("/app/verify?did={}", urlencoding::encode(&did))
     } else {
         format!(
-            "/app/oauth/verify?request_uri={}",
+            "/app/verify?did={}&request_uri={}",
+            urlencoding::encode(&did),
             urlencoding::encode(&pending_preview.request_uri)
         )
     };
@@ -1302,5 +1387,7 @@ pub async fn complete_registration(
         redirect_url,
         access_jwt: None,
         refresh_jwt: None,
+        app_password: Some(app_password),
+        app_password_name: Some(app_password_name),
     }))
 }

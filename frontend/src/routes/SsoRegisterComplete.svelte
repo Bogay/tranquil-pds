@@ -20,6 +20,16 @@
     signal: boolean
   }
 
+  interface RegistrationResult {
+    did: string
+    handle: string
+    redirectUrl: string
+    accessJwt?: string
+    refreshJwt?: string
+    appPassword?: string
+    appPasswordName?: string
+  }
+
   let pending = $state<PendingRegistration | null>(null)
   let loading = $state(true)
   let submitting = $state(false)
@@ -38,9 +48,13 @@
   let checkingHandle = $state(false)
   let handleError = $state<string | null>(null)
 
+  let didType = $state<'plc' | 'web' | 'web-external'>('plc')
+  let externalDid = $state('')
+
   let serverInfo = $state<{
     availableUserDomains: string[]
     inviteCodeRequired: boolean
+    selfHostedDidWebEnabled: boolean
   } | null>(null)
 
   let commsChannels = $state<CommsChannelConfig>({
@@ -49,6 +63,11 @@
     telegram: false,
     signal: false,
   })
+
+  let showAppPassword = $state(false)
+  let registrationResult = $state<RegistrationResult | null>(null)
+  let appPasswordCopied = $state(false)
+  let appPasswordAcknowledged = $state(false)
 
   function getToken(): string | null {
     const params = new URLSearchParams(window.location.search)
@@ -70,6 +89,10 @@
     return commsChannels[ch as keyof CommsChannelConfig] ?? false
   }
 
+  function extractDomain(did: string): string {
+    return did.replace('did:web:', '').replace(/%3A/g, ':')
+  }
+
   let fullHandle = $derived(() => {
     if (!handle.trim()) return ''
     const domain = serverInfo?.availableUserDomains?.[0]
@@ -89,6 +112,7 @@
         serverInfo = {
           availableUserDomains: data.availableUserDomains || [],
           inviteCodeRequired: data.inviteCodeRequired ?? false,
+          selfHostedDidWebEnabled: data.selfHostedDidWebEnabled ?? false,
         }
         if (data.commsChannels) {
           commsChannels = {
@@ -191,6 +215,38 @@
     }
   }
 
+  function copyAppPassword() {
+    if (registrationResult?.appPassword) {
+      navigator.clipboard.writeText(registrationResult.appPassword)
+      appPasswordCopied = true
+    }
+  }
+
+  function proceedFromAppPassword() {
+    if (!registrationResult) return
+
+    if (registrationResult.accessJwt && registrationResult.refreshJwt) {
+      localStorage.setItem('accessJwt', registrationResult.accessJwt)
+      localStorage.setItem('refreshJwt', registrationResult.refreshJwt)
+    }
+
+    if (registrationResult.redirectUrl) {
+      if (registrationResult.redirectUrl.startsWith('/app/verify')) {
+        localStorage.setItem('tranquil_pds_pending_verification', JSON.stringify({
+          did: registrationResult.did,
+          handle: registrationResult.handle,
+          channel: verificationChannel,
+        }))
+        const url = new URL(registrationResult.redirectUrl, window.location.origin)
+        url.searchParams.set('handle', registrationResult.handle)
+        url.searchParams.set('channel', verificationChannel)
+        window.location.href = url.pathname + url.search
+        return
+      }
+      window.location.href = registrationResult.redirectUrl
+    }
+  }
+
   async function handleSubmit(e: Event) {
     e.preventDefault()
     const token = getToken()
@@ -229,6 +285,8 @@
           discord_id: discordId || null,
           telegram_username: telegramUsername || null,
           signal_number: signalNumber || null,
+          did_type: didType,
+          did: didType === 'web-external' ? externalDid.trim() : null,
         }),
       })
 
@@ -240,36 +298,34 @@
         return
       }
 
-      if (data.accessJwt && data.refreshJwt) {
-        localStorage.setItem('accessJwt', data.accessJwt)
-        localStorage.setItem('refreshJwt', data.refreshJwt)
+      registrationResult = {
+        did: data.did,
+        handle: data.handle,
+        redirectUrl: data.redirectUrl,
+        accessJwt: data.accessJwt,
+        refreshJwt: data.refreshJwt,
+        appPassword: data.appPassword,
+        appPasswordName: data.appPasswordName,
       }
 
-      if (data.redirectUrl) {
-        if (data.redirectUrl.startsWith('/app/verify')) {
-          localStorage.setItem('tranquil_pds_pending_verification', JSON.stringify({
-            did: data.did,
-            handle: data.handle,
-            channel: verificationChannel,
-          }))
-        }
-        window.location.href = data.redirectUrl
-        return
+      if (registrationResult.appPassword) {
+        showAppPassword = true
+        submitting = false
+      } else {
+        proceedFromAppPassword()
       }
-
-      toast.error($_('common.error'))
-      submitting = false
-    } catch {
-      toast.error($_('common.error'))
+    } catch (err) {
+      console.error('SSO registration failed:', err)
+      toast.error(err instanceof Error ? err.message : $_('common.error'))
       submitting = false
     }
   }
 </script>
 
-<div class="sso-register-container">
+<div class="page">
   {#if loading}
     <div class="loading">
-      <div class="spinner"></div>
+      <div class="spinner md"></div>
       <p>{$_('common.loading')}</p>
     </div>
   {:else if error && !pending}
@@ -277,7 +333,40 @@
       <div class="error-icon">!</div>
       <h2>{$_('common.error')}</h2>
       <p>{error}</p>
-      <a href="/app/register-sso" class="back-link">{$_('sso_register.tryAgain')}</a>
+      <a href="/app/oauth/register-sso" class="back-link">{$_('sso_register.tryAgain')}</a>
+    </div>
+  {:else if showAppPassword && registrationResult}
+    <header class="page-header">
+      <h1>{$_('appPasswords.created')}</h1>
+      <p class="subtitle">{$_('appPasswords.createdMessage')}</p>
+    </header>
+
+    <div class="app-password-step">
+      <div class="warning-box">
+        <strong>{$_('appPasswords.saveWarningTitle')}</strong>
+        <p>{$_('appPasswords.saveWarningMessage')}</p>
+      </div>
+
+      <div class="app-password-display">
+        <div class="app-password-label">
+          App Password for: <strong>{registrationResult.appPasswordName}</strong>
+        </div>
+        <code class="app-password-code">{registrationResult.appPassword}</code>
+        <button type="button" class="copy-btn" onclick={copyAppPassword}>
+          {appPasswordCopied ? $_('common.copied') : $_('common.copyToClipboard')}
+        </button>
+      </div>
+
+      <div class="field">
+        <label class="checkbox-label">
+          <input type="checkbox" bind:checked={appPasswordAcknowledged} />
+          <span>{$_('appPasswords.acknowledgeLabel')}</span>
+        </label>
+      </div>
+
+      <button onclick={proceedFromAppPassword} disabled={!appPasswordAcknowledged}>
+        {$_('common.continue')}
+      </button>
     </div>
   {:else if pending}
     <header class="page-header">
@@ -404,6 +493,56 @@
             </div>
           </fieldset>
 
+          <fieldset>
+            <legend>{$_('registerPasskey.identityType')}</legend>
+            <p class="section-hint">{$_('registerPasskey.identityTypeHint')}</p>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="didType" value="plc" bind:group={didType} disabled={submitting} />
+                <span class="radio-content">
+                  <strong>{$_('registerPasskey.didPlcRecommended')}</strong>
+                  <span class="radio-hint">{$_('registerPasskey.didPlcHint')}</span>
+                </span>
+              </label>
+              <label class="radio-label" class:disabled={serverInfo?.selfHostedDidWebEnabled === false}>
+                <input type="radio" name="didType" value="web" bind:group={didType} disabled={submitting || serverInfo?.selfHostedDidWebEnabled === false} />
+                <span class="radio-content">
+                  <strong>{$_('registerPasskey.didWeb')}</strong>
+                  {#if serverInfo?.selfHostedDidWebEnabled === false}
+                    <span class="radio-hint disabled-hint">{$_('registerPasskey.didWebDisabledHint')}</span>
+                  {:else}
+                    <span class="radio-hint">{$_('registerPasskey.didWebHint')}</span>
+                  {/if}
+                </span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="didType" value="web-external" bind:group={didType} disabled={submitting} />
+                <span class="radio-content">
+                  <strong>{$_('registerPasskey.didWebBYOD')}</strong>
+                  <span class="radio-hint">{$_('registerPasskey.didWebBYODHint')}</span>
+                </span>
+              </label>
+            </div>
+            {#if didType === 'web'}
+              <div class="warning-box">
+                <strong>{$_('registerPasskey.didWebWarningTitle')}</strong>
+                <ul>
+                  <li><strong>{$_('registerPasskey.didWebWarning1')}</strong> {@html $_('registerPasskey.didWebWarning1Detail', { values: { did: `<code>did:web:yourhandle.${serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}</code>` } })}</li>
+                  <li><strong>{$_('registerPasskey.didWebWarning2')}</strong> {$_('registerPasskey.didWebWarning2Detail')}</li>
+                  <li><strong>{$_('registerPasskey.didWebWarning3')}</strong> {$_('registerPasskey.didWebWarning3Detail')}</li>
+                  <li><strong>{$_('registerPasskey.didWebWarning4')}</strong> {$_('registerPasskey.didWebWarning4Detail')}</li>
+                </ul>
+              </div>
+            {/if}
+            {#if didType === 'web-external'}
+              <div class="field">
+                <label for="external-did">{$_('registerPasskey.externalDid')}</label>
+                <input id="external-did" type="text" bind:value={externalDid} placeholder={$_('registerPasskey.externalDidPlaceholder')} disabled={submitting} required />
+                <p class="hint">{$_('registerPasskey.externalDidHint')} <code>https://{externalDid ? extractDomain(externalDid) : 'yourdomain.com'}/.well-known/did.json</code></p>
+              </div>
+            {/if}
+          </fieldset>
+
           {#if serverInfo?.inviteCodeRequired}
             <div class="field">
               <label for="invite-code">{$_('register.inviteCode')} <span class="required">{$_('register.inviteCodeRequired')}</span></label>
@@ -438,177 +577,17 @@
 </div>
 
 <style>
-  .sso-register-container {
-    max-width: var(--width-lg);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-8);
-  }
-
-  .loading p {
-    color: var(--text-secondary);
-  }
-
-  .error-container {
-    text-align: center;
-    padding: var(--space-8);
-  }
-
-  .error-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: var(--error-text);
-    color: var(--text-inverse);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-    font-weight: bold;
-    margin: 0 auto var(--space-4);
-  }
-
-  .error-container h2 {
-    margin-bottom: var(--space-2);
-  }
-
-  .error-container p {
-    color: var(--text-secondary);
-    margin-bottom: var(--space-6);
-  }
-
-  .back-link {
-    color: var(--accent);
-    text-decoration: none;
-  }
-
-  .back-link:hover {
-    text-decoration: underline;
-  }
-
-  .page-header {
-    margin-bottom: var(--space-6);
-  }
-
-  .page-header h1 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .form-section {
-    min-width: 0;
-  }
-
   form {
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
   }
 
-  .contact-fields {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .contact-fields .field {
-    margin-bottom: 0;
-  }
-
-  .hint.success {
-    color: var(--success-text);
-  }
-
-  .hint.error {
-    color: var(--error-text);
-  }
-
-  .info-panel {
-    background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
-    padding: var(--space-6);
-  }
-
-  .info-panel h3 {
-    margin: 0 0 var(--space-4) 0;
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-  }
-
-  .info-list {
-    margin: 0;
-    padding-left: var(--space-5);
-  }
-
-  .info-list li {
-    margin-bottom: var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: var(--leading-relaxed);
-  }
-
-  .info-list li:last-child {
-    margin-bottom: 0;
-  }
-
   .provider-info {
     margin-bottom: var(--space-6);
   }
 
-  .provider-badge {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-4);
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
-  }
-
-  .provider-details {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .provider-name {
-    font-weight: var(--font-semibold);
-  }
-
-  .provider-username {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-  }
-
-  .required {
-    color: var(--error-text);
-  }
-
   button[type="submit"] {
     margin-top: var(--space-3);
-  }
-
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-color);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

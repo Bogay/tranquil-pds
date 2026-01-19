@@ -151,12 +151,12 @@
                 placeholder={$_('trustedDevices.deviceNamePlaceholder')}
               />
               <div class="edit-actions">
-                <button class="btn-small btn-primary" onclick={handleSaveDeviceName}>{$_('common.save')}</button>
-                <button class="btn-small btn-secondary" onclick={cancelEditDevice}>{$_('common.cancel')}</button>
+                <button class="sm" onclick={handleSaveDeviceName}>{$_('common.save')}</button>
+                <button class="sm ghost" onclick={cancelEditDevice}>{$_('common.cancel')}</button>
               </div>
             {:else}
               <h3>{device.friendlyName || parseUserAgent(device.userAgent)}</h3>
-              <button class="btn-icon" onclick={() => startEditDevice(device)} title={$_('security.rename')}>
+              <button class="icon" onclick={() => startEditDevice(device)} title={$_('security.rename')}>
                 &#9998;
               </button>
             {/if}
@@ -192,7 +192,7 @@
           </div>
 
           <div class="device-actions">
-            <button class="btn-danger" onclick={() => handleRevoke(device.id)}>
+            <button class="sm danger-outline" onclick={() => handleRevoke(device.id)}>
               {$_('trustedDevices.revoke')}
             </button>
           </div>
@@ -203,12 +203,6 @@
 </div>
 
 <style>
-  .page {
-    max-width: var(--width-lg);
-    margin: 0 auto;
-    padding: var(--space-7);
-  }
-
   header {
     margin-bottom: var(--space-7);
   }
@@ -300,19 +294,6 @@
     gap: var(--space-2);
   }
 
-  .btn-icon {
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: var(--space-1);
-    font-size: var(--text-base);
-  }
-
-  .btn-icon:hover {
-    color: var(--text-primary);
-  }
-
   .device-details {
     margin-bottom: var(--space-3);
   }
@@ -338,63 +319,9 @@
     border-top: 1px solid var(--border-color);
   }
 
-  .btn-small {
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-md);
-    font-size: var(--text-xs);
-    cursor: pointer;
-  }
-
-  .btn-primary {
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-  }
-
-  .btn-primary:hover {
-    background: var(--accent-hover);
-  }
-
-  .btn-secondary {
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
-  }
-
-  .btn-secondary:hover {
-    background: var(--bg-secondary);
-  }
-
-  .btn-danger {
-    background: transparent;
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-    padding: var(--space-2) var(--space-4);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: var(--text-sm);
-  }
-
-  .btn-danger:hover {
-    background: var(--error-bg);
-  }
-
   .skeleton-list {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-  }
-
-  .skeleton-card {
-    height: 100px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
-  }
-
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
   }
 </style>

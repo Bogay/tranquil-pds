@@ -463,7 +463,7 @@ async fn test_unverified_account_can_update_email_without_token() {
 }
 
 #[tokio::test]
-async fn test_update_email_taken_by_another_user() {
+async fn test_update_email_to_same_as_another_user_allowed() {
     let client = common::client();
     let base_url = common::base_url().await;
     let pool = common::get_test_db_pool().await;
@@ -499,13 +499,16 @@ async fn test_update_email_taken_by_another_user() {
         .send()
         .await
         .expect("Failed to update email");
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let body: Value = res.json().await.expect("Invalid JSON");
-    assert_eq!(body["error"], "InvalidRequest");
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("already in use")
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "Multiple accounts can share the same email address"
     );
+
+    let user_email: Option<String> =
+        sqlx::query_scalar!("SELECT email FROM users WHERE did = $1", did2)
+            .fetch_one(pool)
+            .await
+            .expect("User not found");
+    assert_eq!(user_email, Some(email1.clone()));
 }

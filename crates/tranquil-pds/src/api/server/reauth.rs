@@ -84,7 +84,9 @@ pub async fn reauth_password(
 
         let app_password_valid = app_password_hashes
             .iter()
-            .any(|h| bcrypt::verify(&input.password, h).unwrap_or(false));
+            .fold(false, |acc, h| {
+                acc | bcrypt::verify(&input.password, h).unwrap_or(false)
+            });
 
         if !app_password_valid {
             warn!(did = %&auth.0.did, "Re-auth failed: invalid password");

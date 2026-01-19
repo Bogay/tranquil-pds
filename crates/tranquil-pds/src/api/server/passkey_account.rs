@@ -18,7 +18,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::api::repo::record::utils::create_signed_commit;
-use crate::auth::{ServiceTokenVerifier, is_service_token};
+use crate::auth::{ServiceTokenVerifier, generate_app_password, is_service_token};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{Did, Handle, Nsid, PlainPassword, Rkey};
 use crate::validation::validate_password;
@@ -50,19 +50,6 @@ fn generate_setup_token() -> String {
             }
         })
         .collect()
-}
-
-fn generate_app_password() -> String {
-    let chars: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
-    let mut rng = rand::thread_rng();
-    let segments: Vec<String> = (0..4)
-        .map(|_| {
-            (0..4)
-                .map(|_| chars[rng.gen_range(0..chars.len())] as char)
-                .collect()
-        })
-        .collect();
-    segments.join("-")
 }
 
 #[derive(Deserialize)]

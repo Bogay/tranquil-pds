@@ -147,13 +147,16 @@
     "discordId": "Discord 用户 ID",
     "discordIdPlaceholder": "您的 Discord 用户 ID",
     "discordIdHint": "您的 Discord 数字用户 ID（开启开发者模式后可以复制）",
+    "discordInUseWarning": "此 Discord ID 已与另一个账户关联。",
     "telegram": "Telegram",
     "telegramUsername": "Telegram 用户名",
     "telegramUsernamePlaceholder": "@yourusername",
+    "telegramInUseWarning": "此 Telegram 用户名已与另一个账户关联。",
     "signal": "Signal",
     "signalNumber": "Signal 电话号码",
     "signalNumberPlaceholder": "+1234567890",
     "signalNumberHint": "包含国家代码（例如中国为 +86）",
+    "signalInUseWarning": "此 Signal 号码已与另一个账户关联。",
     "notConfigured": "未配置",
     "inviteCode": "邀请码",
     "inviteCodePlaceholder": "输入您的邀请码",
@@ -161,6 +164,7 @@
     "createButton": "创建账户",
     "alreadyHaveAccount": "已有账户？",
     "signIn": "立即登录",
+    "emailInUseWarning": "此邮箱已与其他账户关联。您仍可使用，但账户恢复时可能需要使用用户名。",
     "passkeyAccount": "通行密钥",
     "passwordAccount": "密码",
     "ssoAccount": "SSO",
@@ -269,6 +273,7 @@
     "newEmail": "新邮箱",
     "newEmailPlaceholder": "new@example.com",
     "changeEmailButton": "更改邮箱",
+    "emailInUseWarning": "此邮箱已被其他账户使用。您仍可使用，但账户恢复可能需要使用用户名。",
     "requesting": "请求中...",
     "verificationCode": "验证码",
     "verificationCodePlaceholder": "输入验证码",
@@ -435,7 +440,8 @@
     "disableConfirm": "禁用此邀请码？它将无法再被使用。",
     "created": "邀请码已创建",
     "copy": "复制",
-    "createdOn": "创建于 {date}"
+    "createdOn": "创建于 {date}",
+    "spent": "已使用"
   },
   "security": {
     "title": "安全设置",
@@ -570,7 +576,10 @@
     "hideHistory": "隐藏历史",
     "noMessages": "暂无消息记录",
     "sent": "已发送",
-    "failed": "发送失败"
+    "failed": "发送失败",
+    "discordInUseWarning": "此 Discord ID 已与另一个账户关联。",
+    "telegramInUseWarning": "此 Telegram 用户名已与另一个账户关联。",
+    "signalInUseWarning": "此 Signal 号码已与另一个账户关联。"
   },
   "repoExplorer": {
     "title": "数据浏览器",
@@ -688,6 +697,12 @@
       "usePasskey": "使用通行密钥",
       "orContinueWith": "或使用以下方式继续",
       "orUseCredentials": "或使用凭证登录"
+    },
+    "register": {
+      "title": "创建账户",
+      "subtitle": "使用 {app} 创建账户",
+      "subtitleGeneric": "创建账户以继续",
+      "haveAccount": "已有账户？"
     },
     "sso": {
       "linkedAccounts": "已关联账户",
@@ -822,7 +837,13 @@
     "error_expired": "注册会话已过期。请重试。",
     "error_handle_required": "请选择一个昵称",
     "emailVerifiedByProvider": "此邮箱已由{provider}验证。无需额外验证。",
-    "emailChangedNeedsVerification": "如果您使用其他邮箱，则需要进行验证。"
+    "emailChangedNeedsVerification": "如果您使用其他邮箱，则需要进行验证。",
+    "infoAfterTitle": "创建账户后",
+    "infoAddPassword": "添加密码以使用传统方式登录",
+    "infoAddPasskey": "设置通行密钥以实现无密码登录",
+    "infoLinkProviders": "关联其他SSO提供商",
+    "infoChangeHandle": "更改用户名或使用自定义域名",
+    "tryAgain": "重试"
   },
   "verify": {
     "title": "验证账户",
@@ -886,7 +907,8 @@
     "success": "密码重置成功！",
     "requestNewCode": "重新获取验证码",
     "passwordsMismatch": "两次输入的密码不一致",
-    "passwordLength": "密码至少需要8位字符"
+    "passwordLength": "密码至少需要8位字符",
+    "multipleAccountsWarning": "多个账户共享此邮箱。重置验证码已发送至最新创建的账户。如需恢复特定账户，请使用用户名。"
   },
   "recoverPasskey": {
     "title": "恢复账户",

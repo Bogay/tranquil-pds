@@ -150,17 +150,21 @@
     "email": "Sähköposti",
     "emailAddress": "Sähköpostiosoite",
     "emailPlaceholder": "sinä@esimerkki.fi",
+    "emailInUseWarning": "Tämä sähköposti on jo yhdistetty toiseen tiliin. Voit silti käyttää sitä, mutta tilin palauttamiseen saatat joutua käyttämään käsittelynimeäsi.",
     "discord": "Discord",
     "discordId": "Discord-käyttäjätunnus",
     "discordIdPlaceholder": "Discord-käyttäjätunnuksesi",
     "discordIdHint": "Numeerinen Discord-käyttäjätunnuksesi (ota Kehittäjätila käyttöön löytääksesi sen)",
+    "discordInUseWarning": "Tämä Discord-tunnus on jo yhdistetty toiseen tiliin.",
     "telegram": "Telegram",
     "telegramUsername": "Telegram-käyttäjänimi",
     "telegramUsernamePlaceholder": "@käyttäjänimesi",
+    "telegramInUseWarning": "Tämä Telegram-käyttäjänimi on jo yhdistetty toiseen tiliin.",
     "signal": "Signal",
     "signalNumber": "Signal-puhelinnumero",
     "signalNumberPlaceholder": "+358401234567",
     "signalNumberHint": "Sisällytä maakoodi (esim. +358 Suomelle)",
+    "signalInUseWarning": "Tämä Signal-numero on jo yhdistetty toiseen tiliin.",
     "notConfigured": "ei määritetty",
     "inviteCode": "Kutsukoodi",
     "inviteCodePlaceholder": "Syötä kutsukoodisi",
@@ -275,6 +279,7 @@
     "currentEmail": "Nykyinen: {email}",
     "newEmail": "Uusi sähköposti",
     "newEmailPlaceholder": "uusi@esimerkki.fi",
+    "emailInUseWarning": "Tämä sähköposti on jo toisen tilin käytössä. Voit silti käyttää sitä, mutta tilin palauttaminen voi vaatia käsittelynimeäsi.",
     "changeEmailButton": "Vaihda sähköposti",
     "requesting": "Pyydetään...",
     "verificationCode": "Vahvistuskoodi",
@@ -437,6 +442,7 @@
     "noCodes": "Ei vielä kutsukoodeja",
     "available": "Saatavilla",
     "used": "Käyttänyt @{handle}",
+    "spent": "Käytetty",
     "disabled": "Poistettu käytöstä",
     "usedBy": "Käyttänyt",
     "disableConfirm": "Poista tämä kutsukoodi käytöstä? Sitä ei voi enää käyttää.",
@@ -577,7 +583,10 @@
     "hideHistory": "Piilota historia",
     "noMessages": "Viestejä ei löytynyt.",
     "sent": "lähetetty",
-    "failed": "epäonnistui"
+    "failed": "epäonnistui",
+    "discordInUseWarning": "Tämä Discord-tunnus on jo yhdistetty toiseen tiliin.",
+    "telegramInUseWarning": "Tämä Telegram-käyttäjänimi on jo yhdistetty toiseen tiliin.",
+    "signalInUseWarning": "Tämä Signal-numero on jo yhdistetty toiseen tiliin."
   },
   "repoExplorer": {
     "title": "Tietovarastoselaaja",
@@ -695,6 +704,12 @@
       "usePasskey": "Käytä pääsyavainta",
       "orContinueWith": "Tai jatka käyttäen",
       "orUseCredentials": "Tai kirjaudu tunnuksilla"
+    },
+    "register": {
+      "title": "Luo tili",
+      "subtitle": "Luo tili jatkaaksesi sovellukseen",
+      "subtitleGeneric": "Luo tili jatkaaksesi",
+      "haveAccount": "Onko sinulla jo tili? Kirjaudu sisään"
     },
     "sso": {
       "linkedAccounts": "Linkitetyt tilit",
@@ -829,7 +844,13 @@
     "error_expired": "Rekisteröintisessio on vanhentunut. Yritä uudelleen.",
     "error_handle_required": "Valitse käsittelynimi",
     "emailVerifiedByProvider": "Tämä sähköposti on vahvistettu {provider} kautta. Lisävahvistusta ei tarvita.",
-    "emailChangedNeedsVerification": "Jos käytät eri sähköpostia, sinun täytyy vahvistaa se."
+    "emailChangedNeedsVerification": "Jos käytät eri sähköpostia, sinun täytyy vahvistaa se.",
+    "infoAfterTitle": "Tilin luomisen jälkeen",
+    "infoAddPassword": "Lisää salasana perinteistä kirjautumista varten",
+    "infoAddPasskey": "Määritä pääsyavain salasanattomaan kirjautumiseen",
+    "infoLinkProviders": "Linkitä lisää SSO-palveluntarjoajia",
+    "infoChangeHandle": "Vaihda käsittelynimesi tai käytä omaa verkkotunnusta",
+    "tryAgain": "Yritä uudelleen"
   },
   "verify": {
     "title": "Vahvista tilisi",
@@ -881,6 +902,7 @@
     "sendCode": "Lähetä palautuskoodi",
     "sending": "Lähetetään...",
     "codeSent": "Palautuskoodi lähetetty! Tarkista ensisijainen ilmoituskanavasi.",
+    "multipleAccountsWarning": "Useampi tili käyttää tätä sähköpostia. Palautuskoodi lähetettiin viimeksi luodulle tilille. Käytä käsittelynimeäsi tietylle tilille.",
     "enterCode": "Syötä saamasi koodi ja uusi salasanasi.",
     "code": "Palautuskoodi",
     "codePlaceholder": "Syötä palautuskoodi",

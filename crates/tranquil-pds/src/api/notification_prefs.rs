@@ -234,19 +234,6 @@ pub async fn update_notification_prefs(
         if current_email.as_ref().map(|e| e.to_lowercase()) == Some(email_clean.clone()) {
             info!(did = %user.did, "Email unchanged, skipping");
         } else {
-            match state
-                .user_repo
-                .check_email_exists(&email_clean, user_id)
-                .await
-            {
-                Ok(true) => return ApiError::EmailTaken.into_response(),
-                Err(e) => {
-                    return ApiError::InternalError(Some(format!("Database error: {}", e)))
-                        .into_response();
-                }
-                Ok(false) => {}
-            }
-
             if let Err(e) = request_channel_verification(
                 &state,
                 user_id,

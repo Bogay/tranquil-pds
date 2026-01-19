@@ -44,6 +44,16 @@ pub fn decrypt_totp_secret(encrypted: &[u8], version: i32) -> Result<Vec<u8>, St
     crate::config::decrypt_key(encrypted, Some(version))
 }
 
+pub fn generate_app_password() -> String {
+    use rand::Rng;
+    let chars: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let mut rng = rand::thread_rng();
+    let segments: Vec<String> = (0..4)
+        .map(|_| (0..4).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect())
+        .collect();
+    segments.join("-")
+}
+
 const KEY_CACHE_TTL_SECS: u64 = 300;
 const SESSION_CACHE_TTL_SECS: u64 = 60;
 const USER_STATUS_CACHE_TTL_SECS: u64 = 60;

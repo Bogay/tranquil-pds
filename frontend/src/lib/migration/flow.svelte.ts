@@ -915,6 +915,7 @@ export function createInboundMigrationFlow() {
       authMethod: "password",
       passkeySetupToken: null,
       oauthCodeVerifier: null,
+      localAccessToken: null,
       generatedAppPassword: null,
       generatedAppPasswordName: null,
     };

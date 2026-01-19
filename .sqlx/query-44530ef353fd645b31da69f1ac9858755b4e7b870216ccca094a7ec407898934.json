@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT email_verified FROM users WHERE email = $1 OR handle = $1",
+  "query": "SELECT email_verified FROM users WHERE did = $1 OR email = $1 OR handle = $1",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "6258398accee69e0c5f455a3c0ecc273b3da6ef5bb4d8660adafe63d8e3cd2d4"
+  "hash": "44530ef353fd645b31da69f1ac9858755b4e7b870216ccca094a7ec407898934"
 }

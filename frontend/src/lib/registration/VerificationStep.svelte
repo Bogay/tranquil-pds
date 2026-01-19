@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import { api, ApiError } from '../api'
   import { resendVerification } from '../auth.svelte'
   import type { RegistrationFlow } from './flow.svelte'
@@ -12,6 +13,35 @@
   let verificationCode = $state('')
   let resending = $state(false)
   let resendMessage = $state<string | null>(null)
+
+  let pollingInterval: ReturnType<typeof setInterval> | null = null
+
+  $effect(() => {
+    if (flow.state.step === 'verify' && flow.account && !verificationCode.trim()) {
+      pollingInterval = setInterval(async () => {
+        if (verificationCode.trim()) return
+        const advanced = await flow.checkAndAdvanceIfVerified()
+        if (advanced && pollingInterval) {
+          clearInterval(pollingInterval)
+          pollingInterval = null
+        }
+      }, 3000)
+    }
+
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval)
+        pollingInterval = null
+      }
+    }
+  })
+
+  onDestroy(() => {
+    if (pollingInterval) {
+      clearInterval(pollingInterval)
+      pollingInterval = null
+    }
+  })
 
   function channelLabel(ch: string): string {
     switch (ch) {

@@ -57,6 +57,20 @@
   let emailTokenRequired = $state(false)
   let emailUpdateAuthorized = $state(false)
   let emailPollingInterval = $state<ReturnType<typeof setInterval> | null>(null)
+  let newEmailInUse = $state(false)
+
+  async function checkNewEmailInUse() {
+    if (!newEmail.trim() || !newEmail.includes('@')) {
+      newEmailInUse = false
+      return
+    }
+    try {
+      const result = await api.checkEmailInUse(newEmail.trim())
+      newEmailInUse = result.inUse
+    } catch {
+      newEmailInUse = false
+    }
+  }
   let handleLoading = $state(false)
   let newHandle = $state('')
   let deleteLoading = $state(false)
@@ -543,10 +557,14 @@
             id="new-email"
             type="email"
             bind:value={newEmail}
+            onblur={checkNewEmailInUse}
             placeholder={$_('settings.newEmailPlaceholder')}
             disabled={emailLoading || emailUpdateAuthorized}
             required
           />
+          {#if newEmailInUse}
+            <p class="hint warning">{$_('settings.emailInUseWarning')}</p>
+          {/if}
         </div>
         <div class="actions">
           <button type="submit" disabled={emailLoading || (!emailToken && !emailUpdateAuthorized) || !newEmail}>
@@ -565,10 +583,14 @@
             id="new-email"
             type="email"
             bind:value={newEmail}
+            onblur={checkNewEmailInUse}
             placeholder={$_('settings.newEmailPlaceholder')}
             disabled={emailLoading}
             required
           />
+          {#if newEmailInUse}
+            <p class="hint warning">{$_('settings.emailInUseWarning')}</p>
+          {/if}
         </div>
         <button type="submit" disabled={emailLoading || !newEmail.trim()}>
           {emailLoading ? $_('settings.requesting') : $_('settings.changeEmailButton')}

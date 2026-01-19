@@ -31,6 +31,7 @@
   let successPurpose = $state<string | null>(null)
   let successChannel = $state<string | null>(null)
   let tokenFromUrl = $state(false)
+  let oauthRequestUri = $state<string | null>(null)
 
   const auth = $derived(getAuthState())
 
@@ -70,6 +71,9 @@
       }
     } else {
       mode = 'signup'
+      if (params.request_uri) {
+        oauthRequestUri = params.request_uri
+      }
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         try {
@@ -83,6 +87,18 @@
           pendingVerification = null
         }
       }
+      if (!pendingVerification && params.did && params.handle && params.channel) {
+        pendingVerification = {
+          did: unsafeAsDid(params.did),
+          handle: params.handle,
+          channel: params.channel,
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          did: params.did,
+          handle: params.handle,
+          channel: params.channel,
+        }))
+      }
     }
   })
 
@@ -91,6 +107,34 @@
       clearPendingVerification()
       navigate(routes.dashboard)
     }
+  })
+
+  let pollingVerification = false
+  $effect(() => {
+    if (mode === 'signup' && pendingVerification && !verificationCode.trim()) {
+      const currentPending = pendingVerification
+      const interval = setInterval(async () => {
+        if (pollingVerification || verificationCode.trim()) return
+        pollingVerification = true
+        try {
+          const result = await api.checkEmailVerified(currentPending.did)
+          if (result.verified) {
+            clearInterval(interval)
+            clearPendingVerification()
+            if (oauthRequestUri) {
+              navigate(routes.oauthConsent, { params: { request_uri: oauthRequestUri } })
+            } else {
+              navigate(routes.login)
+            }
+          }
+        } catch {
+        } finally {
+          pollingVerification = false
+        }
+      }, 3000)
+      return () => clearInterval(interval)
+    }
+    return undefined
   })
 
   function clearPendingVerification() {
@@ -108,7 +152,11 @@
     try {
       await confirmSignup(pendingVerification.did, verificationCode.trim())
       clearPendingVerification()
-      navigate('/dashboard')
+      if (oauthRequestUri) {
+        navigate(routes.oauthConsent, { params: { request_uri: oauthRequestUri } })
+      } else {
+        navigate(routes.dashboard)
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : 'Verification failed'
     } finally {

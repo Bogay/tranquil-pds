@@ -37,6 +37,8 @@ pub struct ParRequest {
     pub client_assertion: Option<String>,
     #[serde(default)]
     pub client_assertion_type: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -109,6 +111,7 @@ pub async fn pushed_authorization_request(
             )));
         }
     };
+    let prompt = validate_prompt(&request.prompt)?;
     let parameters = AuthorizationRequestParameters {
         response_type: request.response_type,
         client_id: request.client_id.clone(),
@@ -120,6 +123,7 @@ pub async fn pushed_authorization_request(
         response_mode,
         login_hint: request.login_hint,
         dpop_jkt: request.dpop_jkt,
+        prompt,
         extra: None,
     };
     let request_data = RequestData {
@@ -260,4 +264,23 @@ fn scope_matches(client_scope: &str, requested_scope: &str) -> bool {
     }
 
     false
+}
+
+fn validate_prompt(prompt: &Option<String>) -> Result<Option<String>, OAuthError> {
+    const VALID_PROMPTS: &[&str] = &["none", "login", "consent", "select_account", "create"];
+
+    match prompt {
+        None => Ok(None),
+        Some(p) if p.is_empty() => Ok(None),
+        Some(p) => {
+            if VALID_PROMPTS.contains(&p.as_str()) {
+                Ok(Some(p.clone()))
+            } else {
+                Err(OAuthError::InvalidRequest(format!(
+                    "Unsupported prompt value: {}",
+                    p
+                )))
+            }
+        }
+    }
 }

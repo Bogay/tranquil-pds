@@ -50,6 +50,8 @@ pub struct AuthorizationServerMetadata {
     pub introspection_endpoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id_metadata_document_supported: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_values_supported: Option<Vec<String>>,
 }
 
 pub async fn oauth_protected_resource(
@@ -113,6 +115,13 @@ pub async fn oauth_authorization_server(
         revocation_endpoint: Some(format!("{}/oauth/revoke", issuer)),
         introspection_endpoint: Some(format!("{}/oauth/introspect", issuer)),
         client_id_metadata_document_supported: Some(true),
+        prompt_values_supported: Some(vec![
+            "none".to_string(),
+            "login".to_string(),
+            "consent".to_string(),
+            "select_account".to_string(),
+            "create".to_string(),
+        ]),
     })
 }
 

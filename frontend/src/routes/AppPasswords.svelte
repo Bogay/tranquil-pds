@@ -281,7 +281,7 @@
   .password-code {
     display: block;
     font-size: var(--text-xl);
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     letter-spacing: 0.1em;
     padding: var(--space-5);
     background: var(--bg-input);
@@ -469,8 +469,4 @@
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
 </style>

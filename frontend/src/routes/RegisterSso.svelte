@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import { _ } from '../lib/i18n'
   import { getFullUrl } from '../lib/router.svelte'
   import { routes } from '../lib/types/routes'
   import { toast } from '../lib/toast.svelte'
   import AccountTypeSwitcher from '../components/AccountTypeSwitcher.svelte'
   import SsoIcon from '../components/SsoIcon.svelte'
+  import { ensureRequestUri, getRequestUriFromUrl, getOAuthRequestUri } from '../lib/oauth'
 
   interface SsoProvider {
     provider: string
@@ -16,9 +16,19 @@
   let providers = $state<SsoProvider[]>([])
   let loading = $state(true)
   let initiating = $state<string | null>(null)
+  let initialized = false
 
-  onMount(() => {
-    fetchProviders()
+  $effect(() => {
+    if (!initialized) {
+      initialized = true
+      ensureRequestUri().then((requestUri) => {
+        if (!requestUri) return
+        fetchProviders()
+      }).catch((err) => {
+        console.error('Failed to ensure OAuth request URI:', err)
+        toast.error($_('common.error'))
+      })
+    }
   })
 
   async function fetchProviders() {
@@ -26,10 +36,11 @@
       const response = await fetch('/oauth/sso/providers')
       if (response.ok) {
         const data = await response.json()
-        providers = data.providers || []
+        providers = (data.providers || []).toSorted((a: SsoProvider, b: SsoProvider) => a.name.localeCompare(b.name))
       }
-    } catch {
-      toast.error($_('common.error'))
+    } catch (err) {
+      console.error('Failed to fetch SSO providers:', err)
+      toast.error(err instanceof Error ? err.message : $_('common.error'))
     } finally {
       loading = false
     }
@@ -37,9 +48,10 @@
 
   async function initiateRegistration(provider: string) {
     initiating = provider
+    let requestUri = getRequestUriFromUrl()
 
     try {
-      const response = await fetch('/oauth/sso/initiate', {
+      let response = await fetch('/oauth/sso/initiate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -48,14 +60,24 @@
         body: JSON.stringify({
           provider,
           action: 'register',
+          request_uri: requestUri,
         }),
       })
 
-      const data = await response.json()
+      let data = await response.json()
 
       if (!response.ok) {
-        toast.error(data.error_description || data.error || $_('common.error'))
-        initiating = null
+        console.log('SSO initiate failed, restarting OAuth flow', data)
+        try {
+          const newRequestUri = await getOAuthRequestUri('create')
+          const url = new URL(window.location.href)
+          url.searchParams.set('request_uri', newRequestUri)
+          window.location.href = url.toString()
+        } catch (e) {
+          console.error('Failed to restart OAuth flow:', e)
+          toast.error(data.message || data.error || $_('common.error'))
+          initiating = null
+        }
         return
       }
 
@@ -66,14 +88,15 @@
 
       toast.error($_('common.error'))
       initiating = null
-    } catch {
-      toast.error($_('common.error'))
+    } catch (err) {
+      console.error('SSO registration initiation failed:', err)
+      toast.error(err instanceof Error ? err.message : $_('common.error'))
       initiating = null
     }
   }
 </script>
 
-<div class="register-sso-page">
+<div class="page">
   <header class="page-header">
     <h1>{$_('register.title')}</h1>
     <p class="subtitle">{$_('register.ssoSubtitle')}</p>
@@ -90,11 +113,11 @@
     </div>
   </div>
 
-  <AccountTypeSwitcher active="sso" ssoAvailable={providers.length > 0} />
+  <AccountTypeSwitcher active="sso" ssoAvailable={providers.length > 0} oauthRequestUri={getRequestUriFromUrl()} />
 
   {#if loading}
     <div class="loading">
-      <div class="spinner"></div>
+      <div class="spinner md"></div>
     </div>
   {:else if providers.length === 0}
     <div class="no-providers">
@@ -132,90 +155,6 @@
 </div>
 
 <style>
-  .register-sso-page {
-    max-width: var(--width-lg);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .page-header {
-    margin-bottom: var(--space-6);
-  }
-
-  .page-header h1 {
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
-  .migrate-callout {
-    display: flex;
-    gap: var(--space-4);
-    padding: var(--space-5);
-    background: var(--accent-muted);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-xl);
-    margin-bottom: var(--space-6);
-  }
-
-  .migrate-icon {
-    font-size: var(--text-2xl);
-    line-height: 1;
-    color: var(--accent);
-  }
-
-  .migrate-content {
-    flex: 1;
-  }
-
-  .migrate-content strong {
-    display: block;
-    color: var(--text-primary);
-    margin-bottom: var(--space-2);
-  }
-
-  .migrate-content p {
-    margin: 0 0 var(--space-3) 0;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: var(--leading-relaxed);
-  }
-
-  .migrate-link {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--accent);
-    text-decoration: none;
-  }
-
-  .migrate-link:hover {
-    text-decoration: underline;
-  }
-
-  .loading {
-    display: flex;
-    justify-content: center;
-    padding: var(--space-8);
-  }
-
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-color);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .no-providers {
     text-align: center;
     padding: var(--space-8);
@@ -274,20 +213,7 @@
     cursor: not-allowed;
   }
 
-  .provider-name {
+  .provider-button .provider-name {
     flex: 1;
-  }
-
-  .form-links {
-    margin-top: var(--space-8);
-  }
-
-  .link-text {
-    text-align: center;
-    color: var(--text-secondary);
-  }
-
-  .link-text a {
-    color: var(--accent);
   }
 </style>

@@ -487,7 +487,7 @@
   }
 
   .account-info .did {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-secondary);
     word-break: break-all;

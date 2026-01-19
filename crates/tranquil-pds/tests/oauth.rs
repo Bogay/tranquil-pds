@@ -1237,3 +1237,412 @@ async fn test_granular_scope_rpc_specific_method() {
         "Should require lxm parameter for granular scopes"
     );
 }
+
+#[tokio::test]
+async fn test_oauth_metadata_includes_prompt_values_supported() {
+    let url = base_url().await;
+    let client = client();
+    let as_res = client
+        .get(format!("{}/.well-known/oauth-authorization-server", url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(as_res.status(), StatusCode::OK);
+    let as_body: Value = as_res.json().await.unwrap();
+    let prompt_values = as_body["prompt_values_supported"]
+        .as_array()
+        .expect("prompt_values_supported should be an array");
+    assert!(
+        prompt_values.contains(&json!("none")),
+        "Should support prompt=none"
+    );
+    assert!(
+        prompt_values.contains(&json!("login")),
+        "Should support prompt=login"
+    );
+    assert!(
+        prompt_values.contains(&json!("consent")),
+        "Should support prompt=consent"
+    );
+    assert!(
+        prompt_values.contains(&json!("select_account")),
+        "Should support prompt=select_account"
+    );
+    assert!(
+        prompt_values.contains(&json!("create")),
+        "Should support prompt=create"
+    );
+}
+
+#[tokio::test]
+async fn test_par_accepts_valid_prompt_values() {
+    let url = base_url().await;
+    let client = client();
+    let redirect_uri = "https://example.com/callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (_, code_challenge) = generate_pkce();
+    let valid_prompts = ["none", "login", "consent", "select_account", "create"];
+    for prompt in valid_prompts {
+        let par_res = client
+            .post(format!("{}/oauth/par", url))
+            .form(&[
+                ("response_type", "code"),
+                ("client_id", &client_id),
+                ("redirect_uri", redirect_uri),
+                ("code_challenge", &code_challenge),
+                ("code_challenge_method", "S256"),
+                ("scope", "atproto"),
+                ("state", "test-state"),
+                ("prompt", prompt),
+            ])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            par_res.status(),
+            StatusCode::CREATED,
+            "PAR should accept prompt={}",
+            prompt
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_par_rejects_invalid_prompt_value() {
+    let url = base_url().await;
+    let client = client();
+    let redirect_uri = "https://example.com/callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (_, code_challenge) = generate_pkce();
+    let par_res = client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("state", "test-state"),
+            ("prompt", "invalid_prompt"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        par_res.status(),
+        StatusCode::BAD_REQUEST,
+        "PAR should reject invalid prompt value"
+    );
+    let body: Value = par_res.json().await.unwrap();
+    assert_eq!(body["error"], "invalid_request");
+    assert!(
+        body["error_description"]
+            .as_str()
+            .unwrap_or("")
+            .contains("prompt"),
+        "Error should mention prompt"
+    );
+}
+
+#[tokio::test]
+async fn test_prompt_create_redirects_to_register() {
+    let url = base_url().await;
+    let client = no_redirect_client();
+    let redirect_uri = "https://example.com/callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (_, code_challenge) = generate_pkce();
+    let par_res = reqwest::Client::new()
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("state", "test-state"),
+            ("prompt", "create"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(par_res.status(), StatusCode::CREATED);
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+    let auth_res = client
+        .get(format!("{}/oauth/authorize", url))
+        .query(&[("request_uri", request_uri)])
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        auth_res.status().is_redirection(),
+        "Should redirect when prompt=create"
+    );
+    let location = auth_res
+        .headers()
+        .get("location")
+        .expect("Should have Location header")
+        .to_str()
+        .unwrap();
+    assert!(
+        location.contains("/app/oauth/register"),
+        "Should redirect to /app/oauth/register, got: {}",
+        location
+    );
+    assert!(
+        location.contains("request_uri="),
+        "Should include request_uri in redirect"
+    );
+}
+
+#[tokio::test]
+async fn test_register_complete_rejects_invalid_request_uri() {
+    let url = base_url().await;
+    let client = client();
+    let res = client
+        .post(format!("{}/oauth/register/complete", url))
+        .json(&json!({
+            "request_uri": "urn:ietf:params:oauth:request_uri:nonexistent",
+            "did": "did:plc:test123",
+            "app_password": "test-password"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "Should reject invalid request_uri"
+    );
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "invalid_request");
+}
+
+#[tokio::test]
+async fn test_register_complete_rejects_wrong_credentials() {
+    let url = base_url().await;
+    let http_client = client();
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("rc{}", suffix);
+    let email = format!("rc{}@example.com", suffix);
+    let password = "Regcomplete123!";
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle, "email": email, "password": password }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap();
+    verify_new_account(&http_client, user_did).await;
+    let redirect_uri = "https://example.com/callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (_, code_challenge) = generate_pkce();
+    let par_res = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("state", "test-state"),
+            ("prompt", "create"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+    let res = http_client
+        .post(format!("{}/oauth/register/complete", url))
+        .json(&json!({
+            "request_uri": request_uri,
+            "did": user_did,
+            "app_password": "wrong-password"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "Should reject wrong credentials"
+    );
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "access_denied");
+}
+
+#[tokio::test]
+async fn test_full_oauth_registration_flow() {
+    let url = base_url().await;
+    let http_client = client();
+
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let handle = format!("oauthreg{}", suffix);
+    let email = format!("oauthreg{}@example.com", suffix);
+    let password = "OauthRegTest123!";
+
+    let redirect_uri = "https://example.com/callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (code_verifier, code_challenge) = generate_pkce();
+    let state = format!("state-{}", suffix);
+
+    let par_res = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("state", &state),
+            ("prompt", "create"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        par_res.status(),
+        StatusCode::CREATED,
+        "PAR with prompt=create should succeed"
+    );
+    let par_body: Value = par_res.json().await.unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let create_res = http_client
+        .post(format!("{}/xrpc/com.atproto.server.createAccount", url))
+        .json(&json!({ "handle": handle, "email": email, "password": password }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        create_res.status(),
+        StatusCode::OK,
+        "Account creation should succeed"
+    );
+    let account: Value = create_res.json().await.unwrap();
+    let user_did = account["did"].as_str().unwrap();
+    let access_jwt = account["accessJwt"].as_str().unwrap();
+
+    let app_password_res = http_client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.createAppPassword",
+            url
+        ))
+        .header("Authorization", format!("Bearer {}", access_jwt))
+        .json(&json!({ "name": "oauth-test-app" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        app_password_res.status(),
+        StatusCode::OK,
+        "App password creation should succeed"
+    );
+    let app_password_body: Value = app_password_res.json().await.unwrap();
+    let app_password = app_password_body["password"].as_str().unwrap();
+
+    verify_new_account(&http_client, user_did).await;
+
+    let complete_res = http_client
+        .post(format!("{}/oauth/register/complete", url))
+        .json(&json!({
+            "request_uri": request_uri,
+            "did": user_did,
+            "app_password": app_password
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        complete_res.status(),
+        StatusCode::OK,
+        "register_complete should succeed"
+    );
+    let complete_body: Value = complete_res.json().await.unwrap();
+    let mut redirect_location = complete_body["redirect_uri"]
+        .as_str()
+        .expect("Expected redirect_uri from register_complete")
+        .to_string();
+
+    if redirect_location.contains("/oauth/consent") {
+        let consent_res = http_client
+            .post(format!("{}/oauth/authorize/consent", url))
+            .header("Content-Type", "application/json")
+            .json(&json!({
+                "request_uri": request_uri,
+                "approved_scopes": ["atproto"],
+                "remember": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            consent_res.status(),
+            StatusCode::OK,
+            "Consent should succeed"
+        );
+        let consent_body: Value = consent_res.json().await.unwrap();
+        redirect_location = consent_body["redirect_uri"]
+            .as_str()
+            .expect("Expected redirect_uri from consent")
+            .to_string();
+    }
+
+    assert!(
+        redirect_location.contains("code="),
+        "Should have authorization code in redirect: {}",
+        redirect_location
+    );
+
+    let code = redirect_location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
+
+    let token_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        token_res.status(),
+        StatusCode::OK,
+        "Token exchange should succeed"
+    );
+    let token_body: Value = token_res.json().await.unwrap();
+    assert!(
+        token_body["access_token"].is_string(),
+        "Should have access_token"
+    );
+    assert!(
+        token_body["refresh_token"].is_string(),
+        "Should have refresh_token"
+    );
+    assert_eq!(token_body["token_type"], "Bearer");
+    assert_eq!(
+        token_body["sub"], user_did,
+        "Token sub should match user DID"
+    );
+}

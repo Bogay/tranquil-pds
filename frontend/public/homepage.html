@@ -439,6 +439,7 @@
         <div class="actions" id="heroActions">
           <a href="/app/register" class="btn primary" id="heroPrimary"
           >Join This Server</a>
+          <a href="/app/login" class="btn secondary" id="heroLogin">Login</a>
           <a
             href="https://tangled.org/tranquil.farm/tranquil-pds"
             class="btn secondary"
@@ -461,9 +462,9 @@
           <div class="feature">
             <h3>Real security</h3>
             <p>
-              Sign in with passkeys or SSO, add two-factor authentication,
-              set up backup codes, and mark devices you trust. Your account
-              stays yours.
+              Sign in with passkeys or SSO, add two-factor authentication, set
+              up backup codes, and mark devices you trust. Your account stays
+              yours.
             </p>
           </div>
 
@@ -545,6 +546,7 @@
         <div class="actions" id="footerActions">
           <a href="/app/register" class="btn primary" id="footerPrimary"
           >Join This Server</a>
+          <a href="/app/login" class="btn secondary" id="footerLogin">Login</a>
           <a
             href="https://tangled.org/tranquil.farm/tranquil-pds"
             class="btn secondary"
@@ -585,6 +587,10 @@
                 footerPrimary.href = "/app/dashboard";
                 footerPrimary.textContent = handle;
               }
+              var heroLogin = document.getElementById("heroLogin");
+              var footerLogin = document.getElementById("footerLogin");
+              if (heroLogin) heroLogin.classList.add("hidden");
+              if (footerLogin) footerLogin.classList.add("hidden");
               if (heroSecondary) {
                 heroSecondary.classList.add("hidden");
               }

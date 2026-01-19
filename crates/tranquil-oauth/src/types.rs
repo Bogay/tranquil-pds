@@ -94,6 +94,7 @@ pub struct AuthorizationRequestParameters {
     pub response_mode: Option<String>,
     pub login_hint: Option<String>,
     pub dpop_jkt: Option<String>,
+    pub prompt: Option<String>,
     #[serde(flatten)]
     pub extra: Option<JsonValue>,
 }
@@ -423,6 +424,7 @@ mod tests {
                 response_mode: None,
                 login_hint: None,
                 dpop_jkt: None,
+                prompt: None,
                 extra: None,
             },
             expires_at: Utc::now() + expires_in,

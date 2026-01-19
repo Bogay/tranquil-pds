@@ -6,20 +6,30 @@
   interface Props {
     active: 'passkey' | 'password' | 'sso'
     ssoAvailable?: boolean
+    oauthRequestUri?: string | null
   }
 
-  let { active, ssoAvailable = true }: Props = $props()
+  let { active, ssoAvailable = true, oauthRequestUri = null }: Props = $props()
+
+  function buildOauthUrl(route: string): string {
+    const url = getFullUrl(route)
+    return oauthRequestUri ? `${url}?request_uri=${encodeURIComponent(oauthRequestUri)}` : url
+  }
+
+  const passkeyUrl = $derived(buildOauthUrl(routes.oauthRegister))
+  const passwordUrl = $derived(buildOauthUrl(routes.oauthRegisterPassword))
+  const ssoUrl = $derived(buildOauthUrl(routes.oauthRegisterSso))
 </script>
 
 <div class="account-type-switcher">
-  <a href={getFullUrl(routes.register)} class="switcher-option" class:active={active === 'passkey'}>
+  <a href={passkeyUrl} class="switcher-option" class:active={active === 'passkey'}>
     {$_('register.passkeyAccount')}
   </a>
-  <a href={getFullUrl(routes.registerPassword)} class="switcher-option" class:active={active === 'password'}>
+  <a href={passwordUrl} class="switcher-option" class:active={active === 'password'}>
     {$_('register.passwordAccount')}
   </a>
   {#if ssoAvailable || active === 'sso'}
-    <a href={getFullUrl(routes.registerSso)} class="switcher-option" class:active={active === 'sso'}>
+    <a href={ssoUrl} class="switcher-option" class:active={active === 'sso'}>
       {$_('register.ssoAccount')}
     </a>
   {:else}

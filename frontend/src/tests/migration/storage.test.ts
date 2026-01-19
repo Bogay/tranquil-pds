@@ -83,6 +83,7 @@ function createInboundState(
     authMethod: "password",
     passkeySetupToken: null,
     oauthCodeVerifier: null,
+    localAccessToken: null,
     generatedAppPassword: null,
     generatedAppPasswordName: null,
     ...overrides,

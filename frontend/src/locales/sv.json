@@ -147,13 +147,16 @@
     "discordId": "Discord användar-ID",
     "discordIdPlaceholder": "Ditt Discord användar-ID",
     "discordIdHint": "Ditt numeriska Discord användar-ID (aktivera Utvecklarläge för att hitta det)",
+    "discordInUseWarning": "Detta Discord-ID är redan kopplat till ett annat konto.",
     "telegram": "Telegram",
     "telegramUsername": "Telegram-användarnamn",
     "telegramUsernamePlaceholder": "@dittanvändarnamn",
+    "telegramInUseWarning": "Detta Telegram-användarnamn är redan kopplat till ett annat konto.",
     "signal": "Signal",
     "signalNumber": "Signal-telefonnummer",
     "signalNumberPlaceholder": "+46701234567",
     "signalNumberHint": "Inkludera landskod (t.ex. +46 för Sverige)",
+    "signalInUseWarning": "Detta Signal-nummer är redan kopplat till ett annat konto.",
     "notConfigured": "ej konfigurerad",
     "inviteCode": "Inbjudningskod",
     "inviteCodePlaceholder": "Ange din inbjudningskod",
@@ -161,6 +164,7 @@
     "createButton": "Skapa konto",
     "alreadyHaveAccount": "Har du redan ett konto?",
     "signIn": "Logga in",
+    "emailInUseWarning": "Denna e-post är redan kopplad till ett annat konto. Du kan fortfarande använda den, men för kontoåterställning kan du behöva använda ditt användarnamn istället.",
     "passkeyAccount": "Nyckel",
     "passwordAccount": "Lösenord",
     "ssoAccount": "SSO",
@@ -269,6 +273,7 @@
     "newEmail": "Ny e-post",
     "newEmailPlaceholder": "ny@exempel.se",
     "changeEmailButton": "Ändra e-post",
+    "emailInUseWarning": "Denna e-post används redan av ett annat konto. Du kan fortfarande använda den, men kontoåterställning kan kräva ditt användarnamn.",
     "requesting": "Begär...",
     "verificationCode": "Verifieringskod",
     "verificationCodePlaceholder": "Ange verifieringskod",
@@ -435,7 +440,8 @@
     "disableConfirm": "Inaktivera denna inbjudningskod? Den kan inte längre användas.",
     "created": "Inbjudningskod skapad",
     "copy": "Kopiera",
-    "createdOn": "Skapad {date}"
+    "createdOn": "Skapad {date}",
+    "spent": "Förbrukad"
   },
   "security": {
     "title": "Säkerhet",
@@ -570,7 +576,10 @@
     "hideHistory": "Dölj historik",
     "noMessages": "Inga meddelanden hittades.",
     "sent": "skickad",
-    "failed": "misslyckades"
+    "failed": "misslyckades",
+    "discordInUseWarning": "Detta Discord-ID är redan kopplat till ett annat konto.",
+    "telegramInUseWarning": "Detta Telegram-användarnamn är redan kopplat till ett annat konto.",
+    "signalInUseWarning": "Detta Signal-nummer är redan kopplat till ett annat konto."
   },
   "repoExplorer": {
     "title": "Dataförvarsutforskare",
@@ -688,6 +697,12 @@
       "usePasskey": "Använd nyckel",
       "orContinueWith": "Eller fortsätt med",
       "orUseCredentials": "Eller logga in med uppgifter"
+    },
+    "register": {
+      "title": "Skapa konto",
+      "subtitle": "Skapa ett konto med {app}",
+      "subtitleGeneric": "Skapa ett konto för att fortsätta",
+      "haveAccount": "Har du redan ett konto?"
     },
     "sso": {
       "linkedAccounts": "Länkade konton",
@@ -822,7 +837,13 @@
     "error_expired": "Registreringssessionen har löpt ut. Försök igen.",
     "error_handle_required": "Välj ett användarnamn",
     "emailVerifiedByProvider": "Denna e-post är verifierad av {provider}. Ingen ytterligare verifiering behövs.",
-    "emailChangedNeedsVerification": "Om du använder en annan e-post måste du verifiera den."
+    "emailChangedNeedsVerification": "Om du använder en annan e-post måste du verifiera den.",
+    "infoAfterTitle": "Efter att du skapat ditt konto",
+    "infoAddPassword": "Lägg till ett lösenord för traditionell inloggning",
+    "infoAddPasskey": "Konfigurera en nyckel för lösenordsfri inloggning",
+    "infoLinkProviders": "Länka ytterligare SSO-leverantörer",
+    "infoChangeHandle": "Byt användarnamn eller använd en egen domän",
+    "tryAgain": "Försök igen"
   },
   "verify": {
     "title": "Verifiera ditt konto",
@@ -886,7 +907,8 @@
     "success": "Lösenord återställt!",
     "requestNewCode": "Begär ny kod",
     "passwordsMismatch": "Lösenorden matchar inte",
-    "passwordLength": "Lösenordet måste vara minst 8 tecken"
+    "passwordLength": "Lösenordet måste vara minst 8 tecken",
+    "multipleAccountsWarning": "Flera konton delar denna e-post. Återställningskoden skickades till det senast skapade kontot. Använd ditt användarnamn istället för ett specifikt konto."
   },
   "recoverPasskey": {
     "title": "Återställ ditt konto",

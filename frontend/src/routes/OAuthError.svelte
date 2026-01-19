@@ -1,5 +1,7 @@
 <script lang="ts">
   import { _ } from '../lib/i18n'
+  import { routes, buildUrl } from '../lib/types/routes'
+  import { getRequestUriFromUrl } from '../lib/oauth'
 
   function getError(): string {
     const params = new URLSearchParams(window.location.search)
@@ -15,11 +17,19 @@
     window.history.back()
   }
 
+  function handleSignIn() {
+    const requestUri = getRequestUriFromUrl()
+    const url = requestUri
+      ? buildUrl(routes.oauthLogin, { request_uri: requestUri })
+      : routes.login
+    window.location.href = `/app${url}`
+  }
+
   let error = $derived(getError())
   let errorDescription = $derived(getErrorDescription())
 </script>
 
-<div class="oauth-error-container">
+<div class="page-sm text-center">
   <h1>{$_('oauth.error.title')}</h1>
 
   <div class="error-box">
@@ -29,19 +39,17 @@
     {/if}
   </div>
 
-  <button type="button" onclick={handleBack}>
-    {$_('oauth.error.tryAgain')}
-  </button>
+  <div class="actions">
+    <button type="button" onclick={handleBack}>
+      {$_('oauth.error.tryAgain')}
+    </button>
+    <button type="button" class="secondary" onclick={handleSignIn}>
+      {$_('common.signIn')}
+    </button>
+  </div>
 </div>
 
 <style>
-  .oauth-error-container {
-    max-width: var(--width-sm);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-    text-align: center;
-  }
-
   h1 {
     margin: 0 0 var(--space-6) 0;
     color: var(--error-text);
@@ -56,7 +64,7 @@
   }
 
   .error-code {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-base);
     color: var(--error-text);
     margin-bottom: var(--space-2);
@@ -67,17 +75,9 @@
     font-size: var(--text-sm);
   }
 
-  button {
-    padding: var(--space-3) var(--space-6);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    cursor: pointer;
-  }
-
-  button:hover {
-    background: var(--accent-hover);
+  .actions {
+    display: flex;
+    gap: var(--space-3);
+    justify-content: center;
   }
 </style>

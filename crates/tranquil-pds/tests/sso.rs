@@ -1039,7 +1039,7 @@ async fn test_sso_complete_registration_multichannel_discord() {
 
     let redirect_url = body["redirectUrl"].as_str().unwrap();
     assert!(
-        redirect_url.contains("/app/oauth/verify"),
+        redirect_url.contains("/app/verify"),
         "Non-auto-verified channel should redirect to verify, got: {}",
         redirect_url
     );

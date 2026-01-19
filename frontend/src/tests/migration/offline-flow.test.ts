@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createOfflineInboundMigrationFlow } from "../../lib/migration/offline-flow.svelte";
+import { createOfflineInboundMigrationFlow } from "../../lib/migration/offline-flow.svelte.ts";
 
 const OFFLINE_STORAGE_KEY = "tranquil_offline_migration_state";
 

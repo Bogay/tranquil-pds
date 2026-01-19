@@ -18,6 +18,8 @@ use uuid::Uuid;
 
 use super::user::map_sqlx_error;
 
+const REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS: i64 = 600;
+
 fn to_json<T: serde::Serialize>(value: &T) -> Result<serde_json::Value, DbError> {
     serde_json::to_value(value).map_err(|e| {
         tracing::error!("JSON serialization error: {}", e);
@@ -462,15 +464,18 @@ impl OAuthRepository for PostgresOAuthRepository {
         did: &Did,
         device_id: Option<&DeviceId>,
     ) -> Result<(), DbError> {
+        let extended_expiry =
+            chrono::Utc::now() + chrono::Duration::seconds(REGISTRATION_FLOW_EXTENDED_EXPIRY_SECS);
         sqlx::query!(
             r#"
             UPDATE oauth_authorization_request
-            SET did = $2, device_id = $3
+            SET did = $2, device_id = $3, expires_at = $4
             WHERE id = $1
             "#,
             request_id.as_str(),
             did.as_str(),
-            device_id.map(|d| d.as_str())
+            device_id.map(|d| d.as_str()),
+            extended_expiry
         )
         .execute(&self.pool)
         .await

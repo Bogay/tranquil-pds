@@ -6,8 +6,6 @@
   import { isLoading as i18nLoading } from 'svelte-i18n'
   import Toast from './components/Toast.svelte'
   import Login from './routes/Login.svelte'
-  import Register from './routes/Register.svelte'
-  import RegisterPasskey from './routes/RegisterPasskey.svelte'
   import RegisterSso from './routes/RegisterSso.svelte'
   import Verify from './routes/Verify.svelte'
   import ResetPassword from './routes/ResetPassword.svelte'
@@ -29,7 +27,9 @@
   import OAuthPasskey from './routes/OAuthPasskey.svelte'
   import OAuthDelegation from './routes/OAuthDelegation.svelte'
   import OAuthError from './routes/OAuthError.svelte'
-  import OAuthSsoRegister from './routes/OAuthSsoRegister.svelte'
+  import SsoRegisterComplete from './routes/SsoRegisterComplete.svelte'
+  import Register from './routes/Register.svelte'
+  import RegisterPassword from './routes/RegisterPassword.svelte'
   import Security from './routes/Security.svelte'
   import TrustedDevices from './routes/TrustedDevices.svelte'
   import Controllers from './routes/Controllers.svelte'
@@ -98,12 +98,6 @@
     switch (path) {
       case '/login':
         return Login
-      case '/register':
-        return RegisterPasskey
-      case '/register-password':
-        return Register
-      case '/register-sso':
-        return RegisterSso
       case '/verify':
         return Verify
       case '/reset-password':
@@ -145,7 +139,14 @@
       case '/oauth/error':
         return OAuthError
       case '/oauth/sso-register':
-        return OAuthSsoRegister
+        return SsoRegisterComplete
+      case '/register':
+      case '/oauth/register':
+        return Register
+      case '/oauth/register-sso':
+        return RegisterSso
+      case '/oauth/register-password':
+        return RegisterPassword
       case '/security':
         return Security
       case '/trusted-devices':
@@ -167,6 +168,7 @@
 
   let currentPath = $derived(getCurrentPath())
   let CurrentComponent = $derived(getComponent(currentPath))
+
 </script>
 
 <main>

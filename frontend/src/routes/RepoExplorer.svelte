@@ -561,7 +561,7 @@
 
   .did {
     margin: var(--space-1) 0 0 0;
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-muted);
     word-break: break-all;
@@ -583,7 +583,7 @@
   }
 
   .error-code {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     opacity: 0.9;
   }
@@ -788,13 +788,13 @@
   }
 
   .rkey {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-weight: var(--font-medium);
     color: var(--accent);
   }
 
   .cid {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-muted);
   }
@@ -804,7 +804,7 @@
     padding: var(--space-2);
     background: var(--bg-secondary);
     border-radius: var(--radius-md);
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-secondary);
     white-space: pre-wrap;
@@ -855,11 +855,6 @@
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-
   .record-detail {
     display: flex;
     flex-direction: column;
@@ -889,7 +884,7 @@
   }
 
   .mono {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     word-break: break-all;
   }
@@ -944,7 +939,7 @@
     padding: var(--space-4);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     background: var(--bg-input);
     color: var(--text-primary);
@@ -1001,8 +996,4 @@
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
 </style>

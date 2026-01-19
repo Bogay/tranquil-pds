@@ -34,6 +34,10 @@ export interface RegistrationFlowState {
   error: string | null;
   submitting: boolean;
   pdsHostname: string;
+  emailInUse: boolean;
+  discordInUse: boolean;
+  telegramInUse: boolean;
+  signalInUse: boolean;
 }
 
 export function createRegistrationFlow(
@@ -63,6 +67,10 @@ export function createRegistrationFlow(
     error: null,
     submitting: false,
     pdsHostname,
+    emailInUse: false,
+    discordInUse: false,
+    telegramInUse: false,
+    signalInUse: false,
   });
 
   function getPdsEndpoint(): string {
@@ -102,6 +110,36 @@ export function createRegistrationFlow(
       state.error = err.message || "An error occurred";
     } else {
       state.error = "An error occurred";
+    }
+  }
+
+  async function checkEmailInUse(email: string): Promise<void> {
+    if (!email.trim() || !email.includes("@")) {
+      state.emailInUse = false;
+      return;
+    }
+    try {
+      const result = await api.checkEmailInUse(email.trim());
+      state.emailInUse = result.inUse;
+    } catch {
+      state.emailInUse = false;
+    }
+  }
+
+  async function checkCommsChannelInUse(
+    channel: "discord" | "telegram" | "signal",
+    identifier: string,
+  ): Promise<void> {
+    const trimmed = identifier.trim();
+    if (!trimmed) {
+      state[`${channel}InUse`] = false;
+      return;
+    }
+    try {
+      const result = await api.checkCommsChannelInUse(channel, trimmed);
+      state[`${channel}InUse`] = result.inUse;
+    } catch {
+      state[`${channel}InUse`] = false;
     }
   }
 
@@ -356,6 +394,73 @@ export function createRegistrationFlow(
     }
   }
 
+  let checkingVerification = false;
+
+  async function checkAndAdvanceIfVerified(): Promise<boolean> {
+    if (checkingVerification || !state.account) return false;
+
+    checkingVerification = true;
+    try {
+      const result = await api.checkEmailVerified(state.account.did);
+      if (!result.verified) return false;
+
+      if (state.info.didType === "web-external") {
+        const password = state.mode === "passkey"
+          ? state.account.appPassword!
+          : state.info.password!;
+        const session = await api.createSession(state.account.did, password);
+        state.session = {
+          accessJwt: session.accessJwt,
+          refreshJwt: session.refreshJwt,
+        };
+
+        if (state.externalDidWeb.keyMode === "byod") {
+          const credentials = await api.getRecommendedDidCredentials(
+            session.accessJwt,
+          );
+          const newPublicKeyMultibase =
+            credentials.verificationMethods?.atproto?.replace("did:key:", "") ||
+            "";
+
+          const didDoc = generateDidDocument(
+            state.info.externalDid!.trim(),
+            newPublicKeyMultibase,
+            state.account.handle,
+            getPdsEndpoint(),
+          );
+          state.externalDidWeb.updatedDidDocument = JSON.stringify(
+            didDoc,
+            null,
+            "\t",
+          );
+          state.step = "updated-did-doc";
+          persistState();
+        } else {
+          await api.activateAccount(session.accessJwt);
+          await finalizeSession();
+          state.step = "redirect-to-dashboard";
+        }
+      } else {
+        const password = state.mode === "passkey"
+          ? state.account.appPassword!
+          : state.info.password!;
+        const session = await api.createSession(state.account.did, password);
+        state.session = {
+          accessJwt: session.accessJwt,
+          refreshJwt: session.refreshJwt,
+        };
+        await finalizeSession();
+        state.step = "redirect-to-dashboard";
+      }
+
+      return true;
+    } catch {
+      return false;
+    } finally {
+      checkingVerification = false;
+    }
+  }
+
   function goBack() {
     switch (state.step) {
       case "key-choice":
@@ -413,9 +518,12 @@ export function createRegistrationFlow(
     setPasskeyComplete,
     proceedFromAppPassword,
     verifyAccount,
+    checkAndAdvanceIfVerified,
     activateAccount,
     finalizeSession,
     goBack,
+    checkEmailInUse,
+    checkCommsChannelInUse,
 
     setError(msg: string) {
       state.error = msg;

@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, vi } from "vitest";
 import { init, register, waitLocale } from "svelte-i18n";
-import { _testResetState } from "../lib/auth.svelte";
+import { _testResetState } from "../lib/auth.svelte.ts";
 
 register("en", () => import("../locales/en.json"));
 

@@ -63,7 +63,7 @@
       const response = await fetch('/oauth/sso/providers')
       if (response.ok) {
         const data = await response.json()
-        ssoProviders = data.providers || []
+        ssoProviders = (data.providers || []).toSorted((a: SsoProvider, b: SsoProvider) => a.name.localeCompare(b.name))
       }
     } catch {
       ssoProviders = []
@@ -337,35 +337,12 @@
     }
   }
 
-  async function handleCancel() {
-    const requestUri = getRequestUri()
-    if (!requestUri) {
-      window.history.back()
-      return
-    }
-
-    submitting = true
-    try {
-      const response = await fetch('/oauth/authorize/deny', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({ request_uri: requestUri })
-      })
-
-      const data = await response.json()
-      if (data.redirect_uri) {
-        window.location.href = data.redirect_uri
-      }
-    } catch {
-      window.history.back()
-    }
+  function handleCancel() {
+    window.location.href = '/'
   }
 </script>
 
-<div class="oauth-login-container">
+<div class="page-sm">
   <header class="page-header">
     <h1>{$_('oauth.login.title')}</h1>
     <p class="subtitle">
@@ -378,7 +355,7 @@
   </header>
 
   {#if error}
-    <div class="error">{error}</div>
+    <div class="message error">{error}</div>
   {/if}
 
   <form onsubmit={handleSubmit}>
@@ -406,7 +383,7 @@
               disabled={submitting || ssoLoading !== null}
             >
               {#if ssoLoading === provider.provider}
-                <span class="loading-spinner"></span>
+                <span class="spinner sm"></span>
               {:else}
                 <SsoIcon provider={provider.icon} size={20} />
               {/if}
@@ -543,25 +520,6 @@
     text-decoration: underline;
   }
 
-  .oauth-login-container {
-    max-width: var(--width-md);
-    margin: var(--space-9) auto;
-    padding: var(--space-7);
-  }
-
-  .page-header {
-    margin-bottom: var(--space-6);
-  }
-
-  h1 {
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0;
-  }
-
   form {
     display: flex;
     flex-direction: column;
@@ -579,6 +537,18 @@
     .auth-methods {
       grid-template-columns: 1fr auto 1fr;
       align-items: start;
+    }
+  }
+
+  .auth-methods.single-method {
+    grid-template-columns: 1fr;
+  }
+
+  @media (min-width: 600px) {
+    .auth-methods.single-method {
+      grid-template-columns: 1fr;
+      max-width: 400px;
+      margin: var(--space-4) auto 0;
     }
   }
 
@@ -652,32 +622,6 @@
     }
   }
 
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-  }
-
-  input[type="text"],
-  input[type="password"] {
-    padding: var(--space-3);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    background: var(--bg-input);
-    color: var(--text-primary);
-  }
-
-  input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-
   .remember-device {
     display: flex;
     align-items: center;
@@ -692,15 +636,6 @@
     height: 16px;
   }
 
-  .error {
-    padding: var(--space-3);
-    background: var(--error-bg);
-    border: 1px solid var(--error-border);
-    border-radius: var(--radius-md);
-    color: var(--error-text);
-    margin-bottom: var(--space-4);
-  }
-
   .actions {
     display: flex;
     gap: var(--space-4);
@@ -709,17 +644,6 @@
 
   .actions button {
     flex: 1;
-    padding: var(--space-3);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    cursor: pointer;
-    transition: background-color var(--transition-fast);
-  }
-
-  .actions button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
   }
 
   .cancel-row {
@@ -756,7 +680,6 @@
   .submit-btn:hover:not(:disabled) {
     background: var(--accent-hover);
   }
-
 
   .passkey-btn {
     display: flex;
@@ -866,32 +789,5 @@
   .sso-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-  }
-
-  .auth-methods.single-method {
-    grid-template-columns: 1fr;
-  }
-
-  @media (min-width: 600px) {
-    .auth-methods.single-method {
-      grid-template-columns: 1fr;
-      max-width: 400px;
-      margin: var(--space-4) auto 0;
-    }
-  }
-
-  .loading-spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--border-color);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

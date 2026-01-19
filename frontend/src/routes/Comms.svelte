@@ -33,6 +33,9 @@
   let verifyingChannel = $state<string | null>(null)
   let verificationCode = $state('')
   let historyLoading = $state(true)
+  let discordInUse = $state(false)
+  let telegramInUse = $state(false)
+  let signalInUse = $state(false)
   let messages = $state<Array<{
     createdAt: string
     channel: string
@@ -131,6 +134,31 @@
   }
   function formatDate(dateStr: string): string {
     return formatDateTime(dateStr)
+  }
+  async function checkChannelInUse(channel: 'discord' | 'telegram' | 'signal', identifier: string) {
+    const trimmed = identifier.trim()
+    if (!trimmed) {
+      switch (channel) {
+        case 'discord': discordInUse = false; break
+        case 'telegram': telegramInUse = false; break
+        case 'signal': signalInUse = false; break
+      }
+      return
+    }
+    try {
+      const result = await api.checkCommsChannelInUse(channel, trimmed)
+      switch (channel) {
+        case 'discord': discordInUse = result.inUse; break
+        case 'telegram': telegramInUse = result.inUse; break
+        case 'signal': signalInUse = result.inUse; break
+      }
+    } catch {
+      switch (channel) {
+        case 'discord': discordInUse = false; break
+        case 'telegram': telegramInUse = false; break
+        case 'signal': signalInUse = false; break
+      }
+    }
   }
   const channels = ['email', 'discord', 'telegram', 'signal']
   function getChannelName(id: string): string {
@@ -242,6 +270,7 @@
                     id="discord"
                     type="text"
                     bind:value={discordId}
+                    onblur={() => checkChannelInUse('discord', discordId)}
                     placeholder={$_('register.discordIdPlaceholder')}
                     disabled={saving || !isChannelAvailableOnServer('discord')}
                   />
@@ -250,6 +279,9 @@
                   {/if}
                 </div>
                 <p class="config-hint">{$_('comms.discordIdHint')}</p>
+                {#if discordInUse}
+                  <p class="config-hint warning">{$_('comms.discordInUseWarning')}</p>
+                {/if}
                 {#if verifyingChannel === 'discord'}
                   <div class="verify-form">
                     <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
@@ -277,6 +309,7 @@
                     id="telegram"
                     type="text"
                     bind:value={telegramUsername}
+                    onblur={() => checkChannelInUse('telegram', telegramUsername)}
                     placeholder={$_('register.telegramUsernamePlaceholder')}
                     disabled={saving || !isChannelAvailableOnServer('telegram')}
                   />
@@ -285,6 +318,9 @@
                   {/if}
                 </div>
                 <p class="config-hint">{$_('comms.telegramHint')}</p>
+                {#if telegramInUse}
+                  <p class="config-hint warning">{$_('comms.telegramInUseWarning')}</p>
+                {/if}
                 {#if verifyingChannel === 'telegram'}
                   <div class="verify-form">
                     <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
@@ -312,6 +348,7 @@
                     id="signal"
                     type="tel"
                     bind:value={signalNumber}
+                    onblur={() => checkChannelInUse('signal', signalNumber)}
                     placeholder={$_('register.signalNumberPlaceholder')}
                     disabled={saving || !isChannelAvailableOnServer('signal')}
                   />
@@ -320,6 +357,9 @@
                   {/if}
                 </div>
                 <p class="config-hint">{$_('comms.signalHint')}</p>
+                {#if signalInUse}
+                  <p class="config-hint warning">{$_('comms.signalInUseWarning')}</p>
+                {/if}
                 {#if verifyingChannel === 'signal'}
                   <div class="verify-form">
                     <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
@@ -573,6 +613,10 @@
     margin: 0;
   }
 
+  .config-hint.warning {
+    color: var(--warning-text);
+  }
+
   .actions {
     display: flex;
     justify-content: flex-end;
@@ -677,11 +721,6 @@
     margin-bottom: var(--space-1);
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-
   .no-messages {
     color: var(--text-secondary);
     font-style: italic;
@@ -772,8 +811,4 @@
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
 </style>

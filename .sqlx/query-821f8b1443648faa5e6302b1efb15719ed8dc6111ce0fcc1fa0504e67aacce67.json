@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_authorization_request\n            SET did = $2, device_id = $3, expires_at = $4\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "821f8b1443648faa5e6302b1efb15719ed8dc6111ce0fcc1fa0504e67aacce67"
+}

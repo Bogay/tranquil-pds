@@ -361,7 +361,7 @@
   }
 
   .handle-item span {
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
   }
 
@@ -475,8 +475,4 @@
     height: 250px;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
 </style>

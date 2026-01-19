@@ -310,6 +310,23 @@ export const api = {
     });
   },
 
+  checkEmailInUse(email: string): Promise<{ inUse: boolean }> {
+    return xrpc("_account.checkEmailInUse", {
+      method: "POST",
+      body: { email },
+    });
+  },
+
+  checkCommsChannelInUse(
+    channel: "email" | "discord" | "telegram" | "signal",
+    identifier: string,
+  ): Promise<{ inUse: boolean }> {
+    return xrpc("_account.checkCommsChannelInUse", {
+      method: "POST",
+      body: { channel, identifier },
+    });
+  },
+
   async getSession(token: AccessToken): Promise<Session> {
     const raw = await xrpc<unknown>("com.atproto.server.getSession", { token });
     return castSession(raw);

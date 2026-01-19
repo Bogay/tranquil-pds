@@ -1,15 +1,15 @@
-export * from "./types";
-export * from "./atproto-client";
-export * from "./storage";
-export * from "./blob-migration";
+export * from "./types.ts";
+export * from "./atproto-client.ts";
+export * from "./storage.ts";
+export * from "./blob-migration.ts";
 export {
   createInboundMigrationFlow,
   type InboundMigrationFlow,
-} from "./flow.svelte";
+} from "./flow.svelte.ts";
 export {
   clearOfflineState,
   createOfflineInboundMigrationFlow,
   getOfflineResumeInfo,
   hasPendingOfflineMigration,
-} from "./offline-flow.svelte";
-export type { OfflineInboundMigrationFlow } from "./offline-flow.svelte";
+} from "./offline-flow.svelte.ts";
+export type { OfflineInboundMigrationFlow } from "./offline-flow.svelte.ts";

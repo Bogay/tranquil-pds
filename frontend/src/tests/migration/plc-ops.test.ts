@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PlcOps, plcOps } from "../../lib/migration/plc-ops";
+import { PlcOps, plcOps } from "../../lib/migration/plc-ops.ts";
 
 describe("migration/plc-ops", () => {
   beforeEach(() => {

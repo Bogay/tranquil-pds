@@ -549,7 +549,7 @@ impl UserRepository for PostgresUserRepository {
         identifier: &str,
     ) -> Result<Option<bool>, DbError> {
         let row = sqlx::query_scalar!(
-            "SELECT email_verified FROM users WHERE email = $1 OR handle = $1",
+            "SELECT email_verified FROM users WHERE did = $1 OR email = $1 OR handle = $1",
             identifier
         )
         .fetch_optional(&self.pool)
@@ -717,26 +717,15 @@ impl UserRepository for PostgresUserRepository {
     }
 
     async fn verify_email_channel(&self, user_id: Uuid, email: &str) -> Result<bool, DbError> {
-        let result = sqlx::query!(
+        sqlx::query!(
             "UPDATE users SET email = $1, email_verified = TRUE, updated_at = NOW() WHERE id = $2",
             email,
             user_id
         )
         .execute(&self.pool)
-        .await;
-        match result {
-            Ok(_) => Ok(true),
-            Err(e) => {
-                if e.as_database_error()
-                    .map(|db| db.is_unique_violation())
-                    .unwrap_or(false)
-                {
-                    Ok(false)
-                } else {
-                    Err(map_sqlx_error(e))
-                }
-            }
-        }
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(true)
     }
 
     async fn verify_discord_channel(&self, user_id: Uuid, discord_id: &str) -> Result<(), DbError> {
@@ -1590,6 +1579,55 @@ impl UserRepository for PostgresUserRepository {
         )
         .fetch_optional(&self.pool)
         .await
+        .map_err(map_sqlx_error)
+    }
+
+    async fn count_accounts_by_email(&self, email: &str) -> Result<i64, DbError> {
+        sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1) AND deactivated_at IS NULL",
+            email
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map(|c| c.unwrap_or(0))
+        .map_err(map_sqlx_error)
+    }
+
+    async fn count_accounts_by_comms_identifier(
+        &self,
+        channel: CommsChannel,
+        identifier: &str,
+    ) -> Result<i64, DbError> {
+        let query = match channel {
+            CommsChannel::Email => {
+                "SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1) AND deactivated_at IS NULL"
+            }
+            CommsChannel::Discord => {
+                "SELECT COUNT(*) FROM users WHERE discord_id = $1 AND deactivated_at IS NULL"
+            }
+            CommsChannel::Telegram => {
+                "SELECT COUNT(*) FROM users WHERE LOWER(telegram_username) = LOWER($1) AND deactivated_at IS NULL"
+            }
+            CommsChannel::Signal => {
+                "SELECT COUNT(*) FROM users WHERE signal_number = $1 AND deactivated_at IS NULL"
+            }
+        };
+        sqlx::query_scalar(query)
+            .bind(identifier)
+            .fetch_one(&self.pool)
+            .await
+            .map(|c: Option<i64>| c.unwrap_or(0))
+            .map_err(map_sqlx_error)
+    }
+
+    async fn get_handles_by_email(&self, email: &str) -> Result<Vec<Handle>, DbError> {
+        sqlx::query_scalar!(
+            "SELECT handle FROM users WHERE LOWER(email) = LOWER($1) AND deactivated_at IS NULL ORDER BY created_at DESC",
+            email
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map(|handles| handles.into_iter().map(Handle::from).collect())
         .map_err(map_sqlx_error)
     }
 

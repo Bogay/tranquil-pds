@@ -1,6 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::BearerAuth;
+use crate::auth::{BearerAuth, generate_app_password};
 use crate::delegation::{DelegationActionType, intersect_scopes};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
@@ -154,17 +154,7 @@ pub async fn create_app_password(
         (input.scopes.clone(), None)
     };
 
-    let password: String = (0..4)
-        .map(|_| {
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
-            let chars: Vec<char> = "abcdefghijklmnopqrstuvwxyz234567".chars().collect();
-            (0..4)
-                .map(|_| chars[rng.gen_range(0..chars.len())])
-                .collect::<String>()
-        })
-        .collect::<Vec<String>>()
-        .join("-");
+    let password = generate_app_password();
 
     let password_clone = password.clone();
     let password_hash = match tokio::task::spawn_blocking(move || {

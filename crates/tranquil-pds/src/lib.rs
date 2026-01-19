@@ -296,6 +296,14 @@ pub fn app(state: AppState) -> Router {
             get(api::server::check_email_update_status),
         )
         .route(
+            "/_account.checkEmailInUse",
+            post(api::server::check_email_in_use),
+        )
+        .route(
+            "/_account.checkCommsChannelInUse",
+            post(api::server::check_comms_channel_in_use),
+        )
+        .route(
             "/com.atproto.server.reserveSigningKey",
             post(api::server::reserve_signing_key),
         )
@@ -556,6 +564,10 @@ pub fn app(state: AppState) -> Router {
         .route("/passkey/start", post(oauth::endpoints::passkey_start))
         .route("/passkey/finish", post(oauth::endpoints::passkey_finish))
         .route("/authorize/deny", post(oauth::endpoints::authorize_deny))
+        .route(
+            "/register/complete",
+            post(oauth::endpoints::register_complete),
+        )
         .route("/authorize/consent", get(oauth::endpoints::consent_get))
         .route("/authorize/consent", post(oauth::endpoints::consent_post))
         .route(

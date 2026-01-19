@@ -143,17 +143,21 @@
     "email": "이메일",
     "emailAddress": "이메일 주소",
     "emailPlaceholder": "you@example.com",
+    "emailInUseWarning": "이 이메일은 이미 다른 계정과 연결되어 있습니다. 계속 사용할 수 있지만, 계정 복구 시 핸들이 필요할 수 있습니다.",
     "discord": "Discord",
     "discordId": "Discord 사용자 ID",
     "discordIdPlaceholder": "Discord 사용자 ID",
     "discordIdHint": "숫자 Discord 사용자 ID (개발자 모드를 활성화하여 찾기)",
+    "discordInUseWarning": "이 Discord ID는 이미 다른 계정과 연결되어 있습니다.",
     "telegram": "Telegram",
     "telegramUsername": "Telegram 사용자 이름",
     "telegramUsernamePlaceholder": "@yourusername",
+    "telegramInUseWarning": "이 Telegram 사용자 이름은 이미 다른 계정과 연결되어 있습니다.",
     "signal": "Signal",
     "signalNumber": "Signal 전화번호",
     "signalNumberPlaceholder": "+821012345678",
     "signalNumberHint": "국가 코드 포함 (예: 한국 +82)",
+    "signalInUseWarning": "이 Signal 번호는 이미 다른 계정과 연결되어 있습니다.",
     "notConfigured": "구성되지 않음",
     "inviteCode": "초대 코드",
     "inviteCodePlaceholder": "초대 코드 입력",
@@ -269,6 +273,7 @@
     "newEmail": "새 이메일",
     "newEmailPlaceholder": "new@example.com",
     "changeEmailButton": "이메일 변경",
+    "emailInUseWarning": "이 이메일은 이미 다른 계정과 연결되어 있습니다. 계속 사용하실 수 있지만, 계정 복구 시 이메일 대신 핸들을 사용해야 할 수 있습니다.",
     "requesting": "요청 중...",
     "verificationCode": "인증 코드",
     "verificationCodePlaceholder": "인증 코드 입력",
@@ -430,6 +435,7 @@
     "noCodes": "초대 코드가 아직 없습니다",
     "available": "사용 가능",
     "used": "@{handle}이(가) 사용함",
+    "spent": "소진됨",
     "disabled": "비활성화됨",
     "usedBy": "사용자",
     "disableConfirm": "이 초대 코드를 비활성화하시겠습니까? 더 이상 사용할 수 없습니다.",
@@ -570,7 +576,10 @@
     "hideHistory": "기록 숨기기",
     "noMessages": "메시지가 없습니다.",
     "sent": "전송됨",
-    "failed": "실패"
+    "failed": "실패",
+    "discordInUseWarning": "이 Discord ID는 이미 다른 계정과 연결되어 있습니다.",
+    "telegramInUseWarning": "이 Telegram 사용자 이름은 이미 다른 계정과 연결되어 있습니다.",
+    "signalInUseWarning": "이 Signal 번호는 이미 다른 계정과 연결되어 있습니다."
   },
   "repoExplorer": {
     "title": "저장소 탐색기",
@@ -688,6 +697,12 @@
       "usePasskey": "패스키 사용",
       "orContinueWith": "또는 다음으로 계속",
       "orUseCredentials": "또는 자격 증명으로 로그인"
+    },
+    "register": {
+      "title": "계정 만들기",
+      "subtitle": "계속하려면 계정을 만드세요",
+      "subtitleGeneric": "계속하려면 계정을 만드세요",
+      "haveAccount": "이미 계정이 있으신가요? 로그인"
     },
     "sso": {
       "linkedAccounts": "연결된 계정",
@@ -822,7 +837,13 @@
     "error_expired": "등록 세션이 만료되었습니다. 다시 시도해 주세요.",
     "error_handle_required": "핸들을 선택해 주세요",
     "emailVerifiedByProvider": "이 이메일은 {provider}에서 인증되었습니다. 추가 인증이 필요하지 않습니다.",
-    "emailChangedNeedsVerification": "다른 이메일을 사용하시면 인증이 필요합니다."
+    "emailChangedNeedsVerification": "다른 이메일을 사용하시면 인증이 필요합니다.",
+    "infoAfterTitle": "계정 생성 후",
+    "infoAddPassword": "기존 로그인을 위한 비밀번호 추가",
+    "infoAddPasskey": "비밀번호 없는 로그인을 위한 패스키 설정",
+    "infoLinkProviders": "추가 SSO 제공자 연결",
+    "infoChangeHandle": "핸들 변경 또는 사용자 정의 도메인 사용",
+    "tryAgain": "다시 시도"
   },
   "verify": {
     "title": "계정 인증",
@@ -886,7 +907,8 @@
     "success": "비밀번호가 재설정되었습니다!",
     "requestNewCode": "새 코드 요청",
     "passwordsMismatch": "비밀번호가 일치하지 않습니다",
-    "passwordLength": "비밀번호는 8자 이상이어야 합니다"
+    "passwordLength": "비밀번호는 8자 이상이어야 합니다",
+    "multipleAccountsWarning": "여러 계정에서 이 이메일을 공유하고 있습니다. 재설정 코드는 가장 최근에 생성된 계정으로 전송되었습니다. 특정 계정을 복구하려면 핸들을 사용하세요."
   },
   "recoverPasskey": {
     "title": "계정 복구",

@@ -425,7 +425,7 @@
   }
 
   .mono {
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     word-break: break-all;
   }
@@ -521,11 +521,6 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     animation: skeleton-pulse 1.5s ease-in-out infinite;
-  }
-
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
   }
 
   .deactivated-banner {

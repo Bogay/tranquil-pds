@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 use subtle::ConstantTimeEq;
 use tracing::{error, info, warn};
+use tranquil_db_traits::CommsChannel;
 
 const EMAIL_UPDATE_TTL: Duration = Duration::from_secs(30 * 60);
 
@@ -92,22 +93,23 @@ pub async fn request_email_update(
         let formatted_code = crate::auth::verification_token::format_token_for_display(&code);
 
         if let Some(Json(ref inp)) = input
-            && let Some(ref new_email) = inp.new_email {
-                let new_email = new_email.trim().to_lowercase();
-                if !new_email.is_empty() && crate::api::validation::is_valid_email(&new_email) {
-                    let pending = PendingEmailUpdate {
-                        new_email,
-                        token_hash: hash_token(&code),
-                        authorized: false,
-                    };
-                    if let Ok(json) = serde_json::to_string(&pending) {
-                        let cache_key = email_update_cache_key(&auth.0.did);
-                        if let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
-                            warn!("Failed to cache pending email update: {:?}", e);
-                        }
+            && let Some(ref new_email) = inp.new_email
+        {
+            let new_email = new_email.trim().to_lowercase();
+            if !new_email.is_empty() && crate::api::validation::is_valid_email(&new_email) {
+                let pending = PendingEmailUpdate {
+                    new_email,
+                    token_hash: hash_token(&code),
+                    authorized: false,
+                };
+                if let Ok(json) = serde_json::to_string(&pending) {
+                    let cache_key = email_update_cache_key(&auth.0.did);
+                    if let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
+                        warn!("Failed to cache pending email update: {:?}", e);
                     }
                 }
             }
+        }
 
         let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
         if let Err(e) = crate::comms::comms_repo::enqueue_email_update_token(
@@ -278,11 +280,13 @@ pub async fn update_email(
         let cache_key = email_update_cache_key(did);
         if let Some(pending_json) = state.cache.get(&cache_key).await
             && let Ok(pending) = serde_json::from_str::<PendingEmailUpdate>(&pending_json)
-                && pending.authorized && pending.new_email == new_email {
-                    authorized_via_link = true;
-                    let _ = state.cache.delete(&cache_key).await;
-                    info!(did = %did, "Email update completed via link authorization");
-                }
+            && pending.authorized
+            && pending.new_email == new_email
+        {
+            authorized_via_link = true;
+            let _ = state.cache.delete(&cache_key).await;
+            info!(did = %did, "Email update completed via link authorization");
+        }
 
         if !authorized_via_link {
             let Some(ref t) = input.token else {
@@ -316,14 +320,6 @@ pub async fn update_email(
                 }
             }
         }
-    }
-
-    if let Ok(true) = state
-        .user_repo
-        .check_email_exists(&new_email, user_id)
-        .await
-    {
-        return ApiError::InvalidRequest("Email is already in use".into()).into_response();
     }
 
     if let Err(e) = state.user_repo.update_email(user_id, &new_email).await {
@@ -481,10 +477,11 @@ pub async fn authorize_email_update(
 
     pending.authorized = true;
     if let Ok(json) = serde_json::to_string(&pending)
-        && let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
-            warn!("Failed to update pending email authorization: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
+        && let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await
+    {
+        warn!("Failed to update pending email authorization: {:?}", e);
+        return ApiError::InternalError(None).into_response();
+    }
 
     info!(did = %did, "Email update authorized via link click");
 
@@ -538,6 +535,95 @@ pub async fn check_email_update_status(
         "pending": true,
         "authorized": pending.authorized,
         "newEmail": pending.new_email,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct CheckEmailInUseInput {
+    pub email: String,
+}
+
+pub async fn check_email_in_use(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<CheckEmailInUseInput>,
+) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state
+        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
+        .await
+    {
+        return ApiError::RateLimitExceeded(None).into_response();
+    }
+
+    let email = input.email.trim().to_lowercase();
+    if email.is_empty() {
+        return ApiError::InvalidRequest("email is required".into()).into_response();
+    }
+
+    let count = match state.user_repo.count_accounts_by_email(&email).await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("DB error checking email usage: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    Json(json!({
+        "inUse": count > 0,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub struct CheckCommsChannelInUseInput {
+    pub channel: String,
+    pub identifier: String,
+}
+
+pub async fn check_comms_channel_in_use(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(input): Json<CheckCommsChannelInUseInput>,
+) -> Response {
+    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
+    if !state
+        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
+        .await
+    {
+        return ApiError::RateLimitExceeded(None).into_response();
+    }
+
+    let channel = match input.channel.to_lowercase().as_str() {
+        "email" => CommsChannel::Email,
+        "discord" => CommsChannel::Discord,
+        "telegram" => CommsChannel::Telegram,
+        "signal" => CommsChannel::Signal,
+        _ => {
+            return ApiError::InvalidRequest("invalid channel".into()).into_response();
+        }
+    };
+
+    let identifier = input.identifier.trim();
+    if identifier.is_empty() {
+        return ApiError::InvalidRequest("identifier is required".into()).into_response();
+    }
+
+    let count = match state
+        .user_repo
+        .count_accounts_by_comms_identifier(channel, identifier)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!("DB error checking comms channel usage: {:?}", e);
+            return ApiError::InternalError(None).into_response();
+        }
+    };
+
+    Json(json!({
+        "inUse": count > 0,
     }))
     .into_response()
 }

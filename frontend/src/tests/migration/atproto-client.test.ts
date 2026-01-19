@@ -12,8 +12,8 @@ import {
   loadDPoPKey,
   prepareWebAuthnCreationOptions,
   saveDPoPKey,
-} from "../../lib/migration/atproto-client";
-import type { OAuthServerMetadata } from "../../lib/migration/types";
+} from "../../lib/migration/atproto-client.ts";
+import type { OAuthServerMetadata } from "../../lib/migration/types.ts";
 
 const DPOP_KEY_STORAGE = "migration_dpop_key";
 

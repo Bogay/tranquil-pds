@@ -143,17 +143,21 @@
     "email": "メール",
     "emailAddress": "メールアドレス",
     "emailPlaceholder": "you@example.com",
+    "emailInUseWarning": "このメールアドレスは既に別のアカウントに関連付けられています。引き続き使用できますが、アカウント回復にはハンドルが必要になる場合があります。",
     "discord": "Discord",
     "discordId": "Discord ユーザー ID",
     "discordIdPlaceholder": "Discord ユーザー ID",
     "discordIdHint": "数値の Discord ユーザー ID（開発者モードを有効にして確認）",
+    "discordInUseWarning": "この Discord ID は既に別のアカウントに関連付けられています。",
     "telegram": "Telegram",
     "telegramUsername": "Telegram ユーザー名",
     "telegramUsernamePlaceholder": "@yourusername",
+    "telegramInUseWarning": "この Telegram ユーザー名は既に別のアカウントに関連付けられています。",
     "signal": "Signal",
     "signalNumber": "Signal 電話番号",
     "signalNumberPlaceholder": "+81XXXXXXXXXX",
     "signalNumberHint": "国番号を含めてください（例: 日本は +81）",
+    "signalInUseWarning": "この Signal 番号は既に別のアカウントに関連付けられています。",
     "notConfigured": "未設定",
     "inviteCode": "招待コード",
     "inviteCodePlaceholder": "招待コードを入力",
@@ -268,6 +272,7 @@
     "currentEmail": "現在: {email}",
     "newEmail": "新しいメール",
     "newEmailPlaceholder": "new@example.com",
+    "emailInUseWarning": "このメールアドレスは既に別のアカウントで使用されています。引き続き使用できますが、アカウント回復にはハンドルが必要になる場合があります。",
     "changeEmailButton": "メールを変更",
     "requesting": "リクエスト中...",
     "verificationCode": "確認コード",
@@ -430,6 +435,7 @@
     "noCodes": "招待コードはまだありません",
     "available": "利用可能",
     "used": "@{handle} が使用済み",
+    "spent": "使用済み",
     "disabled": "無効",
     "usedBy": "使用者",
     "disableConfirm": "この招待コードを無効にしますか？使用できなくなります。",
@@ -570,7 +576,10 @@
     "hideHistory": "履歴を隠す",
     "noMessages": "メッセージが見つかりません。",
     "sent": "送信済み",
-    "failed": "失敗"
+    "failed": "失敗",
+    "discordInUseWarning": "この Discord ID は既に別のアカウントに関連付けられています。",
+    "telegramInUseWarning": "この Telegram ユーザー名は既に別のアカウントに関連付けられています。",
+    "signalInUseWarning": "この Signal 番号は既に別のアカウントに関連付けられています。"
   },
   "repoExplorer": {
     "title": "リポジトリエクスプローラー",
@@ -688,6 +697,12 @@
       "usePasskey": "パスキーを使用",
       "orContinueWith": "または次の方法で続行",
       "orUseCredentials": "または認証情報でサインイン"
+    },
+    "register": {
+      "title": "アカウント作成",
+      "subtitle": "続行するにはアカウントを作成してください",
+      "subtitleGeneric": "続行するにはアカウントを作成してください",
+      "haveAccount": "すでにアカウントをお持ちですか？サインイン"
     },
     "sso": {
       "linkedAccounts": "連携アカウント",
@@ -822,7 +837,13 @@
     "error_expired": "登録セッションが期限切れです。もう一度お試しください。",
     "error_handle_required": "ハンドルを選択してください",
     "emailVerifiedByProvider": "このメールアドレスは{provider}で確認済みです。追加の確認は不要です。",
-    "emailChangedNeedsVerification": "別のメールアドレスを使用する場合は、確認が必要です。"
+    "emailChangedNeedsVerification": "別のメールアドレスを使用する場合は、確認が必要です。",
+    "infoAfterTitle": "アカウント作成後",
+    "infoAddPassword": "従来のログイン用にパスワードを追加",
+    "infoAddPasskey": "パスワードレスサインイン用にパスキーを設定",
+    "infoLinkProviders": "追加のSSOプロバイダーを連携",
+    "infoChangeHandle": "ハンドルの変更またはカスタムドメインの使用",
+    "tryAgain": "もう一度試す"
   },
   "verify": {
     "title": "アカウント確認",
@@ -874,6 +895,7 @@
     "sendCode": "リセットコードを送信",
     "sending": "送信中...",
     "codeSent": "パスワードリセットコードを送信しました！優先通知チャンネルを確認してください。",
+    "multipleAccountsWarning": "複数のアカウントがこのメールを共有しています。リセットコードは最後に作成されたアカウントに送信されました。特定のアカウントにはハンドルを使用してください。",
     "enterCode": "受け取ったコードと新しいパスワードを入力してください。",
     "code": "リセットコード",
     "codePlaceholder": "リセットコードを入力",

@@ -23,8 +23,9 @@ pub use account_status::{
 };
 pub use app_password::{create_app_password, list_app_passwords, revoke_app_password};
 pub use email::{
-    authorize_email_update, check_email_update_status, check_email_verified, confirm_email,
-    request_email_update, update_email,
+    authorize_email_update, check_comms_channel_in_use, check_email_in_use,
+    check_email_update_status, check_email_verified, confirm_email, request_email_update,
+    update_email,
 };
 pub use invite::{create_invite_code, create_invite_codes, get_account_invite_codes};
 pub use logo::get_logo;

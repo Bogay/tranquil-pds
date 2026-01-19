@@ -208,8 +208,8 @@
   {/if}
 
   {#if oauthLoading}
-    <div class="oauth-loading">
-      <div class="loading-spinner"></div>
+    <div class="loading">
+      <div class="spinner md"></div>
       <p>{$_('migration.oauthCompleting')}</p>
     </div>
   {:else if oauthError}
@@ -317,7 +317,7 @@
     flex-direction: column;
     align-items: stretch;
     background: var(--bg-secondary);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     padding: var(--space-6);
     text-align: left;
@@ -411,18 +411,18 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--overlay-bg);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: var(--z-modal);
   }
 
   .modal {
     background: var(--bg-primary);
     border-radius: var(--radius-xl);
     padding: var(--space-6);
-    max-width: 400px;
+    max-width: var(--width-sm);
     width: 90%;
   }
 
@@ -450,7 +450,7 @@
   }
 
   .detail-row:not(:last-child) {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .detail-row .label {
@@ -470,34 +470,6 @@
     display: flex;
     gap: var(--space-3);
     justify-content: flex-end;
-  }
-
-  .oauth-loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-12);
-    text-align: center;
-  }
-
-  .loading-spinner {
-    width: 48px;
-    height: 48px;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-bottom: var(--space-4);
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .oauth-loading p {
-    color: var(--text-secondary);
-    margin: 0;
   }
 
   .oauth-error {

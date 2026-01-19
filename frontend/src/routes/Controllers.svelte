@@ -770,8 +770,4 @@
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
 </style>

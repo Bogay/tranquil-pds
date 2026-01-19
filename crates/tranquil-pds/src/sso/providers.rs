@@ -833,9 +833,10 @@ impl AppleProvider {
         {
             let cache = self.client_secret_cache.read().await;
             if let Some(ref cached) = *cache
-                && cached.expires_at > now + 3600 {
-                    return Ok(cached.secret.clone());
-                }
+                && cached.expires_at > now + 3600
+            {
+                return Ok(cached.secret.clone());
+            }
         }
 
         let (secret, expires_at) = self.generate_client_secret()?;
@@ -1069,15 +1070,16 @@ impl SsoManager {
                 cfg,
                 Some("https://accounts.google.com"),
                 "Google",
-            ) {
-                providers.insert(SsoProviderType::Google, Arc::new(provider));
-            }
+            )
+        {
+            providers.insert(SsoProviderType::Google, Arc::new(provider));
+        }
 
         if let Some(ref cfg) = config.gitlab
             && let Some(provider) = OidcProvider::new(SsoProviderType::Gitlab, cfg, None, "GitLab")
-            {
-                providers.insert(SsoProviderType::Gitlab, Arc::new(provider));
-            }
+        {
+            providers.insert(SsoProviderType::Gitlab, Arc::new(provider));
+        }
 
         if let Some(ref cfg) = config.oidc
             && let Some(provider) = OidcProvider::new(
@@ -1085,9 +1087,10 @@ impl SsoManager {
                 cfg,
                 None,
                 cfg.display_name.as_deref().unwrap_or("SSO"),
-            ) {
-                providers.insert(SsoProviderType::Oidc, Arc::new(provider));
-            }
+            )
+        {
+            providers.insert(SsoProviderType::Oidc, Arc::new(provider));
+        }
 
         if let Some(ref cfg) = config.apple {
             match AppleProvider::new(cfg) {

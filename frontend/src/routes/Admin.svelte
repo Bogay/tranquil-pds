@@ -1010,7 +1010,7 @@
   }
 
   .code {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
   }
 
@@ -1032,7 +1032,7 @@
   }
 
   .action-btn.danger:hover {
-    background: #900;
+    filter: brightness(0.8);
   }
 
   .muted {
@@ -1049,15 +1049,12 @@
 
   .modal-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    inset: 0;
+    background: var(--overlay-bg);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: var(--z-modal);
   }
 
   .modal {
@@ -1117,7 +1114,7 @@
   }
 
   .mono {
-    font-family: monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     word-break: break-all;
   }

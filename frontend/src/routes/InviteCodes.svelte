@@ -152,6 +152,8 @@
                 <span class="status disabled">{$_('inviteCodes.disabled')}</span>
               {:else if code.uses.length > 0}
                 <span class="status used">{$_('inviteCodes.used', { values: { handle: code.uses[0].usedByHandle || code.uses[0].usedBy.split(':').pop() } })}</span>
+              {:else if code.available === 0}
+                <span class="status spent">{$_('inviteCodes.spent')}</span>
               {:else}
                 <span class="status available">{$_('inviteCodes.available')}</span>
               {/if}
@@ -217,7 +219,7 @@
 
   .code-display code {
     font-size: var(--text-lg);
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     flex: 1;
   }
 
@@ -273,7 +275,7 @@
   }
 
   .code-main code {
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
   }
 
@@ -317,6 +319,11 @@
     color: var(--text-secondary);
   }
 
+  .status.spent {
+    background: var(--bg-tertiary);
+    color: var(--text-tertiary);
+  }
+
   .status.disabled {
     background: var(--error-bg);
     color: var(--error-text);
@@ -334,8 +341,4 @@
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
 </style>

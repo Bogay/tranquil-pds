@@ -118,7 +118,7 @@
       const response = await fetch('/oauth/sso/providers')
       if (response.ok) {
         const data = await response.json()
-        ssoProviders = data.providers || []
+        ssoProviders = (data.providers || []).toSorted((a: SsoProvider, b: SsoProvider) => a.name.localeCompare(b.name))
       }
     } catch {
       ssoProviders = []
@@ -212,7 +212,7 @@
           pendingAction = () => handleUnlinkAccount(id)
           showReauthModal = true
         } else {
-          toast.error(data.error_description || data.error || 'Failed to unlink account')
+          toast.error(data.error_description || data.message || data.error || 'Failed to unlink account')
         }
         unlinkingId = null
         return
@@ -1167,7 +1167,7 @@
     border-radius: var(--radius-md);
     text-align: center;
     font-size: var(--text-sm);
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
   }
 
   .passkey-list {
@@ -1411,11 +1411,6 @@
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  @keyframes skeleton-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-
   @media (max-width: 900px) {
     .skeleton-grid {
       grid-template-columns: 1fr;
@@ -1521,12 +1516,6 @@
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   .loading-text {
