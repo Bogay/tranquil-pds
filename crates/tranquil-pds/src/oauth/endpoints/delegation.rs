@@ -127,7 +127,13 @@ pub async fn delegation_auth(
         .await
         .is_err()
     {
-        tracing::warn!("Failed to set delegated DID on authorization request");
+        return Json(DelegationAuthResponse {
+            success: false,
+            needs_totp: None,
+            redirect_uri: None,
+            error: Some("Failed to update authorization request".to_string()),
+        })
+        .into_response();
     }
 
     let grant = match state

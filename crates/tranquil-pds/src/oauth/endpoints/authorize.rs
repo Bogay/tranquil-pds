@@ -311,6 +311,17 @@ pub async fn authorize_get(
 
                 if is_delegated {
                     tracing::info!("Redirecting to delegation auth");
+                    if let Err(e) = state
+                        .oauth_repo
+                        .set_request_did(&request_id, &user.did)
+                        .await
+                    {
+                        tracing::error!(error = %e, "Failed to set delegated DID on authorization request");
+                        return redirect_to_frontend_error(
+                            "server_error",
+                            "Failed to initialize delegation flow",
+                        );
+                    }
                     return redirect_see_other(&format!(
                         "/app/oauth/delegation?request_uri={}&delegated_did={}",
                         url_encode(&request_uri),
@@ -2137,6 +2148,7 @@ pub async fn check_user_security_status(
 pub struct PasskeyStartInput {
     pub request_uri: String,
     pub identifier: String,
+    pub delegated_did: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2394,20 +2406,85 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    if state
+    let delegation_from_param = match &form.delegated_did {
+        Some(delegated_did_str) => {
+            match delegated_did_str.parse::<tranquil_types::Did>() {
+                Ok(delegated_did) if delegated_did != user.did => {
+                    match state
+                        .delegation_repo
+                        .get_delegation(&delegated_did, &user.did)
+                        .await
+                    {
+                        Ok(Some(_)) => Some(delegated_did),
+                        Ok(None) => None,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                delegated_did = %delegated_did,
+                                controller_did = %user.did,
+                                "Failed to verify delegation relationship"
+                            );
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            }
+        }
+        None => None,
+    };
+
+    let is_delegation_flow = delegation_from_param.is_some()
+        || request_data.did.as_ref().map_or(false, |existing_did| {
+            existing_did
+                .parse::<tranquil_types::Did>()
+                .ok()
+                .map_or(false, |parsed| parsed != user.did)
+        });
+
+    if let Some(delegated_did) = delegation_from_param {
+        tracing::info!(
+            delegated_did = %delegated_did,
+            controller_did = %user.did,
+            "Passkey auth with delegated_did param - setting delegation flow"
+        );
+        if state
+            .oauth_repo
+            .set_authorization_did(&passkey_start_request_id, &delegated_did, None)
+            .await
+            .is_err()
+        {
+            return OAuthError::ServerError("An error occurred.".into()).into_response();
+        }
+        if state
+            .oauth_repo
+            .set_controller_did(&passkey_start_request_id, &user.did)
+            .await
+            .is_err()
+        {
+            return OAuthError::ServerError("An error occurred.".into()).into_response();
+        }
+    } else if is_delegation_flow {
+        tracing::info!(
+            delegated_did = ?request_data.did,
+            controller_did = %user.did,
+            "Passkey auth in delegation flow - preserving delegated DID"
+        );
+        if state
+            .oauth_repo
+            .set_controller_did(&passkey_start_request_id, &user.did)
+            .await
+            .is_err()
+        {
+            return OAuthError::ServerError("An error occurred.".into()).into_response();
+        }
+    } else if state
         .oauth_repo
         .set_authorization_did(&passkey_start_request_id, &user.did, None)
         .await
         .is_err()
     {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": "server_error",
-                "error_description": "An error occurred."
-            })),
-        )
-            .into_response();
+        return OAuthError::ServerError("An error occurred.".into()).into_response();
     }
 
     let options = serde_json::to_value(&rcr).unwrap_or(serde_json::json!({}));
@@ -2497,9 +2574,15 @@ pub async fn passkey_finish(
         }
     };
 
+    let controller_did: Option<tranquil_types::Did> = request_data
+        .controller_did
+        .as_ref()
+        .and_then(|s| s.parse().ok());
+    let passkey_owner_did = controller_did.as_ref().unwrap_or(&did);
+
     let auth_state_json = match state
         .user_repo
-        .load_webauthn_challenge(&did, "authentication")
+        .load_webauthn_challenge(passkey_owner_did, "authentication")
         .await
     {
         Ok(Some(s)) => s,
@@ -2591,7 +2674,7 @@ pub async fn passkey_finish(
 
     if let Err(e) = state
         .user_repo
-        .delete_webauthn_challenge(&did, "authentication")
+        .delete_webauthn_challenge(passkey_owner_did, "authentication")
         .await
     {
         tracing::warn!(error = %e, "Failed to delete authentication state");

@@ -1250,3 +1250,141 @@ async fn test_delegation_viewer_scope_cannot_write() {
         "Error should be InsufficientScope"
     );
 }
+
+#[tokio::test]
+async fn test_delegation_oauth_token_sub_is_delegated_account() {
+    let url = base_url().await;
+    let http_client = client();
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+
+    let (controller_jwt, controller_did) = create_account_and_login(&http_client).await;
+
+    let delegated_handle = format!("dlgsub{}", suffix);
+    let delegated_res = http_client
+        .post(format!("{}/xrpc/_delegation.createDelegatedAccount", url))
+        .bearer_auth(&controller_jwt)
+        .json(&json!({
+            "handle": delegated_handle,
+            "controllerScopes": "atproto"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        delegated_res.status(),
+        StatusCode::OK,
+        "Should create delegated account"
+    );
+    let delegated_account: Value = delegated_res.json().await.unwrap();
+    let delegated_did = delegated_account["did"].as_str().unwrap();
+
+    assert_ne!(
+        delegated_did, controller_did,
+        "Delegated DID should be different from controller DID"
+    );
+
+    let redirect_uri = "https://example.com/deleg-sub-callback";
+    let mock_client = setup_mock_client_metadata(redirect_uri).await;
+    let client_id = mock_client.uri();
+    let (code_verifier, code_challenge) = generate_pkce();
+
+    let par_body: Value = http_client
+        .post(format!("{}/oauth/par", url))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", &client_id),
+            ("redirect_uri", redirect_uri),
+            ("code_challenge", &code_challenge),
+            ("code_challenge_method", "S256"),
+            ("scope", "atproto"),
+            ("login_hint", delegated_did),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let request_uri = par_body["request_uri"].as_str().unwrap();
+
+    let auth_res = http_client
+        .post(format!("{}/oauth/delegation/auth", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "delegated_did": delegated_did,
+            "controller_did": controller_did,
+            "password": "Testpass123!",
+            "remember_device": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        auth_res.status(),
+        StatusCode::OK,
+        "Delegation auth should succeed"
+    );
+    let auth_body: Value = auth_res.json().await.unwrap();
+    assert!(
+        auth_body["success"].as_bool().unwrap_or(false),
+        "Delegation auth should report success: {:?}",
+        auth_body
+    );
+
+    let consent_res = http_client
+        .post(format!("{}/oauth/authorize/consent", url))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "request_uri": request_uri,
+            "approved_scopes": ["atproto"],
+            "remember": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        consent_res.status(),
+        StatusCode::OK,
+        "Consent should succeed"
+    );
+    let consent_body: Value = consent_res.json().await.unwrap();
+    let redirect_location = consent_body["redirect_uri"]
+        .as_str()
+        .expect("Expected redirect_uri");
+
+    let code = redirect_location
+        .split("code=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap();
+
+    let token_res = http_client
+        .post(format!("{}/oauth/token", url))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("code_verifier", &code_verifier),
+            ("client_id", &client_id),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(token_res.status(), StatusCode::OK, "Token exchange should succeed");
+    let tokens: Value = token_res.json().await.unwrap();
+
+    let sub = tokens["sub"].as_str().expect("Token response should have sub claim");
+
+    assert_eq!(
+        sub, delegated_did,
+        "Token sub claim should be the DELEGATED account's DID, not the controller's. Got {} but expected {}",
+        sub, delegated_did
+    );
+    assert_ne!(
+        sub, controller_did,
+        "Token sub claim should NOT be the controller's DID"
+    );
+}

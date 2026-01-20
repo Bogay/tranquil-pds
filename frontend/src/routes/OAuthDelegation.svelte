@@ -127,7 +127,8 @@
         },
         body: JSON.stringify({
           request_uri: requestUri,
-          identifier: controllerIdentifier.trim().replace(/^@/, '')
+          identifier: controllerIdentifier.trim().replace(/^@/, ''),
+          delegated_did: delegatedDid
         })
       })
 
