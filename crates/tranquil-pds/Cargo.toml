@@ -79,6 +79,7 @@ zip = { workspace = true }
 
 [features]
 external-infra = []
+s3-storage = []
 
 [dev-dependencies]
 ciborium = { workspace = true }

@@ -4,7 +4,8 @@ This guide covers installing Tranquil PDS on Debian 13.
 
 ## Prerequisites
 
-- A VPS with at least 2GB RAM and 20GB disk
+- A VPS with at least 2GB RAM
+- Disk space for blobs (depends on usage; plan for ~1GB per active user as a baseline)
 - A domain name pointing to your server's IP
 - A wildcard TLS certificate for `*.pds.example.com` (user handles are served as subdomains)
 - Root or sudo access
@@ -37,49 +38,13 @@ sudo -u postgres psql -c "CREATE DATABASE pds OWNER tranquil_pds;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 ```
 
-## Install minio
+## Create Blob Storage Directories
 
 ```bash
-curl -O https://dl.min.io/server/minio/release/linux-amd64/minio
-chmod +x minio
-mv minio /usr/local/bin/
-mkdir -p /var/lib/minio/data
-useradd -r -s /sbin/nologin minio-user
-chown -R minio-user:minio-user /var/lib/minio
-cat > /etc/default/minio << 'EOF'
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=your-minio-password
-MINIO_VOLUMES="/var/lib/minio/data"
-MINIO_OPTS="--console-address :9001"
-EOF
-cat > /etc/systemd/system/minio.service << 'EOF'
-[Unit]
-Description=MinIO Object Storage
-After=network.target
-[Service]
-User=minio-user
-Group=minio-user
-EnvironmentFile=/etc/default/minio
-ExecStart=/usr/local/bin/minio server $MINIO_VOLUMES $MINIO_OPTS
-Restart=always
-LimitNOFILE=65536
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable minio
-systemctl start minio
+mkdir -p /var/lib/tranquil/blobs /var/lib/tranquil/backups
 ```
 
-Create the buckets (wait a few seconds for minio to start):
-```bash
-curl -O https://dl.min.io/client/mc/release/linux-amd64/mc
-chmod +x mc
-mv mc /usr/local/bin/
-mc alias set local http://localhost:9000 minioadmin your-minio-password
-mc mb local/pds-blobs
-mc mb local/pds-backups
-```
+We'll set ownership after creating the service user.
 
 ## Install valkey
 
@@ -142,12 +107,13 @@ chown -R www-data:www-data /var/www/tranquil-pds
 
 ```bash
 useradd -r -s /sbin/nologin tranquil-pds
+chown -R tranquil-pds:tranquil-pds /var/lib/tranquil
 cp /opt/tranquil-pds/target/release/tranquil-pds /usr/local/bin/
 
 cat > /etc/systemd/system/tranquil-pds.service << 'EOF'
 [Unit]
 Description=Tranquil PDS - AT Protocol PDS
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 [Service]
 Type=simple
 User=tranquil-pds
@@ -156,6 +122,10 @@ EnvironmentFile=/etc/tranquil-pds/tranquil-pds.env
 ExecStart=/usr/local/bin/tranquil-pds
 Restart=always
 RestartSec=5
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/tranquil
 [Install]
 WantedBy=multi-user.target
 EOF

@@ -1536,10 +1536,7 @@ async fn test_full_oauth_registration_flow() {
     let access_jwt = account["accessJwt"].as_str().unwrap();
 
     let app_password_res = http_client
-        .post(format!(
-            "{}/xrpc/com.atproto.server.createAppPassword",
-            url
-        ))
+        .post(format!("{}/xrpc/com.atproto.server.createAppPassword", url))
         .header("Authorization", format!("Bearer {}", access_jwt))
         .json(&json!({ "name": "oauth-test-app" }))
         .send()

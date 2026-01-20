@@ -1,11 +1,15 @@
+#[cfg(feature = "s3-storage")]
 use aws_config::BehaviorVersion;
+#[cfg(feature = "s3-storage")]
 use aws_sdk_s3::Client as S3Client;
+#[cfg(feature = "s3-storage")]
 use aws_sdk_s3::config::Credentials;
 use chrono::Utc;
 use reqwest::{Client, StatusCode, header};
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 #[allow(unused_imports)]
 use std::time::Duration;
@@ -19,16 +23,19 @@ static APP_PORT: OnceLock<u16> = OnceLock::new();
 static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
 static MOCK_PLC: OnceLock<MockServer> = OnceLock::new();
 static TEST_DB_POOL: OnceLock<sqlx::PgPool> = OnceLock::new();
+static TEST_TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-#[cfg(not(feature = "external-infra"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
+use testcontainers::GenericImage;
+#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
 use testcontainers::core::ContainerPort;
 #[cfg(not(feature = "external-infra"))]
-use testcontainers::{ContainerAsync, GenericImage, ImageExt, runners::AsyncRunner};
+use testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 #[cfg(not(feature = "external-infra"))]
 use testcontainers_modules::postgres::Postgres;
 #[cfg(not(feature = "external-infra"))]
 static DB_CONTAINER: OnceLock<ContainerAsync<Postgres>> = OnceLock::new();
-#[cfg(not(feature = "external-infra"))]
+#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
 static S3_CONTAINER: OnceLock<ContainerAsync<GenericImage>> = OnceLock::new();
 
 #[allow(dead_code)]
@@ -42,11 +49,15 @@ pub const TARGET_DID: &str = "did:plc:target";
 
 fn has_external_infra() -> bool {
     std::env::var("TRANQUIL_PDS_TEST_INFRA_READY").is_ok()
-        || (std::env::var("DATABASE_URL").is_ok() && std::env::var("S3_ENDPOINT").is_ok())
+        || (std::env::var("DATABASE_URL").is_ok()
+            && (std::env::var("S3_ENDPOINT").is_ok() || std::env::var("BLOB_STORAGE_PATH").is_ok()))
 }
 #[cfg(test)]
 #[ctor::dtor]
 fn cleanup() {
+    if let Some(temp_dir) = TEST_TEMP_DIR.get() {
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
     if has_external_infra() {
         return;
     }
@@ -125,27 +136,36 @@ pub async fn base_url() -> &'static str {
 async fn setup_with_external_infra() -> String {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
-    let s3_endpoint =
-        std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT must be set when using external infra");
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
-        std::env::set_var(
-            "S3_BUCKET",
-            std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()),
-        );
-        std::env::set_var(
-            "AWS_ACCESS_KEY_ID",
-            std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()),
-        );
-        std::env::set_var(
-            "AWS_SECRET_ACCESS_KEY",
-            std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
-        );
-        std::env::set_var(
-            "AWS_REGION",
-            std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
-        );
-        std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+        if std::env::var("S3_ENDPOINT").is_ok() {
+            let s3_endpoint = std::env::var("S3_ENDPOINT").unwrap();
+            std::env::set_var("BLOB_STORAGE_BACKEND", "s3");
+            std::env::set_var("BACKUP_STORAGE_BACKEND", "s3");
+            std::env::set_var("BACKUP_S3_BUCKET", "test-backups");
+            std::env::set_var(
+                "S3_BUCKET",
+                std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()),
+            );
+            std::env::set_var(
+                "AWS_ACCESS_KEY_ID",
+                std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()),
+            );
+            std::env::set_var(
+                "AWS_SECRET_ACCESS_KEY",
+                std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+            );
+            std::env::set_var(
+                "AWS_REGION",
+                std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+            );
+            std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+        } else if std::env::var("BLOB_STORAGE_PATH").is_ok() {
+            std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
+            std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
+        } else {
+            panic!("Either S3_ENDPOINT or BLOB_STORAGE_PATH must be set for external-infra");
+        }
         std::env::set_var("MAX_IMPORT_SIZE", "100000000");
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
@@ -160,7 +180,49 @@ async fn setup_with_external_infra() -> String {
     spawn_app(database_url).await
 }
 
-#[cfg(not(feature = "external-infra"))]
+#[cfg(all(not(feature = "external-infra"), not(feature = "s3-storage")))]
+async fn setup_with_testcontainers() -> String {
+    let temp_dir = std::env::temp_dir().join(format!("tranquil-pds-test-{}", uuid::Uuid::new_v4()));
+    let blob_path = temp_dir.join("blobs");
+    let backup_path = temp_dir.join("backups");
+    std::fs::create_dir_all(&blob_path).expect("Failed to create blob temp directory");
+    std::fs::create_dir_all(&backup_path).expect("Failed to create backup temp directory");
+    TEST_TEMP_DIR.set(temp_dir).ok();
+    let plc_url = setup_mock_plc_directory().await;
+    unsafe {
+        std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
+        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
+        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+        std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
+    }
+    let mock_server = MockServer::start().await;
+    setup_mock_appview(&mock_server).await;
+    let mock_uri = mock_server.uri();
+    let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
+    let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
+    setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
+    MOCK_APPVIEW.set(mock_server).ok();
+    let container = Postgres::default()
+        .with_tag("18-alpine")
+        .with_label("tranquil_pds_test", "true")
+        .start()
+        .await
+        .expect("Failed to start Postgres");
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}",
+        container
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("Failed to get port")
+    );
+    DB_CONTAINER.set(container).ok();
+    spawn_app(connection_string).await
+}
+
+#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
 async fn setup_with_testcontainers() -> String {
     let s3_container = GenericImage::new("cgr.dev/chainguard/minio", "latest")
         .with_exposed_port(ContainerPort::Tcp(9000))
@@ -178,6 +240,9 @@ async fn setup_with_testcontainers() -> String {
     let s3_endpoint = format!("http://127.0.0.1:{}", s3_port);
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
+        std::env::set_var("BLOB_STORAGE_BACKEND", "s3");
+        std::env::set_var("BACKUP_STORAGE_BACKEND", "s3");
+        std::env::set_var("BACKUP_S3_BUCKET", "test-backups");
         std::env::set_var("S3_BUCKET", "test-bucket");
         std::env::set_var("AWS_ACCESS_KEY_ID", "minioadmin");
         std::env::set_var("AWS_SECRET_ACCESS_KEY", "minioadmin");
@@ -204,6 +269,11 @@ async fn setup_with_testcontainers() -> String {
         .build();
     let s3_client = S3Client::from_conf(s3_config);
     let _ = s3_client.create_bucket().bucket("test-bucket").send().await;
+    let _ = s3_client
+        .create_bucket()
+        .bucket("test-backups")
+        .send()
+        .await;
     let mock_server = MockServer::start().await;
     setup_mock_appview(&mock_server).await;
     let mock_uri = mock_server.uri();
@@ -232,7 +302,7 @@ async fn setup_with_testcontainers() -> String {
 #[cfg(feature = "external-infra")]
 async fn setup_with_testcontainers() -> String {
     panic!(
-        "Testcontainers disabled with external-infra feature. Set DATABASE_URL and S3_ENDPOINT."
+        "Testcontainers disabled with external-infra feature. Set DATABASE_URL and BLOB_STORAGE_PATH (or S3_ENDPOINT)."
     );
 }
 

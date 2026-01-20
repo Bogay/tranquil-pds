@@ -4,15 +4,15 @@ If you're reaching for kubernetes for this app, you're experienced enough to kno
 
 - cloudnativepg (or your preferred postgres operator)
 - valkey
-- s3-compatible object storage (minio operator, or just use a managed service)
+- a PersistentVolume for blob storage
 - the app itself (it's just a container with some env vars)
 
 You'll need a wildcard TLS certificate for `*.your-pds-hostname.example.com`. User handles are served as subdomains.
 
 The container image expects:
 - `DATABASE_URL` - postgres connection string
-- `S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`
-- `BACKUP_S3_BUCKET` - bucket for repo backups (optional but recommended)
+- `BLOB_STORAGE_PATH` - path to blob storage (mount a PV here)
+- `BACKUP_STORAGE_PATH` - path for repo backups (optional but recommended)
 - `VALKEY_URL` - redis:// connection string
 - `PDS_HOSTNAME` - your PDS hostname (without protocol)
 - `JWT_SECRET`, `DPOP_SECRET`, `MASTER_KEY` - generate with `openssl rand -base64 48`

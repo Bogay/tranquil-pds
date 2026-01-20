@@ -44,15 +44,8 @@ nuke_installation() {
     sudo -u postgres psql -c "DROP DATABASE IF EXISTS pds;" 2>/dev/null || true
     sudo -u postgres psql -c "DROP USER IF EXISTS tranquil_pds;" 2>/dev/null || true
 
-    log_info "Removing minio buckets..."
-    if command -v mc &>/dev/null; then
-        mc rb local/pds-blobs --force 2>/dev/null || true
-        mc rb local/pds-backups --force 2>/dev/null || true
-        mc alias remove local 2>/dev/null || true
-    fi
-    systemctl stop minio 2>/dev/null || true
-    rm -rf /var/lib/minio/data/.minio.sys 2>/dev/null || true
-    rm -f /etc/default/minio 2>/dev/null || true
+    log_info "Removing blob storage..."
+    rm -rf /var/lib/tranquil 2>/dev/null || true
 
     log_info "Removing nginx config..."
     rm -f /etc/nginx/sites-enabled/tranquil-pds
@@ -79,7 +72,7 @@ if [[ -f /etc/tranquil-pds/tranquil-pds.env ]] || [[ -d /opt/tranquil-pds ]] || 
             echo "  - PostgreSQL database 'pds' and all data"
             echo "  - All Tranquil PDS configuration and credentials"
             echo "  - All source code in /opt/tranquil-pds"
-            echo "  - MinIO buckets 'pds-blobs' and 'pds-backups' and all data"
+            echo "  - All blobs and backups in /var/lib/tranquil/"
             echo ""
             read -p "Type 'NUKE' to confirm: " CONFIRM_NUKE
             if [[ "$CONFIRM_NUKE" == "NUKE" ]]; then
@@ -153,7 +146,6 @@ else
     DPOP_SECRET=$(openssl rand -base64 48)
     MASTER_KEY=$(openssl rand -base64 48)
     DB_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)
-    MINIO_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 32)
 
     mkdir -p /etc/tranquil-pds
     cat > "$CREDENTIALS_FILE" << EOF
@@ -161,7 +153,6 @@ JWT_SECRET="$JWT_SECRET"
 DPOP_SECRET="$DPOP_SECRET"
 MASTER_KEY="$MASTER_KEY"
 DB_PASSWORD="$DB_PASSWORD"
-MINIO_PASSWORD="$MINIO_PASSWORD"
 EOF
     chmod 600 "$CREDENTIALS_FILE"
     log_success "Secrets generated"
@@ -213,70 +204,9 @@ apt install -y valkey 2>/dev/null || {
 systemctl enable valkey-server 2>/dev/null || true
 systemctl start valkey-server 2>/dev/null || true
 
-log_info "Installing minio..."
-if [[ ! -f /usr/local/bin/minio ]]; then
-    ARCH=$(dpkg --print-architecture)
-    case "$ARCH" in
-        amd64) curl -fsSL -o /tmp/minio https://dl.min.io/server/minio/release/linux-amd64/minio ;;
-        arm64) curl -fsSL -o /tmp/minio https://dl.min.io/server/minio/release/linux-arm64/minio ;;
-        *) log_error "Unsupported architecture: $ARCH"; exit 1 ;;
-    esac
-    chmod +x /tmp/minio
-    mv /tmp/minio /usr/local/bin/
-fi
-
-mkdir -p /var/lib/minio/data
-id -u minio-user &>/dev/null || useradd -r -s /sbin/nologin minio-user
-chown -R minio-user:minio-user /var/lib/minio
-
-cat > /etc/default/minio << EOF
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}
-MINIO_VOLUMES="/var/lib/minio/data"
-MINIO_OPTS="--console-address :9001"
-EOF
-chmod 600 /etc/default/minio
-
-cat > /etc/systemd/system/minio.service << 'EOF'
-[Unit]
-Description=MinIO Object Storage
-After=network.target
-
-[Service]
-User=minio-user
-Group=minio-user
-EnvironmentFile=/etc/default/minio
-ExecStart=/usr/local/bin/minio server $MINIO_VOLUMES $MINIO_OPTS
-Restart=always
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable minio
-systemctl start minio
-log_success "minio installed"
-
-log_info "Waiting for minio..."
-sleep 5
-
-if [[ ! -f /usr/local/bin/mc ]]; then
-    ARCH=$(dpkg --print-architecture)
-    case "$ARCH" in
-        amd64) curl -fsSL -o /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc ;;
-        arm64) curl -fsSL -o /tmp/mc https://dl.min.io/client/mc/release/linux-arm64/mc ;;
-    esac
-    chmod +x /tmp/mc
-    mv /tmp/mc /usr/local/bin/
-fi
-
-mc alias remove local 2>/dev/null || true
-mc alias set local http://localhost:9000 minioadmin "${MINIO_PASSWORD}" --api S3v4
-mc mb local/pds-blobs --ignore-existing
-mc mb local/pds-backups --ignore-existing
-log_success "minio buckets created"
+log_info "Creating blob storage directories..."
+mkdir -p /var/lib/tranquil/blobs /var/lib/tranquil/backups
+log_success "Blob storage directories created"
 
 log_info "Installing rust..."
 if [[ -f "$HOME/.cargo/env" ]]; then
@@ -381,12 +311,8 @@ PDS_HOSTNAME=${PDS_DOMAIN}
 DATABASE_URL=postgres://tranquil_pds:${DB_PASSWORD}@localhost:5432/pds
 DATABASE_MAX_CONNECTIONS=100
 DATABASE_MIN_CONNECTIONS=10
-S3_ENDPOINT=http://localhost:9000
-AWS_REGION=us-east-1
-S3_BUCKET=pds-blobs
-BACKUP_S3_BUCKET=pds-backups
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=${MINIO_PASSWORD}
+BLOB_STORAGE_PATH=/var/lib/tranquil/blobs
+BACKUP_STORAGE_PATH=/var/lib/tranquil/backups
 VALKEY_URL=redis://localhost:6379
 JWT_SECRET=${JWT_SECRET}
 DPOP_SECRET=${DPOP_SECRET}
@@ -406,11 +332,12 @@ cp /opt/tranquil-pds/target/release/tranquil-pds /usr/local/bin/
 mkdir -p /var/lib/tranquil-pds
 cp -r /opt/tranquil-pds/frontend/dist /var/lib/tranquil-pds/frontend
 chown -R tranquil-pds:tranquil-pds /var/lib/tranquil-pds
+chown -R tranquil-pds:tranquil-pds /var/lib/tranquil
 
 cat > /etc/systemd/system/tranquil-pds.service << 'EOF'
 [Unit]
 Description=Tranquil PDS - AT Protocol PDS
-After=network.target postgresql.service minio.service
+After=network.target postgresql.service
 
 [Service]
 Type=simple
@@ -420,6 +347,10 @@ EnvironmentFile=/etc/tranquil-pds/tranquil-pds.env
 ExecStart=/usr/local/bin/tranquil-pds
 Restart=always
 RestartSec=5
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/tranquil
 
 [Install]
 WantedBy=multi-user.target
@@ -577,8 +508,11 @@ echo ""
 echo "PDS: https://${PDS_DOMAIN}"
 echo ""
 echo "Credentials (also in /etc/tranquil-pds/.credentials):"
-echo "  DB password:    ${DB_PASSWORD}"
-echo "  MinIO password: ${MINIO_PASSWORD}"
+echo "  DB password: ${DB_PASSWORD}"
+echo ""
+echo "Data locations:"
+echo "  Blobs:   /var/lib/tranquil/blobs"
+echo "  Backups: /var/lib/tranquil/backups"
 echo ""
 echo "Commands:"
 echo "  journalctl -u tranquil-pds -f    # logs"

@@ -6173,7 +6173,10 @@ dependencies = [
  "bytes",
  "futures",
  "sha2",
+ "tokio",
+ "tracing",
  "tranquil-infra",
+ "uuid",
 ]
 
 [[package]]

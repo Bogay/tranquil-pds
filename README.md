@@ -12,9 +12,9 @@ Another excellent PDS is [Cocoon](https://tangled.org/hailey.at/cocoon), written
 
 ## What's different about Tranquil PDS
 
-It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), SSO login and signup, did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), account delegation (letting others manage an account with configurable permission levels), automatic backups to s3-compatible object storage (configurable retention and frequency, one-click restore), and a built-in web UI for account management, OAuth consent, repo browsing, and admin.
+It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), SSO login and signup, did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), account delegation (letting others manage an account with configurable permission levels), automatic backups (configurable retention and frequency, one-click restore), and a built-in web UI for account management, OAuth consent, repo browsing, and admin.
 
-The PDS itself is a single small binary with no node/npm runtime. It does require postgres, valkey, and s3-compatible storage, which makes setup heavier than the reference PDS's sqlite. The tradeoff is that these are battle-tested pieces of infra that we already know how to scale, back up, and monitor. 
+The PDS itself is a single small binary with no node/npm runtime. It requires postgres and stores blobs on the local filesystem. Valkey is optional (enables distributed rate limiting for multi-node setups). The tradeoff vs the reference PDS's sqlite is that postgres is a battle-tested piece of infra that we already know how to scale, back up, and monitor. 
 
 ## Quick Start
 

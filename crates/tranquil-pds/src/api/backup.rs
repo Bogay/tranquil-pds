@@ -3,7 +3,7 @@ use crate::api::{EmptyResponse, EnabledResponse};
 use crate::auth::BearerAuth;
 use crate::scheduled::generate_full_backup;
 use crate::state::AppState;
-use crate::storage::BackupStorage;
+use crate::storage::{BackupStorage, backup_retention_count};
 use axum::{
     Json,
     extract::{Query, State},
@@ -249,10 +249,10 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         "Created manual backup"
     );
 
-    let retention = BackupStorage::retention_count();
+    let retention = backup_retention_count();
     if let Err(e) = cleanup_old_backups(
         state.backup_repo.as_ref(),
-        backup_storage,
+        backup_storage.as_ref(),
         user.id,
         retention,
     )
@@ -275,7 +275,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
 
 async fn cleanup_old_backups(
     backup_repo: &dyn BackupRepository,
-    backup_storage: &BackupStorage,
+    backup_storage: &dyn BackupStorage,
     user_id: uuid::Uuid,
     retention_count: u32,
 ) -> Result<(), String> {

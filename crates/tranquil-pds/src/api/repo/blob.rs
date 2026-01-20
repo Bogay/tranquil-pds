@@ -198,7 +198,7 @@ pub async fn upload_blob(
     let cid = Cid::new_v1(0x55, multihash);
     let cid_str = cid.to_string();
     let cid_link: CidLink = CidLink::new_unchecked(&cid_str);
-    let storage_key = format!("blobs/{}", cid_str);
+    let storage_key = cid_str.clone();
 
     info!(
         "Blob upload complete: size={}, cid={}, copying to final location",

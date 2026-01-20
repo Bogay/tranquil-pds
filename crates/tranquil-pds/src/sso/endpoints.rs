@@ -1221,7 +1221,11 @@ pub async fn complete_registration(
         scopes: None,
         created_by_controller_did: None,
     };
-    if let Err(e) = state.session_repo.create_app_password(&app_password_data).await {
+    if let Err(e) = state
+        .session_repo
+        .create_app_password(&app_password_data)
+        .await
+    {
         tracing::warn!("Failed to create initial app password: {:?}", e);
     }
 

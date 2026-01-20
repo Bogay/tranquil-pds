@@ -8,8 +8,10 @@ use std::time::Duration;
 pub enum StorageError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("S3 error: {0}")]
-    S3(String),
+    #[error("Storage error: {0}")]
+    Backend(String),
+    #[error("Not found: {0}")]
+    NotFound(String),
     #[error("Other: {0}")]
     Other(String),
 }
@@ -33,6 +35,27 @@ pub trait BlobStorage: Send + Sync {
         stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>,
     ) -> Result<StreamUploadResult, StorageError>;
     async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError>;
+}
+
+#[async_trait]
+pub trait BackupStorage: Send + Sync {
+    async fn put_backup(&self, did: &str, rev: &str, data: &[u8]) -> Result<String, StorageError>;
+    async fn get_backup(&self, storage_key: &str) -> Result<Bytes, StorageError>;
+    async fn delete_backup(&self, storage_key: &str) -> Result<(), StorageError>;
+}
+
+pub fn backup_retention_count() -> u32 {
+    std::env::var("BACKUP_RETENTION_COUNT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7)
+}
+
+pub fn backup_interval_secs() -> u64 {
+    std::env::var("BACKUP_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(86400)
 }
 
 #[derive(Debug, thiserror::Error)]

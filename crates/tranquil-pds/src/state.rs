@@ -5,7 +5,7 @@ use crate::config::AuthConfig;
 use crate::rate_limit::RateLimiters;
 use crate::repo::PostgresBlockStore;
 use crate::sso::{SsoConfig, SsoManager};
-use crate::storage::{BackupStorage, BlobStorage, S3BlobStorage};
+use crate::storage::{BackupStorage, BlobStorage, create_backup_storage, create_blob_storage};
 use crate::sync::firehose::SequencedEvent;
 use sqlx::PgPool;
 use std::error::Error;
@@ -32,7 +32,7 @@ pub struct AppState {
     pub event_notifier: Arc<dyn RepoEventNotifier>,
     pub block_store: PostgresBlockStore,
     pub blob_store: Arc<dyn BlobStorage>,
-    pub backup_storage: Option<Arc<BackupStorage>>,
+    pub backup_storage: Option<Arc<dyn BackupStorage>>,
     pub firehose_tx: broadcast::Sender<SequencedEvent>,
     pub rate_limiters: Arc<RateLimiters>,
     pub circuit_breakers: Arc<CircuitBreakers>,
@@ -165,8 +165,8 @@ impl AppState {
 
         let repos = Arc::new(PostgresRepositories::new(db.clone()));
         let block_store = PostgresBlockStore::new(db);
-        let blob_store = S3BlobStorage::new().await;
-        let backup_storage = BackupStorage::new().await.map(Arc::new);
+        let blob_store = create_blob_storage().await;
+        let backup_storage = create_backup_storage().await;
 
         let firehose_buffer_size: usize = std::env::var("FIREHOSE_BUFFER_SIZE")
             .ok()
@@ -195,7 +195,7 @@ impl AppState {
             sso_repo: repos.sso.clone(),
             repos,
             block_store,
-            blob_store: Arc::new(blob_store),
+            blob_store,
             backup_storage,
             firehose_tx,
             rate_limiters,

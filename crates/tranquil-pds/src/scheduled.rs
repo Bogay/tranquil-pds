@@ -15,7 +15,7 @@ use tranquil_db_traits::{
 use tranquil_types::{AtUri, CidLink, Did};
 
 use crate::repo::PostgresBlockStore;
-use crate::storage::{BackupStorage, BlobStorage};
+use crate::storage::{BackupStorage, BlobStorage, backup_interval_secs, backup_retention_count};
 use crate::sync::car::encode_car_header;
 
 async fn process_genesis_commit(
@@ -537,14 +537,14 @@ pub async fn start_backup_tasks(
     repo_repo: Arc<dyn RepoRepository>,
     backup_repo: Arc<dyn BackupRepository>,
     block_store: PostgresBlockStore,
-    backup_storage: Arc<BackupStorage>,
+    backup_storage: Arc<dyn BackupStorage>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
-    let backup_interval = Duration::from_secs(BackupStorage::interval_secs());
+    let backup_interval = Duration::from_secs(backup_interval_secs());
 
     info!(
         interval_secs = backup_interval.as_secs(),
-        retention_count = BackupStorage::retention_count(),
+        retention_count = backup_retention_count(),
         "Starting backup service"
     );
 
@@ -564,7 +564,7 @@ pub async fn start_backup_tasks(
                     repo_repo.as_ref(),
                     backup_repo.as_ref(),
                     &block_store,
-                    &backup_storage,
+                    backup_storage.as_ref(),
                 ).await {
                     error!("Error processing scheduled backups: {}", e);
                 }
@@ -592,7 +592,7 @@ async fn process_single_backup(
     repo_repo: &dyn RepoRepository,
     backup_repo: &dyn BackupRepository,
     block_store: &PostgresBlockStore,
-    backup_storage: &BackupStorage,
+    backup_storage: &dyn BackupStorage,
     user_id: uuid::Uuid,
     did: String,
     repo_root_cid: String,
@@ -656,13 +656,13 @@ async fn process_scheduled_backups(
     repo_repo: &dyn RepoRepository,
     backup_repo: &dyn BackupRepository,
     block_store: &PostgresBlockStore,
-    backup_storage: &BackupStorage,
+    backup_storage: &dyn BackupStorage,
 ) -> Result<(), String> {
-    let backup_interval_secs = BackupStorage::interval_secs() as i64;
-    let retention_count = BackupStorage::retention_count();
+    let interval_secs = backup_interval_secs() as i64;
+    let retention = backup_retention_count();
 
     let users_needing_backup = backup_repo
-        .get_users_needing_backup(backup_interval_secs, 50)
+        .get_users_needing_backup(interval_secs, 50)
         .await
         .map_err(|e| format!("DB error fetching users for backup: {:?}", e))?;
 
@@ -700,13 +700,9 @@ async fn process_scheduled_backups(
                     block_count = result.block_count,
                     "Created backup"
                 );
-                if let Err(e) = cleanup_old_backups(
-                    backup_repo,
-                    backup_storage,
-                    result.user_id,
-                    retention_count,
-                )
-                .await
+                if let Err(e) =
+                    cleanup_old_backups(backup_repo, backup_storage, result.user_id, retention)
+                        .await
                 {
                     warn!(did = %result.did, error = %e, "Failed to cleanup old backups");
                 }
@@ -844,7 +840,7 @@ fn read_varint(data: &[u8]) -> Option<(u64, usize)> {
 
 async fn cleanup_old_backups(
     backup_repo: &dyn BackupRepository,
-    backup_storage: &BackupStorage,
+    backup_storage: &dyn BackupStorage,
     user_id: uuid::Uuid,
     retention_count: u32,
 ) -> Result<(), String> {

@@ -7,7 +7,8 @@ This guide covers deploying Tranquil PDS using containers with podman.
 
 ## Prerequisites
 
-- A VPS with at least 2GB RAM and 20GB disk
+- A VPS with at least 2GB RAM
+- Disk space for blobs (depends on usage; plan for ~1GB per active user as a baseline)
 - A domain name pointing to your server's IP
 - A **wildcard TLS certificate** for `*.pds.example.com` (user handles are served as subdomains)
 - Root or sudo access
@@ -42,7 +43,7 @@ For production setups with proper service management, continue to either the Deb
 
 ## Standalone Containers (No Compose)
 
-If you already have postgres, valkey, and minio running on the host (eg., from the [Debian install guide](install-debian.md)), you can run just the app containers.
+If you already have postgres and valkey running on the host (eg., from the [Debian install guide](install-debian.md)), you can run just the app containers.
 
 Build the images:
 ```sh
@@ -50,11 +51,12 @@ podman build -t tranquil-pds:latest .
 podman build -t tranquil-pds-frontend:latest ./frontend
 ```
 
-Run the backend with host networking (so it can access postgres/valkey/minio on localhost):
+Run the backend with host networking (so it can access postgres/valkey on localhost) and mount the blob storage:
 ```sh
 podman run -d --name tranquil-pds \
   --network=host \
   --env-file /etc/tranquil-pds/tranquil-pds.env \
+  -v /var/lib/tranquil:/var/lib/tranquil:Z \
   tranquil-pds:latest
 ```
 
@@ -104,7 +106,7 @@ apt install -y podman
 
 ```bash
 mkdir -p /etc/containers/systemd
-mkdir -p /srv/tranquil-pds/{postgres,minio,valkey,certs,acme,config}
+mkdir -p /srv/tranquil-pds/{postgres,valkey,blobs,backups,certs,acme,config}
 ```
 
 ## Create Environment File
@@ -152,24 +154,14 @@ podman build -t tranquil-pds-frontend:latest ./frontend
 ```bash
 source /srv/tranquil-pds/config/tranquil-pds.env
 echo "$DB_PASSWORD" | podman secret create tranquil-pds-db-password -
-echo "$MINIO_ROOT_PASSWORD" | podman secret create tranquil-pds-minio-password -
 ```
 
 ## Start Services and Initialize
 
 ```bash
 systemctl daemon-reload
-systemctl start tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey
+systemctl start tranquil-pds-db tranquil-pds-valkey
 sleep 10
-```
-
-Create the minio buckets:
-```bash
-podman run --rm --pod tranquil-pds \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=your-minio-password \
-  cgr.dev/chainguard/minio-client:latest-dev \
-  sh -c "mc alias set local http://localhost:9000 \$MINIO_ROOT_USER \$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs && mc mb --ignore-existing local/pds-backups"
 ```
 
 Run migrations:
@@ -215,7 +207,7 @@ systemctl restart tranquil-pds-nginx
 ## Enable All Services
 
 ```bash
-systemctl enable tranquil-pds-db tranquil-pds-minio tranquil-pds-valkey tranquil-pds-app tranquil-pds-frontend tranquil-pds-nginx
+systemctl enable tranquil-pds-db tranquil-pds-valkey tranquil-pds-app tranquil-pds-frontend tranquil-pds-nginx
 ```
 
 ## Configure Firewall
@@ -260,7 +252,7 @@ rc-service podman start
 
 ```sh
 mkdir -p /srv/tranquil-pds/{data,config}
-mkdir -p /srv/tranquil-pds/data/{postgres,minio,valkey,certs,acme}
+mkdir -p /srv/tranquil-pds/data/{postgres,valkey,blobs,backups,certs,acme}
 ```
 
 ## Clone Repository and Build Images
@@ -340,16 +332,6 @@ Start services:
 ```sh
 rc-service tranquil-pds start
 sleep 15
-```
-
-Create the minio buckets:
-```sh
-source /srv/tranquil-pds/config/tranquil-pds.env
-podman run --rm --network tranquil-pds_default \
-  -e MINIO_ROOT_USER="$MINIO_ROOT_USER" \
-  -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
-  cgr.dev/chainguard/minio-client:latest-dev \
-  sh -c 'mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/pds-blobs && mc mb --ignore-existing local/pds-backups'
 ```
 
 Run migrations:

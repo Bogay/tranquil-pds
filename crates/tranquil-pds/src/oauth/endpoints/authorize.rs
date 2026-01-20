@@ -3368,11 +3368,9 @@ pub async fn register_complete(
         }
     };
 
-    let password_valid = password_hashes
-        .iter()
-        .fold(false, |acc, hash| {
-            acc | bcrypt::verify(&form.app_password, hash).unwrap_or(false)
-        });
+    let password_valid = password_hashes.iter().fold(false, |acc, hash| {
+        acc | bcrypt::verify(&form.app_password, hash).unwrap_or(false)
+    });
 
     if !password_valid {
         return (

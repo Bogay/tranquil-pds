@@ -49,7 +49,11 @@ pub fn generate_app_password() -> String {
     let chars: &[u8] = b"abcdefghijklmnopqrstuvwxyz234567";
     let mut rng = rand::thread_rng();
     let segments: Vec<String> = (0..4)
-        .map(|_| (0..4).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect())
+        .map(|_| {
+            (0..4)
+                .map(|_| chars[rng.gen_range(0..chars.len())] as char)
+                .collect()
+        })
         .collect();
     segments.join("-")
 }
