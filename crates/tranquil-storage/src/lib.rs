@@ -19,6 +19,13 @@ use std::sync::Arc;
 
 const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
 const EXDEV: i32 = 18;
+const CID_SHARD_PREFIX_LEN: usize = 9;
+
+fn split_cid_path(key: &str) -> Option<(&str, &str)> {
+    let is_cid = key.get(..3).map_or(false, |p| p.eq_ignore_ascii_case("baf"));
+    (key.len() > CID_SHARD_PREFIX_LEN && is_cid)
+        .then(|| key.split_at(CID_SHARD_PREFIX_LEN))
+}
 
 fn validate_key(key: &str) -> Result<(), StorageError> {
     let dominated_by_traversal = key
@@ -483,7 +490,10 @@ impl FilesystemBlobStorage {
 
     fn resolve_path(&self, key: &str) -> Result<PathBuf, StorageError> {
         validate_key(key)?;
-        Ok(self.base_path.join(key))
+        Ok(split_cid_path(key).map_or_else(
+            || self.base_path.join(key),
+            |(dir, file)| self.base_path.join(dir).join(file),
+        ))
     }
 
     async fn atomic_write(&self, path: &Path, data: &[u8]) -> Result<(), StorageError> {
@@ -751,3 +761,92 @@ trait Pipe: Sized {
 }
 
 impl<T> Pipe for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_path_from_raw_blob_cid() {
+        let cid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+        assert_eq!(
+            split_cid_path(cid),
+            Some(("bafkreihd", "wdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"))
+        );
+    }
+
+    #[test]
+    fn split_path_from_dag_cbor_cid() {
+        let cid = "bafyreigdmqpykrgxyaxtlafqpqhzrb7qy2rh75nldvfd4tucqmqqme5yje";
+        assert_eq!(
+            split_cid_path(cid),
+            Some(("bafyreigd", "mqpykrgxyaxtlafqpqhzrb7qy2rh75nldvfd4tucqmqqme5yje"))
+        );
+    }
+
+    #[test]
+    fn no_split_for_temp_keys() {
+        assert_eq!(split_cid_path("temp/abc123"), None);
+    }
+
+    #[test]
+    fn no_split_for_short_keys() {
+        assert_eq!(split_cid_path("bafkreihd"), None);
+        assert_eq!(split_cid_path("bafkrei"), None);
+        assert_eq!(split_cid_path("baf"), None);
+        assert_eq!(split_cid_path("ba"), None);
+        assert_eq!(split_cid_path(""), None);
+    }
+
+    #[test]
+    fn no_split_for_non_cid_keys() {
+        assert_eq!(split_cid_path("something/else/entirely"), None);
+        assert_eq!(split_cid_path("Qmabcdefghijklmnop"), None);
+    }
+
+    #[test]
+    fn split_cid_case_insensitive() {
+        let upper = "BAFKREIHDWDCEFGH4DQKJV67UZCMW7OJEE6XEDZDETOJUZJEVTENXQUVYKU";
+        let mixed = "BaFkReIhDwDcEfGh4DqKjV67UzCmW7OjEe6XeDzDeTojUzJevTeNxQuVyKu";
+        assert_eq!(
+            split_cid_path(upper),
+            Some(("BAFKREIHD", "WDCEFGH4DQKJV67UZCMW7OJEE6XEDZDETOJUZJEVTENXQUVYKU"))
+        );
+        assert_eq!(
+            split_cid_path(mixed),
+            Some(("BaFkReIhD", "wDcEfGh4DqKjV67UzCmW7OjEe6XeDzDeTojUzJevTeNxQuVyKu"))
+        );
+    }
+
+    #[test]
+    fn split_at_minimum_length() {
+        let cid = "bafkreihdx";
+        assert_eq!(split_cid_path(cid), Some(("bafkreihd", "x")));
+    }
+
+    #[test]
+    fn resolve_path_shards_cid_keys() {
+        let base = PathBuf::from("/blobs");
+        let cid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+
+        let expected = PathBuf::from("/blobs/bafkreihd/wdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku");
+        let result = split_cid_path(cid).map_or_else(
+            || base.join(cid),
+            |(dir, file)| base.join(dir).join(file),
+        );
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn resolve_path_no_shard_for_temp() {
+        let base = PathBuf::from("/blobs");
+        let key = "temp/abc123";
+
+        let expected = PathBuf::from("/blobs/temp/abc123");
+        let result = split_cid_path(key).map_or_else(
+            || base.join(key),
+            |(dir, file)| base.join(dir).join(file),
+        );
+        assert_eq!(result, expected);
+    }
+}
