@@ -196,18 +196,18 @@
     display: flex;
     align-items: center;
     padding: var(--space-4);
-    background: var(--bg-card);
+    background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     cursor: pointer;
     text-align: left;
     width: 100%;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--transition-fast), background var(--transition-fast);
   }
 
   .account-item:hover:not(.disabled) {
     border-color: var(--accent);
-    box-shadow: var(--shadow-sm);
+    background: var(--bg-tertiary);
   }
 
   .account-item.disabled {
@@ -231,35 +231,9 @@
     color: var(--text-secondary);
   }
 
-  button {
-    padding: var(--space-3);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    cursor: pointer;
-  }
-
-  button:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  button.secondary {
-    background: transparent;
-    color: var(--accent);
-    border: 1px solid var(--accent);
+  .different-account {
+    margin-top: var(--space-4);
     width: 100%;
-  }
-
-  button.secondary:hover:not(:disabled) {
-    background: var(--accent);
-    color: var(--text-inverse);
   }
 
   .different-account {

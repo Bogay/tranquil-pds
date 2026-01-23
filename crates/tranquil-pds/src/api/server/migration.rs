@@ -1,4 +1,5 @@
 use crate::api::ApiError;
+use crate::auth::BearerAuth;
 use crate::state::AppState;
 use axum::{
     Json,
@@ -35,36 +36,10 @@ pub struct UpdateDidDocumentOutput {
 
 pub async fn update_did_document(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: BearerAuth,
     Json(input): Json<UpdateDidDocumentInput>,
 ) -> Response {
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!(
-        "https://{}/xrpc/_account.updateDidDocument",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
-    );
-    let auth_user = match crate::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        "POST",
-        &http_uri,
-        true,
-        false,
-    )
-    .await
-    {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user = auth.0;
 
     if !auth_user.did.starts_with("did:web:") {
         return ApiError::InvalidRequest(
@@ -166,37 +141,8 @@ pub async fn update_did_document(
         .into_response()
 }
 
-pub async fn get_did_document(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-) -> Response {
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!(
-        "https://{}/xrpc/_account.getDidDocument",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
-    );
-    let auth_user = match crate::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        "GET",
-        &http_uri,
-        true,
-        false,
-    )
-    .await
-    {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+pub async fn get_did_document(State(state): State<AppState>, auth: BearerAuth) -> Response {
+    let auth_user = auth.0;
 
     if !auth_user.did.starts_with("did:web:") {
         return ApiError::InvalidRequest(

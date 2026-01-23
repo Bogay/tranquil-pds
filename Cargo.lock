@@ -6156,11 +6156,13 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures",
+ "hickory-resolver",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "urlencoding",
 ]
 
 [[package]]

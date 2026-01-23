@@ -778,6 +778,11 @@
           "name": "계정 관리",
           "description": "계정 설정 및 환경설정 관리"
         }
+      },
+      "unexpectedState": {
+        "title": "예기치 않은 상태",
+        "description": "동의 페이지가 예기치 않은 상태입니다. 브라우저 콘솔에서 오류를 확인하세요.",
+        "reload": "페이지 새로고침"
       }
     },
     "accounts": {

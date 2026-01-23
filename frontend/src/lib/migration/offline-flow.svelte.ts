@@ -177,7 +177,9 @@ export function createOfflineInboundMigrationFlow() {
 
   function setStep(step: OfflineInboundStep) {
     state.step = step;
-    state.error = null;
+    if (step !== "error") {
+      state.error = null;
+    }
     if (step !== "success") {
       saveOfflineState(state);
     }

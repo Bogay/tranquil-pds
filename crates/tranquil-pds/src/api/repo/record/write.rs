@@ -3,6 +3,7 @@ use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{
     CommitParams, RecordOp, commit_and_log, extract_backlinks, extract_blob_cids,
 };
+use crate::auth::{AuthenticatedUser, BearerAuth};
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -10,7 +11,7 @@ use crate::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use cid::Cid;
@@ -33,32 +34,9 @@ pub struct RepoWriteAuth {
 
 pub async fn prepare_repo_write(
     state: &AppState,
-    headers: &HeaderMap,
+    auth_user: AuthenticatedUser,
     repo: &AtIdentifier,
-    http_method: &str,
-    http_uri: &str,
 ) -> Result<RepoWriteAuth, Response> {
-    let extracted = crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    )
-    .ok_or_else(|| ApiError::AuthenticationRequired.into_response())?;
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let auth_user = crate::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        http_method,
-        http_uri,
-        false,
-        false,
-    )
-    .await
-    .map_err(|e| {
-        tracing::warn!(error = ?e, is_dpop = extracted.is_dpop, "Token validation failed in prepare_repo_write");
-        ApiError::from(e).into_response()
-    })?;
     if repo.as_str() != auth_user.did.as_str() {
         return Err(
             ApiError::InvalidRepo("Repo does not match authenticated user".into()).into_response(),
@@ -146,19 +124,10 @@ pub struct CreateRecordOutput {
 }
 pub async fn create_record(
     State(state): State<AppState>,
-    headers: HeaderMap,
-    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    auth: BearerAuth,
     Json(input): Json<CreateRecordInput>,
 ) -> Response {
-    let auth = match prepare_repo_write(
-        &state,
-        &headers,
-        &input.repo,
-        "POST",
-        &crate::util::build_full_url(&uri.to_string()),
-    )
-    .await
-    {
+    let auth = match prepare_repo_write(&state, auth.0, &input.repo).await {
         Ok(res) => res,
         Err(err_res) => return err_res,
     };
@@ -445,19 +414,10 @@ pub struct PutRecordOutput {
 }
 pub async fn put_record(
     State(state): State<AppState>,
-    headers: HeaderMap,
-    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    auth: BearerAuth,
     Json(input): Json<PutRecordInput>,
 ) -> Response {
-    let auth = match prepare_repo_write(
-        &state,
-        &headers,
-        &input.repo,
-        "POST",
-        &crate::util::build_full_url(&uri.to_string()),
-    )
-    .await
-    {
+    let auth = match prepare_repo_write(&state, auth.0, &input.repo).await {
         Ok(res) => res,
         Err(err_res) => return err_res,
     };

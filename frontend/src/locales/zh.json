@@ -778,6 +778,11 @@
           "name": "管理账户",
           "description": "管理账户设置和偏好"
         }
+      },
+      "unexpectedState": {
+        "title": "意外状态",
+        "description": "同意页面处于意外状态。请检查浏览器控制台以查看错误。",
+        "reload": "重新加载页面"
       }
     },
     "accounts": {

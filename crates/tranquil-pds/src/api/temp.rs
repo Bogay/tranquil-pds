@@ -1,10 +1,9 @@
 use crate::api::error::ApiError;
-use crate::auth::{BearerAuth, extract_auth_token_from_header, validate_token_with_dpop};
+use crate::auth::{BearerAuth, OptionalBearerAuth};
 use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use cid::Cid;
@@ -22,27 +21,11 @@ pub struct CheckSignupQueueOutput {
     pub estimated_time_ms: Option<i64>,
 }
 
-pub async fn check_signup_queue(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(extracted) =
-        extract_auth_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
+pub async fn check_signup_queue(auth: OptionalBearerAuth) -> Response {
+    if let Some(user) = auth.0
+        && user.is_oauth
     {
-        let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-        if let Ok(user) = validate_token_with_dpop(
-            state.user_repo.as_ref(),
-            state.oauth_repo.as_ref(),
-            &extracted.token,
-            extracted.is_dpop,
-            dpop_proof,
-            "GET",
-            "/",
-            false,
-            false,
-        )
-        .await
-            && user.is_oauth
-        {
-            return ApiError::Forbidden.into_response();
-        }
+        return ApiError::Forbidden.into_response();
     }
     Json(CheckSignupQueueOutput {
         activated: true,

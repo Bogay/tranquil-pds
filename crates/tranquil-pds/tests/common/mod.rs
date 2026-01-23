@@ -1,8 +1,8 @@
-#[cfg(feature = "s3-storage")]
+#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
 use aws_config::BehaviorVersion;
-#[cfg(feature = "s3-storage")]
+#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
 use aws_sdk_s3::Client as S3Client;
-#[cfg(feature = "s3-storage")]
+#[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
 use aws_sdk_s3::config::Credentials;
 use chrono::Utc;
 use reqwest::{Client, StatusCode, header};

@@ -16,7 +16,8 @@ pub mod verification_token;
 pub mod webauthn;
 
 pub use extractor::{
-    AuthError, BearerAuth, BearerAuthAdmin, BearerAuthAllowDeactivated, ExtractedToken,
+    AuthError, BearerAuth, BearerAuthAdmin, BearerAuthAllowDeactivated, BlobAuth, BlobAuthResult,
+    ExtractedToken, OptionalBearerAuth, OptionalServiceAuth, ServiceAuth,
     extract_auth_token_from_header, extract_bearer_token_from_header,
 };
 pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};

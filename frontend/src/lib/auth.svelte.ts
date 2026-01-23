@@ -281,7 +281,7 @@ export function clearError(): void {
   }
 }
 
-async function tryRefreshToken(): Promise<string | null> {
+async function tryRefreshToken(): Promise<AccessToken | null> {
   if (state.current.kind !== "authenticated") return null;
   const currentSession = state.current.session;
   try {

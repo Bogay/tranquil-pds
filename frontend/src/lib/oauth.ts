@@ -246,15 +246,15 @@ async function computeJwkThumbprint(jwk: JsonWebKey): Promise<string> {
   return base64UrlEncode(hash);
 }
 
-function getDPoPNonce(): string | null {
+export function getDPoPNonce(): string | null {
   return sessionStorage.getItem(DPOP_NONCE_KEY);
 }
 
-function setDPoPNonce(nonce: string): void {
+export function setDPoPNonce(nonce: string): void {
   sessionStorage.setItem(DPOP_NONCE_KEY, nonce);
 }
 
-function extractDPoPNonceFromResponse(response: Response): void {
+export function extractDPoPNonceFromResponse(response: Response): void {
   const nonce = response.headers.get("DPoP-Nonce");
   if (nonce) {
     setDPoPNonce(nonce);

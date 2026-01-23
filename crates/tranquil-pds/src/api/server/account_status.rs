@@ -40,35 +40,9 @@ pub struct CheckAccountStatusOutput {
 
 pub async fn check_account_status(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: crate::auth::BearerAuthAllowDeactivated,
 ) -> Response {
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!(
-        "https://{}/xrpc/com.atproto.server.checkAccountStatus",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
-    );
-    let did = match crate::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        "GET",
-        &http_uri,
-        true,
-        false,
-    )
-    .await
-    {
-        Ok(user) => user.did,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let did = auth.0.did;
     let user_id = match state.user_repo.get_id_by_did(&did).await {
         Ok(Some(id)) => id,
         _ => {
@@ -331,42 +305,10 @@ async fn assert_valid_did_document_for_service(
 
 pub async fn activate_account(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: crate::auth::BearerAuthAllowDeactivated,
 ) -> Response {
     info!("[MIGRATION] activateAccount called");
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => {
-            info!("[MIGRATION] activateAccount: No auth token");
-            return ApiError::AuthenticationRequired.into_response();
-        }
-    };
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!(
-        "https://{}/xrpc/com.atproto.server.activateAccount",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
-    );
-    let auth_user = match crate::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        "POST",
-        &http_uri,
-        true,
-        false,
-    )
-    .await
-    {
-        Ok(user) => user,
-        Err(e) => {
-            info!("[MIGRATION] activateAccount: Auth failed: {:?}", e);
-            return ApiError::from(e).into_response();
-        }
-    };
+    let auth_user = auth.0;
     info!(
         "[MIGRATION] activateAccount: Authenticated user did={}",
         auth_user.did
@@ -528,36 +470,10 @@ pub struct DeactivateAccountInput {
 
 pub async fn deactivate_account(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: crate::auth::BearerAuth,
     Json(input): Json<DeactivateAccountInput>,
 ) -> Response {
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!(
-        "https://{}/xrpc/com.atproto.server.deactivateAccount",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
-    );
-    let auth_user = match crate::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        "POST",
-        &http_uri,
-        false,
-        false,
-    )
-    .await
-    {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
+    let auth_user = auth.0;
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
         auth_user.is_oauth,
@@ -607,47 +523,20 @@ pub async fn deactivate_account(
 
 pub async fn request_account_delete(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    auth: crate::auth::BearerAuthAllowDeactivated,
 ) -> Response {
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-    let http_uri = format!(
-        "https://{}/xrpc/com.atproto.server.requestAccountDelete",
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
-    );
-    let validated = match crate::auth::validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        "POST",
-        &http_uri,
-        true,
-        false,
-    )
-    .await
-    {
-        Ok(user) => user,
-        Err(e) => return ApiError::from(e).into_response(),
-    };
-    let did = validated.did.clone();
+    let did = &auth.0.did;
 
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &did).await {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, did).await {
         return crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &did,
+            did,
         )
         .await;
     }
 
-    let user_id = match state.user_repo.get_id_by_did(&did).await {
+    let user_id = match state.user_repo.get_id_by_did(did).await {
         Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(None).into_response();
@@ -657,7 +546,7 @@ pub async fn request_account_delete(
     let expires_at = Utc::now() + Duration::minutes(15);
     if let Err(e) = state
         .infra_repo
-        .create_deletion_request(&confirmation_token, &did, expires_at)
+        .create_deletion_request(&confirmation_token, did, expires_at)
         .await
     {
         error!("DB error creating deletion token: {:?}", e);

@@ -88,7 +88,9 @@ export function createInboundMigrationFlow() {
 
   function setStep(step: InboundStep) {
     state.step = step;
-    state.error = null;
+    if (step !== "error") {
+      state.error = null;
+    }
     if (step !== "success") {
       saveMigrationState(state);
       updateStep(step);

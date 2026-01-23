@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::{BearerAuthAllowDeactivated, ServiceTokenVerifier, is_service_token};
+use crate::auth::{BearerAuthAllowDeactivated, BlobAuth, BlobAuthResult};
 use crate::delegation::DelegationActionType;
 use crate::state::AppState;
 use crate::types::{CidLink, Did};
@@ -44,88 +44,25 @@ fn detect_mime_type(data: &[u8], client_hint: &str) -> String {
 pub async fn upload_blob(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
+    auth: BlobAuth,
     body: Body,
 ) -> Response {
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let token = extracted.token;
-
-    let is_service_auth = is_service_token(&token);
-
-    let (did, _is_migration, controller_did): (Did, bool, Option<Did>) = if is_service_auth {
-        debug!("Verifying service token for blob upload");
-        let verifier = ServiceTokenVerifier::new();
-        match verifier
-            .verify_service_token(&token, Some("com.atproto.repo.uploadBlob"))
-            .await
-        {
-            Ok(claims) => {
-                debug!("Service token verified for DID: {}", claims.iss);
-                let did: Did = match claims.iss.parse() {
-                    Ok(d) => d,
-                    Err(_) => {
-                        return ApiError::InvalidDid("Invalid DID format".into()).into_response();
-                    }
-                };
-                (did, false, None)
+    let (did, controller_did): (Did, Option<Did>) = match auth.0 {
+        BlobAuthResult::Service { did } => (did, None),
+        BlobAuthResult::User(auth_user) => {
+            let mime_type_for_check = headers
+                .get("content-type")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("application/octet-stream");
+            if let Err(e) = crate::auth::scope_check::check_blob_scope(
+                auth_user.is_oauth,
+                auth_user.scope.as_deref(),
+                mime_type_for_check,
+            ) {
+                return e;
             }
-            Err(e) => {
-                error!("Service token verification failed: {:?}", e);
-                return ApiError::AuthenticationFailed(Some(format!(
-                    "Service token verification failed: {}",
-                    e
-                )))
-                .into_response();
-            }
-        }
-    } else {
-        let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
-        let http_uri = format!(
-            "https://{}/xrpc/com.atproto.repo.uploadBlob",
-            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
-        );
-        match crate::auth::validate_token_with_dpop(
-            state.user_repo.as_ref(),
-            state.oauth_repo.as_ref(),
-            &token,
-            extracted.is_dpop,
-            dpop_proof,
-            "POST",
-            &http_uri,
-            true,
-            false,
-        )
-        .await
-        {
-            Ok(user) => {
-                let mime_type_for_check = headers
-                    .get("content-type")
-                    .and_then(|h| h.to_str().ok())
-                    .unwrap_or("application/octet-stream");
-                if let Err(e) = crate::auth::scope_check::check_blob_scope(
-                    user.is_oauth,
-                    user.scope.as_deref(),
-                    mime_type_for_check,
-                ) {
-                    return e;
-                }
-                let deactivated = state
-                    .user_repo
-                    .get_status_by_did(&user.did)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|s| s.deactivated_at);
-                let ctrl_did = user.controller_did.clone();
-                (user.did, deactivated.is_some(), ctrl_did)
-            }
-            Err(_) => {
-                return ApiError::AuthenticationFailed(None).into_response();
-            }
+            let ctrl_did = auth_user.controller_did.clone();
+            (auth_user.did, ctrl_did)
         }
     };
 

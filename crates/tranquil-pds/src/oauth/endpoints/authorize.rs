@@ -2,6 +2,7 @@ use crate::comms::{channel_display_name, comms_repo::enqueue_2fa_code};
 use crate::oauth::{
     AuthFlowState, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, SessionId,
     db::should_show_consent,
+    scopes::expand_include_scopes,
 };
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{Did, Handle, PlainPassword};
@@ -1106,6 +1107,46 @@ pub async fn authorize_select(
         .oauth_repo
         .upsert_account_device(&did, &select_device_typed)
         .await;
+
+    let requested_scope_str = request_data
+        .parameters
+        .scope
+        .as_deref()
+        .unwrap_or("atproto");
+    let requested_scopes: Vec<String> = requested_scope_str
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let client_id_typed = ClientId::from(request_data.parameters.client_id.clone());
+    let needs_consent = should_show_consent(
+        state.oauth_repo.as_ref(),
+        &did,
+        &client_id_typed,
+        &requested_scopes,
+    )
+    .await
+    .unwrap_or(true);
+
+    if needs_consent {
+        if state
+            .oauth_repo
+            .set_authorization_did(&select_request_id, &did, Some(&select_device_typed))
+            .await
+            .is_err()
+        {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "An error occurred. Please try again.",
+            );
+        }
+        let consent_url = format!(
+            "/app/oauth/consent?request_uri={}",
+            url_encode(&form.request_uri)
+        );
+        return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
+    }
+
     let code = Code::generate();
     let select_code = AuthorizationCode::from(code.0.clone());
     if state
@@ -1475,7 +1516,8 @@ pub async fn consent_get(
         requested_scope_str.to_string()
     };
 
-    let requested_scopes: Vec<&str> = effective_scope_str.split_whitespace().collect();
+    let expanded_scope_str = expand_include_scopes(&effective_scope_str).await;
+    let requested_scopes: Vec<&str> = expanded_scope_str.split_whitespace().collect();
     let consent_client_id = ClientId::from(request_data.parameters.client_id.clone());
     let preferences = state
         .oauth_repo
@@ -2407,39 +2449,37 @@ pub async fn passkey_start(
     }
 
     let delegation_from_param = match &form.delegated_did {
-        Some(delegated_did_str) => {
-            match delegated_did_str.parse::<tranquil_types::Did>() {
-                Ok(delegated_did) if delegated_did != user.did => {
-                    match state
-                        .delegation_repo
-                        .get_delegation(&delegated_did, &user.did)
-                        .await
-                    {
-                        Ok(Some(_)) => Some(delegated_did),
-                        Ok(None) => None,
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e,
-                                delegated_did = %delegated_did,
-                                controller_did = %user.did,
-                                "Failed to verify delegation relationship"
-                            );
-                            None
-                        }
+        Some(delegated_did_str) => match delegated_did_str.parse::<tranquil_types::Did>() {
+            Ok(delegated_did) if delegated_did != user.did => {
+                match state
+                    .delegation_repo
+                    .get_delegation(&delegated_did, &user.did)
+                    .await
+                {
+                    Ok(Some(_)) => Some(delegated_did),
+                    Ok(None) => None,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            delegated_did = %delegated_did,
+                            controller_did = %user.did,
+                            "Failed to verify delegation relationship"
+                        );
+                        None
                     }
                 }
-                _ => None,
             }
-        }
+            _ => None,
+        },
         None => None,
     };
 
     let is_delegation_flow = delegation_from_param.is_some()
-        || request_data.did.as_ref().map_or(false, |existing_did| {
+        || request_data.did.as_ref().is_some_and(|existing_did| {
             existing_did
                 .parse::<tranquil_types::Did>()
                 .ok()
-                .map_or(false, |parsed| parsed != user.did)
+                .is_some_and(|parsed| parsed != user.did)
         });
 
     if let Some(delegated_did) = delegation_from_param {
@@ -3600,4 +3640,80 @@ pub async fn register_complete(
         request_data.parameters.response_mode.as_deref(),
     );
     Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
+}
+
+pub async fn establish_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    auth: crate::auth::BearerAuth,
+) -> Response {
+    let did = &auth.0.did;
+
+    let existing_device = extract_device_cookie(&headers);
+
+    let (device_id, new_cookie) = match existing_device {
+        Some(id) => {
+            let device_typed = DeviceIdType::from(id.clone());
+            let _ = state
+                .oauth_repo
+                .upsert_account_device(did, &device_typed)
+                .await;
+            (id, None)
+        }
+        None => {
+            let new_id = DeviceId::generate();
+            let device_data = DeviceData {
+                session_id: SessionId::generate().0,
+                user_agent: extract_user_agent(&headers),
+                ip_address: extract_client_ip(&headers),
+                last_seen_at: Utc::now(),
+            };
+            let device_typed = DeviceIdType::from(new_id.0.clone());
+
+            if let Err(e) = state.oauth_repo.create_device(&device_typed, &device_data).await {
+                tracing::error!(error = ?e, "Failed to create device");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "server_error",
+                        "error_description": "Failed to establish session"
+                    })),
+                )
+                    .into_response();
+            }
+
+            if let Err(e) = state.oauth_repo.upsert_account_device(did, &device_typed).await {
+                tracing::error!(error = ?e, "Failed to link device to account");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": "server_error",
+                        "error_description": "Failed to establish session"
+                    })),
+                )
+                    .into_response();
+            }
+
+            (new_id.0.clone(), Some(make_device_cookie(&new_id.0)))
+        }
+    };
+
+    tracing::info!(did = %did, device_id = %device_id, "Device session established");
+
+    match new_cookie {
+        Some(cookie) => (
+            StatusCode::OK,
+            [(SET_COOKIE, cookie)],
+            Json(serde_json::json!({
+                "success": true,
+                "device_id": device_id
+            })),
+        )
+            .into_response(),
+        None => Json(serde_json::json!({
+            "success": true,
+            "device_id": device_id
+        }))
+        .into_response(),
+    }
 }

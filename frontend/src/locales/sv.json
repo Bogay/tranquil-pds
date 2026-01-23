@@ -778,6 +778,11 @@
           "name": "Hantera konto",
           "description": "Hantera kontoinställningar och preferenser"
         }
+      },
+      "unexpectedState": {
+        "title": "Oväntat tillstånd",
+        "description": "Samtyckes-sidan är i ett oväntat tillstånd. Kontrollera webbläsarens konsol för fel.",
+        "reload": "Ladda om sidan"
       }
     },
     "accounts": {

@@ -1,8 +1,8 @@
-use crate::auth::{extract_auth_token_from_header, validate_token_with_dpop};
+use crate::auth::BearerAuth;
 use crate::delegation::DelegationActionType;
 use crate::state::{AppState, RateLimitKind};
 use crate::types::PlainPassword;
-use crate::util::{build_full_url, extract_client_ip};
+use crate::util::extract_client_ip;
 use axum::{
     Json,
     extract::State,
@@ -463,58 +463,10 @@ pub struct DelegationTokenAuthSubmit {
 pub async fn delegation_auth_token(
     State(state): State<AppState>,
     headers: HeaderMap,
+    auth: BearerAuth,
     Json(form): Json<DelegationTokenAuthSubmit>,
 ) -> Response {
-    let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok());
-
-    let extracted = match extract_auth_token_from_header(auth_header) {
-        Some(e) => e,
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(DelegationAuthResponse {
-                    success: false,
-                    needs_totp: None,
-                    redirect_uri: None,
-                    error: Some("Missing or invalid authorization header".to_string()),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    let dpop_proof = headers.get("dpop").and_then(|h| h.to_str().ok());
-    let uri = build_full_url("/oauth/delegation/auth-token");
-
-    let auth_user = match validate_token_with_dpop(
-        state.user_repo.as_ref(),
-        state.oauth_repo.as_ref(),
-        &extracted.token,
-        extracted.is_dpop,
-        dpop_proof,
-        "POST",
-        &uri,
-        false,
-        false,
-    )
-    .await
-    {
-        Ok(user) => user,
-        Err(_) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(DelegationAuthResponse {
-                    success: false,
-                    needs_totp: None,
-                    redirect_uri: None,
-                    error: Some("Invalid or expired access token".to_string()),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    let controller_did = auth_user.did;
+    let controller_did = auth.0.did;
 
     let delegated_did: Did = match form.delegated_did.parse() {
         Ok(d) => d,

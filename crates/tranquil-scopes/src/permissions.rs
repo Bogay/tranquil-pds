@@ -126,7 +126,7 @@ impl ScopePermissions {
             return Ok(());
         }
 
-        let has_permission = self.find_repo_scopes().any(|repo_scope| {
+        let has_repo_permission = self.find_repo_scopes().any(|repo_scope| {
             repo_scope.actions.contains(&action)
                 && match &repo_scope.collection {
                     None => true,
@@ -140,7 +140,7 @@ impl ScopePermissions {
                 }
         });
 
-        if has_permission {
+        if has_repo_permission {
             Ok(())
         } else {
             Err(ScopeError::InsufficientScope {
@@ -181,6 +181,8 @@ impl ScopePermissions {
             return Ok(());
         }
 
+        let aud_base = aud.split('#').next().unwrap_or(aud);
+
         let has_permission = self.find_rpc_scopes().any(|rpc_scope| {
             let lxm_matches = match &rpc_scope.lxm {
                 None => true,
@@ -195,7 +197,10 @@ impl ScopePermissions {
             let aud_matches = match &rpc_scope.aud {
                 None => true,
                 Some(scope_aud) if scope_aud == "*" => true,
-                Some(scope_aud) => scope_aud == aud,
+                Some(scope_aud) => {
+                    let scope_aud_base = scope_aud.split('#').next().unwrap_or(scope_aud);
+                    scope_aud_base == aud_base
+                }
             };
 
             lxm_matches && aud_matches
@@ -521,4 +526,35 @@ mod tests {
         assert!(perms.allows_blob("image/png"));
         assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
     }
+
+    #[test]
+    fn test_rpc_scope_with_did_fragment() {
+        let perms = ScopePermissions::from_scope_string(Some(
+            "rpc:app.bsky.feed.getAuthorFeed?aud=did:web:api.bsky.app#bsky_appview",
+        ));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getAuthorFeed"));
+        assert!(perms.allows_rpc(
+            "did:web:api.bsky.app#bsky_appview",
+            "app.bsky.feed.getAuthorFeed"
+        ));
+        assert!(perms.allows_rpc(
+            "did:web:api.bsky.app#other_service",
+            "app.bsky.feed.getAuthorFeed"
+        ));
+        assert!(!perms.allows_rpc("did:web:other.app", "app.bsky.feed.getAuthorFeed"));
+        assert!(!perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getTimeline"));
+    }
+
+    #[test]
+    fn test_rpc_scope_without_fragment_matches_with_fragment() {
+        let perms = ScopePermissions::from_scope_string(Some(
+            "rpc:app.bsky.feed.getAuthorFeed?aud=did:web:api.bsky.app",
+        ));
+        assert!(perms.allows_rpc("did:web:api.bsky.app", "app.bsky.feed.getAuthorFeed"));
+        assert!(perms.allows_rpc(
+            "did:web:api.bsky.app#bsky_appview",
+            "app.bsky.feed.getAuthorFeed"
+        ));
+    }
+
 }

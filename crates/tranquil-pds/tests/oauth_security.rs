@@ -1373,10 +1373,16 @@ async fn test_delegation_oauth_token_sub_is_delegated_account() {
         .send()
         .await
         .unwrap();
-    assert_eq!(token_res.status(), StatusCode::OK, "Token exchange should succeed");
+    assert_eq!(
+        token_res.status(),
+        StatusCode::OK,
+        "Token exchange should succeed"
+    );
     let tokens: Value = token_res.json().await.unwrap();
 
-    let sub = tokens["sub"].as_str().expect("Token response should have sub claim");
+    let sub = tokens["sub"]
+        .as_str()
+        .expect("Token response should have sub claim");
 
     assert_eq!(
         sub, delegated_did,

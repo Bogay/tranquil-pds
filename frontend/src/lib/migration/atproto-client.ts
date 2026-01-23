@@ -240,9 +240,26 @@ export class AtprotoClient {
     }&cid=${encodeURIComponent(cid)}`;
     const headers: Record<string, string> = {};
     if (this.accessToken) {
-      headers["Authorization"] = `Bearer ${this.accessToken}`;
+      if (this.dpopKeyPair) {
+        headers["Authorization"] = `DPoP ${this.accessToken}`;
+        const tokenHash = await computeAccessTokenHash(this.accessToken);
+        const dpopProof = await createDPoPProof(
+          this.dpopKeyPair,
+          "GET",
+          url.split("?")[0],
+          this.dpopNonce ?? undefined,
+          tokenHash,
+        );
+        headers["DPoP"] = dpopProof;
+      } else {
+        headers["Authorization"] = `Bearer ${this.accessToken}`;
+      }
     }
     const res = await fetch(url, { headers });
+    const newNonce = res.headers.get("DPoP-Nonce");
+    if (newNonce) {
+      this.dpopNonce = newNonce;
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({
         error: "Unknown",

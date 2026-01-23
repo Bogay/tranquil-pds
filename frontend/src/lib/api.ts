@@ -16,6 +16,11 @@ import {
   unsafeAsISODate,
   unsafeAsRefreshToken,
 } from "./types/branded.ts";
+import {
+  createDPoPProofForRequest,
+  getDPoPNonce,
+  setDPoPNonce,
+} from "./oauth.ts";
 import type {
   AccountInfo,
   ApiErrorCode,
@@ -91,42 +96,85 @@ export class ApiError extends Error {
   }
 }
 
-let tokenRefreshCallback: (() => Promise<string | null>) | null = null;
+let tokenRefreshCallback: (() => Promise<AccessToken | null>) | null = null;
 
 export function setTokenRefreshCallback(
-  callback: () => Promise<string | null>,
+  callback: () => Promise<AccessToken | null>,
 ) {
   tokenRefreshCallback = callback;
+}
+
+interface AuthenticatedFetchOptions {
+  method?: "GET" | "POST";
+  token: AccessToken | RefreshToken;
+  headers?: Record<string, string>;
+  body?: BodyInit;
+}
+
+async function authenticatedFetch(
+  url: string,
+  options: AuthenticatedFetchOptions,
+): Promise<Response> {
+  const { method = "GET", token, headers = {}, body } = options;
+  const fullUrl = url.startsWith("http")
+    ? url
+    : `${globalThis.location.origin}${url}`;
+  const dpopProof = await createDPoPProofForRequest(method, fullUrl, token);
+  const res = await fetch(url, {
+    method,
+    headers: {
+      ...headers,
+      Authorization: `DPoP ${token}`,
+      DPoP: dpopProof,
+    },
+    body,
+  });
+  const dpopNonce = res.headers.get("DPoP-Nonce");
+  if (dpopNonce) {
+    setDPoPNonce(dpopNonce);
+  }
+  return res;
 }
 
 interface XrpcOptions {
   method?: "GET" | "POST";
   params?: Record<string, string>;
   body?: unknown;
-  token?: string;
+  token?: AccessToken | RefreshToken;
   skipRetry?: boolean;
+  skipDpopRetry?: boolean;
 }
 
 async function xrpc<T>(method: string, options?: XrpcOptions): Promise<T> {
-  const { method: httpMethod = "GET", params, body, token, skipRetry } =
-    options ?? {};
+  const {
+    method: httpMethod = "GET",
+    params,
+    body,
+    token,
+    skipRetry,
+    skipDpopRetry,
+  } = options ?? {};
   let url = `${API_BASE}/${method}`;
   if (params) {
     const searchParams = new URLSearchParams(params);
     url += `?${searchParams}`;
   }
   const headers: Record<string, string> = {};
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
   if (body) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(url, {
-    method: httpMethod,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const res = token
+    ? await authenticatedFetch(url, {
+      method: httpMethod,
+      token,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    : await fetch(url, {
+      method: httpMethod,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({
       error: "Unknown",
@@ -134,9 +182,21 @@ async function xrpc<T>(method: string, options?: XrpcOptions): Promise<T> {
     }));
     if (
       res.status === 401 &&
+      errData.error === "use_dpop_nonce" &&
+      token &&
+      !skipDpopRetry &&
+      getDPoPNonce()
+    ) {
+      return xrpc(method, { ...options, skipDpopRetry: true });
+    }
+    if (
+      res.status === 401 &&
       (errData.error === "AuthenticationFailed" ||
-        errData.error === "ExpiredToken") &&
-      token && tokenRefreshCallback && !skipRetry
+        errData.error === "ExpiredToken" ||
+        errData.error === "OAuthExpiredToken") &&
+      token &&
+      tokenRefreshCallback &&
+      !skipRetry
     ) {
       const newToken = await tokenRefreshCallback();
       if (newToken && newToken !== token) {
@@ -536,12 +596,10 @@ export const api = {
     token: AccessToken,
     file: File,
   ): Promise<UploadBlobResponse> {
-    const res = await fetch("/xrpc/com.atproto.repo.uploadBlob", {
+    const res = await authenticatedFetch("/xrpc/com.atproto.repo.uploadBlob", {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": file.type,
-      },
+      token,
+      headers: { "Content-Type": file.type },
       body: file,
     });
     if (!res.ok) {
@@ -1084,12 +1142,8 @@ export const api = {
   },
 
   async getRepo(token: AccessToken, did: Did): Promise<ArrayBuffer> {
-    const url = `${API_BASE}/com.atproto.sync.getRepo?did=${
-      encodeURIComponent(did)
-    }`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const url = `${API_BASE}/com.atproto.sync.getRepo?did=${encodeURIComponent(did)}`;
+    const res = await authenticatedFetch(url, { token });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
         error: "Unknown",
@@ -1106,9 +1160,7 @@ export const api = {
 
   async getBackup(token: AccessToken, id: string): Promise<Blob> {
     const url = `${API_BASE}/_backup.getBackup?id=${encodeURIComponent(id)}`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await authenticatedFetch(url, { token });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
         error: "Unknown",
@@ -1146,13 +1198,10 @@ export const api = {
   },
 
   async importRepo(token: AccessToken, car: Uint8Array): Promise<void> {
-    const url = `${API_BASE}/com.atproto.repo.importRepo`;
-    const res = await fetch(url, {
+    const res = await authenticatedFetch(`${API_BASE}/com.atproto.repo.importRepo`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/vnd.ipld.car",
-      },
+      token,
+      headers: { "Content-Type": "application/vnd.ipld.car" },
       body: car as unknown as BodyInit,
     });
     if (!res.ok) {
@@ -1162,6 +1211,22 @@ export const api = {
       }));
       throw new ApiError(res.status, errData.error, errData.message);
     }
+  },
+
+  async establishOAuthSession(token: AccessToken): Promise<{ success: boolean; device_id: string }> {
+    const res = await authenticatedFetch("/oauth/establish-session", {
+      method: "POST",
+      token,
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
+    }
+    return res.json();
   },
 };
 

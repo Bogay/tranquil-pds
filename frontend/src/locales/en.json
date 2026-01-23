@@ -779,6 +779,11 @@
           "name": "Manage Account",
           "description": "Manage account settings and preferences"
         }
+      },
+      "unexpectedState": {
+        "title": "Unexpected State",
+        "description": "The consent page is in an unexpected state. Please check the browser console for errors.",
+        "reload": "Reload Page"
       }
     },
     "accounts": {

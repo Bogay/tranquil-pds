@@ -1,6 +1,7 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::api::repo::record::write::{CommitInfo, prepare_repo_write};
+use crate::auth::BearerAuth;
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -8,7 +9,7 @@ use crate::types::{AtIdentifier, AtUri, Nsid, Rkey};
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use cid::Cid;
@@ -39,19 +40,10 @@ pub struct DeleteRecordOutput {
 
 pub async fn delete_record(
     State(state): State<AppState>,
-    headers: HeaderMap,
-    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    auth: BearerAuth,
     Json(input): Json<DeleteRecordInput>,
 ) -> Response {
-    let auth = match prepare_repo_write(
-        &state,
-        &headers,
-        &input.repo,
-        "POST",
-        &crate::util::build_full_url(&uri.to_string()),
-    )
-    .await
-    {
+    let auth = match prepare_repo_write(&state, auth.0, &input.repo).await {
         Ok(res) => res,
         Err(err_res) => return err_res,
     };

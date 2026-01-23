@@ -785,6 +785,11 @@
           "name": "Hallitse tiliä",
           "description": "Hallitse tilin asetuksia ja asetuksia"
         }
+      },
+      "unexpectedState": {
+        "title": "Odottamaton tila",
+        "description": "Suostumussivulla on odottamaton tila. Tarkista selaimen konsoli virheiden varalta.",
+        "reload": "Lataa sivu uudelleen"
       }
     },
     "accounts": {

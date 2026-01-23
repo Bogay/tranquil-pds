@@ -543,6 +543,13 @@ impl From<crate::auth::extractor::AuthError> for ApiError {
             crate::auth::extractor::AuthError::AccountDeactivated => Self::AccountDeactivated,
             crate::auth::extractor::AuthError::AccountTakedown => Self::AccountTakedown,
             crate::auth::extractor::AuthError::AdminRequired => Self::AdminRequired,
+            crate::auth::extractor::AuthError::OAuthExpiredToken(msg) => {
+                Self::OAuthExpiredToken(Some(msg))
+            }
+            crate::auth::extractor::AuthError::UseDpopNonce(_)
+            | crate::auth::extractor::AuthError::InvalidDpopProof(_) => {
+                Self::AuthenticationFailed(None)
+            }
         }
     }
 }

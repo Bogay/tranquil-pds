@@ -65,6 +65,7 @@
   async function fetchConsentData() {
     const requestUri = getRequestUri()
     if (!requestUri) {
+      console.error('[OAuthConsent] No request_uri in URL')
       error = $_('oauth.error.genericError')
       loading = false
       return
@@ -74,11 +75,20 @@
       const response = await fetch(`/oauth/authorize/consent?request_uri=${encodeURIComponent(requestUri)}`)
       if (!response.ok) {
         const data = await response.json()
+        console.error('[OAuthConsent] Consent fetch failed:', data)
         error = data.error_description || data.error || $_('oauth.error.genericError')
         loading = false
         return
       }
       const data: ConsentData = await response.json()
+
+      if (!data.scopes || !Array.isArray(data.scopes)) {
+        console.error('[OAuthConsent] Invalid scopes data:', data.scopes)
+        error = 'Invalid consent data received'
+        loading = false
+        return
+      }
+
       consentData = data
 
       scopeSelections = Object.fromEntries(
@@ -91,7 +101,8 @@
       if (!data.show_consent) {
         await submitConsent()
       }
-    } catch {
+    } catch (e) {
+      console.error('[OAuthConsent] Error during consent fetch:', e)
       error = $_('oauth.error.genericError')
     } finally {
       loading = false
@@ -104,7 +115,10 @@
   }
 
   async function submitConsent() {
-    if (!consentData) return
+    if (!consentData) {
+      console.error('[OAuthConsent] submitConsent called but no consentData')
+      return
+    }
 
     submitting = true
     let approvedScopes = Object.entries(scopeSelections)
@@ -128,6 +142,7 @@
 
       if (!response.ok) {
         const data = await response.json()
+        console.error('[OAuthConsent] Submit failed:', data)
         error = data.error_description || data.error || $_('oauth.error.genericError')
         submitting = false
         return
@@ -136,8 +151,13 @@
       const data = await response.json()
       if (data.redirect_uri) {
         window.location.href = data.redirect_uri
+      } else {
+        console.error('[OAuthConsent] No redirect_uri in response')
+        error = 'Authorization failed - no redirect received'
+        submitting = false
       }
-    } catch {
+    } catch (e) {
+      console.error('[OAuthConsent] Submit error:', e)
       error = $_('oauth.error.genericError')
       submitting = false
     }
@@ -249,6 +269,8 @@
           <div class="spinner"></div>
           <p>{$_('common.loading')}</p>
         </div>
+      {:else}
+        <p style="color: var(--text-muted); font-size: 0.875rem;">Loading consent data...</p>
       {/if}
     </div>
   {:else if error}
@@ -370,6 +392,19 @@
       </button>
       <button type="button" class="approve-btn" onclick={submitConsent} disabled={submitting}>
         {submitting ? $_('oauth.consent.authorizing') : $_('oauth.consent.authorize')}
+      </button>
+    </div>
+  {:else}
+    <div class="error-container">
+      <h1>{$_('oauth.consent.unexpectedState.title')}</h1>
+      <p style="color: var(--text-secondary);">
+        {$_('oauth.consent.unexpectedState.description')}
+      </p>
+      <p style="color: var(--text-muted); font-size: 0.75rem; font-family: monospace;">
+        loading={loading}, error={error ? 'set' : 'null'}, consentData={consentData ? 'set' : 'null'}, submitting={submitting}
+      </p>
+      <button type="button" onclick={() => window.location.reload()}>
+        {$_('oauth.consent.unexpectedState.reload')}
       </button>
     </div>
   {/if}

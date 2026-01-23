@@ -10,7 +10,9 @@ use serde_json::json;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use tranquil_db_traits::{OAuthRepository, UserRepository};
-use tranquil_types::TokenId;
+use tranquil_types::{ClientId, TokenId};
+
+use crate::types::Did;
 
 use super::scopes::ScopePermissions;
 use super::{DPoPVerifier, OAuthError};
@@ -27,9 +29,9 @@ pub struct OAuthTokenInfo {
 }
 
 pub struct VerifyResult {
-    pub did: String,
-    pub token_id: String,
-    pub client_id: String,
+    pub did: Did,
+    pub token_id: TokenId,
+    pub client_id: ClientId,
     pub scope: Option<String>,
 }
 
@@ -91,10 +93,14 @@ pub async fn verify_oauth_access_token(
             ));
         }
     }
+    let did: Did = token_data
+        .did
+        .parse()
+        .map_err(|_| OAuthError::InvalidToken("Invalid DID in token".to_string()))?;
     Ok(VerifyResult {
-        did: token_data.did,
-        token_id: token_id.to_string(),
-        client_id: token_data.client_id,
+        did,
+        token_id,
+        client_id: ClientId::from(token_data.client_id),
         scope: token_data.scope,
     })
 }
@@ -202,8 +208,8 @@ pub fn generate_dpop_nonce() -> String {
 }
 
 pub struct OAuthUser {
-    pub did: String,
-    pub client_id: Option<String>,
+    pub did: Did,
+    pub client_id: Option<ClientId>,
     pub scope: Option<String>,
     pub is_oauth: bool,
     pub permissions: ScopePermissions,
@@ -382,7 +388,7 @@ impl FromRequestParts<AppState> for OAuthUser {
 }
 
 struct LegacyAuthResult {
-    did: String,
+    did: Did,
 }
 
 async fn try_legacy_auth(
@@ -390,9 +396,21 @@ async fn try_legacy_auth(
     token: &str,
 ) -> Result<LegacyAuthResult, ()> {
     match crate::auth::validate_bearer_token(user_repo, token).await {
-        Ok(user) if !user.is_oauth => Ok(LegacyAuthResult {
-            did: user.did.to_string(),
-        }),
+        Ok(user) if !user.is_oauth => Ok(LegacyAuthResult { did: user.did }),
         _ => Err(()),
     }
+}
+
+pub async fn dpop_nonce_middleware(
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> Response {
+    let mut response = next.run(req).await;
+    let config = AuthConfig::get();
+    let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
+    let nonce = verifier.generate_nonce();
+    if let Ok(nonce_val) = nonce.parse() {
+        response.headers_mut().insert("DPoP-Nonce", nonce_val);
+    }
+    response
 }

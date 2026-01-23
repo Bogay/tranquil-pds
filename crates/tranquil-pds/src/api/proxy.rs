@@ -267,9 +267,18 @@ async fn proxy_handler(
                 }
             }
             Err(e) => {
-                warn!("Token validation failed: {:?}", e);
-                if matches!(e, crate::auth::TokenValidationError::OAuthTokenExpired) {
-                    return ApiError::from(e).into_response();
+                info!(error = ?e, "Proxy token validation failed, returning error to client");
+                if matches!(
+                    e,
+                    crate::auth::TokenValidationError::OAuthTokenExpired
+                        | crate::auth::TokenValidationError::TokenExpired
+                ) {
+                    let mut response = ApiError::from(e).into_response();
+                    let nonce = crate::oauth::verify::generate_dpop_nonce();
+                    if let Ok(nonce_val) = nonce.parse() {
+                        response.headers_mut().insert("DPoP-Nonce", nonce_val);
+                    }
+                    return response;
                 }
             }
         }

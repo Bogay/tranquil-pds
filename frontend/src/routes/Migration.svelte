@@ -2,6 +2,9 @@
   import { setSession } from '../lib/auth.svelte'
   import { navigate, routes } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
+  import { api } from '../lib/api'
+  import { startOAuthLogin } from '../lib/oauth'
+  import { unsafeAsAccessToken } from '../lib/types/branded'
   import {
     createInboundMigrationFlow,
     createOfflineInboundMigrationFlow,
@@ -143,30 +146,48 @@
     direction = 'select'
   }
 
-  function handleInboundComplete() {
+  async function handleInboundComplete() {
     const session = inboundFlow?.getLocalSession()
     if (session) {
-      setSession({
-        did: session.did,
-        handle: session.handle,
-        accessJwt: session.accessJwt,
-        refreshJwt: '',
-      })
+      try {
+        await api.establishOAuthSession(unsafeAsAccessToken(session.accessJwt))
+        clearMigrationState()
+        await startOAuthLogin(session.handle)
+      } catch (e) {
+        console.error('Failed to establish OAuth session, falling back to direct login:', e)
+        setSession({
+          did: session.did,
+          handle: session.handle,
+          accessJwt: session.accessJwt,
+          refreshJwt: '',
+        })
+        navigate(routes.dashboard)
+      }
+    } else {
+      navigate(routes.dashboard)
     }
-    navigate(routes.dashboard)
   }
 
-  function handleOfflineComplete() {
+  async function handleOfflineComplete() {
     const session = offlineFlow?.getLocalSession()
     if (session) {
-      setSession({
-        did: session.did,
-        handle: session.handle,
-        accessJwt: session.accessJwt,
-        refreshJwt: '',
-      })
+      try {
+        await api.establishOAuthSession(unsafeAsAccessToken(session.accessJwt))
+        clearOfflineState()
+        await startOAuthLogin(session.handle)
+      } catch (e) {
+        console.error('Failed to establish OAuth session, falling back to direct login:', e)
+        setSession({
+          did: session.did,
+          handle: session.handle,
+          accessJwt: session.accessJwt,
+          refreshJwt: '',
+        })
+        navigate(routes.dashboard)
+      }
+    } else {
+      navigate(routes.dashboard)
     }
-    navigate(routes.dashboard)
   }
 </script>
 

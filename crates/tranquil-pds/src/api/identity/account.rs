@@ -1,7 +1,7 @@
 use super::did::verify_did_web;
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::create_signed_commit;
-use crate::auth::{ServiceTokenVerifier, is_service_token};
+use crate::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_service_token};
 use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{Did, Handle, Nsid, PlainPassword, Rkey};
@@ -96,9 +96,9 @@ pub async fn create_account(
         .into_response();
     }
 
-    let migration_auth = if let Some(extracted) = crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
+    let migration_auth = if let Some(extracted) =
+        extract_auth_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
+    {
         let token = extracted.token;
         if is_service_token(&token) {
             let verifier = ServiceTokenVerifier::new();

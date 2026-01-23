@@ -7,8 +7,10 @@ license.workspace = true
 [dependencies]
 axum = { workspace = true }
 futures = { workspace = true }
+hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+urlencoding = "2"

@@ -22,9 +22,8 @@ const EXDEV: i32 = 18;
 const CID_SHARD_PREFIX_LEN: usize = 9;
 
 fn split_cid_path(key: &str) -> Option<(&str, &str)> {
-    let is_cid = key.get(..3).map_or(false, |p| p.eq_ignore_ascii_case("baf"));
-    (key.len() > CID_SHARD_PREFIX_LEN && is_cid)
-        .then(|| key.split_at(CID_SHARD_PREFIX_LEN))
+    let is_cid = key.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("baf"));
+    (key.len() > CID_SHARD_PREFIX_LEN && is_cid).then(|| key.split_at(CID_SHARD_PREFIX_LEN))
 }
 
 fn validate_key(key: &str) -> Result<(), StorageError> {
@@ -771,7 +770,10 @@ mod tests {
         let cid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
         assert_eq!(
             split_cid_path(cid),
-            Some(("bafkreihd", "wdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"))
+            Some((
+                "bafkreihd",
+                "wdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"
+            ))
         );
     }
 
@@ -780,7 +782,10 @@ mod tests {
         let cid = "bafyreigdmqpykrgxyaxtlafqpqhzrb7qy2rh75nldvfd4tucqmqqme5yje";
         assert_eq!(
             split_cid_path(cid),
-            Some(("bafyreigd", "mqpykrgxyaxtlafqpqhzrb7qy2rh75nldvfd4tucqmqqme5yje"))
+            Some((
+                "bafyreigd",
+                "mqpykrgxyaxtlafqpqhzrb7qy2rh75nldvfd4tucqmqqme5yje"
+            ))
         );
     }
 
@@ -810,11 +815,17 @@ mod tests {
         let mixed = "BaFkReIhDwDcEfGh4DqKjV67UzCmW7OjEe6XeDzDeTojUzJevTeNxQuVyKu";
         assert_eq!(
             split_cid_path(upper),
-            Some(("BAFKREIHD", "WDCEFGH4DQKJV67UZCMW7OJEE6XEDZDETOJUZJEVTENXQUVYKU"))
+            Some((
+                "BAFKREIHD",
+                "WDCEFGH4DQKJV67UZCMW7OJEE6XEDZDETOJUZJEVTENXQUVYKU"
+            ))
         );
         assert_eq!(
             split_cid_path(mixed),
-            Some(("BaFkReIhD", "wDcEfGh4DqKjV67UzCmW7OjEe6XeDzDeTojUzJevTeNxQuVyKu"))
+            Some((
+                "BaFkReIhD",
+                "wDcEfGh4DqKjV67UzCmW7OjEe6XeDzDeTojUzJevTeNxQuVyKu"
+            ))
         );
     }
 
@@ -829,11 +840,10 @@ mod tests {
         let base = PathBuf::from("/blobs");
         let cid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
 
-        let expected = PathBuf::from("/blobs/bafkreihd/wdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku");
-        let result = split_cid_path(cid).map_or_else(
-            || base.join(cid),
-            |(dir, file)| base.join(dir).join(file),
-        );
+        let expected =
+            PathBuf::from("/blobs/bafkreihd/wdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku");
+        let result = split_cid_path(cid)
+            .map_or_else(|| base.join(cid), |(dir, file)| base.join(dir).join(file));
         assert_eq!(result, expected);
     }
 
@@ -843,10 +853,8 @@ mod tests {
         let key = "temp/abc123";
 
         let expected = PathBuf::from("/blobs/temp/abc123");
-        let result = split_cid_path(key).map_or_else(
-            || base.join(key),
-            |(dir, file)| base.join(dir).join(file),
-        );
+        let result = split_cid_path(key)
+            .map_or_else(|| base.join(key), |(dir, file)| base.join(dir).join(file));
         assert_eq!(result, expected);
     }
 }

@@ -528,7 +528,11 @@ pub fn app(state: AppState) -> Router {
         ));
     let xrpc_service = ServiceBuilder::new()
         .layer(XrpcProxyLayer::new(state.clone()))
-        .service(xrpc_router.with_state(state.clone()));
+        .service(
+            xrpc_router
+                .layer(middleware::from_fn(oauth::verify::dpop_nonce_middleware))
+                .with_state(state.clone()),
+        );
 
     let oauth_router = Router::new()
         .route("/jwks", get(oauth::endpoints::oauth_jwks))
@@ -568,6 +572,10 @@ pub fn app(state: AppState) -> Router {
             "/register/complete",
             post(oauth::endpoints::register_complete),
         )
+        .route(
+            "/establish-session",
+            post(oauth::endpoints::establish_session),
+        )
         .route("/authorize/consent", get(oauth::endpoints::consent_get))
         .route("/authorize/consent", post(oauth::endpoints::consent_post))
         .route(
@@ -605,7 +613,8 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/sso/check-handle-available",
             get(sso::endpoints::check_handle_available),
-        );
+        )
+        .layer(middleware::from_fn(oauth::verify::dpop_nonce_middleware));
 
     let well_known_router = Router::new()
         .route("/did.json", get(api::identity::well_known_did))
