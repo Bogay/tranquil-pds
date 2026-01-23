@@ -1,4 +1,4 @@
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::delegation::DelegationActionType;
 use crate::state::{AppState, RateLimitKind};
 use crate::types::PlainPassword;
@@ -463,10 +463,10 @@ pub struct DelegationTokenAuthSubmit {
 pub async fn delegation_auth_token(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(form): Json<DelegationTokenAuthSubmit>,
 ) -> Response {
-    let controller_did = auth.0.did;
+    let controller_did = &auth.did;
 
     let delegated_did: Did = match form.delegated_did.parse() {
         Ok(d) => d,
@@ -510,7 +510,7 @@ pub async fn delegation_auth_token(
 
     let grant = match state
         .delegation_repo
-        .get_delegation(&delegated_did, &controller_did)
+        .get_delegation(&delegated_did, controller_did)
         .await
     {
         Ok(Some(g)) => g,
@@ -551,7 +551,7 @@ pub async fn delegation_auth_token(
 
     if state
         .oauth_repo
-        .set_controller_did(&request_id, &controller_did)
+        .set_controller_did(&request_id, controller_did)
         .await
         .is_err()
     {
@@ -574,8 +574,8 @@ pub async fn delegation_auth_token(
         .delegation_repo
         .log_delegation_action(
             &delegated_did,
-            &controller_did,
-            Some(&controller_did),
+            controller_did,
+            Some(controller_did),
             DelegationActionType::TokenIssued,
             Some(serde_json::json!({
                 "client_id": request.client_id,

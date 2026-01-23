@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
@@ -45,48 +45,48 @@ pub struct RequestEmailUpdateInput {
 pub async fn request_email_update(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     input: Option<Json<RequestEmailUpdateInput>>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
     if !state
         .check_rate_limit(RateLimitKind::EmailUpdate, &client_ip)
         .await
     {
         warn!(ip = %client_ip, "Email update rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
+        return Err(ApiError::RateLimitExceeded(None));
     }
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.0.is_oauth,
-        auth.0.scope.as_deref(),
+        auth.is_oauth(),
+        auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Manage,
     ) {
-        return e;
+        return Ok(e);
     }
 
-    let user = match state.user_repo.get_email_info_by_did(&auth.0.did).await {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+    let user = state
+        .user_repo
+        .get_email_info_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let Some(current_email) = user.email else {
-        return ApiError::InvalidRequest("account does not have an email address".into())
-            .into_response();
+        return Err(ApiError::InvalidRequest(
+            "account does not have an email address".into(),
+        ));
     };
 
     let token_required = user.email_verified;
 
     if token_required {
         let code = crate::auth::verification_token::generate_channel_update_token(
-            &auth.0.did,
+            &auth.did,
             "email_update",
             &current_email.to_lowercase(),
         );
@@ -103,7 +103,7 @@ pub async fn request_email_update(
                     authorized: false,
                 };
                 if let Ok(json) = serde_json::to_string(&pending) {
-                    let cache_key = email_update_cache_key(&auth.0.did);
+                    let cache_key = email_update_cache_key(&auth.did);
                     if let Err(e) = state.cache.set(&cache_key, &json, EMAIL_UPDATE_TTL).await {
                         warn!("Failed to cache pending email update: {:?}", e);
                     }
@@ -127,7 +127,7 @@ pub async fn request_email_update(
     }
 
     info!("Email update requested for user {}", user.id);
-    TokenRequiredResponse::response(token_required).into_response()
+    Ok(TokenRequiredResponse::response(token_required).into_response())
 }
 
 #[derive(Deserialize)]
@@ -140,51 +140,50 @@ pub struct ConfirmEmailInput {
 pub async fn confirm_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<ConfirmEmailInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
     if !state
         .check_rate_limit(RateLimitKind::EmailUpdate, &client_ip)
         .await
     {
         warn!(ip = %client_ip, "Confirm email rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
+        return Err(ApiError::RateLimitExceeded(None));
     }
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.0.is_oauth,
-        auth.0.scope.as_deref(),
+        auth.is_oauth(),
+        auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Manage,
     ) {
-        return e;
+        return Ok(e);
     }
 
-    let did = &auth.0.did;
-    let user = match state.user_repo.get_email_info_by_did(did).await {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+    let did = &auth.did;
+    let user = state
+        .user_repo
+        .get_email_info_by_did(did)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let Some(ref email) = user.email else {
-        return ApiError::InvalidEmail.into_response();
+        return Err(ApiError::InvalidEmail);
     };
     let current_email = email.to_lowercase();
 
     let provided_email = input.email.trim().to_lowercase();
     if provided_email != current_email {
-        return ApiError::InvalidEmail.into_response();
+        return Err(ApiError::InvalidEmail);
     }
 
     if user.email_verified {
-        return EmptyResponse::ok().into_response();
+        return Ok(EmptyResponse::ok().into_response());
     }
 
     let confirmation_code =
@@ -199,24 +198,28 @@ pub async fn confirm_email(
     match verified {
         Ok(token_data) => {
             if token_data.did != did.as_str() {
-                return ApiError::InvalidToken(None).into_response();
+                return Err(ApiError::InvalidToken(None));
             }
         }
         Err(crate::auth::verification_token::VerifyError::Expired) => {
-            return ApiError::ExpiredToken(None).into_response();
+            return Err(ApiError::ExpiredToken(None));
         }
         Err(_) => {
-            return ApiError::InvalidToken(None).into_response();
+            return Err(ApiError::InvalidToken(None));
         }
     }
 
-    if let Err(e) = state.user_repo.set_email_verified(user.id, true).await {
-        error!("DB error confirming email: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+    state
+        .user_repo
+        .set_email_verified(user.id, true)
+        .await
+        .map_err(|e| {
+            error!("DB error confirming email: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
     info!("Email confirmed for user {}", user.id);
-    EmptyResponse::ok().into_response()
+    Ok(EmptyResponse::ok().into_response())
 }
 
 #[derive(Deserialize)]
@@ -230,31 +233,28 @@ pub struct UpdateEmailInput {
 
 pub async fn update_email(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdateEmailInput>,
-) -> Response {
-    let auth_user = auth.0;
-
+) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth_user.is_oauth,
-        auth_user.scope.as_deref(),
+        auth.is_oauth(),
+        auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Manage,
     ) {
-        return e;
+        return Ok(e);
     }
 
-    let did = &auth_user.did;
-    let user = match state.user_repo.get_email_info_by_did(did).await {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+    let did = &auth.did;
+    let user = state
+        .user_repo
+        .get_email_info_by_did(did)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let user_id = user.id;
     let current_email = user.email.clone();
@@ -262,16 +262,15 @@ pub async fn update_email(
     let new_email = input.email.trim().to_lowercase();
 
     if !crate::api::validation::is_valid_email(&new_email) {
-        return ApiError::InvalidRequest(
+        return Err(ApiError::InvalidRequest(
             "This email address is not supported, please use a different email.".into(),
-        )
-        .into_response();
+        ));
     }
 
     if let Some(ref current) = current_email
         && new_email == current.to_lowercase()
     {
-        return EmptyResponse::ok().into_response();
+        return Ok(EmptyResponse::ok().into_response());
     }
 
     if email_verified {
@@ -290,7 +289,7 @@ pub async fn update_email(
 
         if !authorized_via_link {
             let Some(ref t) = input.token else {
-                return ApiError::TokenRequired.into_response();
+                return Err(ApiError::TokenRequired);
             };
             let confirmation_token =
                 crate::auth::verification_token::normalize_token_input(t.trim());
@@ -309,23 +308,27 @@ pub async fn update_email(
             match verified {
                 Ok(token_data) => {
                     if token_data.did != did.as_str() {
-                        return ApiError::InvalidToken(None).into_response();
+                        return Err(ApiError::InvalidToken(None));
                     }
                 }
                 Err(crate::auth::verification_token::VerifyError::Expired) => {
-                    return ApiError::ExpiredToken(None).into_response();
+                    return Err(ApiError::ExpiredToken(None));
                 }
                 Err(_) => {
-                    return ApiError::InvalidToken(None).into_response();
+                    return Err(ApiError::InvalidToken(None));
                 }
             }
         }
     }
 
-    if let Err(e) = state.user_repo.update_email(user_id, &new_email).await {
-        error!("DB error updating email: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+    state
+        .user_repo
+        .update_email(user_id, &new_email)
+        .await
+        .map_err(|e| {
+            error!("DB error updating email: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
     let verification_token =
         crate::auth::verification_token::generate_signup_token(did, "email", &new_email);
@@ -358,7 +361,7 @@ pub async fn update_email(
     }
 
     info!("Email updated for user {}", user_id);
-    EmptyResponse::ok().into_response()
+    Ok(EmptyResponse::ok().into_response())
 }
 
 #[derive(Deserialize)]
@@ -497,46 +500,46 @@ pub async fn authorize_email_update(
 pub async fn check_email_update_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    auth: BearerAuth,
-) -> Response {
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
     if !state
         .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
         .await
     {
-        return ApiError::RateLimitExceeded(None).into_response();
+        return Err(ApiError::RateLimitExceeded(None));
     }
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.0.is_oauth,
-        auth.0.scope.as_deref(),
+        auth.is_oauth(),
+        auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Read,
     ) {
-        return e;
+        return Ok(e);
     }
 
-    let cache_key = email_update_cache_key(&auth.0.did);
+    let cache_key = email_update_cache_key(&auth.did);
     let pending_json = match state.cache.get(&cache_key).await {
         Some(json) => json,
         None => {
-            return Json(json!({ "pending": false, "authorized": false })).into_response();
+            return Ok(Json(json!({ "pending": false, "authorized": false })).into_response());
         }
     };
 
     let pending: PendingEmailUpdate = match serde_json::from_str(&pending_json) {
         Ok(p) => p,
         Err(_) => {
-            return Json(json!({ "pending": false, "authorized": false })).into_response();
+            return Ok(Json(json!({ "pending": false, "authorized": false })).into_response());
         }
     };
 
-    Json(json!({
+    Ok(Json(json!({
         "pending": true,
         "authorized": pending.authorized,
         "newEmail": pending.new_email,
     }))
-    .into_response()
+    .into_response())
 }
 
 #[derive(Deserialize)]

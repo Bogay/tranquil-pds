@@ -1,6 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::BearerAuthAdmin;
+use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{Did, Handle, PlainPassword};
 use axum::{
@@ -19,28 +19,30 @@ pub struct UpdateAccountEmailInput {
 
 pub async fn update_account_email(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(input): Json<UpdateAccountEmailInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let account = input.account.trim();
     let email = input.email.trim();
     if account.is_empty() || email.is_empty() {
-        return ApiError::InvalidRequest("account and email are required".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "account and email are required".into(),
+        ));
     }
-    let account_did: Did = match account.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
-    };
+    let account_did: Did = account
+        .parse()
+        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+
     match state
         .user_repo
         .admin_update_email(&account_did, email)
         .await
     {
-        Ok(0) => ApiError::AccountNotFound.into_response(),
-        Ok(_) => EmptyResponse::ok().into_response(),
+        Ok(0) => Err(ApiError::AccountNotFound),
+        Ok(_) => Ok(EmptyResponse::ok().into_response()),
         Err(e) => {
             error!("DB error updating email: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -53,19 +55,19 @@ pub struct UpdateAccountHandleInput {
 
 pub async fn update_account_handle(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(input): Json<UpdateAccountHandleInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let did = &input.did;
     let input_handle = input.handle.trim();
     if input_handle.is_empty() {
-        return ApiError::InvalidRequest("handle is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("handle is required".into()));
     }
     if !input_handle
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
     {
-        return ApiError::InvalidHandle(None).into_response();
+        return Err(ApiError::InvalidHandle(None));
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
@@ -75,24 +77,27 @@ pub async fn update_account_handle(
         input_handle.to_string()
     };
     let old_handle = state.user_repo.get_handle_by_did(did).await.ok().flatten();
-    let user_id = match state.user_repo.get_id_by_did(did).await {
-        Ok(Some(id)) => id,
-        _ => return ApiError::AccountNotFound.into_response(),
-    };
+    let user_id = state
+        .user_repo
+        .get_id_by_did(did)
+        .await
+        .ok()
+        .flatten()
+        .ok_or(ApiError::AccountNotFound)?;
     let handle_for_check = Handle::new_unchecked(&handle);
     if let Ok(true) = state
         .user_repo
         .check_handle_exists(&handle_for_check, user_id)
         .await
     {
-        return ApiError::HandleTaken.into_response();
+        return Err(ApiError::HandleTaken);
     }
     match state
         .user_repo
         .admin_update_handle(did, &handle_for_check)
         .await
     {
-        Ok(0) => ApiError::AccountNotFound.into_response(),
+        Ok(0) => Err(ApiError::AccountNotFound),
         Ok(_) => {
             if let Some(old) = old_handle {
                 let _ = state.cache.delete(&format!("handle:{}", old)).await;
@@ -115,11 +120,11 @@ pub async fn update_account_handle(
             {
                 warn!("Failed to update PLC handle for admin handle update: {}", e);
             }
-            EmptyResponse::ok().into_response()
+            Ok(EmptyResponse::ok().into_response())
         }
         Err(e) => {
             error!("DB error updating handle: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -132,31 +137,29 @@ pub struct UpdateAccountPasswordInput {
 
 pub async fn update_account_password(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(input): Json<UpdateAccountPasswordInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let did = &input.did;
     let password = input.password.trim();
     if password.is_empty() {
-        return ApiError::InvalidRequest("password is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("password is required".into()));
     }
-    let password_hash = match bcrypt::hash(password, bcrypt::DEFAULT_COST) {
-        Ok(h) => h,
-        Err(e) => {
-            error!("Failed to hash password: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST).map_err(|e| {
+        error!("Failed to hash password: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
+
     match state
         .user_repo
         .admin_update_password(did, &password_hash)
         .await
     {
-        Ok(0) => ApiError::AccountNotFound.into_response(),
-        Ok(_) => EmptyResponse::ok().into_response(),
+        Ok(0) => Err(ApiError::AccountNotFound),
+        Ok(_) => Ok(EmptyResponse::ok().into_response()),
         Err(e) => {
             error!("DB error updating password: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }

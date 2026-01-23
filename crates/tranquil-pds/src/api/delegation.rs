@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::create_signed_commit;
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::delegation::{DelegationActionType, SCOPE_PRESETS, scopes};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{Did, Handle, Nsid, Rkey};
@@ -33,21 +33,25 @@ pub struct ListControllersResponse {
     pub controllers: Vec<ControllerInfo>,
 }
 
-pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -> Response {
+pub async fn list_controllers(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
     let controllers = match state
         .delegation_repo
-        .get_delegations_for_account(&auth.0.did)
+        .get_delegations_for_account(&auth.did)
         .await
     {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to list controllers: {:?}", e);
-            return ApiError::InternalError(Some("Failed to list controllers".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to list controllers".into())).into_response(),
+            );
         }
     };
 
-    Json(ListControllersResponse {
+    Ok(Json(ListControllersResponse {
         controllers: controllers
             .into_iter()
             .map(|c| ControllerInfo {
@@ -59,7 +63,7 @@ pub async fn list_controllers(State(state): State<AppState>, auth: BearerAuth) -
             })
             .collect(),
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,11 +74,11 @@ pub struct AddControllerInput {
 
 pub async fn add_controller(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<AddControllerInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if let Err(e) = scopes::validate_delegation_scopes(&input.granted_scopes) {
-        return ApiError::InvalidScopes(e).into_response();
+        return Ok(ApiError::InvalidScopes(e).into_response());
     }
 
     let controller_exists = state
@@ -86,24 +90,22 @@ pub async fn add_controller(
         .is_some();
 
     if !controller_exists {
-        return ApiError::ControllerNotFound.into_response();
+        return Ok(ApiError::ControllerNotFound.into_response());
     }
 
-    match state
-        .delegation_repo
-        .controls_any_accounts(&auth.0.did)
-        .await
-    {
+    match state.delegation_repo.controls_any_accounts(&auth.did).await {
         Ok(true) => {
-            return ApiError::InvalidDelegation(
+            return Ok(ApiError::InvalidDelegation(
                 "Cannot add controllers to an account that controls other accounts".into(),
             )
-            .into_response();
+            .into_response());
         }
         Err(e) => {
             tracing::error!("Failed to check delegation status: {:?}", e);
-            return ApiError::InternalError(Some("Failed to verify delegation status".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to verify delegation status".into()))
+                    .into_response(),
+            );
         }
         Ok(false) => {}
     }
@@ -114,15 +116,17 @@ pub async fn add_controller(
         .await
     {
         Ok(true) => {
-            return ApiError::InvalidDelegation(
+            return Ok(ApiError::InvalidDelegation(
                 "Cannot add a controlled account as a controller".into(),
             )
-            .into_response();
+            .into_response());
         }
         Err(e) => {
             tracing::error!("Failed to check controller status: {:?}", e);
-            return ApiError::InternalError(Some("Failed to verify controller status".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to verify controller status".into()))
+                    .into_response(),
+            );
         }
         Ok(false) => {}
     }
@@ -130,10 +134,10 @@ pub async fn add_controller(
     match state
         .delegation_repo
         .create_delegation(
-            &auth.0.did,
+            &auth.did,
             &input.controller_did,
             &input.granted_scopes,
-            &auth.0.did,
+            &auth.did,
         )
         .await
     {
@@ -141,8 +145,8 @@ pub async fn add_controller(
             let _ = state
                 .delegation_repo
                 .log_delegation_action(
-                    &auth.0.did,
-                    &auth.0.did,
+                    &auth.did,
+                    &auth.did,
                     Some(&input.controller_did),
                     DelegationActionType::GrantCreated,
                     Some(serde_json::json!({
@@ -153,17 +157,17 @@ pub async fn add_controller(
                 )
                 .await;
 
-            (
+            Ok((
                 StatusCode::OK,
                 Json(serde_json::json!({
                     "success": true
                 })),
             )
-                .into_response()
+                .into_response())
         }
         Err(e) => {
             tracing::error!("Failed to add controller: {:?}", e);
-            ApiError::InternalError(Some("Failed to add controller".into())).into_response()
+            Ok(ApiError::InternalError(Some("Failed to add controller".into())).into_response())
         }
     }
 }
@@ -175,32 +179,32 @@ pub struct RemoveControllerInput {
 
 pub async fn remove_controller(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<RemoveControllerInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     match state
         .delegation_repo
-        .revoke_delegation(&auth.0.did, &input.controller_did, &auth.0.did)
+        .revoke_delegation(&auth.did, &input.controller_did, &auth.did)
         .await
     {
         Ok(true) => {
             let revoked_app_passwords = state
                 .session_repo
-                .delete_app_passwords_by_controller(&auth.0.did, &input.controller_did)
+                .delete_app_passwords_by_controller(&auth.did, &input.controller_did)
                 .await
                 .unwrap_or(0) as usize;
 
             let revoked_oauth_tokens = state
                 .oauth_repo
-                .revoke_tokens_for_controller(&auth.0.did, &input.controller_did)
+                .revoke_tokens_for_controller(&auth.did, &input.controller_did)
                 .await
                 .unwrap_or(0);
 
             let _ = state
                 .delegation_repo
                 .log_delegation_action(
-                    &auth.0.did,
-                    &auth.0.did,
+                    &auth.did,
+                    &auth.did,
                     Some(&input.controller_did),
                     DelegationActionType::GrantRevoked,
                     Some(serde_json::json!({
@@ -212,18 +216,18 @@ pub async fn remove_controller(
                 )
                 .await;
 
-            (
+            Ok((
                 StatusCode::OK,
                 Json(serde_json::json!({
                     "success": true
                 })),
             )
-                .into_response()
+                .into_response())
         }
-        Ok(false) => ApiError::DelegationNotFound.into_response(),
+        Ok(false) => Ok(ApiError::DelegationNotFound.into_response()),
         Err(e) => {
             tracing::error!("Failed to remove controller: {:?}", e);
-            ApiError::InternalError(Some("Failed to remove controller".into())).into_response()
+            Ok(ApiError::InternalError(Some("Failed to remove controller".into())).into_response())
         }
     }
 }
@@ -236,24 +240,24 @@ pub struct UpdateControllerScopesInput {
 
 pub async fn update_controller_scopes(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdateControllerScopesInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if let Err(e) = scopes::validate_delegation_scopes(&input.granted_scopes) {
-        return ApiError::InvalidScopes(e).into_response();
+        return Ok(ApiError::InvalidScopes(e).into_response());
     }
 
     match state
         .delegation_repo
-        .update_delegation_scopes(&auth.0.did, &input.controller_did, &input.granted_scopes)
+        .update_delegation_scopes(&auth.did, &input.controller_did, &input.granted_scopes)
         .await
     {
         Ok(true) => {
             let _ = state
                 .delegation_repo
                 .log_delegation_action(
-                    &auth.0.did,
-                    &auth.0.did,
+                    &auth.did,
+                    &auth.did,
                     Some(&input.controller_did),
                     DelegationActionType::ScopesModified,
                     Some(serde_json::json!({
@@ -264,19 +268,21 @@ pub async fn update_controller_scopes(
                 )
                 .await;
 
-            (
+            Ok((
                 StatusCode::OK,
                 Json(serde_json::json!({
                     "success": true
                 })),
             )
-                .into_response()
+                .into_response())
         }
-        Ok(false) => ApiError::DelegationNotFound.into_response(),
+        Ok(false) => Ok(ApiError::DelegationNotFound.into_response()),
         Err(e) => {
             tracing::error!("Failed to update controller scopes: {:?}", e);
-            ApiError::InternalError(Some("Failed to update controller scopes".into()))
-                .into_response()
+            Ok(
+                ApiError::InternalError(Some("Failed to update controller scopes".into()))
+                    .into_response(),
+            )
         }
     }
 }
@@ -295,21 +301,26 @@ pub struct ListControlledAccountsResponse {
     pub accounts: Vec<DelegatedAccountInfo>,
 }
 
-pub async fn list_controlled_accounts(State(state): State<AppState>, auth: BearerAuth) -> Response {
+pub async fn list_controlled_accounts(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
     let accounts = match state
         .delegation_repo
-        .get_accounts_controlled_by(&auth.0.did)
+        .get_accounts_controlled_by(&auth.did)
         .await
     {
         Ok(a) => a,
         Err(e) => {
             tracing::error!("Failed to list controlled accounts: {:?}", e);
-            return ApiError::InternalError(Some("Failed to list controlled accounts".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to list controlled accounts".into()))
+                    .into_response(),
+            );
         }
     };
 
-    Json(ListControlledAccountsResponse {
+    Ok(Json(ListControlledAccountsResponse {
         accounts: accounts
             .into_iter()
             .map(|a| DelegatedAccountInfo {
@@ -320,7 +331,7 @@ pub async fn list_controlled_accounts(State(state): State<AppState>, auth: Beare
             })
             .collect(),
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -355,31 +366,33 @@ pub struct GetAuditLogResponse {
 
 pub async fn get_audit_log(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Query(params): Query<AuditLogParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let limit = params.limit.clamp(1, 100);
     let offset = params.offset.max(0);
 
     let entries = match state
         .delegation_repo
-        .get_audit_log_for_account(&auth.0.did, limit, offset)
+        .get_audit_log_for_account(&auth.did, limit, offset)
         .await
     {
         Ok(e) => e,
         Err(e) => {
             tracing::error!("Failed to get audit log: {:?}", e);
-            return ApiError::InternalError(Some("Failed to get audit log".into())).into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to get audit log".into())).into_response(),
+            );
         }
     };
 
     let total = state
         .delegation_repo
-        .count_audit_log_entries(&auth.0.did)
+        .count_audit_log_entries(&auth.did)
         .await
         .unwrap_or_default();
 
-    Json(GetAuditLogResponse {
+    Ok(Json(GetAuditLogResponse {
         entries: entries
             .into_iter()
             .map(|e| AuditLogEntry {
@@ -394,7 +407,7 @@ pub async fn get_audit_log(
             .collect(),
         total,
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Debug, Serialize)]
@@ -444,36 +457,38 @@ pub struct CreateDelegatedAccountResponse {
 pub async fn create_delegated_account(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<CreateDelegatedAccountInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let client_ip = extract_client_ip(&headers);
     if !state
         .check_rate_limit(RateLimitKind::AccountCreation, &client_ip)
         .await
     {
         warn!(ip = %client_ip, "Delegated account creation rate limit exceeded");
-        return ApiError::RateLimitExceeded(Some(
+        return Ok(ApiError::RateLimitExceeded(Some(
             "Too many account creation attempts. Please try again later.".into(),
         ))
-        .into_response();
+        .into_response());
     }
 
     if let Err(e) = scopes::validate_delegation_scopes(&input.controller_scopes) {
-        return ApiError::InvalidScopes(e).into_response();
+        return Ok(ApiError::InvalidScopes(e).into_response());
     }
 
-    match state.delegation_repo.has_any_controllers(&auth.0.did).await {
+    match state.delegation_repo.has_any_controllers(&auth.did).await {
         Ok(true) => {
-            return ApiError::InvalidDelegation(
+            return Ok(ApiError::InvalidDelegation(
                 "Cannot create delegated accounts from a controlled account".into(),
             )
-            .into_response();
+            .into_response());
         }
         Err(e) => {
             tracing::error!("Failed to check controller status: {:?}", e);
-            return ApiError::InternalError(Some("Failed to verify controller status".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to verify controller status".into()))
+                    .into_response(),
+            );
         }
         Ok(false) => {}
     }
@@ -494,7 +509,7 @@ pub async fn create_delegated_account(
         match crate::api::validation::validate_short_handle(handle_to_validate) {
             Ok(h) => format!("{}.{}", h, hostname_for_handles),
             Err(e) => {
-                return ApiError::InvalidRequest(e.to_string()).into_response();
+                return Ok(ApiError::InvalidRequest(e.to_string()).into_response());
             }
         }
     } else {
@@ -509,7 +524,7 @@ pub async fn create_delegated_account(
     if let Some(ref email) = email
         && !crate::api::validation::is_valid_email(email)
     {
-        return ApiError::InvalidEmail.into_response();
+        return Ok(ApiError::InvalidEmail.into_response());
     }
 
     if let Some(ref code) = input.invite_code {
@@ -520,14 +535,14 @@ pub async fn create_delegated_account(
             .unwrap_or(false);
 
         if !valid {
-            return ApiError::InvalidInviteCode.into_response();
+            return Ok(ApiError::InvalidInviteCode.into_response());
         }
     } else {
         let invite_required = std::env::var("INVITE_CODE_REQUIRED")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
         if invite_required {
-            return ApiError::InviteCodeRequired.into_response();
+            return Ok(ApiError::InviteCodeRequired.into_response());
         }
     }
 
@@ -542,7 +557,7 @@ pub async fn create_delegated_account(
         Ok(k) => k,
         Err(e) => {
             error!("Error creating signing key: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
@@ -558,8 +573,10 @@ pub async fn create_delegated_account(
         Ok(r) => r,
         Err(e) => {
             error!("Error creating PLC genesis operation: {:?}", e);
-            return ApiError::InternalError(Some("Failed to create PLC operation".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to create PLC operation".into()))
+                    .into_response(),
+            );
         }
     };
 
@@ -569,22 +586,22 @@ pub async fn create_delegated_account(
         .await
     {
         error!("Failed to submit PLC genesis operation: {:?}", e);
-        return ApiError::UpstreamErrorMsg(format!(
+        return Ok(ApiError::UpstreamErrorMsg(format!(
             "Failed to register DID with PLC directory: {}",
             e
         ))
-        .into_response();
+        .into_response());
     }
 
     let did = Did::new_unchecked(&genesis_result.did);
     let handle = Handle::new_unchecked(&handle);
-    info!(did = %did, handle = %handle, controller = %&auth.0.did, "Created DID for delegated account");
+    info!(did = %did, handle = %handle, controller = %&auth.did, "Created DID for delegated account");
 
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Error encrypting signing key: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
@@ -593,7 +610,7 @@ pub async fn create_delegated_account(
         Ok(c) => c,
         Err(e) => {
             error!("Error persisting MST: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
@@ -602,14 +619,14 @@ pub async fn create_delegated_account(
             Ok(result) => result,
             Err(e) => {
                 error!("Error creating genesis commit: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+                return Ok(ApiError::InternalError(None).into_response());
             }
         };
     let commit_cid: cid::Cid = match state.block_store.put(&commit_bytes).await {
         Ok(c) => c,
         Err(e) => {
             error!("Error saving genesis commit: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
     let genesis_block_cids = vec![mst_root.to_bytes(), commit_cid.to_bytes()];
@@ -618,7 +635,7 @@ pub async fn create_delegated_account(
         handle: handle.clone(),
         email: email.clone(),
         did: did.clone(),
-        controller_did: auth.0.did.clone(),
+        controller_did: auth.did.clone(),
         controller_scopes: input.controller_scopes.clone(),
         encrypted_key_bytes,
         encryption_version: crate::config::ENCRYPTION_VERSION,
@@ -635,14 +652,14 @@ pub async fn create_delegated_account(
     {
         Ok(id) => id,
         Err(tranquil_db_traits::CreateAccountError::HandleTaken) => {
-            return ApiError::HandleNotAvailable(None).into_response();
+            return Ok(ApiError::HandleNotAvailable(None).into_response());
         }
         Err(tranquil_db_traits::CreateAccountError::EmailTaken) => {
-            return ApiError::EmailTaken.into_response();
+            return Ok(ApiError::EmailTaken.into_response());
         }
         Err(e) => {
             error!("Error creating delegated account: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
@@ -678,8 +695,8 @@ pub async fn create_delegated_account(
         .delegation_repo
         .log_delegation_action(
             &did,
-            &auth.0.did,
-            Some(&auth.0.did),
+            &auth.did,
+            Some(&auth.did),
             DelegationActionType::GrantCreated,
             Some(json!({
                 "account_created": true,
@@ -690,7 +707,7 @@ pub async fn create_delegated_account(
         )
         .await;
 
-    info!(did = %did, handle = %handle, controller = %&auth.0.did, "Delegated account created");
+    info!(did = %did, handle = %handle, controller = %&auth.did, "Delegated account created");
 
-    Json(CreateDelegatedAccountResponse { did, handle }).into_response()
+    Ok(Json(CreateDelegatedAccountResponse { did, handle }).into_response())
 }

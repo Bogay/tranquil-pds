@@ -1,5 +1,5 @@
 use crate::api::ApiError;
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -36,35 +36,30 @@ pub struct UpdateDidDocumentOutput {
 
 pub async fn update_did_document(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdateDidDocumentInput>,
-) -> Response {
-    let auth_user = auth.0;
-
-    if !auth_user.did.starts_with("did:web:") {
-        return ApiError::InvalidRequest(
+) -> Result<Response, ApiError> {
+    if !auth.did.starts_with("did:web:") {
+        return Err(ApiError::InvalidRequest(
             "DID document updates are only available for did:web accounts".into(),
-        )
-        .into_response();
+        ));
     }
 
-    let user = match state.user_repo.get_user_for_did_doc(&auth_user.did).await {
-        Ok(Some(u)) => u,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+    let user = state
+        .user_repo
+        .get_user_for_did_doc(&auth.did)
+        .await
+        .map_err(|e| {
             tracing::error!("DB error getting user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-
-    if user.deactivated_at.is_some() {
-        return ApiError::AccountDeactivated.into_response();
-    }
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     if let Some(ref methods) = input.verification_methods {
         if methods.is_empty() {
-            return ApiError::InvalidRequest("verification_methods cannot be empty".into())
-                .into_response();
+            return Err(ApiError::InvalidRequest(
+                "verification_methods cannot be empty".into(),
+            ));
         }
         let validation_error = methods.iter().find_map(|method| {
             if method.id.is_empty() {
@@ -80,22 +75,24 @@ pub async fn update_did_document(
             }
         });
         if let Some(err) = validation_error {
-            return ApiError::InvalidRequest(err.into()).into_response();
+            return Err(ApiError::InvalidRequest(err.into()));
         }
     }
 
     if let Some(ref handles) = input.also_known_as
         && handles.iter().any(|h| !h.starts_with("at://"))
     {
-        return ApiError::InvalidRequest("alsoKnownAs entries must be at:// URIs".into())
-            .into_response();
+        return Err(ApiError::InvalidRequest(
+            "alsoKnownAs entries must be at:// URIs".into(),
+        ));
     }
 
     if let Some(ref endpoint) = input.service_endpoint {
         let endpoint = endpoint.trim();
         if !endpoint.starts_with("https://") {
-            return ApiError::InvalidRequest("serviceEndpoint must start with https://".into())
-                .into_response();
+            return Err(ApiError::InvalidRequest(
+                "serviceEndpoint must start with https://".into(),
+            ));
         }
     }
 
@@ -106,54 +103,54 @@ pub async fn update_did_document(
 
     let also_known_as: Option<Vec<String>> = input.also_known_as.clone();
 
-    if let Err(e) = state
+    state
         .user_repo
         .upsert_did_web_overrides(user.id, verification_methods_json, also_known_as)
         .await
-    {
-        tracing::error!("DB error upserting did_web_overrides: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            tracing::error!("DB error upserting did_web_overrides: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
     if let Some(ref endpoint) = input.service_endpoint {
         let endpoint_clean = endpoint.trim().trim_end_matches('/');
-        if let Err(e) = state
+        state
             .user_repo
-            .update_migrated_to_pds(&auth_user.did, endpoint_clean)
+            .update_migrated_to_pds(&auth.did, endpoint_clean)
             .await
-        {
-            tracing::error!("DB error updating service endpoint: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
+            .map_err(|e| {
+                tracing::error!("DB error updating service endpoint: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
     }
 
-    let did_doc = build_did_document(&state, &auth_user.did).await;
+    let did_doc = build_did_document(&state, &auth.did).await;
 
-    tracing::info!("Updated DID document for {}", &auth_user.did);
+    tracing::info!("Updated DID document for {}", &auth.did);
 
-    (
+    Ok((
         StatusCode::OK,
         Json(UpdateDidDocumentOutput {
             success: true,
             did_document: did_doc,
         }),
     )
-        .into_response()
+        .into_response())
 }
 
-pub async fn get_did_document(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let auth_user = auth.0;
-
-    if !auth_user.did.starts_with("did:web:") {
-        return ApiError::InvalidRequest(
+pub async fn get_did_document(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    if !auth.did.starts_with("did:web:") {
+        return Err(ApiError::InvalidRequest(
             "This endpoint is only available for did:web accounts".into(),
-        )
-        .into_response();
+        ));
     }
 
-    let did_doc = build_did_document(&state, &auth_user.did).await;
+    let did_doc = build_did_document(&state, &auth.did).await;
 
-    (StatusCode::OK, Json(json!({ "didDocument": did_doc }))).into_response()
+    Ok((StatusCode::OK, Json(json!({ "didDocument": did_doc }))).into_response())
 }
 
 async fn build_did_document(state: &AppState, did: &crate::types::Did) -> serde_json::Value {

@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -23,16 +23,17 @@ pub struct NotificationPrefsResponse {
     pub signal_verified: bool,
 }
 
-pub async fn get_notification_prefs(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let user = auth.0;
-    let prefs = match state.user_repo.get_notification_prefs(&user.did).await {
-        Ok(Some(p)) => p,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
-            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
-        }
-    };
-    Json(NotificationPrefsResponse {
+pub async fn get_notification_prefs(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let prefs = state
+        .user_repo
+        .get_notification_prefs(&auth.did)
+        .await
+        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?
+        .ok_or(ApiError::AccountNotFound)?;
+    Ok(Json(NotificationPrefsResponse {
         preferred_channel: prefs.preferred_channel,
         email: prefs.email,
         discord_id: prefs.discord_id,
@@ -42,7 +43,7 @@ pub async fn get_notification_prefs(State(state): State<AppState>, auth: BearerA
         signal_number: prefs.signal_number,
         signal_verified: prefs.signal_verified,
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Serialize)]
@@ -62,23 +63,22 @@ pub struct GetNotificationHistoryResponse {
     pub notifications: Vec<NotificationHistoryEntry>,
 }
 
-pub async fn get_notification_history(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let user = auth.0;
+pub async fn get_notification_history(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let user_id = state
+        .user_repo
+        .get_id_by_did(&auth.did)
+        .await
+        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?
+        .ok_or(ApiError::AccountNotFound)?;
 
-    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&user.did).await {
-        Ok(Some(id)) => id,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
-            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
-        }
-    };
-
-    let rows = match state.infra_repo.get_notification_history(user_id, 50).await {
-        Ok(r) => r,
-        Err(e) => {
-            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
-        }
-    };
+    let rows = state
+        .infra_repo
+        .get_notification_history(user_id, 50)
+        .await
+        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
 
     let sensitive_types = [
         "email_verification",
@@ -111,7 +111,7 @@ pub async fn get_notification_history(State(state): State<AppState>, auth: Beare
         })
         .collect();
 
-    Json(GetNotificationHistoryResponse { notifications }).into_response()
+    Ok(Json(GetNotificationHistoryResponse { notifications }).into_response())
 }
 
 #[derive(Deserialize)]
@@ -184,18 +184,15 @@ pub async fn request_channel_verification(
 
 pub async fn update_notification_prefs(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdateNotificationPrefsInput>,
-) -> Response {
-    let user = auth.0;
-
-    let user_row = match state.user_repo.get_id_handle_email_by_did(&user.did).await {
-        Ok(Some(row)) => row,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
-            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
-        }
-    };
+) -> Result<Response, ApiError> {
+    let user_row = state
+        .user_repo
+        .get_id_handle_email_by_did(&auth.did)
+        .await
+        .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let user_id = user_row.id;
     let handle = user_row.handle;
@@ -206,119 +203,106 @@ pub async fn update_notification_prefs(
     if let Some(ref channel) = input.preferred_channel {
         let valid_channels = ["email", "discord", "telegram", "signal"];
         if !valid_channels.contains(&channel.as_str()) {
-            return ApiError::InvalidRequest(
+            return Err(ApiError::InvalidRequest(
                 "Invalid channel. Must be one of: email, discord, telegram, signal".into(),
-            )
-            .into_response();
+            ));
         }
-        if let Err(e) = state
+        state
             .user_repo
-            .update_preferred_comms_channel(&user.did, channel)
+            .update_preferred_comms_channel(&auth.did, channel)
             .await
-        {
-            return ApiError::InternalError(Some(format!("Database error: {}", e))).into_response();
-        }
-        info!(did = %user.did, channel = %channel, "Updated preferred notification channel");
+            .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
+        info!(did = %auth.did, channel = %channel, "Updated preferred notification channel");
     }
 
     if let Some(ref new_email) = input.email {
         let email_clean = new_email.trim().to_lowercase();
         if email_clean.is_empty() {
-            return ApiError::InvalidRequest("Email cannot be empty".into()).into_response();
+            return Err(ApiError::InvalidRequest("Email cannot be empty".into()));
         }
 
         if !crate::api::validation::is_valid_email(&email_clean) {
-            return ApiError::InvalidEmail.into_response();
+            return Err(ApiError::InvalidEmail);
         }
 
-        if current_email.as_ref().map(|e| e.to_lowercase()) == Some(email_clean.clone()) {
-            info!(did = %user.did, "Email unchanged, skipping");
-        } else {
-            if let Err(e) = request_channel_verification(
+        if current_email.as_ref().map(|e| e.to_lowercase()) != Some(email_clean.clone()) {
+            request_channel_verification(
                 &state,
                 user_id,
-                &user.did,
+                &auth.did,
                 "email",
                 &email_clean,
                 Some(&handle),
             )
             .await
-            {
-                return ApiError::InternalError(Some(e)).into_response();
-            }
+            .map_err(|e| ApiError::InternalError(Some(e)))?;
             verification_required.push("email".to_string());
-            info!(did = %user.did, "Requested email verification");
+            info!(did = %auth.did, "Requested email verification");
         }
     }
 
     if let Some(ref discord_id) = input.discord_id {
         if discord_id.is_empty() {
-            if let Err(e) = state.user_repo.clear_discord(user_id).await {
-                return ApiError::InternalError(Some(format!("Database error: {}", e)))
-                    .into_response();
-            }
-            info!(did = %user.did, "Cleared Discord ID");
+            state
+                .user_repo
+                .clear_discord(user_id)
+                .await
+                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
+            info!(did = %auth.did, "Cleared Discord ID");
         } else {
-            if let Err(e) = request_channel_verification(
-                &state, user_id, &user.did, "discord", discord_id, None,
-            )
-            .await
-            {
-                return ApiError::InternalError(Some(e)).into_response();
-            }
+            request_channel_verification(&state, user_id, &auth.did, "discord", discord_id, None)
+                .await
+                .map_err(|e| ApiError::InternalError(Some(e)))?;
             verification_required.push("discord".to_string());
-            info!(did = %user.did, "Requested Discord verification");
+            info!(did = %auth.did, "Requested Discord verification");
         }
     }
 
     if let Some(ref telegram) = input.telegram_username {
         let telegram_clean = telegram.trim_start_matches('@');
         if telegram_clean.is_empty() {
-            if let Err(e) = state.user_repo.clear_telegram(user_id).await {
-                return ApiError::InternalError(Some(format!("Database error: {}", e)))
-                    .into_response();
-            }
-            info!(did = %user.did, "Cleared Telegram username");
+            state
+                .user_repo
+                .clear_telegram(user_id)
+                .await
+                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
+            info!(did = %auth.did, "Cleared Telegram username");
         } else {
-            if let Err(e) = request_channel_verification(
+            request_channel_verification(
                 &state,
                 user_id,
-                &user.did,
+                &auth.did,
                 "telegram",
                 telegram_clean,
                 None,
             )
             .await
-            {
-                return ApiError::InternalError(Some(e)).into_response();
-            }
+            .map_err(|e| ApiError::InternalError(Some(e)))?;
             verification_required.push("telegram".to_string());
-            info!(did = %user.did, "Requested Telegram verification");
+            info!(did = %auth.did, "Requested Telegram verification");
         }
     }
 
     if let Some(ref signal) = input.signal_number {
         if signal.is_empty() {
-            if let Err(e) = state.user_repo.clear_signal(user_id).await {
-                return ApiError::InternalError(Some(format!("Database error: {}", e)))
-                    .into_response();
-            }
-            info!(did = %user.did, "Cleared Signal number");
+            state
+                .user_repo
+                .clear_signal(user_id)
+                .await
+                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
+            info!(did = %auth.did, "Cleared Signal number");
         } else {
-            if let Err(e) =
-                request_channel_verification(&state, user_id, &user.did, "signal", signal, None)
-                    .await
-            {
-                return ApiError::InternalError(Some(e)).into_response();
-            }
+            request_channel_verification(&state, user_id, &auth.did, "signal", signal, None)
+                .await
+                .map_err(|e| ApiError::InternalError(Some(e)))?;
             verification_required.push("signal".to_string());
-            info!(did = %user.did, "Requested Signal verification");
+            info!(did = %auth.did, "Requested Signal verification");
         }
     }
 
-    Json(UpdateNotificationPrefsResponse {
+    Ok(Json(UpdateNotificationPrefsResponse {
         success: true,
         verification_required,
     })
-    .into_response()
+    .into_response())
 }

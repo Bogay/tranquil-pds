@@ -543,6 +543,13 @@ impl From<crate::auth::extractor::AuthError> for ApiError {
             crate::auth::extractor::AuthError::AccountDeactivated => Self::AccountDeactivated,
             crate::auth::extractor::AuthError::AccountTakedown => Self::AccountTakedown,
             crate::auth::extractor::AuthError::AdminRequired => Self::AdminRequired,
+            crate::auth::extractor::AuthError::ServiceAuthNotAllowed => Self::AuthenticationFailed(
+                Some("Service authentication not allowed for this endpoint".to_string()),
+            ),
+            crate::auth::extractor::AuthError::SigningKeyRequired => Self::InvalidSigningKey,
+            crate::auth::extractor::AuthError::InsufficientScope(msg) => {
+                Self::InsufficientScope(Some(msg))
+            }
             crate::auth::extractor::AuthError::OAuthExpiredToken(msg) => {
                 Self::OAuthExpiredToken(Some(msg))
             }

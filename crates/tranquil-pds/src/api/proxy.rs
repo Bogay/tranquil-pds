@@ -238,7 +238,7 @@ async fn proxy_handler(
         {
             Ok(auth_user) => {
                 if let Err(e) = crate::auth::scope_check::check_rpc_scope(
-                    auth_user.is_oauth,
+                    auth_user.is_oauth(),
                     auth_user.scope.as_deref(),
                     &resolved.did,
                     method,

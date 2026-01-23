@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::BearerAuthAdmin;
+use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{CidLink, Did};
 use axum::{
@@ -35,17 +35,18 @@ pub struct StatusAttr {
 
 pub async fn get_subject_status(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Query(params): Query<GetSubjectStatusParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if params.did.is_none() && params.uri.is_none() && params.blob.is_none() {
-        return ApiError::InvalidRequest("Must provide did, uri, or blob".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "Must provide did, uri, or blob".into(),
+        ));
     }
     if let Some(did_str) = &params.did {
-        let did: Did = match did_str.parse() {
-            Ok(d) => d,
-            Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
-        };
+        let did: Did = did_str
+            .parse()
+            .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
         match state.user_repo.get_status_by_did(&did).await {
             Ok(Some(status)) => {
                 let deactivated = status.deactivated_at.map(|_| StatusAttr {
@@ -56,7 +57,7 @@ pub async fn get_subject_status(
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-                return (
+                return Ok((
                     StatusCode::OK,
                     Json(SubjectStatus {
                         subject: json!({
@@ -67,29 +68,28 @@ pub async fn get_subject_status(
                         deactivated,
                     }),
                 )
-                    .into_response();
+                    .into_response());
             }
             Ok(None) => {
-                return ApiError::SubjectNotFound.into_response();
+                return Err(ApiError::SubjectNotFound);
             }
             Err(e) => {
                 error!("DB error in get_subject_status: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+                return Err(ApiError::InternalError(None));
             }
         }
     }
     if let Some(uri_str) = &params.uri {
-        let cid: CidLink = match uri_str.parse() {
-            Ok(c) => c,
-            Err(_) => return ApiError::InvalidRequest("Invalid CID format".into()).into_response(),
-        };
+        let cid: CidLink = uri_str
+            .parse()
+            .map_err(|_| ApiError::InvalidRequest("Invalid CID format".into()))?;
         match state.repo_repo.get_record_by_cid(&cid).await {
             Ok(Some(record)) => {
                 let takedown = record.takedown_ref.as_ref().map(|r| StatusAttr {
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-                return (
+                return Ok((
                     StatusCode::OK,
                     Json(SubjectStatus {
                         subject: json!({
@@ -101,36 +101,31 @@ pub async fn get_subject_status(
                         deactivated: None,
                     }),
                 )
-                    .into_response();
+                    .into_response());
             }
             Ok(None) => {
-                return ApiError::RecordNotFound.into_response();
+                return Err(ApiError::RecordNotFound);
             }
             Err(e) => {
                 error!("DB error in get_subject_status: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+                return Err(ApiError::InternalError(None));
             }
         }
     }
     if let Some(blob_cid_str) = &params.blob {
-        let blob_cid: CidLink = match blob_cid_str.parse() {
-            Ok(c) => c,
-            Err(_) => return ApiError::InvalidRequest("Invalid CID format".into()).into_response(),
-        };
-        let did = match &params.did {
-            Some(d) => d,
-            None => {
-                return ApiError::InvalidRequest("Must provide a did to request blob state".into())
-                    .into_response();
-            }
-        };
+        let blob_cid: CidLink = blob_cid_str
+            .parse()
+            .map_err(|_| ApiError::InvalidRequest("Invalid CID format".into()))?;
+        let did = params.did.as_ref().ok_or_else(|| {
+            ApiError::InvalidRequest("Must provide a did to request blob state".into())
+        })?;
         match state.blob_repo.get_blob_with_takedown(&blob_cid).await {
             Ok(Some(blob)) => {
                 let takedown = blob.takedown_ref.as_ref().map(|r| StatusAttr {
                     applied: true,
                     r#ref: Some(r.clone()),
                 });
-                return (
+                return Ok((
                     StatusCode::OK,
                     Json(SubjectStatus {
                         subject: json!({
@@ -142,18 +137,18 @@ pub async fn get_subject_status(
                         deactivated: None,
                     }),
                 )
-                    .into_response();
+                    .into_response());
             }
             Ok(None) => {
-                return ApiError::BlobNotFound(None).into_response();
+                return Err(ApiError::BlobNotFound(None));
             }
             Err(e) => {
                 error!("DB error in get_subject_status: {:?}", e);
-                return ApiError::InternalError(None).into_response();
+                return Err(ApiError::InternalError(None));
             }
         }
     }
-    ApiError::InvalidRequest("Invalid subject type".into()).into_response()
+    Err(ApiError::InvalidRequest("Invalid subject type".into()))
 }
 
 #[derive(Deserialize)]
@@ -172,9 +167,9 @@ pub struct StatusAttrInput {
 
 pub async fn update_subject_status(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(input): Json<UpdateSubjectStatusInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let subject_type = input.subject.get("$type").and_then(|t| t.as_str());
     match subject_type {
         Some("com.atproto.admin.defs#repoRef") => {
@@ -187,13 +182,14 @@ pub async fn update_subject_status(
                     } else {
                         None
                     };
-                    if let Err(e) = state.user_repo.set_user_takedown(&did, takedown_ref).await {
-                        error!("Failed to update user takedown status for {}: {:?}", did, e);
-                        return ApiError::InternalError(Some(
-                            "Failed to update takedown status".into(),
-                        ))
-                        .into_response();
-                    }
+                    state
+                        .user_repo
+                        .set_user_takedown(&did, takedown_ref)
+                        .await
+                        .map_err(|e| {
+                            error!("Failed to update user takedown status for {}: {:?}", did, e);
+                            ApiError::InternalError(Some("Failed to update takedown status".into()))
+                        })?;
                 }
                 if let Some(deactivated) = &input.deactivated {
                     let result = if deactivated.applied {
@@ -201,16 +197,13 @@ pub async fn update_subject_status(
                     } else {
                         state.user_repo.activate_account(&did).await
                     };
-                    if let Err(e) = result {
+                    result.map_err(|e| {
                         error!(
                             "Failed to update user deactivation status for {}: {:?}",
                             did, e
                         );
-                        return ApiError::InternalError(Some(
-                            "Failed to update deactivation status".into(),
-                        ))
-                        .into_response();
-                    }
+                        ApiError::InternalError(Some("Failed to update deactivation status".into()))
+                    })?;
                 }
                 if let Some(takedown) = &input.takedown {
                     let status = if takedown.applied {
@@ -249,7 +242,7 @@ pub async fn update_subject_status(
                 if let Ok(Some(handle)) = state.user_repo.get_handle_by_did(&did).await {
                     let _ = state.cache.delete(&format!("handle:{}", handle)).await;
                 }
-                return (
+                return Ok((
                     StatusCode::OK,
                     Json(json!({
                         "subject": input.subject,
@@ -262,41 +255,34 @@ pub async fn update_subject_status(
                         }))
                     })),
                 )
-                    .into_response();
+                    .into_response());
             }
         }
         Some("com.atproto.repo.strongRef") => {
             let uri_str = input.subject.get("uri").and_then(|u| u.as_str());
             if let Some(uri_str) = uri_str {
-                let cid: CidLink = match uri_str.parse() {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return ApiError::InvalidRequest("Invalid CID format".into())
-                            .into_response();
-                    }
-                };
+                let cid: CidLink = uri_str
+                    .parse()
+                    .map_err(|_| ApiError::InvalidRequest("Invalid CID format".into()))?;
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.applied {
                         takedown.r#ref.as_deref()
                     } else {
                         None
                     };
-                    if let Err(e) = state
+                    state
                         .repo_repo
                         .set_record_takedown(&cid, takedown_ref)
                         .await
-                    {
-                        error!(
-                            "Failed to update record takedown status for {}: {:?}",
-                            uri_str, e
-                        );
-                        return ApiError::InternalError(Some(
-                            "Failed to update takedown status".into(),
-                        ))
-                        .into_response();
-                    }
+                        .map_err(|e| {
+                            error!(
+                                "Failed to update record takedown status for {}: {:?}",
+                                uri_str, e
+                            );
+                            ApiError::InternalError(Some("Failed to update takedown status".into()))
+                        })?;
                 }
-                return (
+                return Ok((
                     StatusCode::OK,
                     Json(json!({
                         "subject": input.subject,
@@ -306,41 +292,34 @@ pub async fn update_subject_status(
                         }))
                     })),
                 )
-                    .into_response();
+                    .into_response());
             }
         }
         Some("com.atproto.admin.defs#repoBlobRef") => {
             let cid_str = input.subject.get("cid").and_then(|c| c.as_str());
             if let Some(cid_str) = cid_str {
-                let cid: CidLink = match cid_str.parse() {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return ApiError::InvalidRequest("Invalid CID format".into())
-                            .into_response();
-                    }
-                };
+                let cid: CidLink = cid_str
+                    .parse()
+                    .map_err(|_| ApiError::InvalidRequest("Invalid CID format".into()))?;
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.applied {
                         takedown.r#ref.as_deref()
                     } else {
                         None
                     };
-                    if let Err(e) = state
+                    state
                         .blob_repo
                         .update_blob_takedown(&cid, takedown_ref)
                         .await
-                    {
-                        error!(
-                            "Failed to update blob takedown status for {}: {:?}",
-                            cid_str, e
-                        );
-                        return ApiError::InternalError(Some(
-                            "Failed to update takedown status".into(),
-                        ))
-                        .into_response();
-                    }
+                        .map_err(|e| {
+                            error!(
+                                "Failed to update blob takedown status for {}: {:?}",
+                                cid_str, e
+                            );
+                            ApiError::InternalError(Some("Failed to update takedown status".into()))
+                        })?;
                 }
-                return (
+                return Ok((
                     StatusCode::OK,
                     Json(json!({
                         "subject": input.subject,
@@ -350,10 +329,10 @@ pub async fn update_subject_status(
                         }))
                     })),
                 )
-                    .into_response();
+                    .into_response());
             }
         }
         _ => {}
     }
-    ApiError::InvalidRequest("Invalid subject type".into()).into_response()
+    Err(ApiError::InvalidRequest("Invalid subject type".into()))
 }

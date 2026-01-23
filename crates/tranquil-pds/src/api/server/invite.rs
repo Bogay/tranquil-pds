@@ -1,6 +1,5 @@
 use crate::api::ApiError;
-use crate::auth::BearerAuth;
-use crate::auth::extractor::BearerAuthAdmin;
+use crate::auth::{Active, Admin, Auth};
 use crate::state::AppState;
 use crate::types::Did;
 use axum::{
@@ -44,19 +43,20 @@ pub struct CreateInviteCodeOutput {
 
 pub async fn create_invite_code(
     State(state): State<AppState>,
-    BearerAuthAdmin(auth_user): BearerAuthAdmin,
+    auth: Auth<Admin>,
     Json(input): Json<CreateInviteCodeInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if input.use_count < 1 {
-        return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "useCount must be at least 1".into(),
+        ));
     }
 
     let for_account: Did = match &input.for_account {
-        Some(acct) => match acct.parse() {
-            Ok(d) => d,
-            Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
-        },
-        None => auth_user.did.clone(),
+        Some(acct) => acct
+            .parse()
+            .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?,
+        None => auth.did.clone(),
     };
     let code = gen_invite_code();
 
@@ -65,14 +65,14 @@ pub async fn create_invite_code(
         .create_invite_code(&code, input.use_count, Some(&for_account))
         .await
     {
-        Ok(true) => Json(CreateInviteCodeOutput { code }).into_response(),
+        Ok(true) => Ok(Json(CreateInviteCodeOutput { code }).into_response()),
         Ok(false) => {
             error!("No admin user found to create invite code");
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
         Err(e) => {
             error!("DB error creating invite code: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -98,36 +98,37 @@ pub struct AccountCodes {
 
 pub async fn create_invite_codes(
     State(state): State<AppState>,
-    BearerAuthAdmin(auth_user): BearerAuthAdmin,
+    auth: Auth<Admin>,
     Json(input): Json<CreateInviteCodesInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if input.use_count < 1 {
-        return ApiError::InvalidRequest("useCount must be at least 1".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "useCount must be at least 1".into(),
+        ));
     }
 
     let code_count = input.code_count.unwrap_or(1).max(1);
     let for_accounts: Vec<Did> = match &input.for_accounts {
-        Some(accounts) if !accounts.is_empty() => {
-            let parsed: Result<Vec<Did>, _> = accounts.iter().map(|a| a.parse()).collect();
-            match parsed {
-                Ok(dids) => dids,
-                Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
-            }
-        }
-        _ => vec![auth_user.did.clone()],
+        Some(accounts) if !accounts.is_empty() => accounts
+            .iter()
+            .map(|a| a.parse())
+            .collect::<Result<Vec<Did>, _>>()
+            .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?,
+        _ => vec![auth.did.clone()],
     };
 
-    let admin_user_id = match state.user_repo.get_any_admin_user_id().await {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            error!("No admin user found to create invite codes");
-            return ApiError::InternalError(None).into_response();
-        }
-        Err(e) => {
+    let admin_user_id = state
+        .user_repo
+        .get_any_admin_user_id()
+        .await
+        .map_err(|e| {
             error!("DB error looking up admin user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or_else(|| {
+            error!("No admin user found to create invite codes");
+            ApiError::InternalError(None)
+        })?;
 
     let result = futures::future::try_join_all(for_accounts.into_iter().map(|account| {
         let infra_repo = state.infra_repo.clone();
@@ -146,13 +147,13 @@ pub async fn create_invite_codes(
     .await;
 
     match result {
-        Ok(result_codes) => Json(CreateInviteCodesOutput {
+        Ok(result_codes) => Ok(Json(CreateInviteCodesOutput {
             codes: result_codes,
         })
-        .into_response(),
+        .into_response()),
         Err(e) => {
             error!("DB error creating invite codes: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -192,22 +193,19 @@ pub struct GetAccountInviteCodesOutput {
 
 pub async fn get_account_invite_codes(
     State(state): State<AppState>,
-    BearerAuth(auth_user): BearerAuth,
+    auth: Auth<Active>,
     axum::extract::Query(params): axum::extract::Query<GetAccountInviteCodesParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let include_used = params.include_used.unwrap_or(true);
 
-    let codes_info = match state
+    let codes_info = state
         .infra_repo
-        .get_invite_codes_for_account(&auth_user.did)
+        .get_invite_codes_for_account(&auth.did)
         .await
-    {
-        Ok(info) => info,
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error fetching invite codes: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
     let filtered_codes: Vec<_> = codes_info
         .into_iter()
@@ -254,5 +252,5 @@ pub async fn get_account_invite_codes(
     .await;
 
     let codes: Vec<InviteCode> = codes.into_iter().flatten().collect();
-    Json(GetAccountInviteCodesOutput { codes }).into_response()
+    Ok(Json(GetAccountInviteCodesOutput { codes }).into_response())
 }

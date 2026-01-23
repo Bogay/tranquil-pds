@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::{EmptyResponse, HasPasswordResponse, SuccessResponse};
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::PlainPassword;
 use crate::validation::validate_password;
@@ -227,153 +227,158 @@ pub struct ChangePasswordInput {
 
 pub async fn change_password(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<ChangePasswordInput>,
-) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
-        .await
+) -> Result<Response, ApiError> {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
     {
-        return crate::api::server::reauth::legacy_mfa_required_response(
+        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
     let current_password = &input.current_password;
     let new_password = &input.new_password;
     if current_password.is_empty() {
-        return ApiError::InvalidRequest("currentPassword is required".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "currentPassword is required".into(),
+        ));
     }
     if new_password.is_empty() {
-        return ApiError::InvalidRequest("newPassword is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("newPassword is required".into()));
     }
     if let Err(e) = validate_password(new_password) {
-        return ApiError::InvalidRequest(e.to_string()).into_response();
+        return Err(ApiError::InvalidRequest(e.to_string()));
     }
-    let user = match state
+    let user = state
         .user_repo
-        .get_id_and_password_hash_by_did(&auth.0.did)
+        .get_id_and_password_hash_by_did(&auth.did)
         .await
-    {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error in change_password: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
+
     let (user_id, password_hash) = (user.id, user.password_hash);
-    let valid = match verify(current_password, &password_hash) {
-        Ok(v) => v,
-        Err(e) => {
-            error!("Password verification error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let valid = verify(current_password, &password_hash).map_err(|e| {
+        error!("Password verification error: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
     if !valid {
-        return ApiError::InvalidPassword("Current password is incorrect".into()).into_response();
+        return Err(ApiError::InvalidPassword(
+            "Current password is incorrect".into(),
+        ));
     }
     let new_password_clone = new_password.to_string();
-    let new_hash =
-        match tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST)).await {
-            Ok(Ok(h)) => h,
-            Ok(Err(e)) => {
-                error!("Failed to hash password: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-            Err(e) => {
-                error!("Failed to spawn blocking task: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-    if let Err(e) = state
+    let new_hash = tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST))
+        .await
+        .map_err(|e| {
+            error!("Failed to spawn blocking task: {:?}", e);
+            ApiError::InternalError(None)
+        })?
+        .map_err(|e| {
+            error!("Failed to hash password: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
+
+    state
         .user_repo
         .update_password_hash(user_id, &new_hash)
         .await
-    {
-        error!("DB error updating password: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
-    info!(did = %&auth.0.did, "Password changed successfully");
-    EmptyResponse::ok().into_response()
+        .map_err(|e| {
+            error!("DB error updating password: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
+
+    info!(did = %&auth.did, "Password changed successfully");
+    Ok(EmptyResponse::ok().into_response())
 }
 
-pub async fn get_password_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    match state.user_repo.has_password_by_did(&auth.0.did).await {
-        Ok(Some(has)) => HasPasswordResponse::response(has).into_response(),
-        Ok(None) => ApiError::AccountNotFound.into_response(),
+pub async fn get_password_status(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    match state.user_repo.has_password_by_did(&auth.did).await {
+        Ok(Some(has)) => Ok(HasPasswordResponse::response(has).into_response()),
+        Ok(None) => Err(ApiError::AccountNotFound),
         Err(e) => {
             error!("DB error: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
 
-pub async fn remove_password(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
-        .await
+pub async fn remove_password(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
     {
-        return crate::api::server::reauth::legacy_mfa_required_response(
+        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
     if crate::api::server::reauth::check_reauth_required_cached(
         &*state.session_repo,
         &state.cache,
-        &auth.0.did,
+        &auth.did,
     )
     .await
     {
-        return crate::api::server::reauth::reauth_required_response(
+        return Ok(crate::api::server::reauth::reauth_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
     let has_passkeys = state
         .user_repo
-        .has_passkeys(&auth.0.did)
+        .has_passkeys(&auth.did)
         .await
         .unwrap_or(false);
     if !has_passkeys {
-        return ApiError::InvalidRequest(
+        return Err(ApiError::InvalidRequest(
             "You must have at least one passkey registered before removing your password".into(),
-        )
-        .into_response();
+        ));
     }
 
-    let user = match state.user_repo.get_password_info_by_did(&auth.0.did).await {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+    let user = state
+        .user_repo
+        .get_password_info_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     if user.password_hash.is_none() {
-        return ApiError::InvalidRequest("Account already has no password".into()).into_response();
+        return Err(ApiError::InvalidRequest(
+            "Account already has no password".into(),
+        ));
     }
 
-    if let Err(e) = state.user_repo.remove_user_password(user.id).await {
-        error!("DB error removing password: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+    state
+        .user_repo
+        .remove_user_password(user.id)
+        .await
+        .map_err(|e| {
+            error!("DB error removing password: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
-    info!(did = %&auth.0.did, "Password removed - account is now passkey-only");
-    SuccessResponse::ok().into_response()
+    info!(did = %&auth.did, "Password removed - account is now passkey-only");
+    Ok(SuccessResponse::ok().into_response())
 }
 
 #[derive(Deserialize)]
@@ -384,24 +389,24 @@ pub struct SetPasswordInput {
 
 pub async fn set_password(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<SetPasswordInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let has_password = state
         .user_repo
-        .has_password_by_did(&auth.0.did)
+        .has_password_by_did(&auth.did)
         .await
         .ok()
         .flatten()
         .unwrap_or(false);
     let has_passkeys = state
         .user_repo
-        .has_passkeys(&auth.0.did)
+        .has_passkeys(&auth.did)
         .await
         .unwrap_or(false);
     let has_totp = state
         .user_repo
-        .has_totp_enabled(&auth.0.did)
+        .has_totp_enabled(&auth.did)
         .await
         .unwrap_or(false);
 
@@ -411,67 +416,63 @@ pub async fn set_password(
         && crate::api::server::reauth::check_reauth_required_cached(
             &*state.session_repo,
             &state.cache,
-            &auth.0.did,
+            &auth.did,
         )
         .await
     {
-        return crate::api::server::reauth::reauth_required_response(
+        return Ok(crate::api::server::reauth::reauth_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
     let new_password = &input.new_password;
     if new_password.is_empty() {
-        return ApiError::InvalidRequest("newPassword is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("newPassword is required".into()));
     }
     if let Err(e) = validate_password(new_password) {
-        return ApiError::InvalidRequest(e.to_string()).into_response();
+        return Err(ApiError::InvalidRequest(e.to_string()));
     }
 
-    let user = match state.user_repo.get_password_info_by_did(&auth.0.did).await {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+    let user = state
+        .user_repo
+        .get_password_info_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     if user.password_hash.is_some() {
-        return ApiError::InvalidRequest(
+        return Err(ApiError::InvalidRequest(
             "Account already has a password. Use changePassword instead.".into(),
-        )
-        .into_response();
+        ));
     }
 
     let new_password_clone = new_password.to_string();
-    let new_hash =
-        match tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST)).await {
-            Ok(Ok(h)) => h,
-            Ok(Err(e)) => {
-                error!("Failed to hash password: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-            Err(e) => {
-                error!("Failed to spawn blocking task: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+    let new_hash = tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST))
+        .await
+        .map_err(|e| {
+            error!("Failed to spawn blocking task: {:?}", e);
+            ApiError::InternalError(None)
+        })?
+        .map_err(|e| {
+            error!("Failed to hash password: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
-    if let Err(e) = state
+    state
         .user_repo
         .set_new_user_password(user.id, &new_hash)
         .await
-    {
-        error!("DB error setting password: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            error!("DB error setting password: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
-    info!(did = %&auth.0.did, "Password set for passkey-only account");
-    SuccessResponse::ok().into_response()
+    info!(did = %&auth.did, "Password set for passkey-only account");
+    Ok(SuccessResponse::ok().into_response())
 }

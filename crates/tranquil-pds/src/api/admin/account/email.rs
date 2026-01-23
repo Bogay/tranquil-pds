@@ -1,5 +1,5 @@
 use crate::api::error::{ApiError, AtpJson};
-use crate::auth::BearerAuthAdmin;
+use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::Did;
 use axum::{
@@ -28,29 +28,24 @@ pub struct SendEmailOutput {
 
 pub async fn send_email(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     AtpJson(input): AtpJson<SendEmailInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let content = input.content.trim();
     if content.is_empty() {
-        return ApiError::InvalidRequest("content is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("content is required".into()));
     }
-    let user = match state.user_repo.get_by_did(&input.recipient_did).await {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+    let user = state
+        .user_repo
+        .get_by_did(&input.recipient_did)
+        .await
+        .map_err(|e| {
             error!("DB error in send_email: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
-    let email = match user.email {
-        Some(e) => e,
-        None => {
-            return ApiError::NoEmail.into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
+
+    let email = user.email.ok_or(ApiError::NoEmail)?;
     let (user_id, handle) = (user.id, user.handle);
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let subject = input
@@ -76,11 +71,11 @@ pub async fn send_email(
                 handle,
                 input.recipient_did
             );
-            (StatusCode::OK, Json(SendEmailOutput { sent: true })).into_response()
+            Ok((StatusCode::OK, Json(SendEmailOutput { sent: true })).into_response())
         }
         Err(e) => {
             warn!("Failed to enqueue admin email: {:?}", e);
-            (StatusCode::OK, Json(SendEmailOutput { sent: false })).into_response()
+            Ok((StatusCode::OK, Json(SendEmailOutput { sent: false })).into_response())
         }
     }
 }

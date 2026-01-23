@@ -1,6 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::BearerAuthAdmin;
+use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -21,9 +21,9 @@ pub struct DisableInviteCodesInput {
 
 pub async fn disable_invite_codes(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(input): Json<DisableInviteCodesInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if let Some(codes) = &input.codes
         && let Err(e) = state.infra_repo.disable_invite_codes_by_code(codes).await
     {
@@ -40,7 +40,7 @@ pub async fn disable_invite_codes(
             error!("DB error disabling invite codes by account: {:?}", e);
         }
     }
-    EmptyResponse::ok().into_response()
+    Ok(EmptyResponse::ok().into_response())
 }
 
 #[derive(Deserialize)]
@@ -78,26 +78,23 @@ pub struct GetInviteCodesOutput {
 
 pub async fn get_invite_codes(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Query(params): Query<GetInviteCodesParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let limit = params.limit.unwrap_or(100).clamp(1, 500);
     let sort_order = match params.sort.as_deref() {
         Some("usage") => InviteCodeSortOrder::Usage,
         _ => InviteCodeSortOrder::Recent,
     };
 
-    let codes_rows = match state
+    let codes_rows = state
         .infra_repo
         .list_invite_codes(params.cursor.as_deref(), limit, sort_order)
         .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error fetching invite codes: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
     let user_ids: Vec<uuid::Uuid> = codes_rows.iter().map(|r| r.created_by_user).collect();
     let code_strings: Vec<String> = codes_rows.iter().map(|r| r.code.clone()).collect();
@@ -155,14 +152,14 @@ pub async fn get_invite_codes(
     } else {
         None
     };
-    (
+    Ok((
         StatusCode::OK,
         Json(GetInviteCodesOutput {
             cursor: next_cursor,
             codes,
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -172,27 +169,27 @@ pub struct DisableAccountInvitesInput {
 
 pub async fn disable_account_invites(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(input): Json<DisableAccountInvitesInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let account = input.account.trim();
     if account.is_empty() {
-        return ApiError::InvalidRequest("account is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("account is required".into()));
     }
-    let account_did: tranquil_types::Did = match account.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
-    };
+    let account_did: tranquil_types::Did = account
+        .parse()
+        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+
     match state
         .user_repo
         .set_invites_disabled(&account_did, true)
         .await
     {
-        Ok(true) => EmptyResponse::ok().into_response(),
-        Ok(false) => ApiError::AccountNotFound.into_response(),
+        Ok(true) => Ok(EmptyResponse::ok().into_response()),
+        Ok(false) => Err(ApiError::AccountNotFound),
         Err(e) => {
             error!("DB error disabling account invites: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -204,27 +201,27 @@ pub struct EnableAccountInvitesInput {
 
 pub async fn enable_account_invites(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(input): Json<EnableAccountInvitesInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let account = input.account.trim();
     if account.is_empty() {
-        return ApiError::InvalidRequest("account is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("account is required".into()));
     }
-    let account_did: tranquil_types::Did = match account.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidDid("Invalid DID format".into()).into_response(),
-    };
+    let account_did: tranquil_types::Did = account
+        .parse()
+        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
+
     match state
         .user_repo
         .set_invites_disabled(&account_did, false)
         .await
     {
-        Ok(true) => EmptyResponse::ok().into_response(),
-        Ok(false) => ApiError::AccountNotFound.into_response(),
+        Ok(true) => Ok(EmptyResponse::ok().into_response()),
+        Ok(false) => Err(ApiError::AccountNotFound),
         Err(e) => {
             error!("DB error enabling account invites: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }

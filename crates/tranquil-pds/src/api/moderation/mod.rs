@@ -1,6 +1,6 @@
 use crate::api::ApiError;
 use crate::api::proxy_client::{is_ssrf_safe, proxy_client};
-use crate::auth::extractor::BearerAuthAllowTakendown;
+use crate::auth::{AnyUser, Auth};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -42,18 +42,16 @@ fn get_report_service_config() -> Option<(String, String)> {
 
 pub async fn create_report(
     State(state): State<AppState>,
-    auth: BearerAuthAllowTakendown,
+    auth: Auth<AnyUser>,
     Json(input): Json<CreateReportInput>,
 ) -> Response {
-    let auth_user = auth.0;
-    let did = &auth_user.did;
+    let did = &auth.did;
 
     if let Some((service_url, service_did)) = get_report_service_config() {
-        return proxy_to_report_service(&state, &auth_user, &service_url, &service_did, &input)
-            .await;
+        return proxy_to_report_service(&state, &auth, &service_url, &service_did, &input).await;
     }
 
-    create_report_locally(&state, did, auth_user.is_takendown(), input).await
+    create_report_locally(&state, did, auth.status.is_takendown(), input).await
 }
 
 async fn proxy_to_report_service(

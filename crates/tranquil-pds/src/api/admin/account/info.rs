@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::BearerAuthAdmin;
+use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{Did, Handle};
 use axum::{
@@ -67,26 +67,23 @@ pub struct GetAccountInfosOutput {
 
 pub async fn get_account_info(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Query(params): Query<GetAccountInfoParams>,
-) -> Response {
-    let account = match state
+) -> Result<Response, ApiError> {
+    let account = state
         .infra_repo
         .get_admin_account_info_by_did(&params.did)
         .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error in get_account_info: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let invited_by = get_invited_by(&state, account.id).await;
     let invites = get_invites_for_user(&state, account.id).await;
 
-    (
+    Ok((
         StatusCode::OK,
         Json(AccountInfo {
             did: account.did,
@@ -105,7 +102,7 @@ pub async fn get_account_info(
             invites,
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 async fn get_invited_by(state: &AppState, user_id: uuid::Uuid) -> Option<InviteCodeInfo> {
@@ -200,30 +197,27 @@ async fn get_invite_code_info(state: &AppState, code: &str) -> Option<InviteCode
 
 pub async fn get_account_infos(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     RawQuery(raw_query): RawQuery,
-) -> Response {
+) -> Result<Response, ApiError> {
     let dids: Vec<String> = crate::util::parse_repeated_query_param(raw_query.as_deref(), "dids")
         .into_iter()
         .filter(|d| !d.is_empty())
         .collect();
 
     if dids.is_empty() {
-        return ApiError::InvalidRequest("dids is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("dids is required".into()));
     }
 
     let dids_typed: Vec<Did> = dids.iter().filter_map(|d| d.parse().ok()).collect();
-    let accounts = match state
+    let accounts = state
         .infra_repo
         .get_admin_account_infos_by_dids(&dids_typed)
         .await
-    {
-        Ok(accounts) => accounts,
-        Err(e) => {
+        .map_err(|e| {
             error!("Failed to fetch account infos: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
     let user_ids: Vec<uuid::Uuid> = accounts.iter().map(|u| u.id).collect();
 
@@ -316,5 +310,5 @@ pub async fn get_account_infos(
         })
         .collect();
 
-    (StatusCode::OK, Json(GetAccountInfosOutput { infos })).into_response()
+    Ok((StatusCode::OK, Json(GetAccountInfosOutput { infos })).into_response())
 }

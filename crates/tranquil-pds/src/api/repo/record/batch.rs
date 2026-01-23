@@ -1,7 +1,7 @@
 use super::validation::validate_record_with_status;
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -262,22 +262,22 @@ pub struct CommitInfo {
 
 pub async fn apply_writes(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<ApplyWritesInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     info!(
         "apply_writes called: repo={}, writes={}",
         input.repo,
         input.writes.len()
     );
-    let auth_user = auth.0;
-    let did = auth_user.did.clone();
-    let is_oauth = auth_user.is_oauth;
-    let scope = auth_user.scope;
-    let controller_did = auth_user.controller_did.clone();
+    let did = auth.did.clone();
+    let is_oauth = auth.is_oauth();
+    let scope = auth.scope.clone();
+    let controller_did = auth.controller_did.clone();
     if input.repo.as_str() != did {
-        return ApiError::InvalidRepo("Repo does not match authenticated user".into())
-            .into_response();
+        return Err(ApiError::InvalidRepo(
+            "Repo does not match authenticated user".into(),
+        ));
     }
     if state
         .user_repo
@@ -285,7 +285,7 @@ pub async fn apply_writes(
         .await
         .unwrap_or(false)
     {
-        return ApiError::AccountMigrated.into_response();
+        return Err(ApiError::AccountMigrated);
     }
     let is_verified = state
         .user_repo
@@ -298,14 +298,16 @@ pub async fn apply_writes(
         .await
         .unwrap_or(false);
     if !is_verified && !is_delegated {
-        return ApiError::AccountNotVerified.into_response();
+        return Err(ApiError::AccountNotVerified);
     }
     if input.writes.is_empty() {
-        return ApiError::InvalidRequest("writes array is empty".into()).into_response();
+        return Err(ApiError::InvalidRequest("writes array is empty".into()));
     }
     if input.writes.len() > MAX_BATCH_WRITES {
-        return ApiError::InvalidRequest(format!("Too many writes (max {})", MAX_BATCH_WRITES))
-            .into_response();
+        return Err(ApiError::InvalidRequest(format!(
+            "Too many writes (max {})",
+            MAX_BATCH_WRITES
+        )));
     }
 
     let has_custom_scope = scope
@@ -374,38 +376,40 @@ pub async fn apply_writes(
             })
             .next()
         {
-            return err;
+            return Ok(err);
         }
     }
 
-    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&did).await {
-        Ok(Some(id)) => id,
-        _ => return ApiError::InternalError(Some("User not found".into())).into_response(),
-    };
-    let root_cid_str = match state.repo_repo.get_repo_root_cid_by_user_id(user_id).await {
-        Ok(Some(cid_str)) => cid_str,
-        _ => return ApiError::InternalError(Some("Repo root not found".into())).into_response(),
-    };
-    let current_root_cid = match Cid::from_str(&root_cid_str) {
-        Ok(c) => c,
-        Err(_) => {
-            return ApiError::InternalError(Some("Invalid repo root CID".into())).into_response();
-        }
-    };
+    let user_id: uuid::Uuid = state
+        .user_repo
+        .get_id_by_did(&did)
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| ApiError::InternalError(Some("User not found".into())))?;
+    let root_cid_str = state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())))?;
+    let current_root_cid = Cid::from_str(&root_cid_str)
+        .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())))?;
     if let Some(swap_commit) = &input.swap_commit
         && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
     {
-        return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+        return Err(ApiError::InvalidSwap(Some("Repo has been modified".into())));
     }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = match tracking_store.get(&current_root_cid).await {
-        Ok(Some(b)) => b,
-        _ => return ApiError::InternalError(Some("Commit block not found".into())).into_response(),
-    };
-    let commit = match Commit::from_cbor(&commit_bytes) {
-        Ok(c) => c,
-        _ => return ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
-    };
+    let commit_bytes = tracking_store
+        .get(&current_root_cid)
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| ApiError::InternalError(Some("Commit block not found".into())))?;
+    let commit = Commit::from_cbor(&commit_bytes)
+        .map_err(|_| ApiError::InternalError(Some("Failed to parse commit".into())))?;
     let original_mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let initial_mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let WriteAccumulator {
@@ -424,34 +428,27 @@ pub async fn apply_writes(
     .await
     {
         Ok(acc) => acc,
-        Err(response) => return response,
+        Err(response) => return Ok(response),
     };
-    let new_mst_root = match mst.persist().await {
-        Ok(c) => c,
-        Err(_) => {
-            return ApiError::InternalError(Some("Failed to persist MST".into())).into_response();
-        }
-    };
+    let new_mst_root = mst
+        .persist()
+        .await
+        .map_err(|_| ApiError::InternalError(Some("Failed to persist MST".into())))?;
     let (new_mst_blocks, old_mst_blocks) = {
         let mut new_blocks = std::collections::BTreeMap::new();
         let mut old_blocks = std::collections::BTreeMap::new();
         for key in &modified_keys {
-            if mst.blocks_for_path(key, &mut new_blocks).await.is_err() {
-                return ApiError::InternalError(Some(
-                    "Failed to get new MST blocks for path".into(),
-                ))
-                .into_response();
-            }
-            if original_mst
+            mst.blocks_for_path(key, &mut new_blocks)
+                .await
+                .map_err(|_| {
+                    ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
+                })?;
+            original_mst
                 .blocks_for_path(key, &mut old_blocks)
                 .await
-                .is_err()
-            {
-                return ApiError::InternalError(Some(
-                    "Failed to get old MST blocks for path".into(),
-                ))
-                .into_response();
-            }
+                .map_err(|_| {
+                    ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
+                })?;
         }
         (new_blocks, old_blocks)
     };
@@ -503,12 +500,13 @@ pub async fn apply_writes(
     {
         Ok(res) => res,
         Err(e) if e.contains("ConcurrentModification") => {
-            return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+            return Err(ApiError::InvalidSwap(Some("Repo has been modified".into())));
         }
         Err(e) => {
             error!("Commit failed: {}", e);
-            return ApiError::InternalError(Some("Failed to commit changes".into()))
-                .into_response();
+            return Err(ApiError::InternalError(Some(
+                "Failed to commit changes".into(),
+            )));
         }
     };
 
@@ -557,7 +555,7 @@ pub async fn apply_writes(
             .await;
     }
 
-    (
+    Ok((
         StatusCode::OK,
         Json(ApplyWritesOutput {
             commit: CommitInfo {
@@ -567,5 +565,5 @@ pub async fn apply_writes(
             results,
         }),
     )
-        .into_response()
+        .into_response())
 }

@@ -1,7 +1,7 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::BearerAuth;
 use crate::auth::webauthn::WebAuthnConfig;
+use crate::auth::{Active, Auth};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -34,32 +34,29 @@ pub struct StartRegistrationResponse {
 
 pub async fn start_passkey_registration(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<StartRegistrationInput>,
-) -> Response {
-    let webauthn = match get_webauthn() {
-        Ok(w) => w,
-        Err(e) => return e.into_response(),
-    };
+) -> Result<Response, ApiError> {
+    let webauthn = get_webauthn()?;
 
-    let handle = match state.user_repo.get_handle_by_did(&auth.0.did).await {
-        Ok(Some(h)) => h,
-        Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
-        }
-        Err(e) => {
+    let handle = state
+        .user_repo
+        .get_handle_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
-    let existing_passkeys = match state.user_repo.get_passkeys_for_user(&auth.0.did).await {
-        Ok(passkeys) => passkeys,
-        Err(e) => {
+    let existing_passkeys = state
+        .user_repo
+        .get_passkeys_for_user(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching existing passkeys: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
     let exclude_credentials: Vec<CredentialID> = existing_passkeys
         .iter()
@@ -68,42 +65,32 @@ pub async fn start_passkey_registration(
 
     let display_name = input.friendly_name.as_deref().unwrap_or(&handle);
 
-    let (ccr, reg_state) = match webauthn.start_registration(
-        &auth.0.did,
-        &handle,
-        display_name,
-        exclude_credentials,
-    ) {
-        Ok(result) => result,
-        Err(e) => {
+    let (ccr, reg_state) = webauthn
+        .start_registration(&auth.did, &handle, display_name, exclude_credentials)
+        .map_err(|e| {
             error!("Failed to start passkey registration: {}", e);
-            return ApiError::InternalError(Some("Failed to start registration".into()))
-                .into_response();
-        }
-    };
+            ApiError::InternalError(Some("Failed to start registration".into()))
+        })?;
 
-    let state_json = match serde_json::to_string(&reg_state) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to serialize registration state: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let state_json = serde_json::to_string(&reg_state).map_err(|e| {
+        error!("Failed to serialize registration state: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
 
-    if let Err(e) = state
+    state
         .user_repo
-        .save_webauthn_challenge(&auth.0.did, "registration", &state_json)
+        .save_webauthn_challenge(&auth.did, "registration", &state_json)
         .await
-    {
-        error!("Failed to save registration state: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            error!("Failed to save registration state: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
     let options = serde_json::to_value(&ccr).unwrap_or(serde_json::json!({}));
 
-    info!(did = %auth.0.did, "Passkey registration started");
+    info!(did = %auth.did, "Passkey registration started");
 
-    Json(StartRegistrationResponse { options }).into_response()
+    Ok(Json(StartRegistrationResponse { options }).into_response())
 }
 
 #[derive(Deserialize)]
@@ -122,81 +109,62 @@ pub struct FinishRegistrationResponse {
 
 pub async fn finish_passkey_registration(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<FinishRegistrationInput>,
-) -> Response {
-    let webauthn = match get_webauthn() {
-        Ok(w) => w,
-        Err(e) => return e.into_response(),
-    };
+) -> Result<Response, ApiError> {
+    let webauthn = get_webauthn()?;
 
-    let reg_state_json = match state
+    let reg_state_json = state
         .user_repo
-        .load_webauthn_challenge(&auth.0.did, "registration")
+        .load_webauthn_challenge(&auth.did, "registration")
         .await
-    {
-        Ok(Some(json)) => json,
-        Ok(None) => {
-            return ApiError::NoRegistrationInProgress.into_response();
-        }
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error loading registration state: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::NoRegistrationInProgress)?;
 
-    let reg_state: SecurityKeyRegistration = match serde_json::from_str(&reg_state_json) {
-        Ok(s) => s,
-        Err(e) => {
+    let reg_state: SecurityKeyRegistration =
+        serde_json::from_str(&reg_state_json).map_err(|e| {
             error!("Failed to deserialize registration state: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
-    let credential: RegisterPublicKeyCredential = match serde_json::from_value(input.credential) {
-        Ok(c) => c,
-        Err(e) => {
+    let credential: RegisterPublicKeyCredential = serde_json::from_value(input.credential)
+        .map_err(|e| {
             warn!("Failed to parse credential: {:?}", e);
-            return ApiError::InvalidCredential.into_response();
-        }
-    };
+            ApiError::InvalidCredential
+        })?;
 
-    let passkey = match webauthn.finish_registration(&credential, &reg_state) {
-        Ok(pk) => pk,
-        Err(e) => {
+    let passkey = webauthn
+        .finish_registration(&credential, &reg_state)
+        .map_err(|e| {
             warn!("Failed to finish passkey registration: {}", e);
-            return ApiError::RegistrationFailed.into_response();
-        }
-    };
+            ApiError::RegistrationFailed
+        })?;
 
-    let public_key = match serde_json::to_vec(&passkey) {
-        Ok(pk) => pk,
-        Err(e) => {
-            error!("Failed to serialize passkey: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let public_key = serde_json::to_vec(&passkey).map_err(|e| {
+        error!("Failed to serialize passkey: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
 
-    let passkey_id = match state
+    let passkey_id = state
         .user_repo
         .save_passkey(
-            &auth.0.did,
+            &auth.did,
             passkey.cred_id(),
             &public_key,
             input.friendly_name.as_deref(),
         )
         .await
-    {
-        Ok(id) => id,
-        Err(e) => {
+        .map_err(|e| {
             error!("Failed to save passkey: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
     if let Err(e) = state
         .user_repo
-        .delete_webauthn_challenge(&auth.0.did, "registration")
+        .delete_webauthn_challenge(&auth.did, "registration")
         .await
     {
         warn!("Failed to delete registration state: {:?}", e);
@@ -207,13 +175,13 @@ pub async fn finish_passkey_registration(
         passkey.cred_id(),
     );
 
-    info!(did = %auth.0.did, passkey_id = %passkey_id, "Passkey registered");
+    info!(did = %auth.did, passkey_id = %passkey_id, "Passkey registered");
 
-    Json(FinishRegistrationResponse {
+    Ok(Json(FinishRegistrationResponse {
         id: passkey_id.to_string(),
         credential_id: credential_id_base64,
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Serialize)]
@@ -232,14 +200,18 @@ pub struct ListPasskeysResponse {
     pub passkeys: Vec<PasskeyInfo>,
 }
 
-pub async fn list_passkeys(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let passkeys = match state.user_repo.get_passkeys_for_user(&auth.0.did).await {
-        Ok(pks) => pks,
-        Err(e) => {
+pub async fn list_passkeys(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let passkeys = state
+        .user_repo
+        .get_passkeys_for_user(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching passkeys: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
     let passkey_infos: Vec<PasskeyInfo> = passkeys
         .into_iter()
@@ -252,10 +224,10 @@ pub async fn list_passkeys(State(state): State<AppState>, auth: BearerAuth) -> R
         })
         .collect();
 
-    Json(ListPasskeysResponse {
+    Ok(Json(ListPasskeysResponse {
         passkeys: passkey_infos,
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -266,45 +238,39 @@ pub struct DeletePasskeyInput {
 
 pub async fn delete_passkey(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<DeletePasskeyInput>,
-) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
-        .await
+) -> Result<Response, ApiError> {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
     {
-        return crate::api::server::reauth::legacy_mfa_required_response(
+        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
-    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::reauth_required_response(
+    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.did).await {
+        return Ok(crate::api::server::reauth::reauth_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
-    let id: uuid::Uuid = match input.id.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return ApiError::InvalidId.into_response();
-        }
-    };
+    let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
-    match state.user_repo.delete_passkey(id, &auth.0.did).await {
+    match state.user_repo.delete_passkey(id, &auth.did).await {
         Ok(true) => {
-            info!(did = %auth.0.did, passkey_id = %id, "Passkey deleted");
-            EmptyResponse::ok().into_response()
+            info!(did = %auth.did, passkey_id = %id, "Passkey deleted");
+            Ok(EmptyResponse::ok().into_response())
         }
-        Ok(false) => ApiError::PasskeyNotFound.into_response(),
+        Ok(false) => Err(ApiError::PasskeyNotFound),
         Err(e) => {
             error!("DB error deleting passkey: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -318,29 +284,24 @@ pub struct UpdatePasskeyInput {
 
 pub async fn update_passkey(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdatePasskeyInput>,
-) -> Response {
-    let id: uuid::Uuid = match input.id.parse() {
-        Ok(id) => id,
-        Err(_) => {
-            return ApiError::InvalidId.into_response();
-        }
-    };
+) -> Result<Response, ApiError> {
+    let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
     match state
         .user_repo
-        .update_passkey_name(id, &auth.0.did, &input.friendly_name)
+        .update_passkey_name(id, &auth.did, &input.friendly_name)
         .await
     {
         Ok(true) => {
-            info!(did = %auth.0.did, passkey_id = %id, "Passkey renamed");
-            EmptyResponse::ok().into_response()
+            info!(did = %auth.did, passkey_id = %id, "Passkey renamed");
+            Ok(EmptyResponse::ok().into_response())
         }
-        Ok(false) => ApiError::PasskeyNotFound.into_response(),
+        Ok(false) => Err(ApiError::PasskeyNotFound),
         Err(e) => {
             error!("DB error updating passkey: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }

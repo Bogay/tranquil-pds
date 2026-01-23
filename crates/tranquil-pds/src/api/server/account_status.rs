@@ -1,5 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
+use crate::auth::{Active, Auth, NotTakendown};
 use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
@@ -40,18 +41,18 @@ pub struct CheckAccountStatusOutput {
 
 pub async fn check_account_status(
     State(state): State<AppState>,
-    auth: crate::auth::BearerAuthAllowDeactivated,
-) -> Response {
-    let did = auth.0.did;
-    let user_id = match state.user_repo.get_id_by_did(&did).await {
-        Ok(Some(id)) => id,
-        _ => {
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    auth: Auth<NotTakendown>,
+) -> Result<Response, ApiError> {
+    let did = &auth.did;
+    let user_id = state
+        .user_repo
+        .get_id_by_did(did)
+        .await
+        .map_err(|_| ApiError::InternalError(None))?
+        .ok_or(ApiError::InternalError(None))?;
     let is_active = state
         .user_repo
-        .is_account_active_by_did(&did)
+        .is_account_active_by_did(did)
         .await
         .ok()
         .flatten()
@@ -95,8 +96,8 @@ pub async fn check_account_status(
         .await
         .unwrap_or(0);
     let valid_did =
-        is_valid_did_for_service(state.user_repo.as_ref(), state.cache.clone(), &did).await;
-    (
+        is_valid_did_for_service(state.user_repo.as_ref(), state.cache.clone(), did).await;
+    Ok((
         StatusCode::OK,
         Json(CheckAccountStatusOutput {
             activated: is_active,
@@ -110,7 +111,7 @@ pub async fn check_account_status(
             imported_blobs,
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 async fn is_valid_did_for_service(
@@ -305,26 +306,25 @@ async fn assert_valid_did_document_for_service(
 
 pub async fn activate_account(
     State(state): State<AppState>,
-    auth: crate::auth::BearerAuthAllowDeactivated,
-) -> Response {
+    auth: Auth<NotTakendown>,
+) -> Result<Response, ApiError> {
     info!("[MIGRATION] activateAccount called");
-    let auth_user = auth.0;
     info!(
         "[MIGRATION] activateAccount: Authenticated user did={}",
-        auth_user.did
+        auth.did
     );
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth_user.is_oauth,
-        auth_user.scope.as_deref(),
+        auth.is_oauth(),
+        auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Repo,
         crate::oauth::scopes::AccountAction::Manage,
     ) {
         info!("[MIGRATION] activateAccount: Scope check failed");
-        return e;
+        return Ok(e);
     }
 
-    let did = auth_user.did;
+    let did = auth.did.clone();
 
     info!(
         "[MIGRATION] activateAccount: Validating DID document for did={}",
@@ -344,7 +344,7 @@ pub async fn activate_account(
             did,
             did_validation_start.elapsed()
         );
-        return e.into_response();
+        return Err(e);
     }
     info!(
         "[MIGRATION] activateAccount: DID document validation SUCCESS for {} (took {:?})",
@@ -450,14 +450,14 @@ pub async fn activate_account(
                 );
             }
             info!("[MIGRATION] activateAccount: SUCCESS for did={}", did);
-            EmptyResponse::ok().into_response()
+            Ok(EmptyResponse::ok().into_response())
         }
         Err(e) => {
             error!(
                 "[MIGRATION] activateAccount: DB error activating account: {:?}",
                 e
             );
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -470,18 +470,16 @@ pub struct DeactivateAccountInput {
 
 pub async fn deactivate_account(
     State(state): State<AppState>,
-    auth: crate::auth::BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<DeactivateAccountInput>,
-) -> Response {
-    let auth_user = auth.0;
-
+) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth_user.is_oauth,
-        auth_user.scope.as_deref(),
+        auth.is_oauth(),
+        auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Repo,
         crate::oauth::scopes::AccountAction::Manage,
     ) {
-        return e;
+        return Ok(e);
     }
 
     let delete_after: Option<chrono::DateTime<chrono::Utc>> = input
@@ -490,7 +488,7 @@ pub async fn deactivate_account(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&chrono::Utc));
 
-    let did = auth_user.did;
+    let did = auth.did.clone();
 
     let handle = state.user_repo.get_handle_by_did(&did).await.ok().flatten();
 
@@ -511,47 +509,48 @@ pub async fn deactivate_account(
             {
                 warn!("Failed to sequence account deactivated event: {}", e);
             }
-            EmptyResponse::ok().into_response()
+            Ok(EmptyResponse::ok().into_response())
         }
-        Ok(false) => EmptyResponse::ok().into_response(),
+        Ok(false) => Ok(EmptyResponse::ok().into_response()),
         Err(e) => {
             error!("DB error deactivating account: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
 
 pub async fn request_account_delete(
     State(state): State<AppState>,
-    auth: crate::auth::BearerAuthAllowDeactivated,
-) -> Response {
-    let did = &auth.0.did;
+    auth: Auth<NotTakendown>,
+) -> Result<Response, ApiError> {
+    let did = &auth.did;
 
     if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, did).await {
-        return crate::api::server::reauth::legacy_mfa_required_response(
+        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
             &*state.session_repo,
             did,
         )
-        .await;
+        .await);
     }
 
-    let user_id = match state.user_repo.get_id_by_did(did).await {
-        Ok(Some(id)) => id,
-        _ => {
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let user_id = state
+        .user_repo
+        .get_id_by_did(did)
+        .await
+        .ok()
+        .flatten()
+        .ok_or(ApiError::InternalError(None))?;
     let confirmation_token = Uuid::new_v4().to_string();
     let expires_at = Utc::now() + Duration::minutes(15);
-    if let Err(e) = state
+    state
         .infra_repo
         .create_deletion_request(&confirmation_token, did, expires_at)
         .await
-    {
-        error!("DB error creating deletion token: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            error!("DB error creating deletion token: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     if let Err(e) = crate::comms::comms_repo::enqueue_account_deletion(
         state.user_repo.as_ref(),
@@ -565,7 +564,7 @@ pub async fn request_account_delete(
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }
     info!("Account deletion requested for user {}", did);
-    EmptyResponse::ok().into_response()
+    Ok(EmptyResponse::ok().into_response())
 }
 
 #[derive(Deserialize)]

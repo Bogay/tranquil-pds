@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::{EmptyResponse, EnabledResponse};
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::scheduled::generate_full_backup;
 use crate::state::AppState;
 use crate::storage::{BackupStorage, backup_retention_count};
@@ -35,24 +35,27 @@ pub struct ListBackupsOutput {
     pub backup_enabled: bool,
 }
 
-pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let (user_id, backup_enabled) =
-        match state.backup_repo.get_user_backup_status(&auth.0.did).await {
-            Ok(Some(status)) => status,
-            Ok(None) => {
-                return ApiError::AccountNotFound.into_response();
-            }
-            Err(e) => {
-                error!("DB error fetching user: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+pub async fn list_backups(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, crate::api::error::ApiError> {
+    let (user_id, backup_enabled) = match state.backup_repo.get_user_backup_status(&auth.did).await
+    {
+        Ok(Some(status)) => status,
+        Ok(None) => {
+            return Ok(ApiError::AccountNotFound.into_response());
+        }
+        Err(e) => {
+            error!("DB error fetching user: {:?}", e);
+            return Ok(ApiError::InternalError(None).into_response());
+        }
+    };
 
     let backups = match state.backup_repo.list_backups_for_user(user_id).await {
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching backups: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
@@ -68,14 +71,14 @@ pub async fn list_backups(State(state): State<AppState>, auth: BearerAuth) -> Re
         })
         .collect();
 
-    (
+    Ok((
         StatusCode::OK,
         Json(ListBackupsOutput {
             backups: backup_list,
             backup_enabled,
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -85,35 +88,35 @@ pub struct GetBackupQuery {
 
 pub async fn get_backup(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Query(query): Query<GetBackupQuery>,
-) -> Response {
+) -> Result<Response, crate::api::error::ApiError> {
     let backup_id = match uuid::Uuid::parse_str(&query.id) {
         Ok(id) => id,
         Err(_) => {
-            return ApiError::InvalidRequest("Invalid backup ID".into()).into_response();
+            return Ok(ApiError::InvalidRequest("Invalid backup ID".into()).into_response());
         }
     };
 
     let backup_info = match state
         .backup_repo
-        .get_backup_storage_info(backup_id, &auth.0.did)
+        .get_backup_storage_info(backup_id, &auth.did)
         .await
     {
         Ok(Some(b)) => b,
         Ok(None) => {
-            return ApiError::BackupNotFound.into_response();
+            return Ok(ApiError::BackupNotFound.into_response());
         }
         Err(e) => {
             error!("DB error fetching backup: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
     let backup_storage = match state.backup_storage.as_ref() {
         Some(storage) => storage,
         None => {
-            return ApiError::BackupsDisabled.into_response();
+            return Ok(ApiError::BackupsDisabled.into_response());
         }
     };
 
@@ -121,12 +124,13 @@ pub async fn get_backup(
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to fetch backup from storage: {:?}", e);
-            return ApiError::InternalError(Some("Failed to retrieve backup".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to retrieve backup".into())).into_response(),
+            );
         }
     };
 
-    (
+    Ok((
         StatusCode::OK,
         [
             (axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car"),
@@ -137,7 +141,7 @@ pub async fn get_backup(
         ],
         car_bytes,
     )
-        .into_response()
+        .into_response())
 }
 
 #[derive(Serialize)]
@@ -149,40 +153,45 @@ pub struct CreateBackupOutput {
     pub block_count: i32,
 }
 
-pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> Response {
+pub async fn create_backup(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, crate::api::error::ApiError> {
     let backup_storage = match state.backup_storage.as_ref() {
         Some(storage) => storage,
         None => {
-            return ApiError::BackupsDisabled.into_response();
+            return Ok(ApiError::BackupsDisabled.into_response());
         }
     };
 
-    let user = match state.backup_repo.get_user_for_backup(&auth.0.did).await {
+    let user = match state.backup_repo.get_user_for_backup(&auth.did).await {
         Ok(Some(u)) => u,
         Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
+            return Ok(ApiError::AccountNotFound.into_response());
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
     if user.deactivated_at.is_some() {
-        return ApiError::AccountDeactivated.into_response();
+        return Ok(ApiError::AccountDeactivated.into_response());
     }
 
     let repo_rev = match &user.repo_rev {
         Some(rev) => rev.clone(),
         None => {
-            return ApiError::RepoNotReady.into_response();
+            return Ok(ApiError::RepoNotReady.into_response());
         }
     };
 
     let head_cid = match Cid::from_str(&user.repo_root_cid) {
         Ok(c) => c,
         Err(_) => {
-            return ApiError::InternalError(Some("Invalid repo root CID".into())).into_response();
+            return Ok(
+                ApiError::InternalError(Some("Invalid repo root CID".into())).into_response(),
+            );
         }
     };
 
@@ -197,8 +206,9 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         Ok(bytes) => bytes,
         Err(e) => {
             error!("Failed to generate CAR: {:?}", e);
-            return ApiError::InternalError(Some("Failed to generate backup".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to generate backup".into())).into_response(),
+            );
         }
     };
 
@@ -212,7 +222,9 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         Ok(key) => key,
         Err(e) => {
             error!("Failed to upload backup: {:?}", e);
-            return ApiError::InternalError(Some("Failed to store backup".into())).into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to store backup".into())).into_response(),
+            );
         }
     };
 
@@ -238,7 +250,9 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
                     "Failed to rollback orphaned backup from S3"
                 );
             }
-            return ApiError::InternalError(Some("Failed to record backup".into())).into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to record backup".into())).into_response(),
+            );
         }
     };
 
@@ -261,7 +275,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
         warn!(did = %user.did, error = %e, "Failed to cleanup old backups after manual backup");
     }
 
-    (
+    Ok((
         StatusCode::OK,
         Json(CreateBackupOutput {
             id: backup_id.to_string(),
@@ -270,7 +284,7 @@ pub async fn create_backup(State(state): State<AppState>, auth: BearerAuth) -> R
             block_count,
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 async fn cleanup_old_backups(
@@ -310,33 +324,33 @@ pub struct DeleteBackupQuery {
 
 pub async fn delete_backup(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Query(query): Query<DeleteBackupQuery>,
-) -> Response {
+) -> Result<Response, crate::api::error::ApiError> {
     let backup_id = match uuid::Uuid::parse_str(&query.id) {
         Ok(id) => id,
         Err(_) => {
-            return ApiError::InvalidRequest("Invalid backup ID".into()).into_response();
+            return Ok(ApiError::InvalidRequest("Invalid backup ID".into()).into_response());
         }
     };
 
     let backup = match state
         .backup_repo
-        .get_backup_for_deletion(backup_id, &auth.0.did)
+        .get_backup_for_deletion(backup_id, &auth.did)
         .await
     {
         Ok(Some(b)) => b,
         Ok(None) => {
-            return ApiError::BackupNotFound.into_response();
+            return Ok(ApiError::BackupNotFound.into_response());
         }
         Err(e) => {
             error!("DB error fetching backup: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
     if backup.deactivated_at.is_some() {
-        return ApiError::AccountDeactivated.into_response();
+        return Ok(ApiError::AccountDeactivated.into_response());
     }
 
     if let Some(backup_storage) = state.backup_storage.as_ref()
@@ -351,12 +365,12 @@ pub async fn delete_backup(
 
     if let Err(e) = state.backup_repo.delete_backup(backup.id).await {
         error!("DB error deleting backup: {:?}", e);
-        return ApiError::InternalError(Some("Failed to delete backup".into())).into_response();
+        return Ok(ApiError::InternalError(Some("Failed to delete backup".into())).into_response());
     }
 
-    info!(did = %auth.0.did, backup_id = %backup_id, "Deleted backup");
+    info!(did = %auth.did, backup_id = %backup_id, "Deleted backup");
 
-    EmptyResponse::ok().into_response()
+    Ok(EmptyResponse::ok().into_response())
 }
 
 #[derive(Deserialize)]
@@ -367,51 +381,56 @@ pub struct SetBackupEnabledInput {
 
 pub async fn set_backup_enabled(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<SetBackupEnabledInput>,
-) -> Response {
+) -> Result<Response, crate::api::error::ApiError> {
     let deactivated_at = match state
         .backup_repo
-        .get_user_deactivated_status(&auth.0.did)
+        .get_user_deactivated_status(&auth.did)
         .await
     {
         Ok(Some(status)) => status,
         Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
+            return Ok(ApiError::AccountNotFound.into_response());
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
     if deactivated_at.is_some() {
-        return ApiError::AccountDeactivated.into_response();
+        return Ok(ApiError::AccountDeactivated.into_response());
     }
 
     if let Err(e) = state
         .backup_repo
-        .update_backup_enabled(&auth.0.did, input.enabled)
+        .update_backup_enabled(&auth.did, input.enabled)
         .await
     {
         error!("DB error updating backup_enabled: {:?}", e);
-        return ApiError::InternalError(Some("Failed to update setting".into())).into_response();
+        return Ok(
+            ApiError::InternalError(Some("Failed to update setting".into())).into_response(),
+        );
     }
 
-    info!(did = %auth.0.did, enabled = input.enabled, "Updated backup_enabled setting");
+    info!(did = %auth.did, enabled = input.enabled, "Updated backup_enabled setting");
 
-    EnabledResponse::response(input.enabled).into_response()
+    Ok(EnabledResponse::response(input.enabled).into_response())
 }
 
-pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let user_id = match state.backup_repo.get_user_id_by_did(&auth.0.did).await {
+pub async fn export_blobs(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, crate::api::error::ApiError> {
+    let user_id = match state.backup_repo.get_user_id_by_did(&auth.did).await {
         Ok(Some(id)) => id,
         Ok(None) => {
-            return ApiError::AccountNotFound.into_response();
+            return Ok(ApiError::AccountNotFound.into_response());
         }
         Err(e) => {
             error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
@@ -419,12 +438,12 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
         Ok(rows) => rows,
         Err(e) => {
             error!("DB error fetching blobs: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Ok(ApiError::InternalError(None).into_response());
         }
     };
 
     if blobs.is_empty() {
-        return (
+        return Ok((
             StatusCode::OK,
             [
                 (axum::http::header::CONTENT_TYPE, "application/zip"),
@@ -435,7 +454,7 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
             ],
             Vec::<u8>::new(),
         )
-            .into_response();
+            .into_response());
     }
 
     let mut zip_buffer = std::io::Cursor::new(Vec::new());
@@ -513,16 +532,17 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
 
         if let Err(e) = zip.finish() {
             error!("Failed to finish zip: {:?}", e);
-            return ApiError::InternalError(Some("Failed to create zip file".into()))
-                .into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to create zip file".into())).into_response(),
+            );
         }
     }
 
     let zip_bytes = zip_buffer.into_inner();
 
-    info!(did = %auth.0.did, blob_count = blobs.len(), size_bytes = zip_bytes.len(), "Exported blobs");
+    info!(did = %auth.did, blob_count = blobs.len(), size_bytes = zip_bytes.len(), "Exported blobs");
 
-    (
+    Ok((
         StatusCode::OK,
         [
             (axum::http::header::CONTENT_TYPE, "application/zip"),
@@ -533,7 +553,7 @@ pub async fn export_blobs(State(state): State<AppState>, auth: BearerAuth) -> Re
         ],
         zip_bytes,
     )
-        .into_response()
+        .into_response())
 }
 
 fn mime_to_extension(mime_type: &str) -> &'static str {

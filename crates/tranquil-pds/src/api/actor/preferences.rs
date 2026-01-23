@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::BearerAuthAllowDeactivated;
+use crate::auth::{Active, Auth};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -32,13 +32,9 @@ fn get_age_from_datestring(birth_date: &str) -> Option<i32> {
 pub struct GetPreferencesOutput {
     pub preferences: Vec<Value>,
 }
-pub async fn get_preferences(
-    State(state): State<AppState>,
-    auth: BearerAuthAllowDeactivated,
-) -> Response {
-    let auth_user = auth.0;
-    let has_full_access = auth_user.permissions().has_full_access();
-    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth_user.did).await {
+pub async fn get_preferences(State(state): State<AppState>, auth: Auth<Active>) -> Response {
+    let has_full_access = auth.permissions().has_full_access();
+    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth.did).await {
         Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(Some("User not found".into())).into_response();
@@ -93,12 +89,11 @@ pub struct PutPreferencesInput {
 }
 pub async fn put_preferences(
     State(state): State<AppState>,
-    auth: BearerAuthAllowDeactivated,
+    auth: Auth<Active>,
     Json(input): Json<PutPreferencesInput>,
 ) -> Response {
-    let auth_user = auth.0;
-    let has_full_access = auth_user.permissions().has_full_access();
-    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth_user.did).await {
+    let has_full_access = auth.permissions().has_full_access();
+    let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth.did).await {
         Ok(Some(id)) => id,
         _ => {
             return ApiError::InternalError(Some("User not found".into())).into_response();

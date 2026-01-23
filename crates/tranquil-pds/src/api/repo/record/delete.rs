@@ -1,7 +1,7 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::api::repo::record::write::{CommitInfo, prepare_repo_write};
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -40,41 +40,49 @@ pub struct DeleteRecordOutput {
 
 pub async fn delete_record(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<DeleteRecordInput>,
-) -> Response {
-    let auth = match prepare_repo_write(&state, auth.0, &input.repo).await {
+) -> Result<Response, crate::api::error::ApiError> {
+    let repo_auth = match prepare_repo_write(&state, &auth, &input.repo).await {
         Ok(res) => res,
-        Err(err_res) => return err_res,
+        Err(err_res) => return Ok(err_res),
     };
 
     if let Err(e) = crate::auth::scope_check::check_repo_scope(
-        auth.is_oauth,
-        auth.scope.as_deref(),
+        repo_auth.is_oauth,
+        repo_auth.scope.as_deref(),
         crate::oauth::RepoAction::Delete,
         &input.collection,
     ) {
-        return e;
+        return Ok(e);
     }
 
-    let did = auth.did;
-    let user_id = auth.user_id;
-    let current_root_cid = auth.current_root_cid;
-    let controller_did = auth.controller_did;
+    let did = repo_auth.did;
+    let user_id = repo_auth.user_id;
+    let current_root_cid = repo_auth.current_root_cid;
+    let controller_did = repo_auth.controller_did;
 
     if let Some(swap_commit) = &input.swap_commit
         && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
     {
-        return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+        return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
     }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = match tracking_store.get(&current_root_cid).await {
         Ok(Some(b)) => b,
-        _ => return ApiError::InternalError(Some("Commit block not found".into())).into_response(),
+        _ => {
+            return Ok(
+                ApiError::InternalError(Some("Commit block not found".into())).into_response(),
+            );
+        }
     };
     let commit = match Commit::from_cbor(&commit_bytes) {
         Ok(c) => c,
-        _ => return ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
+        _ => {
+            return Ok(
+                ApiError::InternalError(Some("Failed to parse commit".into())).into_response(),
+            );
+        }
     };
     let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let key = format!("{}/{}", input.collection, input.rkey);
@@ -82,29 +90,34 @@ pub async fn delete_record(
         let expected_cid = Cid::from_str(swap_record_str).ok();
         let actual_cid = mst.get(&key).await.ok().flatten();
         if expected_cid != actual_cid {
-            return ApiError::InvalidSwap(Some(
+            return Ok(ApiError::InvalidSwap(Some(
                 "Record has been modified or does not exist".into(),
             ))
-            .into_response();
+            .into_response());
         }
     }
     let prev_record_cid = mst.get(&key).await.ok().flatten();
     if prev_record_cid.is_none() {
-        return (StatusCode::OK, Json(DeleteRecordOutput { commit: None })).into_response();
+        return Ok((StatusCode::OK, Json(DeleteRecordOutput { commit: None })).into_response());
     }
     let new_mst = match mst.delete(&key).await {
         Ok(m) => m,
         Err(e) => {
             error!("Failed to delete from MST: {:?}", e);
-            return ApiError::InternalError(Some(format!("Failed to delete from MST: {:?}", e)))
-                .into_response();
+            return Ok(ApiError::InternalError(Some(format!(
+                "Failed to delete from MST: {:?}",
+                e
+            )))
+            .into_response());
         }
     };
     let new_mst_root = match new_mst.persist().await {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to persist MST: {:?}", e);
-            return ApiError::InternalError(Some("Failed to persist MST".into())).into_response();
+            return Ok(
+                ApiError::InternalError(Some("Failed to persist MST".into())).into_response(),
+            );
         }
     };
     let collection_for_audit = input.collection.to_string();
@@ -121,16 +134,20 @@ pub async fn delete_record(
         .await
         .is_err()
     {
-        return ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
-            .into_response();
+        return Ok(
+            ApiError::InternalError(Some("Failed to get new MST blocks for path".into()))
+                .into_response(),
+        );
     }
     if mst
         .blocks_for_path(&key, &mut old_mst_blocks)
         .await
         .is_err()
     {
-        return ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
-            .into_response();
+        return Ok(
+            ApiError::InternalError(Some("Failed to get old MST blocks for path".into()))
+                .into_response(),
+        );
     }
     let mut relevant_blocks = new_mst_blocks.clone();
     relevant_blocks.extend(old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));
@@ -169,9 +186,9 @@ pub async fn delete_record(
     {
         Ok(res) => res,
         Err(e) if e.contains("ConcurrentModification") => {
-            return ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response();
+            return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
         }
-        Err(e) => return ApiError::InternalError(Some(e)).into_response(),
+        Err(e) => return Ok(ApiError::InternalError(Some(e)).into_response()),
     };
 
     if let Some(ref controller) = controller_did {
@@ -202,7 +219,7 @@ pub async fn delete_record(
         error!("Failed to remove backlinks for {}: {}", deleted_uri, e);
     }
 
-    (
+    Ok((
         StatusCode::OK,
         Json(DeleteRecordOutput {
             commit: Some(CommitInfo {
@@ -211,7 +228,7 @@ pub async fn delete_record(
             }),
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 use crate::types::Did;

@@ -1,6 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::auth::{
     decrypt_totp_secret, encrypt_totp_secret, generate_backup_codes, generate_qr_png_base64,
     generate_totp_secret, generate_totp_uri, hash_backup_code, is_backup_code_format,
@@ -26,66 +26,63 @@ pub struct CreateTotpSecretResponse {
     pub qr_base64: String,
 }
 
-pub async fn create_totp_secret(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    match state.user_repo.get_totp_record(&auth.0.did).await {
-        Ok(Some(record)) if record.verified => return ApiError::TotpAlreadyEnabled.into_response(),
+pub async fn create_totp_secret(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    match state.user_repo.get_totp_record(&auth.did).await {
+        Ok(Some(record)) if record.verified => return Err(ApiError::TotpAlreadyEnabled),
         Ok(_) => {}
         Err(e) => {
             error!("DB error checking TOTP: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     }
 
     let secret = generate_totp_secret();
 
-    let handle = match state.user_repo.get_handle_by_did(&auth.0.did).await {
-        Ok(Some(h)) => h,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+    let handle = state
+        .user_repo
+        .get_handle_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching handle: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let uri = generate_totp_uri(&secret, &handle, &hostname);
 
-    let qr_code = match generate_qr_png_base64(&secret, &handle, &hostname) {
-        Ok(qr) => qr,
-        Err(e) => {
-            error!("Failed to generate QR code: {:?}", e);
-            return ApiError::InternalError(Some("Failed to generate QR code".into()))
-                .into_response();
-        }
-    };
+    let qr_code = generate_qr_png_base64(&secret, &handle, &hostname).map_err(|e| {
+        error!("Failed to generate QR code: {:?}", e);
+        ApiError::InternalError(Some("Failed to generate QR code".into()))
+    })?;
 
-    let encrypted_secret = match encrypt_totp_secret(&secret) {
-        Ok(enc) => enc,
-        Err(e) => {
-            error!("Failed to encrypt TOTP secret: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let encrypted_secret = encrypt_totp_secret(&secret).map_err(|e| {
+        error!("Failed to encrypt TOTP secret: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
 
-    if let Err(e) = state
+    state
         .user_repo
-        .upsert_totp_secret(&auth.0.did, &encrypted_secret, ENCRYPTION_VERSION)
+        .upsert_totp_secret(&auth.did, &encrypted_secret, ENCRYPTION_VERSION)
         .await
-    {
-        error!("Failed to store TOTP secret: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            error!("Failed to store TOTP secret: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
     let secret_base32 = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &secret);
 
-    info!(did = %&auth.0.did, "TOTP secret created (pending verification)");
+    info!(did = %&auth.did, "TOTP secret created (pending verification)");
 
-    Json(CreateTotpSecretResponse {
+    Ok(Json(CreateTotpSecretResponse {
         secret: secret_base32,
         uri,
         qr_base64: qr_code,
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -101,69 +98,68 @@ pub struct EnableTotpResponse {
 
 pub async fn enable_totp(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<EnableTotpInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
+        .check_rate_limit(RateLimitKind::TotpVerify, &auth.did)
         .await
     {
-        warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
+        warn!(did = %&auth.did, "TOTP verification rate limit exceeded");
+        return Err(ApiError::RateLimitExceeded(None));
     }
 
-    let totp_record = match state.user_repo.get_totp_record(&auth.0.did).await {
+    let totp_record = match state.user_repo.get_totp_record(&auth.did).await {
         Ok(Some(row)) => row,
-        Ok(None) => return ApiError::TotpNotEnabled.into_response(),
+        Ok(None) => return Err(ApiError::TotpNotEnabled),
         Err(e) => {
             error!("DB error fetching TOTP: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
 
     if totp_record.verified {
-        return ApiError::TotpAlreadyEnabled.into_response();
+        return Err(ApiError::TotpAlreadyEnabled);
     }
 
-    let secret = match decrypt_totp_secret(
+    let secret = decrypt_totp_secret(
         &totp_record.secret_encrypted,
         totp_record.encryption_version,
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to decrypt TOTP secret: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    )
+    .map_err(|e| {
+        error!("Failed to decrypt TOTP secret: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
-        return ApiError::InvalidCode(Some("Invalid verification code".into())).into_response();
+        return Err(ApiError::InvalidCode(Some(
+            "Invalid verification code".into(),
+        )));
     }
 
     let backup_codes = generate_backup_codes();
-    let backup_hashes: Result<Vec<_>, _> =
-        backup_codes.iter().map(|c| hash_backup_code(c)).collect();
-    let backup_hashes = match backup_hashes {
-        Ok(hashes) => hashes,
-        Err(e) => {
+    let backup_hashes: Vec<_> = backup_codes
+        .iter()
+        .map(|c| hash_backup_code(c))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
             error!("Failed to hash backup code: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
-    if let Err(e) = state
+    state
         .user_repo
-        .enable_totp_with_backup_codes(&auth.0.did, &backup_hashes)
+        .enable_totp_with_backup_codes(&auth.did, &backup_hashes)
         .await
-    {
-        error!("Failed to enable TOTP: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            error!("Failed to enable TOTP: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
-    info!(did = %&auth.0.did, "TOTP enabled with {} backup codes", backup_codes.len());
+    info!(did = %&auth.did, "TOTP enabled with {} backup codes", backup_codes.len());
 
-    Json(EnableTotpResponse { backup_codes }).into_response()
+    Ok(Json(EnableTotpResponse { backup_codes }).into_response())
 }
 
 #[derive(Deserialize)]
@@ -174,84 +170,84 @@ pub struct DisableTotpInput {
 
 pub async fn disable_totp(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<DisableTotpInput>,
-) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
-        .await
+) -> Result<Response, ApiError> {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
     {
-        return crate::api::server::reauth::legacy_mfa_required_response(
+        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
     if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
+        .check_rate_limit(RateLimitKind::TotpVerify, &auth.did)
         .await
     {
-        warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
+        warn!(did = %&auth.did, "TOTP verification rate limit exceeded");
+        return Err(ApiError::RateLimitExceeded(None));
     }
 
-    let password_hash = match state.user_repo.get_password_hash_by_did(&auth.0.did).await {
-        Ok(Some(hash)) => hash,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+    let password_hash = state
+        .user_repo
+        .get_password_hash_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
     if !password_valid {
-        return ApiError::InvalidPassword("Password is incorrect".into()).into_response();
+        return Err(ApiError::InvalidPassword("Password is incorrect".into()));
     }
 
-    let totp_record = match state.user_repo.get_totp_record(&auth.0.did).await {
+    let totp_record = match state.user_repo.get_totp_record(&auth.did).await {
         Ok(Some(row)) if row.verified => row,
-        Ok(Some(_)) | Ok(None) => return ApiError::TotpNotEnabled.into_response(),
+        Ok(Some(_)) | Ok(None) => return Err(ApiError::TotpNotEnabled),
         Err(e) => {
             error!("DB error fetching TOTP: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
 
     let code = input.code.trim();
     let code_valid = if is_backup_code_format(code) {
-        verify_backup_code_for_user(&state, &auth.0.did, code).await
+        verify_backup_code_for_user(&state, &auth.did, code).await
     } else {
-        let secret = match decrypt_totp_secret(
+        let secret = decrypt_totp_secret(
             &totp_record.secret_encrypted,
             totp_record.encryption_version,
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to decrypt TOTP secret: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
+        )
+        .map_err(|e| {
+            error!("Failed to decrypt TOTP secret: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
         verify_totp_code(&secret, code)
     };
 
     if !code_valid {
-        return ApiError::InvalidCode(Some("Invalid verification code".into())).into_response();
+        return Err(ApiError::InvalidCode(Some(
+            "Invalid verification code".into(),
+        )));
     }
 
-    if let Err(e) = state
+    state
         .user_repo
-        .delete_totp_and_backup_codes(&auth.0.did)
+        .delete_totp_and_backup_codes(&auth.did)
         .await
-    {
-        error!("Failed to delete TOTP: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            error!("Failed to delete TOTP: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
-    info!(did = %&auth.0.did, "TOTP disabled");
+    info!(did = %&auth.did, "TOTP disabled");
 
-    EmptyResponse::ok().into_response()
+    Ok(EmptyResponse::ok().into_response())
 }
 
 #[derive(Serialize)]
@@ -262,30 +258,34 @@ pub struct GetTotpStatusResponse {
     pub backup_codes_remaining: i64,
 }
 
-pub async fn get_totp_status(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    let enabled = match state.user_repo.get_totp_record(&auth.0.did).await {
+pub async fn get_totp_status(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let enabled = match state.user_repo.get_totp_record(&auth.did).await {
         Ok(Some(row)) => row.verified,
         Ok(None) => false,
         Err(e) => {
             error!("DB error fetching TOTP status: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
 
-    let backup_count = match state.user_repo.count_unused_backup_codes(&auth.0.did).await {
-        Ok(count) => count,
-        Err(e) => {
+    let backup_count = state
+        .user_repo
+        .count_unused_backup_codes(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error counting backup codes: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
-    Json(GetTotpStatusResponse {
+    Ok(Json(GetTotpStatusResponse {
         enabled,
         has_backup_codes: backup_count > 0,
         backup_codes_remaining: backup_count,
     })
-    .into_response()
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -302,79 +302,79 @@ pub struct RegenerateBackupCodesResponse {
 
 pub async fn regenerate_backup_codes(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<RegenerateBackupCodesInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &auth.0.did)
+        .check_rate_limit(RateLimitKind::TotpVerify, &auth.did)
         .await
     {
-        warn!(did = %&auth.0.did, "TOTP verification rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
+        warn!(did = %&auth.did, "TOTP verification rate limit exceeded");
+        return Err(ApiError::RateLimitExceeded(None));
     }
 
-    let password_hash = match state.user_repo.get_password_hash_by_did(&auth.0.did).await {
-        Ok(Some(hash)) => hash,
-        Ok(None) => return ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+    let password_hash = state
+        .user_repo
+        .get_password_hash_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
 
     let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
     if !password_valid {
-        return ApiError::InvalidPassword("Password is incorrect".into()).into_response();
+        return Err(ApiError::InvalidPassword("Password is incorrect".into()));
     }
 
-    let totp_record = match state.user_repo.get_totp_record(&auth.0.did).await {
+    let totp_record = match state.user_repo.get_totp_record(&auth.did).await {
         Ok(Some(row)) if row.verified => row,
-        Ok(Some(_)) | Ok(None) => return ApiError::TotpNotEnabled.into_response(),
+        Ok(Some(_)) | Ok(None) => return Err(ApiError::TotpNotEnabled),
         Err(e) => {
             error!("DB error fetching TOTP: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
 
-    let secret = match decrypt_totp_secret(
+    let secret = decrypt_totp_secret(
         &totp_record.secret_encrypted,
         totp_record.encryption_version,
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            error!("Failed to decrypt TOTP secret: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    )
+    .map_err(|e| {
+        error!("Failed to decrypt TOTP secret: {:?}", e);
+        ApiError::InternalError(None)
+    })?;
 
     let code = input.code.trim();
     if !verify_totp_code(&secret, code) {
-        return ApiError::InvalidCode(Some("Invalid verification code".into())).into_response();
+        return Err(ApiError::InvalidCode(Some(
+            "Invalid verification code".into(),
+        )));
     }
 
     let backup_codes = generate_backup_codes();
-    let backup_hashes: Result<Vec<_>, _> =
-        backup_codes.iter().map(|c| hash_backup_code(c)).collect();
-    let backup_hashes = match backup_hashes {
-        Ok(hashes) => hashes,
-        Err(e) => {
+    let backup_hashes: Vec<_> = backup_codes
+        .iter()
+        .map(|c| hash_backup_code(c))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
             error!("Failed to hash backup code: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
-    if let Err(e) = state
+    state
         .user_repo
-        .replace_backup_codes(&auth.0.did, &backup_hashes)
+        .replace_backup_codes(&auth.did, &backup_hashes)
         .await
-    {
-        error!("Failed to regenerate backup codes: {:?}", e);
-        return ApiError::InternalError(None).into_response();
-    }
+        .map_err(|e| {
+            error!("Failed to regenerate backup codes: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
 
-    info!(did = %&auth.0.did, "Backup codes regenerated");
+    info!(did = %&auth.did, "Backup codes regenerated");
 
-    Json(RegenerateBackupCodesResponse { backup_codes }).into_response()
+    Ok(Json(RegenerateBackupCodesResponse { backup_codes }).into_response())
 }
 
 async fn verify_backup_code_for_user(

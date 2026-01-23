@@ -644,7 +644,7 @@ pub struct LinkedAccountsResponse {
 
 pub async fn get_linked_accounts(
     State(state): State<AppState>,
-    crate::auth::extractor::BearerAuth(auth): crate::auth::extractor::BearerAuth,
+    auth: crate::auth::Auth<crate::auth::Active>,
 ) -> Result<Json<LinkedAccountsResponse>, ApiError> {
     let identities = state
         .sso_repo
@@ -679,7 +679,7 @@ pub struct UnlinkAccountResponse {
 
 pub async fn unlink_account(
     State(state): State<AppState>,
-    crate::auth::extractor::BearerAuth(auth): crate::auth::extractor::BearerAuth,
+    auth: crate::auth::Auth<crate::auth::Active>,
     Json(input): Json<UnlinkAccountRequest>,
 ) -> Result<Json<UnlinkAccountResponse>, ApiError> {
     if !state

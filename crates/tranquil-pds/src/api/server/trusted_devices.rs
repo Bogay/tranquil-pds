@@ -11,7 +11,7 @@ use tracing::{error, info};
 use tranquil_db_traits::OAuthRepository;
 use tranquil_types::DeviceId;
 
-use crate::auth::BearerAuth;
+use crate::auth::{Active, Auth};
 use crate::state::AppState;
 
 const TRUST_DURATION_DAYS: i64 = 30;
@@ -71,32 +71,36 @@ pub struct ListTrustedDevicesResponse {
     pub devices: Vec<TrustedDevice>,
 }
 
-pub async fn list_trusted_devices(State(state): State<AppState>, auth: BearerAuth) -> Response {
-    match state.oauth_repo.list_trusted_devices(&auth.0.did).await {
-        Ok(rows) => {
-            let devices = rows
-                .into_iter()
-                .map(|row| {
-                    let trust_state =
-                        DeviceTrustState::from_timestamps(row.trusted_at, row.trusted_until);
-                    TrustedDevice {
-                        id: row.id,
-                        user_agent: row.user_agent,
-                        friendly_name: row.friendly_name,
-                        trusted_at: row.trusted_at,
-                        trusted_until: row.trusted_until,
-                        last_seen_at: row.last_seen_at,
-                        trust_state,
-                    }
-                })
-                .collect();
-            Json(ListTrustedDevicesResponse { devices }).into_response()
-        }
-        Err(e) => {
+pub async fn list_trusted_devices(
+    State(state): State<AppState>,
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let rows = state
+        .oauth_repo
+        .list_trusted_devices(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
-    }
+            ApiError::InternalError(None)
+        })?;
+
+    let devices = rows
+        .into_iter()
+        .map(|row| {
+            let trust_state = DeviceTrustState::from_timestamps(row.trusted_at, row.trusted_until);
+            TrustedDevice {
+                id: row.id,
+                user_agent: row.user_agent,
+                friendly_name: row.friendly_name,
+                trusted_at: row.trusted_at,
+                trusted_until: row.trusted_until,
+                last_seen_at: row.last_seen_at,
+                trust_state,
+            }
+        })
+        .collect();
+
+    Ok(Json(ListTrustedDevicesResponse { devices }).into_response())
 }
 
 #[derive(Deserialize)]
@@ -107,35 +111,36 @@ pub struct RevokeTrustedDeviceInput {
 
 pub async fn revoke_trusted_device(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<RevokeTrustedDeviceInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let device_id = DeviceId::from(input.device_id.clone());
     match state
         .oauth_repo
-        .device_belongs_to_user(&device_id, &auth.0.did)
+        .device_belongs_to_user(&device_id, &auth.did)
         .await
     {
         Ok(true) => {}
         Ok(false) => {
-            return ApiError::DeviceNotFound.into_response();
+            return Err(ApiError::DeviceNotFound);
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     }
 
-    match state.oauth_repo.revoke_device_trust(&device_id).await {
-        Ok(()) => {
-            info!(did = %&auth.0.did, device_id = %input.device_id, "Trusted device revoked");
-            SuccessResponse::ok().into_response()
-        }
-        Err(e) => {
+    state
+        .oauth_repo
+        .revoke_device_trust(&device_id)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
-    }
+            ApiError::InternalError(None)
+        })?;
+
+    info!(did = %&auth.did, device_id = %input.device_id, "Trusted device revoked");
+    Ok(SuccessResponse::ok().into_response())
 }
 
 #[derive(Deserialize)]
@@ -147,39 +152,36 @@ pub struct UpdateTrustedDeviceInput {
 
 pub async fn update_trusted_device(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdateTrustedDeviceInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let device_id = DeviceId::from(input.device_id.clone());
     match state
         .oauth_repo
-        .device_belongs_to_user(&device_id, &auth.0.did)
+        .device_belongs_to_user(&device_id, &auth.did)
         .await
     {
         Ok(true) => {}
         Ok(false) => {
-            return ApiError::DeviceNotFound.into_response();
+            return Err(ApiError::DeviceNotFound);
         }
         Err(e) => {
             error!("DB error: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     }
 
-    match state
+    state
         .oauth_repo
         .update_device_friendly_name(&device_id, input.friendly_name.as_deref())
         .await
-    {
-        Ok(()) => {
-            info!(did = %auth.0.did, device_id = %input.device_id, "Trusted device updated");
-            SuccessResponse::ok().into_response()
-        }
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
-    }
+            ApiError::InternalError(None)
+        })?;
+
+    info!(did = %auth.did, device_id = %input.device_id, "Trusted device updated");
+    Ok(SuccessResponse::ok().into_response())
 }
 
 pub async fn get_device_trust_state(

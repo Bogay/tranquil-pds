@@ -556,5 +556,4 @@ mod tests {
             "app.bsky.feed.getAuthorFeed"
         ));
     }
-
 }

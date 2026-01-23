@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::{BearerAuthAllowDeactivated, BlobAuth, BlobAuthResult};
+use crate::auth::{Auth, AuthAny, NotTakendown, Permissive};
 use crate::delegation::DelegationActionType;
 use crate::state::AppState;
 use crate::types::{CidLink, Did};
@@ -44,25 +44,30 @@ fn detect_mime_type(data: &[u8], client_hint: &str) -> String {
 pub async fn upload_blob(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    auth: BlobAuth,
+    auth: AuthAny<Permissive>,
     body: Body,
-) -> Response {
-    let (did, controller_did): (Did, Option<Did>) = match auth.0 {
-        BlobAuthResult::Service { did } => (did, None),
-        BlobAuthResult::User(auth_user) => {
+) -> Result<Response, ApiError> {
+    let (did, controller_did): (Did, Option<Did>) = match &auth {
+        AuthAny::Service(service) => {
+            service.require_lxm("com.atproto.repo.uploadBlob")?;
+            (service.did.clone(), None)
+        }
+        AuthAny::User(user) => {
+            if user.status.is_takendown() {
+                return Err(ApiError::AccountTakedown);
+            }
             let mime_type_for_check = headers
                 .get("content-type")
                 .and_then(|h| h.to_str().ok())
                 .unwrap_or("application/octet-stream");
             if let Err(e) = crate::auth::scope_check::check_blob_scope(
-                auth_user.is_oauth,
-                auth_user.scope.as_deref(),
+                user.is_oauth(),
+                user.scope.as_deref(),
                 mime_type_for_check,
             ) {
-                return e;
+                return Ok(e);
             }
-            let ctrl_did = auth_user.controller_did.clone();
-            (auth_user.did, ctrl_did)
+            (user.did.clone(), user.controller_did.clone())
         }
     };
 
@@ -72,7 +77,7 @@ pub async fn upload_blob(
         .await
         .unwrap_or(false)
     {
-        return ApiError::Forbidden.into_response();
+        return Err(ApiError::Forbidden);
     }
 
     let client_mime_hint = headers
@@ -80,12 +85,13 @@ pub async fn upload_blob(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("application/octet-stream");
 
-    let user_id = match state.user_repo.get_id_by_did(&did).await {
-        Ok(Some(id)) => id,
-        _ => {
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let user_id = state
+        .user_repo
+        .get_id_by_did(&did)
+        .await
+        .ok()
+        .flatten()
+        .ok_or(ApiError::InternalError(None))?;
 
     let temp_key = format!("temp/{}", uuid::Uuid::new_v4());
     let max_size = get_max_blob_size() as u64;
@@ -98,22 +104,22 @@ pub async fn upload_blob(
 
     info!("Starting streaming blob upload to temp key: {}", temp_key);
 
-    let upload_result = match state.blob_store.put_stream(&temp_key, pinned_stream).await {
-        Ok(result) => result,
-        Err(e) => {
+    let upload_result = state
+        .blob_store
+        .put_stream(&temp_key, pinned_stream)
+        .await
+        .map_err(|e| {
             error!("Failed to stream blob to storage: {:?}", e);
-            return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
-        }
-    };
+            ApiError::InternalError(Some("Failed to store blob".into()))
+        })?;
 
     let size = upload_result.size;
     if size > max_size {
         let _ = state.blob_store.delete(&temp_key).await;
-        return ApiError::InvalidRequest(format!(
+        return Err(ApiError::InvalidRequest(format!(
             "Blob size {} exceeds maximum of {} bytes",
             size, max_size
-        ))
-        .into_response();
+        )));
     }
 
     let mime_type = match state.blob_store.get_head(&temp_key, 8192).await {
@@ -129,7 +135,7 @@ pub async fn upload_blob(
         Err(e) => {
             let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to create multihash for blob: {:?}", e);
-            return ApiError::InternalError(Some("Failed to hash blob".into())).into_response();
+            return Err(ApiError::InternalError(Some("Failed to hash blob".into())));
         }
     };
     let cid = Cid::new_v1(0x55, multihash);
@@ -152,14 +158,14 @@ pub async fn upload_blob(
         Err(e) => {
             let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to insert blob record: {:?}", e);
-            return ApiError::InternalError(None).into_response();
+            return Err(ApiError::InternalError(None));
         }
     };
 
     if was_inserted && let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
         let _ = state.blob_store.delete(&temp_key).await;
         error!("Failed to copy blob to final location: {:?}", e);
-        return ApiError::InternalError(Some("Failed to store blob".into())).into_response();
+        return Err(ApiError::InternalError(Some("Failed to store blob".into())));
     }
 
     let _ = state.blob_store.delete(&temp_key).await;
@@ -183,7 +189,7 @@ pub async fn upload_blob(
             .await;
     }
 
-    Json(json!({
+    Ok(Json(json!({
         "blob": {
             "$type": "blob",
             "ref": {
@@ -193,7 +199,7 @@ pub async fn upload_blob(
             "size": size
         }
     }))
-    .into_response()
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -218,32 +224,31 @@ pub struct ListMissingBlobsOutput {
 
 pub async fn list_missing_blobs(
     State(state): State<AppState>,
-    auth: BearerAuthAllowDeactivated,
+    auth: Auth<NotTakendown>,
     Query(params): Query<ListMissingBlobsParams>,
-) -> Response {
-    let auth_user = auth.0;
-    let did = &auth_user.did;
-    let user = match state.user_repo.get_by_did(did).await {
-        Ok(Some(u)) => u,
-        Ok(None) => return ApiError::InternalError(None).into_response(),
-        Err(e) => {
+) -> Result<Response, ApiError> {
+    let did = &auth.did;
+    let user = state
+        .user_repo
+        .get_by_did(did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching user: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::InternalError(None))?;
+
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor = params.cursor.as_deref();
-    let missing = match state
+    let missing = state
         .blob_repo
         .list_missing_blobs(user.id, cursor, limit + 1)
         .await
-    {
-        Ok(m) => m,
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error fetching missing blobs: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
+
     let has_more = missing.len() > limit as usize;
     let blobs: Vec<RecordBlob> = missing
         .into_iter()
@@ -258,12 +263,12 @@ pub async fn list_missing_blobs(
     } else {
         None
     };
-    (
+    Ok((
         StatusCode::OK,
         Json(ListMissingBlobsOutput {
             cursor: next_cursor,
             blobs,
         }),
     )
-        .into_response()
+        .into_response())
 }

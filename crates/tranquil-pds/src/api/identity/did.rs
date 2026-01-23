@@ -1,5 +1,5 @@
 use crate::api::{ApiError, DidResponse, EmptyResponse};
-use crate::auth::BearerAuthAllowDeactivated;
+use crate::auth::{Auth, NotTakendown};
 use crate::plc::signing_key_to_did_key;
 use crate::state::AppState;
 use crate::types::Handle;
@@ -518,31 +518,25 @@ pub struct AtprotoPds {
 
 pub async fn get_recommended_did_credentials(
     State(state): State<AppState>,
-    auth: BearerAuthAllowDeactivated,
-) -> Response {
-    let auth_user = auth.0;
-    let handle = match state.user_repo.get_handle_by_did(&auth_user.did).await {
-        Ok(Some(h)) => h,
-        Ok(None) => return ApiError::InternalError(None).into_response(),
-        Err(_) => return ApiError::InternalError(None).into_response(),
-    };
-    let key_bytes = match auth_user.key_bytes {
-        Some(kb) => kb,
-        None => {
-            return ApiError::AuthenticationFailed(Some(
-                "OAuth tokens cannot get DID credentials".into(),
-            ))
-            .into_response();
-        }
-    };
+    auth: Auth<NotTakendown>,
+) -> Result<Response, ApiError> {
+    let handle = state
+        .user_repo
+        .get_handle_by_did(&auth.did)
+        .await
+        .map_err(|_| ApiError::InternalError(None))?
+        .ok_or(ApiError::InternalError(None))?;
+
+    let key_bytes = auth.key_bytes.clone().ok_or_else(|| {
+        ApiError::AuthenticationFailed(Some("OAuth tokens cannot get DID credentials".into()))
+    })?;
+
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let pds_endpoint = format!("https://{}", hostname);
-    let signing_key = match k256::ecdsa::SigningKey::from_slice(&key_bytes) {
-        Ok(k) => k,
-        Err(_) => return ApiError::InternalError(None).into_response(),
-    };
+    let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)
+        .map_err(|_| ApiError::InternalError(None))?;
     let did_key = signing_key_to_did_key(&signing_key);
-    let rotation_keys = if auth_user.did.starts_with("did:web:") {
+    let rotation_keys = if auth.did.starts_with("did:web:") {
         vec![]
     } else {
         let server_rotation_key = match std::env::var("PLC_ROTATION_KEY") {
@@ -556,7 +550,7 @@ pub async fn get_recommended_did_credentials(
         };
         vec![server_rotation_key]
     };
-    (
+    Ok((
         StatusCode::OK,
         Json(GetRecommendedDidCredentialsOutput {
             rotation_keys,
@@ -570,7 +564,7 @@ pub async fn get_recommended_did_credentials(
             },
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -580,68 +574,70 @@ pub struct UpdateHandleInput {
 
 pub async fn update_handle(
     State(state): State<AppState>,
-    auth: BearerAuthAllowDeactivated,
+    auth: Auth<NotTakendown>,
     Json(input): Json<UpdateHandleInput>,
-) -> Response {
-    let auth_user = auth.0;
+) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
-        auth_user.is_oauth,
-        auth_user.scope.as_deref(),
+        auth.is_oauth(),
+        auth.scope.as_deref(),
         crate::oauth::scopes::IdentityAttr::Handle,
     ) {
-        return e;
+        return Ok(e);
     }
-    let did = auth_user.did;
+    let did = auth.did.clone();
     if !state
         .check_rate_limit(crate::state::RateLimitKind::HandleUpdate, &did)
         .await
     {
-        return ApiError::RateLimitExceeded(Some(
+        return Err(ApiError::RateLimitExceeded(Some(
             "Too many handle updates. Try again later.".into(),
-        ))
-        .into_response();
+        )));
     }
     if !state
         .check_rate_limit(crate::state::RateLimitKind::HandleUpdateDaily, &did)
         .await
     {
-        return ApiError::RateLimitExceeded(Some("Daily handle update limit exceeded.".into()))
-            .into_response();
+        return Err(ApiError::RateLimitExceeded(Some(
+            "Daily handle update limit exceeded.".into(),
+        )));
     }
-    let user_row = match state.user_repo.get_id_and_handle_by_did(&did).await {
-        Ok(Some(row)) => row,
-        Ok(None) => return ApiError::InternalError(None).into_response(),
-        Err(_) => return ApiError::InternalError(None).into_response(),
-    };
+    let user_row = state
+        .user_repo
+        .get_id_and_handle_by_did(&did)
+        .await
+        .map_err(|_| ApiError::InternalError(None))?
+        .ok_or(ApiError::InternalError(None))?;
     let user_id = user_row.id;
     let current_handle = user_row.handle;
     let new_handle = input.handle.trim().to_ascii_lowercase();
     if new_handle.is_empty() {
-        return ApiError::InvalidRequest("handle is required".into()).into_response();
+        return Err(ApiError::InvalidRequest("handle is required".into()));
     }
     if !new_handle
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
     {
-        return ApiError::InvalidHandle(Some("Handle contains invalid characters".into()))
-            .into_response();
+        return Err(ApiError::InvalidHandle(Some(
+            "Handle contains invalid characters".into(),
+        )));
     }
     if new_handle.split('.').any(|segment| segment.is_empty()) {
-        return ApiError::InvalidHandle(Some("Handle contains empty segment".into()))
-            .into_response();
+        return Err(ApiError::InvalidHandle(Some(
+            "Handle contains empty segment".into(),
+        )));
     }
     if new_handle
         .split('.')
         .any(|segment| segment.starts_with('-') || segment.ends_with('-'))
     {
-        return ApiError::InvalidHandle(Some(
+        return Err(ApiError::InvalidHandle(Some(
             "Handle segment cannot start or end with hyphen".into(),
-        ))
-        .into_response();
+        )));
     }
     if crate::moderation::has_explicit_slur(&new_handle) {
-        return ApiError::InvalidHandle(Some("Inappropriate language in handle".into()))
-            .into_response();
+        return Err(ApiError::InvalidHandle(Some(
+            "Inappropriate language in handle".into(),
+        )));
     }
     let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
     let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
@@ -667,19 +663,18 @@ pub async fn update_handle(
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            return EmptyResponse::ok().into_response();
+            return Ok(EmptyResponse::ok().into_response());
         }
         if short_part.contains('.') {
-            return ApiError::InvalidHandle(Some(
+            return Err(ApiError::InvalidHandle(Some(
                 "Nested subdomains are not allowed. Use a simple handle without dots.".into(),
-            ))
-            .into_response();
+            )));
         }
         if short_part.len() < 3 {
-            return ApiError::InvalidHandle(Some("Handle too short".into())).into_response();
+            return Err(ApiError::InvalidHandle(Some("Handle too short".into())));
         }
         if short_part.len() > 18 {
-            return ApiError::InvalidHandle(Some("Handle too long".into())).into_response();
+            return Err(ApiError::InvalidHandle(Some("Handle too long".into())));
         }
         full_handle
     } else {
@@ -691,74 +686,65 @@ pub async fn update_handle(
             {
                 warn!("Failed to sequence identity event for handle update: {}", e);
             }
-            return EmptyResponse::ok().into_response();
+            return Ok(EmptyResponse::ok().into_response());
         }
         match crate::handle::verify_handle_ownership(&new_handle, &did).await {
             Ok(()) => {}
             Err(crate::handle::HandleResolutionError::NotFound) => {
-                return ApiError::HandleNotAvailable(None).into_response();
+                return Err(ApiError::HandleNotAvailable(None));
             }
             Err(crate::handle::HandleResolutionError::DidMismatch { expected, actual }) => {
-                return ApiError::HandleNotAvailable(Some(format!(
+                return Err(ApiError::HandleNotAvailable(Some(format!(
                     "Handle points to different DID. Expected {}, got {}",
                     expected, actual
-                )))
-                .into_response();
+                ))));
             }
             Err(e) => {
                 warn!("Handle verification failed: {}", e);
-                return ApiError::HandleNotAvailable(Some(format!(
+                return Err(ApiError::HandleNotAvailable(Some(format!(
                     "Handle verification failed: {}",
                     e
-                )))
-                .into_response();
+                ))));
             }
         }
         new_handle.clone()
     };
-    let handle_typed: Handle = match handle.parse() {
-        Ok(h) => h,
-        Err(_) => {
-            return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
-        }
-    };
-    let handle_exists = match state
+    let handle_typed: Handle = handle
+        .parse()
+        .map_err(|_| ApiError::InvalidHandle(Some("Invalid handle format".into())))?;
+    let handle_exists = state
         .user_repo
         .check_handle_exists(&handle_typed, user_id)
         .await
-    {
-        Ok(exists) => exists,
-        Err(_) => return ApiError::InternalError(None).into_response(),
-    };
+        .map_err(|_| ApiError::InternalError(None))?;
     if handle_exists {
-        return ApiError::HandleTaken.into_response();
+        return Err(ApiError::HandleTaken);
     }
-    let result = state.user_repo.update_handle(user_id, &handle_typed).await;
-    match result {
-        Ok(_) => {
-            if !current_handle.is_empty() {
-                let _ = state
-                    .cache
-                    .delete(&format!("handle:{}", current_handle))
-                    .await;
-            }
-            let _ = state.cache.delete(&format!("handle:{}", handle)).await;
-            if let Err(e) =
-                crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
-                    .await
-            {
-                warn!("Failed to sequence identity event for handle update: {}", e);
-            }
-            if let Err(e) = update_plc_handle(&state, &did, &handle_typed).await {
-                warn!("Failed to update PLC handle: {}", e);
-            }
-            EmptyResponse::ok().into_response()
-        }
-        Err(e) => {
+    state
+        .user_repo
+        .update_handle(user_id, &handle_typed)
+        .await
+        .map_err(|e| {
             error!("DB error updating handle: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
+            ApiError::InternalError(None)
+        })?;
+
+    if !current_handle.is_empty() {
+        let _ = state
+            .cache
+            .delete(&format!("handle:{}", current_handle))
+            .await;
     }
+    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+    if let Err(e) =
+        crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed)).await
+    {
+        warn!("Failed to sequence identity event for handle update: {}", e);
+    }
+    if let Err(e) = update_plc_handle(&state, &did, &handle_typed).await {
+        warn!("Failed to update PLC handle: {}", e);
+    }
+    Ok(EmptyResponse::ok().into_response())
 }
 
 pub async fn update_plc_handle(

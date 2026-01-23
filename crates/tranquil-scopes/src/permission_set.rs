@@ -149,7 +149,12 @@ async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, String> {
         return Err(format!("Invalid NSID format: {}", nsid));
     }
 
-    let authority = parts[..2].iter().rev().cloned().collect::<Vec<_>>().join(".");
+    let authority = parts[..2]
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(".");
     debug!(nsid, authority = %authority, "Resolving lexicon DID authority via DNS");
 
     let did = resolve_lexicon_did_authority(&authority).await?;
@@ -279,40 +284,42 @@ fn build_expanded_scopes(
 ) -> String {
     let mut scopes: Vec<String> = Vec::new();
 
-    permissions.iter().for_each(|perm| match perm.resource.as_str() {
-        "repo" => {
-            if let Some(collections) = &perm.collection {
-                let actions: Vec<&str> = perm
-                    .action
-                    .as_ref()
-                    .map(|a| a.iter().map(String::as_str).collect())
-                    .unwrap_or_else(|| DEFAULT_ACTIONS.to_vec());
+    permissions
+        .iter()
+        .for_each(|perm| match perm.resource.as_str() {
+            "repo" => {
+                if let Some(collections) = &perm.collection {
+                    let actions: Vec<&str> = perm
+                        .action
+                        .as_ref()
+                        .map(|a| a.iter().map(String::as_str).collect())
+                        .unwrap_or_else(|| DEFAULT_ACTIONS.to_vec());
 
-                collections
-                    .iter()
-                    .filter(|coll| is_under_authority(coll, namespace_authority))
-                    .for_each(|coll| {
-                        actions.iter().for_each(|action| {
-                            scopes.push(format!("repo:{}?action={}", coll, action));
+                    collections
+                        .iter()
+                        .filter(|coll| is_under_authority(coll, namespace_authority))
+                        .for_each(|coll| {
+                            actions.iter().for_each(|action| {
+                                scopes.push(format!("repo:{}?action={}", coll, action));
+                            });
                         });
-                    });
+                }
             }
-        }
-        "rpc" => {
-            if let Some(lxms) = &perm.lxm {
-                let perm_aud = perm.aud.as_deref().or(default_aud);
+            "rpc" => {
+                if let Some(lxms) = &perm.lxm {
+                    let perm_aud = perm.aud.as_deref().or(default_aud);
 
-                lxms.iter().for_each(|lxm| {
-                    let scope = match perm_aud {
-                        Some(aud) => format!("rpc:{}?aud={}", lxm, aud),
-                        None => format!("rpc:{}", lxm),
-                    };
-                    scopes.push(scope);
-                });
+                    lxms.iter().for_each(|lxm| {
+                        let scope = match perm_aud {
+                            Some(aud) => format!("rpc:{}?aud={}", lxm, aud),
+                            None => format!("rpc:{}", lxm),
+                        };
+                        scopes.push(scope);
+                    });
+                }
             }
-        }
-        _ => {}
-    });
+            _ => {}
+        });
 
     scopes.join(" ")
 }
@@ -334,7 +341,8 @@ mod tests {
 
     #[test]
     fn test_parse_include_scope_with_multiple_params() {
-        let (nsid, aud) = parse_include_scope("io.atcr.authFullApp?foo=bar&aud=did:web:example.com&baz=qux");
+        let (nsid, aud) =
+            parse_include_scope("io.atcr.authFullApp?foo=bar&aud=did:web:example.com&baz=qux");
         assert_eq!(nsid, "io.atcr.authFullApp");
         assert_eq!(aud, Some("did:web:example.com"));
     }
@@ -443,7 +451,8 @@ mod tests {
             aud: None,
         }];
 
-        let expanded = build_expanded_scopes(&permissions, Some("did:web:api.example.com"), "io.atcr");
+        let expanded =
+            build_expanded_scopes(&permissions, Some("did:web:api.example.com"), "io.atcr");
         assert!(expanded.contains("rpc:io.atcr.getManifest?aud=did:web:api.example.com"));
     }
 
@@ -583,7 +592,8 @@ mod tests {
                 cache_key.to_string(),
                 CachedLexicon {
                     expanded_scope: "old_value".to_string(),
-                    cached_at: std::time::Instant::now() - std::time::Duration::from_secs(CACHE_TTL_SECS + 1),
+                    cached_at: std::time::Instant::now()
+                        - std::time::Duration::from_secs(CACHE_TTL_SECS + 1),
                 },
             );
         }
@@ -601,12 +611,22 @@ mod tests {
     fn test_nsid_authority_extraction_for_dns() {
         let nsid = "io.atcr.authFullApp";
         let parts: Vec<&str> = nsid.split('.').collect();
-        let authority = parts[..2].iter().rev().cloned().collect::<Vec<_>>().join(".");
+        let authority = parts[..2]
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(".");
         assert_eq!(authority, "atcr.io");
 
         let nsid2 = "app.bsky.feed.post";
         let parts2: Vec<&str> = nsid2.split('.').collect();
-        let authority2 = parts2[..2].iter().rev().cloned().collect::<Vec<_>>().join(".");
+        let authority2 = parts2[..2]
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(".");
         assert_eq!(authority2, "bsky.app");
     }
 }

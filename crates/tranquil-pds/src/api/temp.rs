@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::{BearerAuth, OptionalBearerAuth};
+use crate::auth::{Active, Auth, Permissive};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -21,9 +21,9 @@ pub struct CheckSignupQueueOutput {
     pub estimated_time_ms: Option<i64>,
 }
 
-pub async fn check_signup_queue(auth: OptionalBearerAuth) -> Response {
-    if let Some(user) = auth.0
-        && user.is_oauth
+pub async fn check_signup_queue(auth: Option<Auth<Permissive>>) -> Response {
+    if let Some(ref user) = auth
+        && user.is_oauth()
     {
         return ApiError::Forbidden.into_response();
     }
@@ -49,11 +49,9 @@ pub struct DereferenceScopeOutput {
 
 pub async fn dereference_scope(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    _auth: Auth<Active>,
     Json(input): Json<DereferenceScopeInput>,
-) -> Response {
-    let _ = auth;
-
+) -> Result<Response, ApiError> {
     let scope_parts: Vec<&str> = input.scope.split_whitespace().collect();
     let mut resolved_scopes: Vec<String> = Vec::new();
 
@@ -118,8 +116,8 @@ pub async fn dereference_scope(
         }
     }
 
-    Json(DereferenceScopeOutput {
+    Ok(Json(DereferenceScopeOutput {
         scope: resolved_scopes.join(" "),
     })
-    .into_response()
+    .into_response())
 }

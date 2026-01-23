@@ -3,6 +3,7 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::AccountStatus;
+use crate::api::ApiError;
 use crate::cache::Cache;
 use crate::oauth::scopes::ScopePermissions;
 use crate::types::Did;
@@ -16,9 +17,9 @@ pub mod verification_token;
 pub mod webauthn;
 
 pub use extractor::{
-    AuthError, BearerAuth, BearerAuthAdmin, BearerAuthAllowDeactivated, BlobAuth, BlobAuthResult,
-    ExtractedToken, OptionalBearerAuth, OptionalServiceAuth, ServiceAuth,
-    extract_auth_token_from_header, extract_bearer_token_from_header,
+    Active, Admin, AnyUser, Auth, AuthAny, AuthError, AuthPolicy, ExtractedToken, NotTakendown,
+    Permissive, ServiceAuth, SigningAuth, extract_auth_token_from_header,
+    extract_bearer_token_from_header,
 };
 pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 
@@ -94,14 +95,80 @@ impl fmt::Display for TokenValidationError {
     }
 }
 
+pub enum AuthSource {
+    Session,
+    OAuth,
+    Service { claims: ServiceTokenClaims },
+}
+
+impl AuthSource {
+    pub fn is_oauth(&self) -> bool {
+        matches!(self, Self::OAuth)
+    }
+
+    pub fn is_service(&self) -> bool {
+        matches!(self, Self::Service { .. })
+    }
+
+    pub fn service_claims(&self) -> Option<&ServiceTokenClaims> {
+        match self {
+            Self::Service { claims } => Some(claims),
+            _ => None,
+        }
+    }
+}
+
 pub struct AuthenticatedUser {
     pub did: Did,
     pub key_bytes: Option<Vec<u8>>,
-    pub is_oauth: bool,
     pub is_admin: bool,
     pub status: AccountStatus,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
+    pub auth_source: AuthSource,
+}
+
+impl AuthenticatedUser {
+    pub fn is_oauth(&self) -> bool {
+        self.auth_source.is_oauth()
+    }
+
+    pub fn is_service(&self) -> bool {
+        self.auth_source.is_service()
+    }
+
+    pub fn service_claims(&self) -> Option<&ServiceTokenClaims> {
+        self.auth_source.service_claims()
+    }
+
+    pub fn require_lxm(&self, expected_lxm: &str) -> Result<(), ApiError> {
+        match self.auth_source.service_claims() {
+            Some(claims) => match &claims.lxm {
+                Some(lxm) if lxm == "*" || lxm == expected_lxm => Ok(()),
+                Some(lxm) => Err(ApiError::AuthorizationError(format!(
+                    "Token lxm '{}' does not permit '{}'",
+                    lxm, expected_lxm
+                ))),
+                None => Err(ApiError::AuthorizationError(
+                    "Token missing lxm claim".to_string(),
+                )),
+            },
+            None => Ok(()),
+        }
+    }
+
+    pub fn require_user(&self) -> Result<&Self, ApiError> {
+        if self.is_service() {
+            return Err(ApiError::AuthenticationFailed(Some(
+                "User authentication required".to_string(),
+            )));
+        }
+        Ok(self)
+    }
+
+    pub fn as_user(&self) -> Option<&Self> {
+        if self.is_service() { None } else { Some(self) }
+    }
 }
 
 impl AuthenticatedUser {
@@ -111,7 +178,7 @@ impl AuthenticatedUser {
         {
             return ScopePermissions::from_scope_string(Some(scope));
         }
-        if !self.is_oauth {
+        if !self.is_oauth() {
             return ScopePermissions::from_scope_string(Some("atproto"));
         }
         ScopePermissions::from_scope_string(self.scope.as_deref())
@@ -349,11 +416,11 @@ async fn validate_bearer_token_with_options_internal(
                         return Ok(AuthenticatedUser {
                             did: did.clone(),
                             key_bytes: Some(decrypted_key),
-                            is_oauth: false,
                             is_admin,
                             status,
                             scope: token_data.claims.scope.clone(),
                             controller_did,
+                            auth_source: AuthSource::Session,
                         });
                     }
                 }
@@ -397,11 +464,11 @@ async fn validate_bearer_token_with_options_internal(
             return Ok(AuthenticatedUser {
                 did: Did::new_unchecked(oauth_token.did),
                 key_bytes,
-                is_oauth: true,
                 is_admin: oauth_token.is_admin,
                 status,
                 scope: oauth_info.scope,
                 controller_did: oauth_info.controller_did.map(Did::new_unchecked),
+                auth_source: AuthSource::OAuth,
             });
         } else {
             return Err(TokenValidationError::TokenExpired);
@@ -481,11 +548,11 @@ pub async fn validate_token_with_dpop(
             Ok(AuthenticatedUser {
                 did: Did::new_unchecked(result.did),
                 key_bytes,
-                is_oauth: true,
                 is_admin: user_info.is_admin,
                 status,
                 scope: result.scope,
                 controller_did: None,
+                auth_source: AuthSource::OAuth,
             })
         }
         Err(crate::oauth::OAuthError::ExpiredToken(_)) => {

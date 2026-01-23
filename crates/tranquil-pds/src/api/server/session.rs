@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::{EmptyResponse, SuccessResponse};
-use crate::auth::{BearerAuth, BearerAuthAllowDeactivated};
+use crate::auth::{Active, Auth, NotTakendown};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{AccountState, Did, Handle, PlainPassword};
 use axum::{
@@ -279,15 +279,15 @@ pub async fn create_session(
 
 pub async fn get_session(
     State(state): State<AppState>,
-    BearerAuthAllowDeactivated(auth_user): BearerAuthAllowDeactivated,
-) -> Response {
-    let permissions = auth_user.permissions();
+    auth: Auth<NotTakendown>,
+) -> Result<Response, ApiError> {
+    let permissions = auth.permissions();
     let can_read_email = permissions.allows_email_read();
 
-    let did_for_doc = auth_user.did.clone();
+    let did_for_doc = auth.did.clone();
     let did_resolver = state.did_resolver.clone();
     let (db_result, did_doc) = tokio::join!(
-        state.user_repo.get_session_info_by_did(&auth_user.did),
+        state.user_repo.get_session_info_by_did(&auth.did),
         did_resolver.resolve_did_document(&did_for_doc)
     );
     match db_result {
@@ -316,7 +316,7 @@ pub async fn get_session(
             let email_confirmed_value = can_read_email && row.email_verified;
             let mut response = json!({
                 "handle": handle,
-                "did": &auth_user.did,
+                "did": &auth.did,
                 "active": account_state.is_active(),
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
@@ -337,12 +337,12 @@ pub async fn get_session(
             if let Some(doc) = did_doc {
                 response["didDoc"] = doc;
             }
-            Json(response).into_response()
+            Ok(Json(response).into_response())
         }
-        Ok(None) => ApiError::AuthenticationFailed(None).into_response(),
+        Ok(None) => Err(ApiError::AuthenticationFailed(None)),
         Err(e) => {
             error!("Database error in get_session: {:?}", e);
-            ApiError::InternalError(None).into_response()
+            Err(ApiError::InternalError(None))
         }
     }
 }
@@ -350,18 +350,14 @@ pub async fn get_session(
 pub async fn delete_session(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    _auth: BearerAuth,
-) -> Response {
-    let extracted = match crate::auth::extract_auth_token_from_header(
+    _auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let extracted = crate::auth::extract_auth_token_from_header(
         headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
-        Some(t) => t,
-        None => return ApiError::AuthenticationRequired.into_response(),
-    };
-    let jti = match crate::auth::get_jti_from_token(&extracted.token) {
-        Ok(jti) => jti,
-        Err(_) => return ApiError::AuthenticationFailed(None).into_response(),
-    };
+    )
+    .ok_or(ApiError::AuthenticationRequired)?;
+    let jti = crate::auth::get_jti_from_token(&extracted.token)
+        .map_err(|_| ApiError::AuthenticationFailed(None))?;
     let did = crate::auth::get_did_from_token(&extracted.token).ok();
     match state.session_repo.delete_session_by_access_jti(&jti).await {
         Ok(rows) if rows > 0 => {
@@ -369,10 +365,10 @@ pub async fn delete_session(
                 let session_cache_key = format!("auth:session:{}:{}", did, jti);
                 let _ = state.cache.delete(&session_cache_key).await;
             }
-            EmptyResponse::ok().into_response()
+            Ok(EmptyResponse::ok().into_response())
         }
-        Ok(_) => ApiError::AuthenticationFailed(None).into_response(),
-        Err(_) => ApiError::AuthenticationFailed(None).into_response(),
+        Ok(_) => Err(ApiError::AuthenticationFailed(None)),
+        Err(_) => Err(ApiError::AuthenticationFailed(None)),
     }
 }
 
@@ -796,29 +792,31 @@ pub struct ListSessionsOutput {
 pub async fn list_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: BearerAuth,
-) -> Response {
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
     let current_jti = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .and_then(|token| crate::auth::get_jti_from_token(token).ok());
 
-    let jwt_rows = match state.session_repo.list_sessions_by_did(&auth.0.did).await {
-        Ok(rows) => rows,
-        Err(e) => {
+    let jwt_rows = state
+        .session_repo
+        .list_sessions_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching JWT sessions: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
-    let oauth_rows = match state.oauth_repo.list_sessions_by_did(&auth.0.did).await {
-        Ok(rows) => rows,
-        Err(e) => {
+    let oauth_rows = state
+        .oauth_repo
+        .list_sessions_by_did(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error fetching OAuth sessions: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+            ApiError::InternalError(None)
+        })?;
 
     let jwt_sessions = jwt_rows.into_iter().map(|row| SessionInfo {
         id: format!("jwt:{}", row.id),
@@ -829,7 +827,7 @@ pub async fn list_sessions(
         is_current: current_jti.as_ref() == Some(&row.access_jti),
     });
 
-    let is_oauth = auth.0.is_oauth;
+    let is_oauth = auth.is_oauth();
     let oauth_sessions = oauth_rows.into_iter().map(|row| {
         let client_name = extract_client_name(&row.client_id);
         let is_current_oauth = is_oauth && current_jti.as_deref() == Some(row.token_id.as_str());
@@ -846,7 +844,7 @@ pub async fn list_sessions(
     let mut sessions: Vec<SessionInfo> = jwt_sessions.chain(oauth_sessions).collect();
     sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-    (StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response()
+    Ok((StatusCode::OK, Json(ListSessionsOutput { sessions })).into_response())
 }
 
 fn extract_client_name(client_id: &str) -> String {
@@ -867,106 +865,107 @@ pub struct RevokeSessionInput {
 
 pub async fn revoke_session(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<RevokeSessionInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if let Some(jwt_id) = input.session_id.strip_prefix("jwt:") {
-        let Ok(session_id) = jwt_id.parse::<i32>() else {
-            return ApiError::InvalidRequest("Invalid session ID".into()).into_response();
-        };
-        let access_jti = match state
+        let session_id: i32 = jwt_id
+            .parse()
+            .map_err(|_| ApiError::InvalidRequest("Invalid session ID".into()))?;
+        let access_jti = state
             .session_repo
-            .get_session_access_jti_by_id(session_id, &auth.0.did)
+            .get_session_access_jti_by_id(session_id, &auth.did)
             .await
-        {
-            Ok(Some(jti)) => jti,
-            Ok(None) => {
-                return ApiError::SessionNotFound.into_response();
-            }
-            Err(e) => {
+            .map_err(|e| {
                 error!("DB error in revoke_session: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-        };
-        if let Err(e) = state.session_repo.delete_session_by_id(session_id).await {
-            error!("DB error deleting session: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-        let cache_key = format!("auth:session:{}:{}", &auth.0.did, access_jti);
+                ApiError::InternalError(None)
+            })?
+            .ok_or(ApiError::SessionNotFound)?;
+        state
+            .session_repo
+            .delete_session_by_id(session_id)
+            .await
+            .map_err(|e| {
+                error!("DB error deleting session: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
+        let cache_key = format!("auth:session:{}:{}", &auth.did, access_jti);
         if let Err(e) = state.cache.delete(&cache_key).await {
             warn!("Failed to invalidate session cache: {:?}", e);
         }
-        info!(did = %&auth.0.did, session_id = %session_id, "JWT session revoked");
+        info!(did = %&auth.did, session_id = %session_id, "JWT session revoked");
     } else if let Some(oauth_id) = input.session_id.strip_prefix("oauth:") {
-        let Ok(session_id) = oauth_id.parse::<i32>() else {
-            return ApiError::InvalidRequest("Invalid session ID".into()).into_response();
-        };
-        match state
+        let session_id: i32 = oauth_id
+            .parse()
+            .map_err(|_| ApiError::InvalidRequest("Invalid session ID".into()))?;
+        let deleted = state
             .oauth_repo
-            .delete_session_by_id(session_id, &auth.0.did)
+            .delete_session_by_id(session_id, &auth.did)
             .await
-        {
-            Ok(0) => {
-                return ApiError::SessionNotFound.into_response();
-            }
-            Err(e) => {
+            .map_err(|e| {
                 error!("DB error deleting OAuth session: {:?}", e);
-                return ApiError::InternalError(None).into_response();
-            }
-            _ => {}
+                ApiError::InternalError(None)
+            })?;
+        if deleted == 0 {
+            return Err(ApiError::SessionNotFound);
         }
-        info!(did = %&auth.0.did, session_id = %session_id, "OAuth session revoked");
+        info!(did = %&auth.did, session_id = %session_id, "OAuth session revoked");
     } else {
-        return ApiError::InvalidRequest("Invalid session ID format".into()).into_response();
+        return Err(ApiError::InvalidRequest("Invalid session ID format".into()));
     }
-    EmptyResponse::ok().into_response()
+    Ok(EmptyResponse::ok().into_response())
 }
 
 pub async fn revoke_all_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: BearerAuth,
-) -> Response {
-    let current_jti = crate::auth::extract_auth_token_from_header(
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let jti = crate::auth::extract_auth_token_from_header(
         headers.get("authorization").and_then(|v| v.to_str().ok()),
     )
-    .and_then(|extracted| crate::auth::get_jti_from_token(&extracted.token).ok());
+    .and_then(|extracted| crate::auth::get_jti_from_token(&extracted.token).ok())
+    .ok_or(ApiError::InvalidToken(None))?;
 
-    let Some(ref jti) = current_jti else {
-        return ApiError::InvalidToken(None).into_response();
-    };
-
-    if auth.0.is_oauth {
-        if let Err(e) = state.session_repo.delete_sessions_by_did(&auth.0.did).await {
-            error!("DB error revoking JWT sessions: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-        let jti_typed = TokenId::from(jti.clone());
-        if let Err(e) = state
-            .oauth_repo
-            .delete_sessions_by_did_except(&auth.0.did, &jti_typed)
-            .await
-        {
-            error!("DB error revoking OAuth sessions: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    } else {
-        if let Err(e) = state
+    if auth.is_oauth() {
+        state
             .session_repo
-            .delete_sessions_by_did_except_jti(&auth.0.did, jti)
+            .delete_sessions_by_did(&auth.did)
             .await
-        {
-            error!("DB error revoking JWT sessions: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-        if let Err(e) = state.oauth_repo.delete_sessions_by_did(&auth.0.did).await {
-            error!("DB error revoking OAuth sessions: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
+            .map_err(|e| {
+                error!("DB error revoking JWT sessions: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
+        let jti_typed = TokenId::from(jti.clone());
+        state
+            .oauth_repo
+            .delete_sessions_by_did_except(&auth.did, &jti_typed)
+            .await
+            .map_err(|e| {
+                error!("DB error revoking OAuth sessions: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
+    } else {
+        state
+            .session_repo
+            .delete_sessions_by_did_except_jti(&auth.did, &jti)
+            .await
+            .map_err(|e| {
+                error!("DB error revoking JWT sessions: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
+        state
+            .oauth_repo
+            .delete_sessions_by_did(&auth.did)
+            .await
+            .map_err(|e| {
+                error!("DB error revoking OAuth sessions: {:?}", e);
+                ApiError::InternalError(None)
+            })?;
     }
 
-    info!(did = %&auth.0.did, "All other sessions revoked");
-    SuccessResponse::ok().into_response()
+    info!(did = %&auth.did, "All other sessions revoked");
+    Ok(SuccessResponse::ok().into_response())
 }
 
 #[derive(Serialize)]
@@ -978,20 +977,22 @@ pub struct LegacyLoginPreferenceOutput {
 
 pub async fn get_legacy_login_preference(
     State(state): State<AppState>,
-    auth: BearerAuth,
-) -> Response {
-    match state.user_repo.get_legacy_login_pref(&auth.0.did).await {
-        Ok(Some(pref)) => Json(LegacyLoginPreferenceOutput {
-            allow_legacy_login: pref.allow_legacy_login,
-            has_mfa: pref.has_mfa,
-        })
-        .into_response(),
-        Ok(None) => ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+    auth: Auth<Active>,
+) -> Result<Response, ApiError> {
+    let pref = state
+        .user_repo
+        .get_legacy_login_pref(&auth.did)
+        .await
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
-    }
+            ApiError::InternalError(None)
+        })?
+        .ok_or(ApiError::AccountNotFound)?;
+    Ok(Json(LegacyLoginPreferenceOutput {
+        allow_legacy_login: pref.allow_legacy_login,
+        has_mfa: pref.has_mfa,
+    })
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -1002,51 +1003,48 @@ pub struct UpdateLegacyLoginInput {
 
 pub async fn update_legacy_login_preference(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdateLegacyLoginInput>,
-) -> Response {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.0.did)
-        .await
+) -> Result<Response, ApiError> {
+    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
     {
-        return crate::api::server::reauth::legacy_mfa_required_response(
+        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
-    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.0.did).await {
-        return crate::api::server::reauth::reauth_required_response(
+    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.did).await {
+        return Ok(crate::api::server::reauth::reauth_required_response(
             &*state.user_repo,
             &*state.session_repo,
-            &auth.0.did,
+            &auth.did,
         )
-        .await;
+        .await);
     }
 
-    match state
+    let updated = state
         .user_repo
-        .update_legacy_login(&auth.0.did, input.allow_legacy_login)
+        .update_legacy_login(&auth.did, input.allow_legacy_login)
         .await
-    {
-        Ok(true) => {
-            info!(
-                did = %&auth.0.did,
-                allow_legacy_login = input.allow_legacy_login,
-                "Legacy login preference updated"
-            );
-            Json(json!({
-                "allowLegacyLogin": input.allow_legacy_login
-            }))
-            .into_response()
-        }
-        Ok(false) => ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
+            ApiError::InternalError(None)
+        })?;
+    if !updated {
+        return Err(ApiError::AccountNotFound);
     }
+    info!(
+        did = %&auth.did,
+        allow_legacy_login = input.allow_legacy_login,
+        "Legacy login preference updated"
+    );
+    Ok(Json(json!({
+        "allowLegacyLogin": input.allow_legacy_login
+    }))
+    .into_response())
 }
 
 use crate::comms::VALID_LOCALES;
@@ -1059,37 +1057,34 @@ pub struct UpdateLocaleInput {
 
 pub async fn update_locale(
     State(state): State<AppState>,
-    auth: BearerAuth,
+    auth: Auth<Active>,
     Json(input): Json<UpdateLocaleInput>,
-) -> Response {
+) -> Result<Response, ApiError> {
     if !VALID_LOCALES.contains(&input.preferred_locale.as_str()) {
-        return ApiError::InvalidRequest(format!(
+        return Err(ApiError::InvalidRequest(format!(
             "Invalid locale. Valid options: {}",
             VALID_LOCALES.join(", ")
-        ))
-        .into_response();
+        )));
     }
 
-    match state
+    let updated = state
         .user_repo
-        .update_locale(&auth.0.did, &input.preferred_locale)
+        .update_locale(&auth.did, &input.preferred_locale)
         .await
-    {
-        Ok(true) => {
-            info!(
-                did = %&auth.0.did,
-                locale = %input.preferred_locale,
-                "User locale preference updated"
-            );
-            Json(json!({
-                "preferredLocale": input.preferred_locale
-            }))
-            .into_response()
-        }
-        Ok(false) => ApiError::AccountNotFound.into_response(),
-        Err(e) => {
+        .map_err(|e| {
             error!("DB error updating locale: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
+            ApiError::InternalError(None)
+        })?;
+    if !updated {
+        return Err(ApiError::AccountNotFound);
     }
+    info!(
+        did = %&auth.did,
+        locale = %input.preferred_locale,
+        "User locale preference updated"
+    );
+    Ok(Json(json!({
+        "preferredLocale": input.preferred_locale
+    }))
+    .into_response())
 }

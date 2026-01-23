@@ -161,7 +161,7 @@ async fn test_oauth_token_works_with_bearer_auth() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::OK, "OAuth token should work with BearerAuth extractor");
+    assert_eq!(res.status(), StatusCode::OK, "OAuth token should work with RequiredAuth extractor");
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["did"].as_str().unwrap(), did);
 }

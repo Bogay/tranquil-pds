@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::BearerAuthAdmin;
+use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
@@ -78,7 +78,7 @@ pub async fn get_server_config(
 
 pub async fn update_server_config(
     State(state): State<AppState>,
-    _admin: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Json(req): Json<UpdateServerConfigRequest>,
 ) -> Result<Json<UpdateServerConfigResponse>, ApiError> {
     if let Some(server_name) = req.server_name {

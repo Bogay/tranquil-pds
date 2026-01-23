@@ -1,8 +1,7 @@
 use crate::comms::{channel_display_name, comms_repo::enqueue_2fa_code};
 use crate::oauth::{
     AuthFlowState, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, SessionId,
-    db::should_show_consent,
-    scopes::expand_include_scopes,
+    db::should_show_consent, scopes::expand_include_scopes,
 };
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{Did, Handle, PlainPassword};
@@ -3645,9 +3644,9 @@ pub async fn register_complete(
 pub async fn establish_session(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: crate::auth::BearerAuth,
+    auth: crate::auth::Auth<crate::auth::Active>,
 ) -> Response {
-    let did = &auth.0.did;
+    let did = &auth.did;
 
     let existing_device = extract_device_cookie(&headers);
 
@@ -3670,7 +3669,11 @@ pub async fn establish_session(
             };
             let device_typed = DeviceIdType::from(new_id.0.clone());
 
-            if let Err(e) = state.oauth_repo.create_device(&device_typed, &device_data).await {
+            if let Err(e) = state
+                .oauth_repo
+                .create_device(&device_typed, &device_data)
+                .await
+            {
                 tracing::error!(error = ?e, "Failed to create device");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -3682,7 +3685,11 @@ pub async fn establish_session(
                     .into_response();
             }
 
-            if let Err(e) = state.oauth_repo.upsert_account_device(did, &device_typed).await {
+            if let Err(e) = state
+                .oauth_repo
+                .upsert_account_device(did, &device_typed)
+                .await
+            {
                 tracing::error!(error = ?e, "Failed to link device to account");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,

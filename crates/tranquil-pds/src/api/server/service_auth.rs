@@ -95,12 +95,12 @@ pub async fn get_service_auth(
         {
             Ok(result) => crate::auth::AuthenticatedUser {
                 did: Did::new_unchecked(result.did),
-                is_oauth: true,
                 is_admin: false,
                 status: AccountStatus::Active,
                 scope: result.scope,
                 key_bytes: None,
                 controller_did: None,
+                auth_source: crate::auth::AuthSource::OAuth,
             },
             Err(crate::oauth::OAuthError::UseDpopNonce(nonce)) => {
                 return (
@@ -131,7 +131,7 @@ pub async fn get_service_auth(
     };
     info!(
         did = %&auth_user.did,
-        is_oauth = auth_user.is_oauth,
+        is_oauth = auth_user.is_oauth(),
         has_key = auth_user.key_bytes.is_some(),
         "getServiceAuth auth validated"
     );
@@ -180,14 +180,14 @@ pub async fn get_service_auth(
 
     if let Some(method) = lxm {
         if let Err(e) = crate::auth::scope_check::check_rpc_scope(
-            auth_user.is_oauth,
+            auth_user.is_oauth(),
             auth_user.scope.as_deref(),
             &params.aud,
             method,
         ) {
             return e;
         }
-    } else if auth_user.is_oauth {
+    } else if auth_user.is_oauth() {
         let permissions = auth_user.permissions();
         if !permissions.has_full_access() {
             return ApiError::InvalidRequest(

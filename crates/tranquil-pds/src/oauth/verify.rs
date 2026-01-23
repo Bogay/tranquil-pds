@@ -396,7 +396,7 @@ async fn try_legacy_auth(
     token: &str,
 ) -> Result<LegacyAuthResult, ()> {
     match crate::auth::validate_bearer_token(user_repo, token).await {
-        Ok(user) if !user.is_oauth => Ok(LegacyAuthResult { did: user.did }),
+        Ok(user) if !user.is_oauth() => Ok(LegacyAuthResult { did: user.did }),
         _ => Err(()),
     }
 }

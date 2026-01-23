@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::BearerAuthAdmin;
+use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{Did, Handle};
 use axum::{
@@ -50,14 +50,14 @@ pub struct SearchAccountsOutput {
 
 pub async fn search_accounts(
     State(state): State<AppState>,
-    _auth: BearerAuthAdmin,
+    _auth: Auth<Admin>,
     Query(params): Query<SearchAccountsParams>,
-) -> Response {
+) -> Result<Response, ApiError> {
     let limit = params.limit.clamp(1, 100);
     let email_filter = params.email.as_deref().map(|e| format!("%{}%", e));
     let handle_filter = params.handle.as_deref().map(|h| format!("%{}%", h));
     let cursor_did: Option<Did> = params.cursor.as_ref().and_then(|c| c.parse().ok());
-    let result = state
+    let rows = state
         .user_repo
         .search_accounts(
             cursor_did.as_ref(),
@@ -65,44 +65,41 @@ pub async fn search_accounts(
             handle_filter.as_deref(),
             limit + 1,
         )
-        .await;
-    match result {
-        Ok(rows) => {
-            let has_more = rows.len() > limit as usize;
-            let accounts: Vec<AccountView> = rows
-                .into_iter()
-                .take(limit as usize)
-                .map(|row| AccountView {
-                    did: row.did.clone(),
-                    handle: row.handle,
-                    email: row.email,
-                    indexed_at: row.created_at.to_rfc3339(),
-                    email_confirmed_at: if row.email_verified {
-                        Some(row.created_at.to_rfc3339())
-                    } else {
-                        None
-                    },
-                    deactivated_at: row.deactivated_at.map(|dt| dt.to_rfc3339()),
-                    invites_disabled: row.invites_disabled,
-                })
-                .collect();
-            let next_cursor = if has_more {
-                accounts.last().map(|a| a.did.to_string())
+        .await
+        .map_err(|e| {
+            error!("DB error in search_accounts: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
+
+    let has_more = rows.len() > limit as usize;
+    let accounts: Vec<AccountView> = rows
+        .into_iter()
+        .take(limit as usize)
+        .map(|row| AccountView {
+            did: row.did.clone(),
+            handle: row.handle,
+            email: row.email,
+            indexed_at: row.created_at.to_rfc3339(),
+            email_confirmed_at: if row.email_verified {
+                Some(row.created_at.to_rfc3339())
             } else {
                 None
-            };
-            (
-                StatusCode::OK,
-                Json(SearchAccountsOutput {
-                    cursor: next_cursor,
-                    accounts,
-                }),
-            )
-                .into_response()
-        }
-        Err(e) => {
-            error!("DB error in search_accounts: {:?}", e);
-            ApiError::InternalError(None).into_response()
-        }
-    }
+            },
+            deactivated_at: row.deactivated_at.map(|dt| dt.to_rfc3339()),
+            invites_disabled: row.invites_disabled,
+        })
+        .collect();
+    let next_cursor = if has_more {
+        accounts.last().map(|a| a.did.to_string())
+    } else {
+        None
+    };
+    Ok((
+        StatusCode::OK,
+        Json(SearchAccountsOutput {
+            cursor: next_cursor,
+            accounts,
+        }),
+    )
+        .into_response())
 }
