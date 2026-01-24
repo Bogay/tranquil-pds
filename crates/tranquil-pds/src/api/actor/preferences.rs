@@ -1,5 +1,5 @@
 use crate::api::error::ApiError;
-use crate::auth::{Active, Auth};
+use crate::auth::{Auth, NotTakendown, Permissive};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -32,7 +32,7 @@ fn get_age_from_datestring(birth_date: &str) -> Option<i32> {
 pub struct GetPreferencesOutput {
     pub preferences: Vec<Value>,
 }
-pub async fn get_preferences(State(state): State<AppState>, auth: Auth<Active>) -> Response {
+pub async fn get_preferences(State(state): State<AppState>, auth: Auth<Permissive>) -> Response {
     let has_full_access = auth.permissions().has_full_access();
     let user_id: uuid::Uuid = match state.user_repo.get_id_by_did(&auth.did).await {
         Ok(Some(id)) => id,
@@ -89,7 +89,7 @@ pub struct PutPreferencesInput {
 }
 pub async fn put_preferences(
     State(state): State<AppState>,
-    auth: Auth<Active>,
+    auth: Auth<NotTakendown>,
     Json(input): Json<PutPreferencesInput>,
 ) -> Response {
     let has_full_access = auth.permissions().has_full_access();

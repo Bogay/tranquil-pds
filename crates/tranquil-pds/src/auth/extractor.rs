@@ -27,7 +27,6 @@ pub enum AuthError {
     AccountTakedown,
     AdminRequired,
     ServiceAuthNotAllowed,
-    SigningKeyRequired,
     InsufficientScope(String),
     OAuthExpiredToken(String),
     UseDpopNonce(String),
@@ -430,6 +429,28 @@ impl FromRequestParts<AppState> for ServiceAuth {
     }
 }
 
+impl OptionalFromRequestParts<AppState> for ServiceAuth {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        match extract_auth_internal(parts, state).await {
+            Ok(ExtractedAuth::Service(claims)) => {
+                let did: Did = claims
+                    .iss
+                    .parse()
+                    .map_err(|_| AuthError::AuthenticationFailed)?;
+                Ok(Some(ServiceAuth { did, claims }))
+            }
+            Ok(ExtractedAuth::User(_)) => Err(AuthError::AuthenticationFailed),
+            Err(AuthError::MissingToken) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 pub enum AuthAny<P: AuthPolicy = Active> {
     User(Auth<P>),
     Service(ServiceAuth),
@@ -514,86 +535,6 @@ impl<P: AuthPolicy> OptionalFromRequestParts<AppState> for AuthAny<P> {
             Err(AuthError::MissingToken) => Ok(None),
             Err(e) => Err(e),
         }
-    }
-}
-
-pub struct SigningAuth<P: AuthPolicy = Active> {
-    pub did: Did,
-    pub key_bytes: Vec<u8>,
-    pub is_admin: bool,
-    pub status: AccountStatus,
-    pub scope: Option<String>,
-    pub controller_did: Option<Did>,
-    is_oauth: bool,
-    _policy: PhantomData<P>,
-}
-
-impl<P: AuthPolicy> SigningAuth<P> {
-    pub fn needs_scope_check(&self) -> bool {
-        self.is_oauth
-    }
-
-    pub fn permissions(&self) -> ScopePermissions {
-        if let Some(ref scope) = self.scope
-            && scope != super::SCOPE_ACCESS
-        {
-            return ScopePermissions::from_scope_string(Some(scope));
-        }
-        if !self.is_oauth {
-            return ScopePermissions::from_scope_string(Some("atproto"));
-        }
-        ScopePermissions::from_scope_string(self.scope.as_deref())
-    }
-
-    #[allow(clippy::result_large_err)]
-    pub fn check_repo_scope(&self, action: RepoAction, collection: &str) -> Result<(), Response> {
-        if !self.needs_scope_check() {
-            return Ok(());
-        }
-        self.permissions()
-            .assert_repo(action, collection)
-            .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
-    }
-}
-
-impl<P: AuthPolicy> FromRequestParts<AppState> for SigningAuth<P> {
-    type Rejection = AuthError;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        let user = extract_user_auth_internal(parts, state).await?;
-        P::validate(&user)?;
-
-        let key_bytes = match user.key_bytes {
-            Some(kb) => kb,
-            None => {
-                let user_with_key = state
-                    .user_repo
-                    .get_with_key_by_did(&user.did)
-                    .await
-                    .ok()
-                    .flatten()
-                    .ok_or(AuthError::SigningKeyRequired)?;
-                crate::config::decrypt_key(
-                    &user_with_key.key_bytes,
-                    user_with_key.encryption_version,
-                )
-                .map_err(|_| AuthError::SigningKeyRequired)?
-            }
-        };
-
-        Ok(SigningAuth {
-            did: user.did,
-            key_bytes,
-            is_admin: user.is_admin,
-            status: user.status,
-            scope: user.scope,
-            controller_did: user.controller_did,
-            is_oauth: user.auth_source.is_oauth(),
-            _policy: PhantomData,
-        })
     }
 }
 

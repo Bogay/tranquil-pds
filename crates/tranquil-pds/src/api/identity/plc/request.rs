@@ -1,6 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::{Auth, NotTakendown};
+use crate::auth::{Auth, Permissive};
 use crate::state::AppState;
 use axum::{
     extract::State,
@@ -15,7 +15,7 @@ fn generate_plc_token() -> String {
 
 pub async fn request_plc_operation_signature(
     State(state): State<AppState>,
-    auth: Auth<NotTakendown>,
+    auth: Auth<Permissive>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
         auth.is_oauth(),

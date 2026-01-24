@@ -436,3 +436,105 @@ async fn test_declared_age_pref_computed_under_18() {
     assert_eq!(declared_age["isOverAge16"], false);
     assert_eq!(declared_age["isOverAge18"], false);
 }
+
+#[tokio::test]
+async fn test_deactivated_account_can_get_preferences() {
+    let client = client();
+    let base = base_url().await;
+    let (token, _did) = create_account_and_login(&client).await;
+
+    let prefs = json!({
+        "preferences": [
+            {
+                "$type": "app.bsky.actor.defs#adultContentPref",
+                "enabled": true
+            }
+        ]
+    });
+    let put_resp = client
+        .post(format!("{}/xrpc/app.bsky.actor.putPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&prefs)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put_resp.status(), 200);
+
+    let deactivate = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deactivate.status(), 200);
+
+    let get_resp = client
+        .get(format!("{}/xrpc/app.bsky.actor.getPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        get_resp.status(),
+        200,
+        "Deactivated account should still be able to get preferences"
+    );
+    let body: Value = get_resp.json().await.unwrap();
+    let prefs_arr = body["preferences"].as_array().unwrap();
+    assert_eq!(prefs_arr.len(), 1);
+}
+
+#[tokio::test]
+async fn test_deactivated_account_can_put_preferences() {
+    let client = client();
+    let base = base_url().await;
+    let (token, _did) = create_account_and_login(&client).await;
+
+    let deactivate = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.deactivateAccount",
+            base
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deactivate.status(), 200);
+
+    let prefs = json!({
+        "preferences": [
+            {
+                "$type": "app.bsky.actor.defs#adultContentPref",
+                "enabled": true
+            }
+        ]
+    });
+    let put_resp = client
+        .post(format!("{}/xrpc/app.bsky.actor.putPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&prefs)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        put_resp.status(),
+        200,
+        "Deactivated account should still be able to put preferences"
+    );
+
+    let get_resp = client
+        .get(format!("{}/xrpc/app.bsky.actor.getPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(get_resp.status(), 200);
+    let body: Value = get_resp.json().await.unwrap();
+    let prefs_arr = body["preferences"].as_array().unwrap();
+    assert_eq!(prefs_arr.len(), 1);
+}

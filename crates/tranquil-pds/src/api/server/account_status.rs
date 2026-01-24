@@ -1,6 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::{Active, Auth, NotTakendown};
+use crate::auth::{Auth, NotTakendown, Permissive};
 use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
@@ -41,7 +41,7 @@ pub struct CheckAccountStatusOutput {
 
 pub async fn check_account_status(
     State(state): State<AppState>,
-    auth: Auth<NotTakendown>,
+    auth: Auth<Permissive>,
 ) -> Result<Response, ApiError> {
     let did = &auth.did;
     let user_id = state
@@ -306,7 +306,7 @@ async fn assert_valid_did_document_for_service(
 
 pub async fn activate_account(
     State(state): State<AppState>,
-    auth: Auth<NotTakendown>,
+    auth: Auth<Permissive>,
 ) -> Result<Response, ApiError> {
     info!("[MIGRATION] activateAccount called");
     info!(
@@ -470,7 +470,7 @@ pub struct DeactivateAccountInput {
 
 pub async fn deactivate_account(
     State(state): State<AppState>,
-    auth: Auth<Active>,
+    auth: Auth<Permissive>,
     Json(input): Json<DeactivateAccountInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(

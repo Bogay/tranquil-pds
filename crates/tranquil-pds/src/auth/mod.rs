@@ -18,8 +18,7 @@ pub mod webauthn;
 
 pub use extractor::{
     Active, Admin, AnyUser, Auth, AuthAny, AuthError, AuthPolicy, ExtractedToken, NotTakendown,
-    Permissive, ServiceAuth, SigningAuth, extract_auth_token_from_header,
-    extract_bearer_token_from_header,
+    Permissive, ServiceAuth, extract_auth_token_from_header, extract_bearer_token_from_header,
 };
 pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 

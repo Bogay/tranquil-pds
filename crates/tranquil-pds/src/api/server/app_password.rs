@@ -1,6 +1,6 @@
 use crate::api::EmptyResponse;
 use crate::api::error::ApiError;
-use crate::auth::{Active, Auth, generate_app_password};
+use crate::auth::{Auth, NotTakendown, Permissive, generate_app_password};
 use crate::delegation::{DelegationActionType, intersect_scopes};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
@@ -33,7 +33,7 @@ pub struct ListAppPasswordsOutput {
 
 pub async fn list_app_passwords(
     State(state): State<AppState>,
-    auth: Auth<Active>,
+    auth: Auth<Permissive>,
 ) -> Result<Response, ApiError> {
     let user = state
         .user_repo
@@ -90,7 +90,7 @@ pub struct CreateAppPasswordOutput {
 pub async fn create_app_password(
     State(state): State<AppState>,
     headers: HeaderMap,
-    auth: Auth<Active>,
+    auth: Auth<NotTakendown>,
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Result<Response, ApiError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
@@ -227,7 +227,7 @@ pub struct RevokeAppPasswordInput {
 
 pub async fn revoke_app_password(
     State(state): State<AppState>,
-    auth: Auth<Active>,
+    auth: Auth<Permissive>,
     Json(input): Json<RevokeAppPasswordInput>,
 ) -> Result<Response, ApiError> {
     let user = state

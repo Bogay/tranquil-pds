@@ -581,3 +581,68 @@ fn generate_dpop_proof(method: &str, uri: &str, nonce: Option<&str>) -> (Value, 
     let proof = format!("{}.{}", signing_input, sig_b64);
     (jwk, proof)
 }
+
+#[tokio::test]
+async fn test_optional_service_auth_extractor_behavior() {
+    let url = base_url().await;
+    let http_client = client();
+    let (access_jwt, did) = create_account_and_login(&http_client).await;
+
+    let service_auth_res = http_client
+        .get(format!("{}/xrpc/com.atproto.server.getServiceAuth", url))
+        .bearer_auth(&access_jwt)
+        .query(&[("aud", "did:web:test.example")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(service_auth_res.status(), StatusCode::OK);
+    let service_body: Value = service_auth_res.json().await.unwrap();
+    let service_token = service_body["token"].as_str().unwrap();
+
+    let no_auth_res = http_client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getBlob?did={}&cid=bafyreifakecidfornowfakecidfornow1234567",
+            url, did
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        no_auth_res.status() == StatusCode::NOT_FOUND
+            || no_auth_res.status() == StatusCode::BAD_REQUEST,
+        "getBlob with no auth should reach handler (AuthAny optional path) - got {}",
+        no_auth_res.status()
+    );
+
+    let service_auth_blob_res = http_client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getBlob?did={}&cid=bafyreifakecidfornowfakecidfornow1234567",
+            url, did
+        ))
+        .bearer_auth(service_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        service_auth_blob_res.status() == StatusCode::NOT_FOUND
+            || service_auth_blob_res.status() == StatusCode::BAD_REQUEST,
+        "getBlob with service auth should reach handler (AuthAny service path) - got {}",
+        service_auth_blob_res.status()
+    );
+
+    let user_auth_blob_res = http_client
+        .get(format!(
+            "{}/xrpc/com.atproto.sync.getBlob?did={}&cid=bafyreifakecidfornowfakecidfornow1234567",
+            url, did
+        ))
+        .bearer_auth(&access_jwt)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        user_auth_blob_res.status() == StatusCode::NOT_FOUND
+            || user_auth_blob_res.status() == StatusCode::BAD_REQUEST,
+        "getBlob with user auth should reach handler (AuthAny user path) - got {}",
+        user_auth_blob_res.status()
+    );
+}

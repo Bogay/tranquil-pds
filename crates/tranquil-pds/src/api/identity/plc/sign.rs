@@ -1,5 +1,5 @@
 use crate::api::ApiError;
-use crate::auth::{Auth, NotTakendown};
+use crate::auth::{Auth, Permissive};
 use crate::circuit_breaker::with_circuit_breaker;
 use crate::plc::{PlcClient, PlcError, PlcService, create_update_op, sign_operation};
 use crate::state::AppState;
@@ -40,7 +40,7 @@ pub struct SignPlcOperationOutput {
 
 pub async fn sign_plc_operation(
     State(state): State<AppState>,
-    auth: Auth<NotTakendown>,
+    auth: Auth<Permissive>,
     Json(input): Json<SignPlcOperationInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(

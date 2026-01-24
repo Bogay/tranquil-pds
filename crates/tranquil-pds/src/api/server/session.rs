@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::{EmptyResponse, SuccessResponse};
-use crate::auth::{Active, Auth, NotTakendown};
+use crate::auth::{Active, Auth, Permissive};
 use crate::state::{AppState, RateLimitKind};
 use crate::types::{AccountState, Did, Handle, PlainPassword};
 use axum::{
@@ -279,7 +279,7 @@ pub async fn create_session(
 
 pub async fn get_session(
     State(state): State<AppState>,
-    auth: Auth<NotTakendown>,
+    auth: Auth<Permissive>,
 ) -> Result<Response, ApiError> {
     let permissions = auth.permissions();
     let can_read_email = permissions.allows_email_read();

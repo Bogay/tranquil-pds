@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
-use crate::auth::{Active, Auth};
+use crate::auth::{Auth, NotTakendown};
 use crate::state::{AppState, RateLimitKind};
 use axum::{
     Json,
@@ -45,7 +45,7 @@ pub struct RequestEmailUpdateInput {
 pub async fn request_email_update(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    auth: Auth<Active>,
+    auth: Auth<NotTakendown>,
     input: Option<Json<RequestEmailUpdateInput>>,
 ) -> Result<Response, ApiError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
@@ -140,7 +140,7 @@ pub struct ConfirmEmailInput {
 pub async fn confirm_email(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    auth: Auth<Active>,
+    auth: Auth<NotTakendown>,
     Json(input): Json<ConfirmEmailInput>,
 ) -> Result<Response, ApiError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
@@ -233,7 +233,7 @@ pub struct UpdateEmailInput {
 
 pub async fn update_email(
     State(state): State<AppState>,
-    auth: Auth<Active>,
+    auth: Auth<NotTakendown>,
     Json(input): Json<UpdateEmailInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
@@ -500,7 +500,7 @@ pub async fn authorize_email_update(
 pub async fn check_email_update_status(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-    auth: Auth<Active>,
+    auth: Auth<NotTakendown>,
 ) -> Result<Response, ApiError> {
     let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
     if !state

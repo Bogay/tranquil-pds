@@ -1,5 +1,5 @@
 use crate::api::{ApiError, EmptyResponse};
-use crate::auth::{Auth, NotTakendown};
+use crate::auth::{Auth, Permissive};
 use crate::circuit_breaker::with_circuit_breaker;
 use crate::plc::{PlcClient, signing_key_to_did_key, validate_plc_operation};
 use crate::state::AppState;
@@ -20,7 +20,7 @@ pub struct SubmitPlcOperationInput {
 
 pub async fn submit_plc_operation(
     State(state): State<AppState>,
-    auth: Auth<NotTakendown>,
+    auth: Auth<Permissive>,
     Json(input): Json<SubmitPlcOperationInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(

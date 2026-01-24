@@ -1,5 +1,5 @@
 use crate::api::ApiError;
-use crate::auth::{Active, Admin, Auth};
+use crate::auth::{Admin, Auth, NotTakendown};
 use crate::state::AppState;
 use crate::types::Did;
 use axum::{
@@ -193,7 +193,7 @@ pub struct GetAccountInviteCodesOutput {
 
 pub async fn get_account_invite_codes(
     State(state): State<AppState>,
-    auth: Auth<Active>,
+    auth: Auth<NotTakendown>,
     axum::extract::Query(params): axum::extract::Query<GetAccountInviteCodesParams>,
 ) -> Result<Response, ApiError> {
     let include_used = params.include_used.unwrap_or(true);
