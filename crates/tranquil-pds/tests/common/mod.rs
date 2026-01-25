@@ -14,6 +14,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 #[allow(unused_imports)]
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 use tranquil_pds::state::AppState;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
@@ -546,7 +547,7 @@ async fn spawn_app(database_url: String) -> String {
         .with_email_update_limit(10000)
         .with_oauth_authorize_limit(10000)
         .with_oauth_token_limit(10000);
-    let state = AppState::from_db(pool)
+    let state = AppState::from_db(pool, CancellationToken::new())
         .await
         .with_rate_limiters(rate_limiters);
     tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;

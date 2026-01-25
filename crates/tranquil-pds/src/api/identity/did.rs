@@ -1,8 +1,12 @@
 use crate::api::{ApiError, DidResponse, EmptyResponse};
 use crate::auth::{Auth, NotTakendown};
 use crate::plc::signing_key_to_did_key;
+use crate::rate_limit::{
+    HandleUpdateDailyLimit, HandleUpdateLimit, check_user_rate_limit_with_message,
+};
 use crate::state::AppState;
 use crate::types::Handle;
+use crate::util::{get_header_str, pds_hostname, pds_hostname_without_port};
 use axum::{
     Json,
     extract::{Path, Query, State},
@@ -101,20 +105,17 @@ pub fn get_public_key_multibase(key_bytes: &[u8]) -> Result<String, &'static str
 }
 
 pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let host_header = headers
-        .get("host")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or(&hostname);
+    let hostname = pds_hostname();
+    let hostname_without_port = pds_hostname_without_port();
+    let host_header = get_header_str(&headers, "host").unwrap_or(hostname);
     let host_without_port = host_header.split(':').next().unwrap_or(host_header);
-    let hostname_without_port = hostname.split(':').next().unwrap_or(&hostname);
     if host_without_port != hostname_without_port
         && host_without_port.ends_with(&format!(".{}", hostname_without_port))
     {
         let handle = host_without_port
             .strip_suffix(&format!(".{}", hostname_without_port))
             .unwrap_or(host_without_port);
-        return serve_subdomain_did_doc(&state, handle, &hostname).await;
+        return serve_subdomain_did_doc(&state, handle, hostname).await;
     }
     let did = if hostname.contains(':') {
         format!("did:web:{}", hostname.replace(':', "%3A"))
@@ -257,8 +258,8 @@ async fn serve_subdomain_did_doc(state: &AppState, subdomain: &str, hostname: &s
 }
 
 pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname = pds_hostname();
+    let hostname_for_handles = pds_hostname_without_port();
     let current_handle = format!("{}.{}", handle, hostname_for_handles);
     let current_handle_typed: Handle = match current_handle.parse() {
         Ok(h) => h,
@@ -531,7 +532,7 @@ pub async fn get_recommended_did_credentials(
         ApiError::AuthenticationFailed(Some("OAuth tokens cannot get DID credentials".into()))
     })?;
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     let pds_endpoint = format!("https://{}", hostname);
     let signing_key = k256::ecdsa::SigningKey::from_slice(&key_bytes)
         .map_err(|_| ApiError::InternalError(None))?;
@@ -585,22 +586,18 @@ pub async fn update_handle(
         return Ok(e);
     }
     let did = auth.did.clone();
-    if !state
-        .check_rate_limit(crate::state::RateLimitKind::HandleUpdate, &did)
-        .await
-    {
-        return Err(ApiError::RateLimitExceeded(Some(
-            "Too many handle updates. Try again later.".into(),
-        )));
-    }
-    if !state
-        .check_rate_limit(crate::state::RateLimitKind::HandleUpdateDaily, &did)
-        .await
-    {
-        return Err(ApiError::RateLimitExceeded(Some(
-            "Daily handle update limit exceeded.".into(),
-        )));
-    }
+    let _rate_limit = check_user_rate_limit_with_message::<HandleUpdateLimit>(
+        &state,
+        &did,
+        "Too many handle updates. Try again later.",
+    )
+    .await?;
+    let _daily_rate_limit = check_user_rate_limit_with_message::<HandleUpdateDailyLimit>(
+        &state,
+        &did,
+        "Daily handle update limit exceeded.",
+    )
+    .await?;
     let user_row = state
         .user_repo
         .get_id_and_handle_by_did(&did)
@@ -639,8 +636,7 @@ pub async fn update_handle(
             "Inappropriate language in handle".into(),
         )));
     }
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let suffix = format!(".{}", hostname_for_handles);
     let is_service_domain =
         crate::handle::is_service_domain_handle(&new_handle, hostname_for_handles);
@@ -656,7 +652,7 @@ pub async fn update_handle(
             format!("{}.{}", new_handle, hostname_for_handles)
         };
         if full_handle == current_handle {
-            let handle_typed = Handle::new_unchecked(&full_handle);
+            let handle_typed = unsafe { Handle::new_unchecked(&full_handle) };
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
                     .await
@@ -679,7 +675,7 @@ pub async fn update_handle(
         full_handle
     } else {
         if new_handle == current_handle {
-            let handle_typed = Handle::new_unchecked(&new_handle);
+            let handle_typed = unsafe { Handle::new_unchecked(&new_handle) };
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
                     .await
@@ -772,7 +768,7 @@ pub async fn update_plc_handle(
 }
 
 pub async fn well_known_atproto_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let host = match headers.get("host").and_then(|h| h.to_str().ok()) {
+    let host = match crate::util::get_header_str(&headers, "host") {
         Some(h) => h,
         None => return (StatusCode::BAD_REQUEST, "Missing host header").into_response(),
     };

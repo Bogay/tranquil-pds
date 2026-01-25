@@ -1,6 +1,8 @@
 use crate::api::ApiError;
+use crate::api::error::DbResultExt;
 use crate::auth::{Active, Auth};
 use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -49,10 +51,7 @@ pub async fn update_did_document(
         .user_repo
         .get_user_for_did_doc(&auth.did)
         .await
-        .map_err(|e| {
-            tracing::error!("DB error getting user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     if let Some(ref methods) = input.verification_methods {
@@ -107,10 +106,7 @@ pub async fn update_did_document(
         .user_repo
         .upsert_did_web_overrides(user.id, verification_methods_json, also_known_as)
         .await
-        .map_err(|e| {
-            tracing::error!("DB error upserting did_web_overrides: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("upserting did_web_overrides")?;
 
     if let Some(ref endpoint) = input.service_endpoint {
         let endpoint_clean = endpoint.trim().trim_end_matches('/');
@@ -118,10 +114,7 @@ pub async fn update_did_document(
             .user_repo
             .update_migrated_to_pds(&auth.did, endpoint_clean)
             .await
-            .map_err(|e| {
-                tracing::error!("DB error updating service endpoint: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("updating service endpoint")?;
     }
 
     let did_doc = build_did_document(&state, &auth.did).await;
@@ -154,7 +147,7 @@ pub async fn get_did_document(
 }
 
 async fn build_did_document(state: &AppState, did: &crate::types::Did) -> serde_json::Value {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
 
     let user = match state.user_repo.get_user_for_did_doc_build(did).await {
         Ok(Some(row)) => row,

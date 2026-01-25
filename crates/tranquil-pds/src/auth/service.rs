@@ -1,3 +1,5 @@
+use crate::types::Did;
+use crate::util::pds_hostname;
 use anyhow::{Result, anyhow};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -42,10 +44,10 @@ pub struct DidService {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceTokenClaims {
-    pub iss: String,
+    pub iss: Did,
     #[serde(default)]
-    pub sub: Option<String>,
-    pub aud: String,
+    pub sub: Option<Did>,
+    pub aud: Did,
     pub exp: usize,
     #[serde(default)]
     pub iat: Option<usize>,
@@ -56,8 +58,8 @@ pub struct ServiceTokenClaims {
 }
 
 impl ServiceTokenClaims {
-    pub fn subject(&self) -> &str {
-        self.sub.as_deref().unwrap_or(&self.iss)
+    pub fn subject(&self) -> &Did {
+        self.sub.as_ref().unwrap_or(&self.iss)
     }
 }
 
@@ -78,8 +80,7 @@ impl ServiceTokenVerifier {
         let plc_directory_url = std::env::var("PLC_DIRECTORY_URL")
             .unwrap_or_else(|_| "https://plc.directory".to_string());
 
-        let pds_hostname =
-            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let pds_hostname = pds_hostname();
         let pds_did = format!("did:web:{}", pds_hostname);
 
         let client = Client::builder()
@@ -130,7 +131,7 @@ impl ServiceTokenVerifier {
             return Err(anyhow!("Token expired"));
         }
 
-        if claims.aud != self.pds_did {
+        if claims.aud.as_str() != self.pds_did {
             return Err(anyhow!(
                 "Invalid audience: expected {}, got {}",
                 self.pds_did,
@@ -154,7 +155,7 @@ impl ServiceTokenVerifier {
             }
         }
 
-        let did = &claims.iss;
+        let did = claims.iss.as_str();
         let public_key = self.resolve_signing_key(did).await?;
 
         let signature_bytes = URL_SAFE_NO_PAD

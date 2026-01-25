@@ -1,4 +1,5 @@
 use crate::appview::DidResolver;
+use crate::auth::webauthn::WebAuthnConfig;
 use crate::cache::{Cache, DistributedRateLimiter, create_cache};
 use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
@@ -7,10 +8,12 @@ use crate::repo::PostgresBlockStore;
 use crate::sso::{SsoConfig, SsoManager};
 use crate::storage::{BackupStorage, BlobStorage, create_backup_storage, create_blob_storage};
 use crate::sync::firehose::SequencedEvent;
+use crate::util::pds_hostname;
 use sqlx::PgPool;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tranquil_db::{
     BacklinkRepository, BackupRepository, BlobRepository, DelegationRepository, InfraRepository,
     OAuthRepository, PostgresRepositories, RepoEventNotifier, RepoRepository, SessionRepository,
@@ -41,8 +44,11 @@ pub struct AppState {
     pub did_resolver: Arc<DidResolver>,
     pub sso_repo: Arc<dyn SsoRepository>,
     pub sso_manager: SsoManager,
+    pub webauthn_config: Arc<WebAuthnConfig>,
+    pub shutdown: CancellationToken,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum RateLimitKind {
     Login,
     AccountCreation,
@@ -116,7 +122,7 @@ impl RateLimitKind {
 }
 
 impl AppState {
-    pub async fn new() -> Result<Self, Box<dyn Error>> {
+    pub async fn new(shutdown: CancellationToken) -> Result<Self, Box<dyn Error>> {
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| "DATABASE_URL environment variable must be set")?;
 
@@ -157,10 +163,10 @@ impl AppState {
             .await
             .map_err(|e| format!("Failed to run migrations: {}", e))?;
 
-        Ok(Self::from_db(db).await)
+        Ok(Self::from_db(db, shutdown).await)
     }
 
-    pub async fn from_db(db: PgPool) -> Self {
+    pub async fn from_db(db: PgPool, shutdown: CancellationToken) -> Self {
         AuthConfig::init();
 
         let repos = Arc::new(PostgresRepositories::new(db.clone()));
@@ -180,6 +186,10 @@ impl AppState {
         let did_resolver = Arc::new(DidResolver::new());
         let sso_config = SsoConfig::init();
         let sso_manager = SsoManager::from_config(sso_config);
+        let webauthn_config = Arc::new(
+            WebAuthnConfig::new(pds_hostname())
+                .expect("Failed to create WebAuthn config at startup"),
+        );
 
         Self {
             user_repo: repos.user.clone(),
@@ -204,6 +214,8 @@ impl AppState {
             distributed_rate_limiter,
             did_resolver,
             sso_manager,
+            webauthn_config,
+            shutdown,
         }
     }
 

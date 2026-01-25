@@ -5,12 +5,52 @@ use tranquil_types::{CidLink, Did, Handle};
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::invite_code::{InviteCodeError, ValidatedInviteCode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InviteCodeSortOrder {
     #[default]
     Recent,
     Usage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum InviteCodeState {
+    #[default]
+    Active,
+    Disabled,
+}
+
+impl InviteCodeState {
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn is_disabled(self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+}
+
+impl From<bool> for InviteCodeState {
+    fn from(disabled: bool) -> Self {
+        if disabled {
+            Self::Disabled
+        } else {
+            Self::Active
+        }
+    }
+}
+
+impl From<Option<bool>> for InviteCodeState {
+    fn from(disabled: Option<bool>) -> Self {
+        Self::from(disabled.unwrap_or(false))
+    }
+}
+
+impl From<InviteCodeState> for bool {
+    fn from(state: InviteCodeState) -> Self {
+        matches!(state, InviteCodeState::Disabled)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
@@ -72,7 +112,7 @@ pub struct QueuedComms {
 pub struct InviteCodeInfo {
     pub code: String,
     pub available_uses: i32,
-    pub disabled: bool,
+    pub state: InviteCodeState,
     pub for_account: Option<Did>,
     pub created_at: DateTime<Utc>,
     pub created_by: Option<Did>,
@@ -93,6 +133,12 @@ pub struct InviteCodeRow {
     pub disabled: Option<bool>,
     pub created_by_user: Uuid,
     pub created_at: DateTime<Utc>,
+}
+
+impl InviteCodeRow {
+    pub fn state(&self) -> InviteCodeState {
+        InviteCodeState::from(self.disabled)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,11 +194,21 @@ pub trait InfraRepository: Send + Sync {
 
     async fn get_invite_code_available_uses(&self, code: &str) -> Result<Option<i32>, DbError>;
 
-    async fn is_invite_code_valid(&self, code: &str) -> Result<bool, DbError>;
+    async fn validate_invite_code<'a>(
+        &self,
+        code: &'a str,
+    ) -> Result<ValidatedInviteCode<'a>, InviteCodeError>;
 
-    async fn decrement_invite_code_uses(&self, code: &str) -> Result<(), DbError>;
+    async fn decrement_invite_code_uses(
+        &self,
+        code: &ValidatedInviteCode<'_>,
+    ) -> Result<(), DbError>;
 
-    async fn record_invite_code_use(&self, code: &str, used_by_user: Uuid) -> Result<(), DbError>;
+    async fn record_invite_code_use(
+        &self,
+        code: &ValidatedInviteCode<'_>,
+        used_by_user: Uuid,
+    ) -> Result<(), DbError>;
 
     async fn get_invite_codes_for_account(
         &self,
@@ -317,9 +373,9 @@ pub trait InfraRepository: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct NotificationHistoryRow {
     pub created_at: DateTime<Utc>,
-    pub channel: String,
-    pub comms_type: String,
-    pub status: String,
+    pub channel: CommsChannel,
+    pub comms_type: CommsType,
+    pub status: CommsStatus,
     pub subject: Option<String>,
     pub body: String,
 }

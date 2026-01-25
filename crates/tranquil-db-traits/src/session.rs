@@ -5,15 +5,104 @@ use uuid::Uuid;
 
 use crate::DbError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum LoginType {
+    #[default]
+    Modern,
+    Legacy,
+}
+
+impl LoginType {
+    pub fn is_legacy(self) -> bool {
+        matches!(self, Self::Legacy)
+    }
+
+    pub fn is_modern(self) -> bool {
+        matches!(self, Self::Modern)
+    }
+}
+
+impl From<bool> for LoginType {
+    fn from(legacy: bool) -> Self {
+        if legacy { Self::Legacy } else { Self::Modern }
+    }
+}
+
+impl From<LoginType> for bool {
+    fn from(lt: LoginType) -> Self {
+        matches!(lt, LoginType::Legacy)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum AppPasswordPrivilege {
+    #[default]
+    Standard,
+    Privileged,
+}
+
+impl AppPasswordPrivilege {
+    pub fn is_privileged(self) -> bool {
+        matches!(self, Self::Privileged)
+    }
+}
+
+impl From<bool> for AppPasswordPrivilege {
+    fn from(privileged: bool) -> Self {
+        if privileged {
+            Self::Privileged
+        } else {
+            Self::Standard
+        }
+    }
+}
+
+impl From<AppPasswordPrivilege> for bool {
+    fn from(p: AppPasswordPrivilege) -> Self {
+        matches!(p, AppPasswordPrivilege::Privileged)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SessionId(i32);
+
+impl SessionId {
+    pub fn new(id: i32) -> Self {
+        Self(id)
+    }
+
+    pub fn as_i32(self) -> i32 {
+        self.0
+    }
+}
+
+impl From<i32> for SessionId {
+    fn from(id: i32) -> Self {
+        Self(id)
+    }
+}
+
+impl From<SessionId> for i32 {
+    fn from(id: SessionId) -> Self {
+        id.0
+    }
+}
+
+impl std::fmt::Display for SessionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionToken {
-    pub id: i32,
+    pub id: SessionId,
     pub did: Did,
     pub access_jti: String,
     pub refresh_jti: String,
     pub access_expires_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
-    pub legacy_login: bool,
+    pub login_type: LoginType,
     pub mfa_verified: bool,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
@@ -29,7 +118,7 @@ pub struct SessionTokenCreate {
     pub refresh_jti: String,
     pub access_expires_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
-    pub legacy_login: bool,
+    pub login_type: LoginType,
     pub mfa_verified: bool,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
@@ -38,7 +127,7 @@ pub struct SessionTokenCreate {
 
 #[derive(Debug, Clone)]
 pub struct SessionForRefresh {
-    pub id: i32,
+    pub id: SessionId,
     pub did: Did,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
@@ -48,7 +137,7 @@ pub struct SessionForRefresh {
 
 #[derive(Debug, Clone)]
 pub struct SessionListItem {
-    pub id: i32,
+    pub id: SessionId,
     pub access_jti: String,
     pub created_at: DateTime<Utc>,
     pub refresh_expires_at: DateTime<Utc>,
@@ -61,7 +150,7 @@ pub struct AppPasswordRecord {
     pub name: String,
     pub password_hash: String,
     pub created_at: DateTime<Utc>,
-    pub privileged: bool,
+    pub privilege: AppPasswordPrivilege,
     pub scopes: Option<String>,
     pub created_by_controller_did: Option<Did>,
 }
@@ -71,14 +160,14 @@ pub struct AppPasswordCreate {
     pub user_id: Uuid,
     pub name: String,
     pub password_hash: String,
-    pub privileged: bool,
+    pub privilege: AppPasswordPrivilege,
     pub scopes: Option<String>,
     pub created_by_controller_did: Option<Did>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SessionMfaStatus {
-    pub legacy_login: bool,
+    pub login_type: LoginType,
     pub mfa_verified: bool,
     pub last_reauth_at: Option<DateTime<Utc>>,
 }
@@ -93,7 +182,7 @@ pub enum RefreshSessionResult {
 #[derive(Debug, Clone)]
 pub struct SessionRefreshData {
     pub old_refresh_jti: String,
-    pub session_id: i32,
+    pub session_id: SessionId,
     pub new_access_jti: String,
     pub new_refresh_jti: String,
     pub new_access_expires_at: DateTime<Utc>,
@@ -102,7 +191,7 @@ pub struct SessionRefreshData {
 
 #[async_trait]
 pub trait SessionRepository: Send + Sync {
-    async fn create_session(&self, data: &SessionTokenCreate) -> Result<i32, DbError>;
+    async fn create_session(&self, data: &SessionTokenCreate) -> Result<SessionId, DbError>;
 
     async fn get_session_by_access_jti(
         &self,
@@ -116,7 +205,7 @@ pub trait SessionRepository: Send + Sync {
 
     async fn update_session_tokens(
         &self,
-        session_id: i32,
+        session_id: SessionId,
         new_access_jti: &str,
         new_refresh_jti: &str,
         new_access_expires_at: DateTime<Utc>,
@@ -125,7 +214,7 @@ pub trait SessionRepository: Send + Sync {
 
     async fn delete_session_by_access_jti(&self, access_jti: &str) -> Result<u64, DbError>;
 
-    async fn delete_session_by_id(&self, session_id: i32) -> Result<u64, DbError>;
+    async fn delete_session_by_id(&self, session_id: SessionId) -> Result<u64, DbError>;
 
     async fn delete_sessions_by_did(&self, did: &Did) -> Result<u64, DbError>;
 
@@ -139,7 +228,7 @@ pub trait SessionRepository: Send + Sync {
 
     async fn get_session_access_jti_by_id(
         &self,
-        session_id: i32,
+        session_id: SessionId,
         did: &Did,
     ) -> Result<Option<String>, DbError>;
 
@@ -155,12 +244,15 @@ pub trait SessionRepository: Send + Sync {
         app_password_name: &str,
     ) -> Result<Vec<String>, DbError>;
 
-    async fn check_refresh_token_used(&self, refresh_jti: &str) -> Result<Option<i32>, DbError>;
+    async fn check_refresh_token_used(
+        &self,
+        refresh_jti: &str,
+    ) -> Result<Option<SessionId>, DbError>;
 
     async fn mark_refresh_token_used(
         &self,
         refresh_jti: &str,
-        session_id: i32,
+        session_id: SessionId,
     ) -> Result<bool, DbError>;
 
     async fn list_app_passwords(&self, user_id: Uuid) -> Result<Vec<AppPasswordRecord>, DbError>;

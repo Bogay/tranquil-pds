@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
-use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use tranquil_pds::comms::{CommsService, DiscordSender, EmailSender, SignalSender, TelegramSender};
 
@@ -34,10 +34,20 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let state = AppState::new().await?;
-    tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
+    let shutdown = CancellationToken::new();
 
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let shutdown_for_panic = shutdown.clone();
+    let default_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        error!("PANIC: {}", info);
+        shutdown_for_panic.cancel();
+        default_panic_hook(info);
+    }));
+
+    spawn_signal_handler(shutdown.clone());
+
+    let state = AppState::new(shutdown.clone()).await?;
+    tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
 
     let backfill_repo_repo = state.repo_repo.clone();
     let backfill_block_store = state.block_store.clone();
@@ -77,7 +87,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         comms_service = comms_service.register_sender(signal_sender);
     }
 
-    let comms_handle = tokio::spawn(comms_service.run(shutdown_rx.clone()));
+    let comms_handle = tokio::spawn(comms_service.run(shutdown.clone()));
 
     let crawlers_handle = if let Some(crawlers) = Crawlers::from_env() {
         let crawlers = Arc::new(
@@ -88,7 +98,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(tokio::spawn(start_crawlers_service(
             crawlers,
             firehose_rx,
-            shutdown_rx.clone(),
+            shutdown.clone(),
         )))
     } else {
         warn!("Crawlers notification service disabled (PDS_HOSTNAME or CRAWLERS not set)");
@@ -102,7 +112,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             state.backup_repo.clone(),
             state.block_store.clone(),
             backup_storage,
-            shutdown_rx.clone(),
+            shutdown.clone(),
         )))
     } else {
         warn!("Backup service disabled (BACKUP_S3_BUCKET not set or BACKUP_ENABLED=false)");
@@ -114,7 +124,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state.blob_repo.clone(),
         state.blob_store.clone(),
         state.sso_repo.clone(),
-        shutdown_rx,
+        shutdown.clone(),
     ));
 
     let app = tranquil_pds::app(state);
@@ -136,7 +146,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
 
     let server_result = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(shutdown_tx))
+        .with_graceful_shutdown(shutdown.clone().cancelled_owned())
         .await;
 
     comms_handle.await.ok();
@@ -158,37 +168,40 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn shutdown_signal(shutdown_tx: watch::Sender<bool>) {
-    let ctrl_c = async {
-        match tokio::signal::ctrl_c().await {
-            Ok(()) => {}
-            Err(e) => {
-                error!("Failed to install Ctrl+C handler: {}", e);
+fn spawn_signal_handler(shutdown: CancellationToken) {
+    tokio::spawn(async move {
+        let ctrl_c = async {
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => {}
+                Err(e) => {
+                    error!("Failed to install Ctrl+C handler: {}", e);
+                    std::future::pending::<()>().await;
+                }
             }
+        };
+
+        #[cfg(unix)]
+        let terminate = async {
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(mut signal) => {
+                    signal.recv().await;
+                }
+                Err(e) => {
+                    error!("Failed to install SIGTERM handler: {}", e);
+                    std::future::pending::<()>().await;
+                }
+            }
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
         }
-    };
 
-    #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(e) => {
-                error!("Failed to install SIGTERM handler: {}", e);
-                std::future::pending::<()>().await;
-            }
-        }
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
-
-    info!("Shutdown signal received, stopping services...");
-    shutdown_tx.send(true).ok();
+        info!("Shutdown signal received, stopping services...");
+        shutdown.cancel();
+    });
 }

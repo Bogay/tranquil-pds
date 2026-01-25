@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
 use tranquil_db_traits::{
-    AuditLogEntry, ControllerInfo, DbError, DelegatedAccountInfo, DelegationActionType,
+    AuditLogEntry, ControllerInfo, DbError, DbScope, DelegatedAccountInfo, DelegationActionType,
     DelegationGrant, DelegationRepository,
 };
 use tranquil_types::Did;
@@ -80,7 +80,7 @@ impl DelegationRepository for PostgresDelegationRepository {
         &self,
         delegated_did: &Did,
         controller_did: &Did,
-        granted_scopes: &str,
+        granted_scopes: &DbScope,
         granted_by: &Did,
     ) -> Result<Uuid, DbError> {
         let id = sqlx::query_scalar!(
@@ -91,7 +91,7 @@ impl DelegationRepository for PostgresDelegationRepository {
             "#,
             delegated_did.as_str(),
             controller_did.as_str(),
-            granted_scopes,
+            granted_scopes.as_str(),
             granted_by.as_str()
         )
         .fetch_one(&self.pool)
@@ -128,7 +128,7 @@ impl DelegationRepository for PostgresDelegationRepository {
         &self,
         delegated_did: &Did,
         controller_did: &Did,
-        new_scopes: &str,
+        new_scopes: &DbScope,
     ) -> Result<bool, DbError> {
         let result = sqlx::query!(
             r#"
@@ -136,7 +136,7 @@ impl DelegationRepository for PostgresDelegationRepository {
             SET granted_scopes = $1
             WHERE delegated_did = $2 AND controller_did = $3 AND revoked_at IS NULL
             "#,
-            new_scopes,
+            new_scopes.as_str(),
             delegated_did.as_str(),
             controller_did.as_str()
         )
@@ -170,7 +170,7 @@ impl DelegationRepository for PostgresDelegationRepository {
             id: r.id,
             delegated_did: r.delegated_did.into(),
             controller_did: r.controller_did.into(),
-            granted_scopes: r.granted_scopes,
+            granted_scopes: DbScope::from_db(r.granted_scopes),
             granted_at: r.granted_at,
             granted_by: r.granted_by.into(),
             revoked_at: r.revoked_at,
@@ -206,7 +206,7 @@ impl DelegationRepository for PostgresDelegationRepository {
             .map(|r| ControllerInfo {
                 did: r.did.into(),
                 handle: r.handle.into(),
-                granted_scopes: r.granted_scopes,
+                granted_scopes: DbScope::from_db(r.granted_scopes),
                 granted_at: r.granted_at,
                 is_active: r.is_active,
             })
@@ -243,7 +243,7 @@ impl DelegationRepository for PostgresDelegationRepository {
             .map(|r| DelegatedAccountInfo {
                 did: r.did.into(),
                 handle: r.handle.into(),
-                granted_scopes: r.granted_scopes,
+                granted_scopes: DbScope::from_db(r.granted_scopes),
                 granted_at: r.granted_at,
             })
             .collect())
@@ -280,7 +280,7 @@ impl DelegationRepository for PostgresDelegationRepository {
             .map(|r| ControllerInfo {
                 did: r.did.into(),
                 handle: r.handle.into(),
-                granted_scopes: r.granted_scopes,
+                granted_scopes: DbScope::from_db(r.granted_scopes),
                 granted_at: r.granted_at,
                 is_active: r.is_active,
             })

@@ -1,4 +1,5 @@
 use crate::api::ApiError;
+use crate::api::error::DbResultExt;
 use crate::auth::{Auth, Permissive};
 use crate::circuit_breaker::with_circuit_breaker;
 use crate::plc::{PlcClient, PlcError, PlcService, create_update_op, sign_operation};
@@ -64,20 +65,14 @@ pub async fn sign_plc_operation(
         .user_repo
         .get_id_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching user id")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let token_expiry = state
         .infra_repo
         .get_plc_token_expiry(user_id, token)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching PLC token expiry")?
         .ok_or_else(|| ApiError::InvalidToken(Some("Invalid or expired token".into())))?;
 
     if Utc::now() > token_expiry {
@@ -88,10 +83,7 @@ pub async fn sign_plc_operation(
         .user_repo
         .get_user_key_by_id(user_id)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching user key")?
         .ok_or_else(|| ApiError::InternalError(Some("User signing key not found".into())))?;
 
     let key_bytes = crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)

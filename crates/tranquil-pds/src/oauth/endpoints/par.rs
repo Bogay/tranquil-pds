@@ -1,9 +1,10 @@
 use crate::oauth::{
-    AuthorizationRequestParameters, ClientAuth, ClientMetadataCache, OAuthError, RequestData,
-    RequestId,
+    AuthorizationRequestParameters, ClientAuth, ClientMetadataCache, CodeChallengeMethod,
+    OAuthError, Prompt, RequestData, RequestId, ResponseMode, ResponseType,
     scopes::{ParsedScope, parse_scope},
 };
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{OAuthParLimit, OAuthRateLimited};
+use crate::state::AppState;
 use axum::body::Bytes;
 use axum::{Json, extract::State, http::HeaderMap};
 use chrono::{Duration, Utc};
@@ -49,6 +50,7 @@ pub struct ParResponse {
 
 pub async fn pushed_authorization_request(
     State(state): State<AppState>,
+    _rate_limit: OAuthRateLimited<OAuthParLimit>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<(axum::http::StatusCode, Json<ParResponse>), OAuthError> {
@@ -70,30 +72,14 @@ pub async fn pushed_authorization_request(
                 .to_string(),
         ));
     };
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::OAuthPar, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "OAuth PAR rate limit exceeded");
-        return Err(OAuthError::RateLimited);
-    }
-    if request.response_type != "code" {
-        return Err(OAuthError::InvalidRequest(
-            "response_type must be 'code'".to_string(),
-        ));
-    }
+    let response_type = parse_response_type(&request.response_type)?;
     let code_challenge = request
         .code_challenge
         .as_ref()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| OAuthError::InvalidRequest("code_challenge is required".to_string()))?;
-    let code_challenge_method = request.code_challenge_method.as_deref().unwrap_or("");
-    if code_challenge_method != "S256" {
-        return Err(OAuthError::InvalidRequest(
-            "code_challenge_method must be 'S256'".to_string(),
-        ));
-    }
+    let code_challenge_method =
+        parse_code_challenge_method(request.code_challenge_method.as_deref())?;
     let client_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_cache.get(&request.client_id).await?;
     client_cache.validate_redirect_uri(&client_metadata, &request.redirect_uri)?;
@@ -101,25 +87,16 @@ pub async fn pushed_authorization_request(
     let validated_scope = validate_scope(&request.scope, &client_metadata)?;
     let request_id = RequestId::generate();
     let expires_at = Utc::now() + Duration::seconds(PAR_EXPIRY_SECONDS);
-    let response_mode = match request.response_mode.as_deref() {
-        Some("fragment") => Some("fragment".to_string()),
-        Some("query") | None => None,
-        Some(mode) => {
-            return Err(OAuthError::InvalidRequest(format!(
-                "Unsupported response_mode: {}",
-                mode
-            )));
-        }
-    };
-    let prompt = validate_prompt(&request.prompt)?;
+    let response_mode = parse_response_mode(request.response_mode.as_deref())?;
+    let prompt = parse_prompt(request.prompt.as_deref())?;
     let parameters = AuthorizationRequestParameters {
-        response_type: request.response_type,
+        response_type,
         client_id: request.client_id.clone(),
         redirect_uri: request.redirect_uri,
         scope: validated_scope,
         state: request.state,
         code_challenge: code_challenge.clone(),
-        code_challenge_method: code_challenge_method.to_string(),
+        code_challenge_method,
         response_mode,
         login_hint: request.login_hint,
         dpop_jkt: request.dpop_jkt,
@@ -266,21 +243,52 @@ fn scope_matches(client_scope: &str, requested_scope: &str) -> bool {
     false
 }
 
-fn validate_prompt(prompt: &Option<String>) -> Result<Option<String>, OAuthError> {
-    const VALID_PROMPTS: &[&str] = &["none", "login", "consent", "select_account", "create"];
+fn parse_response_type(value: &str) -> Result<ResponseType, OAuthError> {
+    match value {
+        "code" => Ok(ResponseType::Code),
+        other => Err(OAuthError::InvalidRequest(format!(
+            "response_type must be 'code', got '{}'",
+            other
+        ))),
+    }
+}
 
-    match prompt {
-        None => Ok(None),
-        Some(p) if p.is_empty() => Ok(None),
-        Some(p) => {
-            if VALID_PROMPTS.contains(&p.as_str()) {
-                Ok(Some(p.clone()))
-            } else {
-                Err(OAuthError::InvalidRequest(format!(
-                    "Unsupported prompt value: {}",
-                    p
-                )))
-            }
-        }
+fn parse_code_challenge_method(value: Option<&str>) -> Result<CodeChallengeMethod, OAuthError> {
+    match value {
+        Some("S256") | None => Ok(CodeChallengeMethod::S256),
+        Some("plain") => Err(OAuthError::InvalidRequest(
+            "code_challenge_method 'plain' is not allowed, use 'S256'".to_string(),
+        )),
+        Some(other) => Err(OAuthError::InvalidRequest(format!(
+            "Unsupported code_challenge_method: {}",
+            other
+        ))),
+    }
+}
+
+fn parse_response_mode(value: Option<&str>) -> Result<Option<ResponseMode>, OAuthError> {
+    match value {
+        None | Some("query") => Ok(None),
+        Some("fragment") => Ok(Some(ResponseMode::Fragment)),
+        Some("form_post") => Ok(Some(ResponseMode::FormPost)),
+        Some(other) => Err(OAuthError::InvalidRequest(format!(
+            "Unsupported response_mode: {}",
+            other
+        ))),
+    }
+}
+
+fn parse_prompt(value: Option<&str>) -> Result<Option<Prompt>, OAuthError> {
+    match value {
+        None | Some("") => Ok(None),
+        Some("none") => Ok(Some(Prompt::None)),
+        Some("login") => Ok(Some(Prompt::Login)),
+        Some("consent") => Ok(Some(Prompt::Consent)),
+        Some("select_account") => Ok(Some(Prompt::SelectAccount)),
+        Some("create") => Ok(Some(Prompt::Create)),
+        Some(other) => Err(OAuthError::InvalidRequest(format!(
+            "Unsupported prompt value: {}",
+            other
+        ))),
     }
 }

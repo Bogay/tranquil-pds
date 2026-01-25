@@ -1,7 +1,12 @@
 use super::validation::validate_record_with_status;
+use super::validation_mode::{ValidationMode, deserialize_validation_mode};
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log, extract_blob_cids};
-use crate::auth::{Active, Auth};
+use crate::auth::{
+    Active, Auth, WriteOpKind, require_not_migrated, require_verified_or_delegated,
+    verify_batch_write_scopes,
+};
+use crate::cid_types::CommitCid;
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -34,7 +39,7 @@ async fn process_single_write(
     write: &WriteOp,
     acc: WriteAccumulator,
     did: &Did,
-    validate: Option<bool>,
+    validate: ValidationMode,
     tracking_store: &TrackingBlockStore,
 ) -> Result<WriteAccumulator, Response> {
     let WriteAccumulator {
@@ -51,19 +56,17 @@ async fn process_single_write(
             rkey,
             value,
         } => {
-            let validation_status = match validate {
-                Some(false) => None,
-                _ => {
-                    let require_lexicon = validate == Some(true);
-                    match validate_record_with_status(
-                        value,
-                        collection,
-                        rkey.as_ref(),
-                        require_lexicon,
-                    ) {
-                        Ok(status) => Some(status),
-                        Err(err_response) => return Err(*err_response),
-                    }
+            let validation_status = if validate.should_skip() {
+                None
+            } else {
+                match validate_record_with_status(
+                    value,
+                    collection,
+                    rkey.as_ref(),
+                    validate.requires_lexicon(),
+                ) {
+                    Ok(status) => Some(status),
+                    Err(err_response) => return Err(*err_response),
                 }
             };
             all_blob_cids.extend(extract_blob_cids(value));
@@ -104,19 +107,17 @@ async fn process_single_write(
             rkey,
             value,
         } => {
-            let validation_status = match validate {
-                Some(false) => None,
-                _ => {
-                    let require_lexicon = validate == Some(true);
-                    match validate_record_with_status(
-                        value,
-                        collection,
-                        Some(rkey),
-                        require_lexicon,
-                    ) {
-                        Ok(status) => Some(status),
-                        Err(err_response) => return Err(*err_response),
-                    }
+            let validation_status = if validate.should_skip() {
+                None
+            } else {
+                match validate_record_with_status(
+                    value,
+                    collection,
+                    Some(rkey),
+                    validate.requires_lexicon(),
+                ) {
+                    Ok(status) => Some(status),
+                    Err(err_response) => return Err(*err_response),
                 }
             };
             all_blob_cids.extend(extract_blob_cids(value));
@@ -181,7 +182,7 @@ async fn process_writes(
     writes: &[WriteOp],
     initial_mst: Mst<TrackingBlockStore>,
     did: &Did,
-    validate: Option<bool>,
+    validate: ValidationMode,
     tracking_store: &TrackingBlockStore,
 ) -> Result<WriteAccumulator, Response> {
     use futures::stream::{self, TryStreamExt};
@@ -222,7 +223,8 @@ pub enum WriteOp {
 #[serde(rename_all = "camelCase")]
 pub struct ApplyWritesInput {
     pub repo: AtIdentifier,
-    pub validate: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_validation_mode")]
+    pub validate: ValidationMode,
     pub writes: Vec<WriteOp>,
     pub swap_commit: Option<String>,
 }
@@ -270,36 +272,7 @@ pub async fn apply_writes(
         input.repo,
         input.writes.len()
     );
-    let did = auth.did.clone();
-    let is_oauth = auth.is_oauth();
-    let scope = auth.scope.clone();
-    let controller_did = auth.controller_did.clone();
-    if input.repo.as_str() != did {
-        return Err(ApiError::InvalidRepo(
-            "Repo does not match authenticated user".into(),
-        ));
-    }
-    if state
-        .user_repo
-        .is_account_migrated(&did)
-        .await
-        .unwrap_or(false)
-    {
-        return Err(ApiError::AccountMigrated);
-    }
-    let is_verified = state
-        .user_repo
-        .has_verified_comms_channel(&did)
-        .await
-        .unwrap_or(false);
-    let is_delegated = state
-        .delegation_repo
-        .is_delegated_account(&did)
-        .await
-        .unwrap_or(false);
-    if !is_verified && !is_delegated {
-        return Err(ApiError::AccountNotVerified);
-    }
+
     if input.writes.is_empty() {
         return Err(ApiError::InvalidRequest("writes array is empty".into()));
     }
@@ -310,74 +283,40 @@ pub async fn apply_writes(
         )));
     }
 
-    let has_custom_scope = scope
-        .as_ref()
-        .map(|s| s != "com.atproto.access")
-        .unwrap_or(false);
-    if is_oauth || has_custom_scope {
-        use std::collections::HashSet;
-        let create_collections: HashSet<&Nsid> = input
-            .writes
-            .iter()
-            .filter_map(|w| {
-                if let WriteOp::Create { collection, .. } = w {
-                    Some(collection)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let update_collections: HashSet<&Nsid> = input
-            .writes
-            .iter()
-            .filter_map(|w| {
-                if let WriteOp::Update { collection, .. } = w {
-                    Some(collection)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let delete_collections: HashSet<&Nsid> = input
-            .writes
-            .iter()
-            .filter_map(|w| {
-                if let WriteOp::Delete { collection, .. } = w {
-                    Some(collection)
-                } else {
-                    None
-                }
-            })
-            .collect();
+    let batch_proof = match verify_batch_write_scopes(
+        &auth,
+        &auth,
+        &input.writes,
+        |w| match w {
+            WriteOp::Create { collection, .. } => collection.as_str(),
+            WriteOp::Update { collection, .. } => collection.as_str(),
+            WriteOp::Delete { collection, .. } => collection.as_str(),
+        },
+        |w| match w {
+            WriteOp::Create { .. } => WriteOpKind::Create,
+            WriteOp::Update { .. } => WriteOpKind::Update,
+            WriteOp::Delete { .. } => WriteOpKind::Delete,
+        },
+    ) {
+        Ok(proof) => proof,
+        Err(e) => return Ok(e.into_response()),
+    };
 
-        let scope_checks = create_collections
-            .iter()
-            .map(|c| (crate::oauth::RepoAction::Create, c))
-            .chain(
-                update_collections
-                    .iter()
-                    .map(|c| (crate::oauth::RepoAction::Update, c)),
-            )
-            .chain(
-                delete_collections
-                    .iter()
-                    .map(|c| (crate::oauth::RepoAction::Delete, c)),
-            );
+    let principal_did = batch_proof.principal_did();
+    let controller_did = batch_proof.controller_did().map(|c| c.into_did());
 
-        if let Some(err) = scope_checks
-            .filter_map(|(action, collection)| {
-                crate::auth::scope_check::check_repo_scope(
-                    is_oauth,
-                    scope.as_deref(),
-                    action,
-                    collection,
-                )
-                .err()
-            })
-            .next()
-        {
-            return Ok(err);
-        }
+    if input.repo.as_str() != principal_did.as_str() {
+        return Err(ApiError::InvalidRepo(
+            "Repo does not match authenticated user".into(),
+        ));
+    }
+
+    let did = principal_did.into_did();
+    if let Err(e) = require_not_migrated(&state, &did).await {
+        return Ok(e);
+    }
+    if let Err(e) = require_verified_or_delegated(&state, batch_proof.user()).await {
+        return Ok(e);
     }
 
     let user_id: uuid::Uuid = state
@@ -394,16 +333,16 @@ pub async fn apply_writes(
         .ok()
         .flatten()
         .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())))?;
-    let current_root_cid = Cid::from_str(&root_cid_str)
+    let current_root_cid = CommitCid::from_str(&root_cid_str)
         .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())))?;
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+        && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
     {
         return Err(ApiError::InvalidSwap(Some("Repo has been modified".into())));
     }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = tracking_store
-        .get(&current_root_cid)
+        .get(current_root_cid.as_cid())
         .await
         .ok()
         .flatten()
@@ -471,7 +410,7 @@ pub async fn apply_writes(
         } => Some(*cid),
         _ => None,
     });
-    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
+    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid.into_cid())
         .chain(
             old_mst_blocks
                 .keys()
@@ -487,7 +426,7 @@ pub async fn apply_writes(
         CommitParams {
             did: &did,
             user_id,
-            current_root_cid: Some(current_root_cid),
+            current_root_cid: Some(current_root_cid.into_cid()),
             prev_data_cid: Some(commit.data),
             new_mst_root,
             ops,

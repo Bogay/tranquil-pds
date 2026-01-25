@@ -1,36 +1,26 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::api::{EmptyResponse, HasPasswordResponse, SuccessResponse};
-use crate::auth::{Active, Auth};
-use crate::state::{AppState, RateLimitKind};
+use crate::auth::{
+    Active, Auth, NormalizedLoginIdentifier, require_legacy_session_mfa, require_reauth_window,
+    require_reauth_window_if_available,
+};
+use crate::rate_limit::{PasswordResetLimit, RateLimited, ResetPasswordLimit};
+use crate::state::AppState;
 use crate::types::PlainPassword;
+use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
 use axum::{
     Json,
     extract::State,
-    http::HeaderMap,
     response::{IntoResponse, Response},
 };
-use bcrypt::{DEFAULT_COST, hash, verify};
+use bcrypt::{DEFAULT_COST, hash};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use tracing::{error, info, warn};
 
 fn generate_reset_code() -> String {
     crate::util::generate_token_code()
-}
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for")
-        && let Ok(value) = forwarded.to_str()
-        && let Some(first_ip) = value.split(',').next()
-    {
-        return first_ip.trim().to_string();
-    }
-    if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str()
-    {
-        return value.trim().to_string();
-    }
-    "unknown".to_string()
 }
 
 #[derive(Deserialize)]
@@ -41,31 +31,18 @@ pub struct RequestPasswordResetInput {
 
 pub async fn request_password_reset(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<PasswordResetLimit>,
     Json(input): Json<RequestPasswordResetInput>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::PasswordReset, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Password reset rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
     let identifier = input.email.trim();
     if identifier.is_empty() {
         return ApiError::InvalidRequest("email or handle is required".into()).into_response();
     }
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let normalized = identifier.to_lowercase();
     let normalized = normalized.strip_prefix('@').unwrap_or(&normalized);
     let is_email_lookup = normalized.contains('@');
-    let normalized_handle = if normalized.contains('@') || normalized.contains('.') {
-        normalized.to_string()
-    } else {
-        format!("{}.{}", normalized, hostname_for_handles)
-    };
+    let normalized_handle = NormalizedLoginIdentifier::normalize(identifier, hostname_for_handles);
 
     let multiple_accounts_warning = if is_email_lookup {
         match state.user_repo.count_accounts_by_email(normalized).await {
@@ -78,7 +55,7 @@ pub async fn request_password_reset(
 
     let user_id = match state
         .user_repo
-        .get_id_by_email_or_handle(normalized, &normalized_handle)
+        .get_id_by_email_or_handle(normalized, normalized_handle.as_str())
         .await
     {
         Ok(Some(id)) => id,
@@ -101,13 +78,13 @@ pub async fn request_password_reset(
         error!("DB error setting reset code: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     if let Err(e) = crate::comms::comms_repo::enqueue_password_reset(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         user_id,
         &code,
-        &hostname,
+        hostname,
     )
     .await
     {
@@ -135,17 +112,9 @@ pub struct ResetPasswordInput {
 
 pub async fn reset_password(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<ResetPasswordLimit>,
     Json(input): Json<ResetPasswordInput>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::ResetPassword, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Reset password rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
     let token = input.token.trim();
     let password = &input.password;
     if token.is_empty() {
@@ -230,50 +199,35 @@ pub async fn change_password(
     auth: Auth<Active>,
     Json(input): Json<ChangePasswordInput>,
 ) -> Result<Response, ApiError> {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
-    {
-        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    use crate::auth::verify_password_mfa;
 
-    let current_password = &input.current_password;
-    let new_password = &input.new_password;
-    if current_password.is_empty() {
+    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
+
+    if input.current_password.is_empty() {
         return Err(ApiError::InvalidRequest(
             "currentPassword is required".into(),
         ));
     }
-    if new_password.is_empty() {
+    if input.new_password.is_empty() {
         return Err(ApiError::InvalidRequest("newPassword is required".into()));
     }
-    if let Err(e) = validate_password(new_password) {
+    if let Err(e) = validate_password(&input.new_password) {
         return Err(ApiError::InvalidRequest(e.to_string()));
     }
+
+    let password_mfa = verify_password_mfa(&state, &auth, &input.current_password).await?;
+
     let user = state
         .user_repo
-        .get_id_and_password_hash_by_did(&auth.did)
+        .get_id_and_password_hash_by_did(password_mfa.did())
         .await
-        .map_err(|e| {
-            error!("DB error in change_password: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("in change_password")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let (user_id, password_hash) = (user.id, user.password_hash);
-    let valid = verify(current_password, &password_hash).map_err(|e| {
-        error!("Password verification error: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
-    if !valid {
-        return Err(ApiError::InvalidPassword(
-            "Current password is incorrect".into(),
-        ));
-    }
-    let new_password_clone = new_password.to_string();
+    let new_password_clone = input.new_password.to_string();
     let new_hash = tokio::task::spawn_blocking(move || hash(new_password_clone, DEFAULT_COST))
         .await
         .map_err(|e| {
@@ -287,14 +241,11 @@ pub async fn change_password(
 
     state
         .user_repo
-        .update_password_hash(user_id, &new_hash)
+        .update_password_hash(user.id, &new_hash)
         .await
-        .map_err(|e| {
-            error!("DB error updating password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating password")?;
 
-    info!(did = %&auth.did, "Password changed successfully");
+    info!(did = %session_mfa.did(), "Password changed successfully");
     Ok(EmptyResponse::ok().into_response())
 }
 
@@ -302,48 +253,32 @@ pub async fn get_password_status(
     State(state): State<AppState>,
     auth: Auth<Active>,
 ) -> Result<Response, ApiError> {
-    match state.user_repo.has_password_by_did(&auth.did).await {
-        Ok(Some(has)) => Ok(HasPasswordResponse::response(has).into_response()),
-        Ok(None) => Err(ApiError::AccountNotFound),
-        Err(e) => {
-            error!("DB error: {:?}", e);
-            Err(ApiError::InternalError(None))
-        }
-    }
+    let has = state
+        .user_repo
+        .has_password_by_did(&auth.did)
+        .await
+        .log_db_err("checking password status")?
+        .ok_or(ApiError::AccountNotFound)?;
+    Ok(HasPasswordResponse::response(has).into_response())
 }
 
 pub async fn remove_password(
     State(state): State<AppState>,
     auth: Auth<Active>,
 ) -> Result<Response, ApiError> {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
-    {
-        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
-    if crate::api::server::reauth::check_reauth_required_cached(
-        &*state.session_repo,
-        &state.cache,
-        &auth.did,
-    )
-    .await
-    {
-        return Ok(crate::api::server::reauth::reauth_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    let reauth_mfa = match require_reauth_window(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
     let has_passkeys = state
         .user_repo
-        .has_passkeys(&auth.did)
+        .has_passkeys(reauth_mfa.did())
         .await
         .unwrap_or(false);
     if !has_passkeys {
@@ -354,12 +289,9 @@ pub async fn remove_password(
 
     let user = state
         .user_repo
-        .get_password_info_by_did(&auth.did)
+        .get_password_info_by_did(reauth_mfa.did())
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting password info")?
         .ok_or(ApiError::AccountNotFound)?;
 
     if user.password_hash.is_none() {
@@ -372,12 +304,9 @@ pub async fn remove_password(
         .user_repo
         .remove_user_password(user.id)
         .await
-        .map_err(|e| {
-            error!("DB error removing password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("removing password")?;
 
-    info!(did = %&auth.did, "Password removed - account is now passkey-only");
+    info!(did = %session_mfa.did(), "Password removed - account is now passkey-only");
     Ok(SuccessResponse::ok().into_response())
 }
 
@@ -392,41 +321,10 @@ pub async fn set_password(
     auth: Auth<Active>,
     Json(input): Json<SetPasswordInput>,
 ) -> Result<Response, ApiError> {
-    let has_password = state
-        .user_repo
-        .has_password_by_did(&auth.did)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(false);
-    let has_passkeys = state
-        .user_repo
-        .has_passkeys(&auth.did)
-        .await
-        .unwrap_or(false);
-    let has_totp = state
-        .user_repo
-        .has_totp_enabled(&auth.did)
-        .await
-        .unwrap_or(false);
-
-    let has_any_reauth_method = has_password || has_passkeys || has_totp;
-
-    if has_any_reauth_method
-        && crate::api::server::reauth::check_reauth_required_cached(
-            &*state.session_repo,
-            &state.cache,
-            &auth.did,
-        )
-        .await
-    {
-        return Ok(crate::api::server::reauth::reauth_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    let reauth_mfa = match require_reauth_window_if_available(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
     let new_password = &input.new_password;
     if new_password.is_empty() {
@@ -436,14 +334,13 @@ pub async fn set_password(
         return Err(ApiError::InvalidRequest(e.to_string()));
     }
 
+    let did = reauth_mfa.as_ref().map(|m| m.did()).unwrap_or(&auth.did);
+
     let user = state
         .user_repo
-        .get_password_info_by_did(&auth.did)
+        .get_password_info_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting password info")?
         .ok_or(ApiError::AccountNotFound)?;
 
     if user.password_hash.is_some() {
@@ -468,11 +365,8 @@ pub async fn set_password(
         .user_repo
         .set_new_user_password(user.id, &new_hash)
         .await
-        .map_err(|e| {
-            error!("DB error setting password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("setting password")?;
 
-    info!(did = %&auth.did, "Password set for passkey-only account");
+    info!(did = %did, "Password set for passkey-only account");
     Ok(SuccessResponse::ok().into_response())
 }

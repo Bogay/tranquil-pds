@@ -1,4 +1,4 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use axum::{Json, extract::State};
@@ -56,10 +56,7 @@ pub async fn get_server_config(
         .infra_repo
         .get_server_configs(keys)
         .await
-        .map_err(|e| {
-            error!("DB error fetching server config: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching server config")?;
 
     let config_map: std::collections::HashMap<String, String> = rows.into_iter().collect();
 
@@ -92,10 +89,7 @@ pub async fn update_server_config(
             .infra_repo
             .upsert_server_config("server_name", trimmed)
             .await
-            .map_err(|e| {
-                error!("DB error upserting server_name: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("upserting server_name")?;
     }
 
     if let Some(ref color) = req.primary_color {
@@ -104,19 +98,13 @@ pub async fn update_server_config(
                 .infra_repo
                 .delete_server_config("primary_color")
                 .await
-                .map_err(|e| {
-                    error!("DB error deleting primary_color: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("deleting primary_color")?;
         } else if is_valid_hex_color(color) {
             state
                 .infra_repo
                 .upsert_server_config("primary_color", color)
                 .await
-                .map_err(|e| {
-                    error!("DB error upserting primary_color: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("upserting primary_color")?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid primary color format (expected #RRGGBB)".into(),
@@ -130,19 +118,13 @@ pub async fn update_server_config(
                 .infra_repo
                 .delete_server_config("primary_color_dark")
                 .await
-                .map_err(|e| {
-                    error!("DB error deleting primary_color_dark: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("deleting primary_color_dark")?;
         } else if is_valid_hex_color(color) {
             state
                 .infra_repo
                 .upsert_server_config("primary_color_dark", color)
                 .await
-                .map_err(|e| {
-                    error!("DB error upserting primary_color_dark: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("upserting primary_color_dark")?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid primary dark color format (expected #RRGGBB)".into(),
@@ -156,19 +138,13 @@ pub async fn update_server_config(
                 .infra_repo
                 .delete_server_config("secondary_color")
                 .await
-                .map_err(|e| {
-                    error!("DB error deleting secondary_color: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("deleting secondary_color")?;
         } else if is_valid_hex_color(color) {
             state
                 .infra_repo
                 .upsert_server_config("secondary_color", color)
                 .await
-                .map_err(|e| {
-                    error!("DB error upserting secondary_color: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("upserting secondary_color")?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid secondary color format (expected #RRGGBB)".into(),
@@ -182,19 +158,13 @@ pub async fn update_server_config(
                 .infra_repo
                 .delete_server_config("secondary_color_dark")
                 .await
-                .map_err(|e| {
-                    error!("DB error deleting secondary_color_dark: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("deleting secondary_color_dark")?;
         } else if is_valid_hex_color(color) {
             state
                 .infra_repo
                 .upsert_server_config("secondary_color_dark", color)
                 .await
-                .map_err(|e| {
-                    error!("DB error upserting secondary_color_dark: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("upserting secondary_color_dark")?;
         } else {
             return Err(ApiError::InvalidRequest(
                 "Invalid secondary dark color format (expected #RRGGBB)".into(),
@@ -217,7 +187,7 @@ pub async fn update_server_config(
         };
 
         if let Some(old_cid_str) = should_delete_old {
-            let old_cid = CidLink::new_unchecked(old_cid_str);
+            let old_cid = unsafe { CidLink::new_unchecked(old_cid_str) };
             if let Ok(Some(storage_key)) =
                 state.infra_repo.get_blob_storage_key_by_cid(&old_cid).await
             {
@@ -235,19 +205,13 @@ pub async fn update_server_config(
                 .infra_repo
                 .delete_server_config("logo_cid")
                 .await
-                .map_err(|e| {
-                    error!("DB error deleting logo_cid: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("deleting logo_cid")?;
         } else {
             state
                 .infra_repo
                 .upsert_server_config("logo_cid", logo_cid)
                 .await
-                .map_err(|e| {
-                    error!("DB error upserting logo_cid: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("upserting logo_cid")?;
         }
     }
 

@@ -1,8 +1,10 @@
+use crate::api::error::DbResultExt;
 use crate::api::{ApiError, EmptyResponse};
 use crate::auth::{Auth, Permissive};
 use crate::circuit_breaker::with_circuit_breaker;
 use crate::plc::{PlcClient, signing_key_to_did_key, validate_plc_operation};
 use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -40,26 +42,20 @@ pub async fn submit_plc_operation(
         .map_err(|e| ApiError::InvalidRequest(format!("Invalid operation: {}", e)))?;
 
     let op = &input.operation;
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     let public_url = format!("https://{}", hostname);
     let user = state
         .user_repo
         .get_id_and_handle_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let key_row = state
         .user_repo
         .get_user_key_by_id(user.id)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching user key")?
         .ok_or_else(|| ApiError::InternalError(Some("User signing key not found".into())))?;
 
     let key_bytes = crate::config::decrypt_key(&key_row.key_bytes, key_row.encryption_version)

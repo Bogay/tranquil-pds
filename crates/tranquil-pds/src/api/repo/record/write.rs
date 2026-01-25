@@ -1,9 +1,14 @@
 use super::validation::validate_record_with_status;
+use super::validation_mode::{ValidationMode, deserialize_validation_mode};
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{
     CommitParams, RecordOp, commit_and_log, extract_backlinks, extract_blob_cids,
 };
-use crate::auth::{Active, Auth};
+use crate::auth::{
+    Active, Auth, RepoScopeAction, ScopeVerified, VerifyScope, require_not_migrated,
+    require_verified_or_delegated,
+};
+use crate::cid_types::CommitCid;
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -26,46 +31,31 @@ use uuid::Uuid;
 pub struct RepoWriteAuth {
     pub did: Did,
     pub user_id: Uuid,
-    pub current_root_cid: Cid,
+    pub current_root_cid: CommitCid,
     pub is_oauth: bool,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
 }
 
-pub async fn prepare_repo_write(
+pub async fn prepare_repo_write<A: RepoScopeAction>(
     state: &AppState,
-    auth_user: &crate::auth::AuthenticatedUser,
+    scope_proof: &ScopeVerified<'_, A>,
     repo: &AtIdentifier,
 ) -> Result<RepoWriteAuth, Response> {
-    if repo.as_str() != auth_user.did.as_str() {
+    let user = scope_proof.user();
+    let principal_did = scope_proof.principal_did();
+    if repo.as_str() != principal_did.as_str() {
         return Err(
             ApiError::InvalidRepo("Repo does not match authenticated user".into()).into_response(),
         );
     }
-    if state
-        .user_repo
-        .is_account_migrated(&auth_user.did)
-        .await
-        .unwrap_or(false)
-    {
-        return Err(ApiError::AccountMigrated.into_response());
-    }
-    let is_verified = state
-        .user_repo
-        .has_verified_comms_channel(&auth_user.did)
-        .await
-        .unwrap_or(false);
-    let is_delegated = state
-        .delegation_repo
-        .is_delegated_account(&auth_user.did)
-        .await
-        .unwrap_or(false);
-    if !is_verified && !is_delegated {
-        return Err(ApiError::AccountNotVerified.into_response());
-    }
+
+    require_not_migrated(state, principal_did.as_did()).await?;
+    let _account_verified = require_verified_or_delegated(state, user).await?;
+
     let user_id = state
         .user_repo
-        .get_id_by_did(&auth_user.did)
+        .get_id_by_did(principal_did.as_did())
         .await
         .map_err(|e| {
             error!("DB error fetching user: {}", e);
@@ -83,16 +73,16 @@ pub async fn prepare_repo_write(
         .ok_or_else(|| {
             ApiError::InternalError(Some("Repo root not found".into())).into_response()
         })?;
-    let current_root_cid = Cid::from_str(&root_cid_str).map_err(|_| {
+    let current_root_cid = CommitCid::from_str(&root_cid_str).map_err(|_| {
         ApiError::InternalError(Some("Invalid repo root CID".into())).into_response()
     })?;
     Ok(RepoWriteAuth {
-        did: auth_user.did.clone(),
+        did: principal_did.into_did(),
         user_id,
         current_root_cid,
-        is_oauth: auth_user.is_oauth(),
-        scope: auth_user.scope.clone(),
-        controller_did: auth_user.controller_did.clone(),
+        is_oauth: user.is_oauth(),
+        scope: user.scope.clone(),
+        controller_did: scope_proof.controller_did().map(|c| c.into_did()),
     })
 }
 #[derive(Deserialize)]
@@ -101,7 +91,8 @@ pub struct CreateRecordInput {
     pub repo: AtIdentifier,
     pub collection: Nsid,
     pub rkey: Option<Rkey>,
-    pub validate: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_validation_mode")]
+    pub validate: ValidationMode,
     pub record: serde_json::Value,
     #[serde(rename = "swapCommit")]
     pub swap_commit: Option<String>,
@@ -127,19 +118,15 @@ pub async fn create_record(
     auth: Auth<Active>,
     Json(input): Json<CreateRecordInput>,
 ) -> Result<Response, crate::api::error::ApiError> {
-    let repo_auth = match prepare_repo_write(&state, &auth, &input.repo).await {
+    let scope_proof = match auth.verify_repo_create(&input.collection) {
+        Ok(proof) => proof,
+        Err(e) => return Ok(e.into_response()),
+    };
+
+    let repo_auth = match prepare_repo_write(&state, &scope_proof, &input.repo).await {
         Ok(res) => res,
         Err(err_res) => return Ok(err_res),
     };
-
-    if let Err(e) = crate::auth::scope_check::check_repo_scope(
-        repo_auth.is_oauth,
-        repo_auth.scope.as_deref(),
-        crate::oauth::RepoAction::Create,
-        &input.collection,
-    ) {
-        return Ok(e);
-    }
 
     let did = repo_auth.did;
     let user_id = repo_auth.user_id;
@@ -147,20 +134,19 @@ pub async fn create_record(
     let controller_did = repo_auth.controller_did;
 
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+        && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
     {
         return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
     }
 
-    let validation_status = if input.validate == Some(false) {
+    let validation_status = if input.validate.should_skip() {
         None
     } else {
-        let require_lexicon = input.validate == Some(true);
         match validate_record_with_status(
             &input.record,
             &input.collection,
             input.rkey.as_ref(),
-            require_lexicon,
+            input.validate.requires_lexicon(),
         ) {
             Ok(status) => Some(status),
             Err(err_response) => return Ok(*err_response),
@@ -169,7 +155,7 @@ pub async fn create_record(
     let rkey = input.rkey.unwrap_or_else(Rkey::generate);
 
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = match tracking_store.get(&current_root_cid).await {
+    let commit_bytes = match tracking_store.get(current_root_cid.as_cid()).await {
         Ok(Some(b)) => b,
         _ => {
             return Ok(
@@ -192,7 +178,7 @@ pub async fn create_record(
     let mut conflict_uris_to_cleanup: Vec<AtUri> = Vec::new();
     let mut all_old_mst_blocks = std::collections::BTreeMap::new();
 
-    if input.validate != Some(false) {
+    if !input.validate.should_skip() {
         let record_uri = AtUri::from_parts(&did, &input.collection, &rkey);
         let backlinks = extract_backlinks(&record_uri, &input.record);
 
@@ -323,7 +309,7 @@ pub async fn create_record(
         .collect();
     let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
     let blob_cids = extract_blob_cids(&input.record);
-    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
+    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid.into_cid())
         .chain(
             all_old_mst_blocks
                 .keys()
@@ -337,7 +323,7 @@ pub async fn create_record(
         CommitParams {
             did: &did,
             user_id,
-            current_root_cid: Some(current_root_cid),
+            current_root_cid: Some(current_root_cid.into_cid()),
             prev_data_cid: Some(initial_mst_root),
             new_mst_root,
             ops,
@@ -412,7 +398,8 @@ pub struct PutRecordInput {
     pub repo: AtIdentifier,
     pub collection: Nsid,
     pub rkey: Rkey,
-    pub validate: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_validation_mode")]
+    pub validate: ValidationMode,
     pub record: serde_json::Value,
     #[serde(rename = "swapCommit")]
     pub swap_commit: Option<String>,
@@ -434,27 +421,15 @@ pub async fn put_record(
     auth: Auth<Active>,
     Json(input): Json<PutRecordInput>,
 ) -> Result<Response, crate::api::error::ApiError> {
-    let repo_auth = match prepare_repo_write(&state, &auth, &input.repo).await {
+    let upsert_proof = match auth.verify_repo_upsert(&input.collection) {
+        Ok(proof) => proof,
+        Err(e) => return Ok(e.into_response()),
+    };
+
+    let repo_auth = match prepare_repo_write(&state, &upsert_proof, &input.repo).await {
         Ok(res) => res,
         Err(err_res) => return Ok(err_res),
     };
-
-    if let Err(e) = crate::auth::scope_check::check_repo_scope(
-        repo_auth.is_oauth,
-        repo_auth.scope.as_deref(),
-        crate::oauth::RepoAction::Create,
-        &input.collection,
-    ) {
-        return Ok(e);
-    }
-    if let Err(e) = crate::auth::scope_check::check_repo_scope(
-        repo_auth.is_oauth,
-        repo_auth.scope.as_deref(),
-        crate::oauth::RepoAction::Update,
-        &input.collection,
-    ) {
-        return Ok(e);
-    }
 
     let did = repo_auth.did;
     let user_id = repo_auth.user_id;
@@ -462,12 +437,12 @@ pub async fn put_record(
     let controller_did = repo_auth.controller_did;
 
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+        && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
     {
         return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
     }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = match tracking_store.get(&current_root_cid).await {
+    let commit_bytes = match tracking_store.get(current_root_cid.as_cid()).await {
         Ok(Some(b)) => b,
         _ => {
             return Ok(
@@ -485,15 +460,14 @@ pub async fn put_record(
     };
     let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let key = format!("{}/{}", input.collection, input.rkey);
-    let validation_status = if input.validate == Some(false) {
+    let validation_status = if input.validate.should_skip() {
         None
     } else {
-        let require_lexicon = input.validate == Some(true);
         match validate_record_with_status(
             &input.record,
             &input.collection,
             Some(&input.rkey),
-            require_lexicon,
+            input.validate.requires_lexicon(),
         ) {
             Ok(status) => Some(status),
             Err(err_response) => return Ok(*err_response),
@@ -610,7 +584,7 @@ pub async fn put_record(
     let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
     let is_update = existing_cid.is_some();
     let blob_cids = extract_blob_cids(&input.record);
-    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
+    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid.into_cid())
         .chain(
             old_mst_blocks
                 .keys()
@@ -624,7 +598,7 @@ pub async fn put_record(
         CommitParams {
             did: &did,
             user_id,
-            current_root_cid: Some(current_root_cid),
+            current_root_cid: Some(current_root_cid.into_cid()),
             prev_data_cid: Some(commit.data),
             new_mst_root,
             ops: vec![op],

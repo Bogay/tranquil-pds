@@ -21,7 +21,7 @@ pub async fn get_logo(State(state): State<AppState>) -> Response {
         Some(c) if !c.is_empty() => c,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
-    let cid = crate::types::CidLink::new_unchecked(&cid_str);
+    let cid = unsafe { crate::types::CidLink::new_unchecked(&cid_str) };
 
     let metadata = match state.blob_repo.get_blob_metadata(&cid).await {
         Ok(Some(m)) => m,

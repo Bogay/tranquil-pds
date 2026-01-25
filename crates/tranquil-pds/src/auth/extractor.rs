@@ -9,7 +9,7 @@ use tracing::{debug, error, info};
 
 use super::{
     AccountStatus, AuthSource, AuthenticatedUser, ServiceTokenClaims, ServiceTokenVerifier,
-    is_service_token, validate_bearer_token_for_service_auth,
+    is_service_token, scope_verified::VerifyScope, validate_bearer_token_for_service_auth,
 };
 use crate::api::error::ApiError;
 use crate::oauth::scopes::{RepoAction, ScopePermissions};
@@ -293,7 +293,7 @@ async fn extract_auth_internal(
         return Ok(ExtractedAuth::Service(claims));
     }
 
-    let dpop_proof = parts.headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let dpop_proof = crate::util::get_header_str(&parts.headers, "DPoP");
     let method = parts.method.as_str();
     let uri = build_full_url(&parts.uri.to_string());
 
@@ -358,6 +358,22 @@ impl<P: AuthPolicy> std::ops::Deref for Auth<P> {
     }
 }
 
+impl<P: AuthPolicy> AsRef<AuthenticatedUser> for Auth<P> {
+    fn as_ref(&self) -> &AuthenticatedUser {
+        &self.0
+    }
+}
+
+impl<P: AuthPolicy> VerifyScope for Auth<P> {
+    fn needs_scope_check(&self) -> bool {
+        self.0.is_oauth()
+    }
+
+    fn permissions(&self) -> ScopePermissions {
+        self.0.permissions()
+    }
+}
+
 impl<P: AuthPolicy> FromRequestParts<AppState> for Auth<P> {
     type Rejection = AuthError;
 
@@ -418,10 +434,7 @@ impl FromRequestParts<AppState> for ServiceAuth {
     ) -> Result<Self, Self::Rejection> {
         match extract_auth_internal(parts, state).await? {
             ExtractedAuth::Service(claims) => {
-                let did: Did = claims
-                    .iss
-                    .parse()
-                    .map_err(|_| AuthError::AuthenticationFailed)?;
+                let did = claims.iss.clone();
                 Ok(ServiceAuth { did, claims })
             }
             ExtractedAuth::User(_) => Err(AuthError::AuthenticationFailed),
@@ -438,10 +451,7 @@ impl OptionalFromRequestParts<AppState> for ServiceAuth {
     ) -> Result<Option<Self>, Self::Rejection> {
         match extract_auth_internal(parts, state).await {
             Ok(ExtractedAuth::Service(claims)) => {
-                let did: Did = claims
-                    .iss
-                    .parse()
-                    .map_err(|_| AuthError::AuthenticationFailed)?;
+                let did = claims.iss.clone();
                 Ok(Some(ServiceAuth { did, claims }))
             }
             Ok(ExtractedAuth::User(_)) => Err(AuthError::AuthenticationFailed),
@@ -503,10 +513,7 @@ impl<P: AuthPolicy> FromRequestParts<AppState> for AuthAny<P> {
                 Ok(AuthAny::User(Auth(user, PhantomData)))
             }
             ExtractedAuth::Service(claims) => {
-                let did: Did = claims
-                    .iss
-                    .parse()
-                    .map_err(|_| AuthError::AuthenticationFailed)?;
+                let did = claims.iss.clone();
                 Ok(AuthAny::Service(ServiceAuth { did, claims }))
             }
         }
@@ -526,10 +533,7 @@ impl<P: AuthPolicy> OptionalFromRequestParts<AppState> for AuthAny<P> {
                 Ok(Some(AuthAny::User(Auth(user, PhantomData))))
             }
             Ok(ExtractedAuth::Service(claims)) => {
-                let did: Did = claims
-                    .iss
-                    .parse()
-                    .map_err(|_| AuthError::AuthenticationFailed)?;
+                let did = claims.iss.clone();
                 Ok(Some(AuthAny::Service(ServiceAuth { did, claims })))
             }
             Err(AuthError::MissingToken) => Ok(None),

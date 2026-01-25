@@ -1,4 +1,4 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use axum::{
     Json,
     extract::State,
@@ -11,10 +11,11 @@ use tracing::{error, info, warn};
 use tranquil_db_traits::{SessionRepository, UserRepository};
 
 use crate::auth::{Active, Auth};
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{TotpVerifyLimit, check_user_rate_limit_with_message};
+use crate::state::AppState;
 use crate::types::PlainPassword;
 
-const REAUTH_WINDOW_SECONDS: i64 = 300;
+pub const REAUTH_WINDOW_SECONDS: i64 = 300;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,10 +33,7 @@ pub async fn get_reauth_status(
         .session_repo
         .get_last_reauth_at(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("getting last reauth")?;
 
     let reauth_required = is_reauth_required(last_reauth_at);
     let available_methods =
@@ -70,10 +68,7 @@ pub async fn reauth_password(
         .user_repo
         .get_password_hash_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching password hash")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
@@ -97,10 +92,7 @@ pub async fn reauth_password(
 
     let reauthed_at = update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error updating reauth: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating reauth")?;
 
     info!(did = %&auth.did, "Re-auth successful via password");
     Ok(Json(ReauthResponse { reauthed_at }).into_response())
@@ -117,15 +109,12 @@ pub async fn reauth_totp(
     auth: Auth<Active>,
     Json(input): Json<TotpReauthInput>,
 ) -> Result<Response, ApiError> {
-    if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &auth.did)
-        .await
-    {
-        warn!(did = %&auth.did, "TOTP verification rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(Some(
-            "Too many verification attempts. Please try again in a few minutes.".into(),
-        )));
-    }
+    let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
+        &state,
+        &auth.did,
+        "Too many verification attempts. Please try again in a few minutes.",
+    )
+    .await?;
 
     let valid =
         crate::api::server::totp::verify_totp_or_backup_for_user(&state, &auth.did, &input.code)
@@ -140,10 +129,7 @@ pub async fn reauth_totp(
 
     let reauthed_at = update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error updating reauth: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating reauth")?;
 
     info!(did = %&auth.did, "Re-auth successful via TOTP");
     Ok(Json(ReauthResponse { reauthed_at }).into_response())
@@ -159,16 +145,11 @@ pub async fn reauth_passkey_start(
     State(state): State<AppState>,
     auth: Auth<Active>,
 ) -> Result<Response, ApiError> {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-
     let stored_passkeys = state
         .user_repo
         .get_passkeys_for_user(&auth.did)
         .await
-        .map_err(|e| {
-            error!("Failed to get passkeys: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("getting passkeys")?;
 
     if stored_passkeys.is_empty() {
         return Err(ApiError::NoPasskeys);
@@ -185,10 +166,7 @@ pub async fn reauth_passkey_start(
         )));
     }
 
-    let webauthn = crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname).map_err(|e| {
-        error!("Failed to create WebAuthn config: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
+    let webauthn = &state.webauthn_config;
 
     let (rcr, auth_state) = webauthn.start_authentication(passkeys).map_err(|e| {
         error!("Failed to start passkey authentication: {:?}", e);
@@ -204,10 +182,7 @@ pub async fn reauth_passkey_start(
         .user_repo
         .save_webauthn_challenge(&auth.did, "authentication", &state_json)
         .await
-        .map_err(|e| {
-            error!("Failed to save authentication state: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("saving authentication state")?;
 
     let options = serde_json::to_value(&rcr).unwrap_or(serde_json::json!({}));
     Ok(Json(PasskeyReauthStartResponse { options }).into_response())
@@ -224,16 +199,11 @@ pub async fn reauth_passkey_finish(
     auth: Auth<Active>,
     Json(input): Json<PasskeyReauthFinishInput>,
 ) -> Result<Response, ApiError> {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-
     let auth_state_json = state
         .user_repo
         .load_webauthn_challenge(&auth.did, "authentication")
         .await
-        .map_err(|e| {
-            error!("Failed to load authentication state: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("loading authentication state")?
         .ok_or(ApiError::NoChallengeInProgress)?;
 
     let auth_state: webauthn_rs::prelude::SecurityKeyAuthentication =
@@ -248,12 +218,8 @@ pub async fn reauth_passkey_finish(
             ApiError::InvalidCredential
         })?;
 
-    let webauthn = crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname).map_err(|e| {
-        error!("Failed to create WebAuthn config: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
-
-    let auth_result = webauthn
+    let auth_result = state
+        .webauthn_config
         .finish_authentication(&credential, &auth_state)
         .map_err(|e| {
             warn!(did = %&auth.did, "Passkey re-auth failed: {:?}", e);
@@ -287,10 +253,7 @@ pub async fn reauth_passkey_finish(
 
     let reauthed_at = update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error updating reauth: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating reauth")?;
 
     info!(did = %&auth.did, "Re-auth successful via passkey");
     Ok(Json(ReauthResponse { reauthed_at }).into_response())
@@ -418,7 +381,7 @@ pub async fn check_legacy_session_mfa(
 ) -> bool {
     match session_repo.get_session_mfa_status(did).await {
         Ok(Some(status)) => {
-            if !status.legacy_login {
+            if status.login_type.is_modern() {
                 return true;
             }
             if status.mfa_verified {

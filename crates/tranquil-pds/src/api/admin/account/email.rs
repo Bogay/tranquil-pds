@@ -1,7 +1,8 @@
-use crate::api::error::{ApiError, AtpJson};
+use crate::api::error::{ApiError, AtpJson, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::Did;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -9,7 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::warn;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,15 +40,12 @@ pub async fn send_email(
         .user_repo
         .get_by_did(&input.recipient_did)
         .await
-        .map_err(|e| {
-            error!("DB error in send_email: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("in send_email")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let email = user.email.ok_or(ApiError::NoEmail)?;
     let (user_id, handle) = (user.id, user.handle);
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     let subject = input
         .subject
         .clone()

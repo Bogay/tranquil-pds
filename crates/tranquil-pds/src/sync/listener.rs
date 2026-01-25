@@ -2,13 +2,21 @@ use crate::state::AppState;
 use crate::sync::firehose::SequencedEvent;
 use std::sync::atomic::{AtomicI64, Ordering};
 use tracing::{debug, error, info, warn};
+use tranquil_db_traits::SequenceNumber;
 
 static LAST_BROADCAST_SEQ: AtomicI64 = AtomicI64::new(0);
 
 pub async fn start_sequencer_listener(state: AppState) {
-    let initial_seq = state.repo_repo.get_max_seq().await.unwrap_or(0);
-    LAST_BROADCAST_SEQ.store(initial_seq, Ordering::SeqCst);
-    info!(initial_seq = initial_seq, "Initialized sequencer listener");
+    let initial_seq = state
+        .repo_repo
+        .get_max_seq()
+        .await
+        .unwrap_or(SequenceNumber::ZERO);
+    LAST_BROADCAST_SEQ.store(initial_seq.as_i64(), Ordering::SeqCst);
+    info!(
+        initial_seq = initial_seq.as_i64(),
+        "Initialized sequencer listener"
+    );
     tokio::spawn(async move {
         info!("Starting sequencer listener background task");
         loop {
@@ -27,7 +35,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to events: {:?}", e))?;
     info!("Connected to database and listening for repo updates");
-    let catchup_start = LAST_BROADCAST_SEQ.load(Ordering::SeqCst);
+    let catchup_start = SequenceNumber::from_raw(LAST_BROADCAST_SEQ.load(Ordering::SeqCst));
     let events = state
         .repo_repo
         .get_events_since_seq(catchup_start, None)
@@ -36,14 +44,14 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
     if !events.is_empty() {
         info!(
             count = events.len(),
-            from_seq = catchup_start,
+            from_seq = catchup_start.as_i64(),
             "Broadcasting catch-up events"
         );
         events.into_iter().for_each(|event| {
             let seq = event.seq;
             let firehose_event = to_firehose_event(event);
             let _ = state.firehose_tx.send(firehose_event);
-            LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
+            LAST_BROADCAST_SEQ.store(seq.as_i64(), Ordering::SeqCst);
         });
     }
     loop {
@@ -63,7 +71,10 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
         if seq_id > last_seq + 1 {
             let gap_events = state
                 .repo_repo
-                .get_events_in_seq_range(last_seq, seq_id)
+                .get_events_in_seq_range(
+                    SequenceNumber::from_raw(last_seq),
+                    SequenceNumber::from_raw(seq_id),
+                )
                 .await
                 .unwrap_or_default();
             if !gap_events.is_empty() {
@@ -72,13 +83,13 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
                     let seq = event.seq;
                     let firehose_event = to_firehose_event(event);
                     let _ = state.firehose_tx.send(firehose_event);
-                    LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
+                    LAST_BROADCAST_SEQ.store(seq.as_i64(), Ordering::SeqCst);
                 });
             }
         }
         let event = state
             .repo_repo
-            .get_event_by_seq(seq_id)
+            .get_event_by_seq(SequenceNumber::from_raw(seq_id))
             .await
             .ok()
             .flatten();
@@ -97,7 +108,7 @@ async fn listen_loop(state: AppState) -> anyhow::Result<()> {
                     warn!(seq = seq_id, error = %e, "Failed to broadcast event (no receivers?)");
                 }
             }
-            LAST_BROADCAST_SEQ.store(seq, Ordering::SeqCst);
+            LAST_BROADCAST_SEQ.store(seq.as_i64(), Ordering::SeqCst);
         } else {
             warn!(
                 seq = seq_id,

@@ -694,6 +694,12 @@ impl From<crate::storage::StorageError> for ApiError {
     }
 }
 
+impl From<crate::rate_limit::UserRateLimitError> for ApiError {
+    fn from(e: crate::rate_limit::UserRateLimitError) -> Self {
+        Self::RateLimitExceeded(e.message)
+    }
+}
+
 #[allow(clippy::result_large_err)]
 pub fn parse_did(s: &str) -> Result<tranquil_types::Did, Response> {
     s.parse()
@@ -754,5 +760,18 @@ fn extract_json_error_message(rejection: &JsonRejection) -> String {
         }
         JsonRejection::BytesRejection(_) => "Failed to read request body".to_string(),
         _ => "Invalid request body".to_string(),
+    }
+}
+
+pub trait DbResultExt<T> {
+    fn log_db_err(self, ctx: &str) -> Result<T, ApiError>;
+}
+
+impl<T, E: std::fmt::Debug> DbResultExt<T> for Result<T, E> {
+    fn log_db_err(self, ctx: &str) -> Result<T, ApiError> {
+        self.map_err(|e| {
+            tracing::error!("DB error {}: {:?}", ctx, e);
+            ApiError::DatabaseError
+        })
     }
 }

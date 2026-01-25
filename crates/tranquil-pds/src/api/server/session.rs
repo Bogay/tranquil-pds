@@ -1,8 +1,13 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::api::{EmptyResponse, SuccessResponse};
-use crate::auth::{Active, Auth, Permissive};
-use crate::state::{AppState, RateLimitKind};
+use crate::auth::{
+    Active, Auth, NormalizedLoginIdentifier, Permissive, require_legacy_session_mfa,
+    require_reauth_window,
+};
+use crate::rate_limit::{LoginLimit, RateLimited, RefreshSessionLimit};
+use crate::state::AppState;
 use crate::types::{AccountState, Did, Handle, PlainPassword};
+use crate::util::{pds_hostname, pds_hostname_without_port};
 use axum::{
     Json,
     extract::State,
@@ -13,33 +18,8 @@ use bcrypt::verify;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{error, info, warn};
+use tranquil_db_traits::{SessionId, TokenFamilyId};
 use tranquil_types::TokenId;
-
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for")
-        && let Ok(value) = forwarded.to_str()
-        && let Some(first_ip) = value.split(',').next()
-    {
-        return first_ip.trim().to_string();
-    }
-    if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str()
-    {
-        return value.trim().to_string();
-    }
-    "unknown".to_string()
-}
-
-fn normalize_handle(identifier: &str, pds_hostname: &str) -> String {
-    let identifier = identifier.trim();
-    if identifier.contains('@') || identifier.starts_with("did:") {
-        identifier.to_string()
-    } else if !identifier.contains('.') {
-        format!("{}.{}", identifier.to_lowercase(), pds_hostname)
-    } else {
-        identifier.to_lowercase()
-    }
-}
 
 fn full_handle(stored_handle: &str, _pds_hostname: &str) -> String {
     stored_handle.to_string()
@@ -75,31 +55,25 @@ pub struct CreateSessionOutput {
 
 pub async fn create_session(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    rate_limit: RateLimited<LoginLimit>,
     Json(input): Json<CreateSessionInput>,
 ) -> Response {
+    let client_ip = rate_limit.client_ip();
     info!(
         "create_session called with identifier: {}",
         input.identifier
     );
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::Login, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Login rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
-    let normalized_identifier = normalize_handle(&input.identifier, hostname_for_handles);
+    let pds_host = pds_hostname();
+    let hostname_for_handles = pds_hostname_without_port();
+    let normalized_identifier =
+        NormalizedLoginIdentifier::normalize(&input.identifier, hostname_for_handles);
     info!(
         "Normalized identifier: {} -> {}",
         input.identifier, normalized_identifier
     );
     let row = match state
         .user_repo
-        .get_login_full_by_identifier(&normalized_identifier)
+        .get_login_full_by_identifier(normalized_identifier.as_str())
         .await
     {
         Ok(Some(row)) => row,
@@ -165,8 +139,7 @@ pub async fn create_session(
         warn!("Login attempt for takendown account: {}", row.did);
         return ApiError::AccountTakedown.into_response();
     }
-    let is_verified =
-        row.email_verified || row.discord_verified || row.telegram_verified || row.signal_verified;
+    let is_verified = row.channel_verification.has_any_verified();
     let is_delegated = state
         .delegation_repo
         .is_delegated_account(&row.did)
@@ -226,7 +199,7 @@ pub async fn create_session(
         refresh_jti: refresh_meta.jti.clone(),
         access_expires_at: access_meta.expires_at,
         refresh_expires_at: refresh_meta.expires_at,
-        legacy_login: is_legacy_login,
+        login_type: tranquil_db_traits::LoginType::from(is_legacy_login),
         mfa_verified: false,
         scope: app_password_scopes.clone(),
         controller_did: app_password_controller.clone(),
@@ -246,13 +219,13 @@ pub async fn create_session(
             ip = %client_ip,
             "Legacy login on TOTP-enabled account - sending notification"
         );
-        let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let hostname = pds_hostname();
         if let Err(e) = crate::comms::comms_repo::enqueue_legacy_login(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
             row.id,
-            &hostname,
-            &client_ip,
+            hostname,
+            client_ip,
             row.preferred_comms_channel,
         )
         .await
@@ -260,7 +233,7 @@ pub async fn create_session(
             error!("Failed to queue legacy login notification: {:?}", e);
         }
     }
-    let handle = full_handle(&row.handle, &pds_hostname);
+    let handle = full_handle(&row.handle, pds_host);
     let is_active = account_state.is_active();
     let status = account_state.status_for_session().map(String::from);
     Json(CreateSessionOutput {
@@ -270,7 +243,7 @@ pub async fn create_session(
         did: row.did,
         did_doc,
         email: row.email,
-        email_confirmed: Some(row.email_verified),
+        email_confirmed: Some(row.channel_verification.email),
         active: Some(is_active),
         status,
     })
@@ -292,16 +265,17 @@ pub async fn get_session(
     );
     match db_result {
         Ok(Some(row)) => {
-            let (preferred_channel, preferred_channel_verified) = match row.preferred_comms_channel
-            {
-                tranquil_db_traits::CommsChannel::Email => ("email", row.email_verified),
-                tranquil_db_traits::CommsChannel::Discord => ("discord", row.discord_verified),
-                tranquil_db_traits::CommsChannel::Telegram => ("telegram", row.telegram_verified),
-                tranquil_db_traits::CommsChannel::Signal => ("signal", row.signal_verified),
+            let preferred_channel = match row.preferred_comms_channel {
+                tranquil_db_traits::CommsChannel::Email => "email",
+                tranquil_db_traits::CommsChannel::Discord => "discord",
+                tranquil_db_traits::CommsChannel::Telegram => "telegram",
+                tranquil_db_traits::CommsChannel::Signal => "signal",
             };
-            let pds_hostname =
-                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-            let handle = full_handle(&row.handle, &pds_hostname);
+            let preferred_channel_verified = row
+                .channel_verification
+                .is_verified(row.preferred_comms_channel);
+            let pds_hostname = pds_hostname();
+            let handle = full_handle(&row.handle, pds_hostname);
             let account_state = AccountState::from_db_fields(
                 row.deactivated_at,
                 row.takedown_ref.clone(),
@@ -313,7 +287,7 @@ pub async fn get_session(
             } else {
                 None
             };
-            let email_confirmed_value = can_read_email && row.email_verified;
+            let email_confirmed_value = can_read_email && row.channel_verification.email;
             let mut response = json!({
                 "handle": handle,
                 "did": &auth.did,
@@ -352,9 +326,10 @@ pub async fn delete_session(
     headers: axum::http::HeaderMap,
     _auth: Auth<Active>,
 ) -> Result<Response, ApiError> {
-    let extracted = crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    )
+    let extracted = crate::auth::extract_auth_token_from_header(crate::util::get_header_str(
+        &headers,
+        "Authorization",
+    ))
     .ok_or(ApiError::AuthenticationRequired)?;
     let jti = crate::auth::get_jti_from_token(&extracted.token)
         .map_err(|_| ApiError::AuthenticationFailed(None))?;
@@ -374,19 +349,13 @@ pub async fn delete_session(
 
 pub async fn refresh_session(
     State(state): State<AppState>,
+    _rate_limit: RateLimited<RefreshSessionLimit>,
     headers: axum::http::HeaderMap,
 ) -> Response {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::RefreshSession, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "Refresh session rate limit exceeded");
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
+    let extracted = match crate::auth::extract_auth_token_from_header(crate::util::get_header_str(
+        &headers,
+        "Authorization",
+    )) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
     };
@@ -503,15 +472,17 @@ pub async fn refresh_session(
     );
     match db_result {
         Ok(Some(u)) => {
-            let (preferred_channel, preferred_channel_verified) = match u.preferred_comms_channel {
-                tranquil_db_traits::CommsChannel::Email => ("email", u.email_verified),
-                tranquil_db_traits::CommsChannel::Discord => ("discord", u.discord_verified),
-                tranquil_db_traits::CommsChannel::Telegram => ("telegram", u.telegram_verified),
-                tranquil_db_traits::CommsChannel::Signal => ("signal", u.signal_verified),
+            let preferred_channel = match u.preferred_comms_channel {
+                tranquil_db_traits::CommsChannel::Email => "email",
+                tranquil_db_traits::CommsChannel::Discord => "discord",
+                tranquil_db_traits::CommsChannel::Telegram => "telegram",
+                tranquil_db_traits::CommsChannel::Signal => "signal",
             };
-            let pds_hostname =
-                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-            let handle = full_handle(&u.handle, &pds_hostname);
+            let preferred_channel_verified = u
+                .channel_verification
+                .is_verified(u.preferred_comms_channel);
+            let pds_hostname = pds_hostname();
+            let handle = full_handle(&u.handle, pds_hostname);
             let account_state =
                 AccountState::from_db_fields(u.deactivated_at, u.takedown_ref.clone(), None, None);
             let mut response = json!({
@@ -520,7 +491,7 @@ pub async fn refresh_session(
                 "handle": handle,
                 "did": session_row.did,
                 "email": u.email,
-                "emailConfirmed": u.email_verified,
+                "emailConfirmed": u.channel_verification.email,
                 "preferredChannel": preferred_channel,
                 "preferredChannelVerified": preferred_channel_verified,
                 "preferredLocale": u.preferred_locale,
@@ -664,7 +635,7 @@ pub async fn confirm_signup(
         refresh_jti: refresh_meta.jti.clone(),
         access_expires_at: access_meta.expires_at,
         refresh_expires_at: refresh_meta.expires_at,
-        legacy_login: false,
+        login_type: tranquil_db_traits::LoginType::Modern,
         mfa_verified: false,
         scope: None,
         controller_did: None,
@@ -675,12 +646,12 @@ pub async fn confirm_signup(
         return ApiError::InternalError(None).into_response();
     }
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     if let Err(e) = crate::comms::comms_repo::enqueue_welcome(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         row.id,
-        &hostname,
+        hostname,
     )
     .await
     {
@@ -731,8 +702,7 @@ pub async fn resend_verification(
             return ApiError::InternalError(None).into_response();
         }
     };
-    let is_verified =
-        row.email_verified || row.discord_verified || row.telegram_verified || row.signal_verified;
+    let is_verified = row.channel_verification.has_any_verified();
     if is_verified {
         return ApiError::InvalidRequest("Account is already verified".into()).into_response();
     }
@@ -756,14 +726,14 @@ pub async fn resend_verification(
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
         state.infra_repo.as_ref(),
         row.id,
         channel_str,
         &recipient,
         &formatted_token,
-        &hostname,
+        hostname,
     )
     .await
     {
@@ -804,19 +774,13 @@ pub async fn list_sessions(
         .session_repo
         .list_sessions_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching JWT sessions: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching JWT sessions")?;
 
     let oauth_rows = state
         .oauth_repo
         .list_sessions_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching OAuth sessions: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching OAuth sessions")?;
 
     let jwt_sessions = jwt_rows.into_iter().map(|row| SessionInfo {
         id: format!("jwt:{}", row.id),
@@ -869,43 +833,36 @@ pub async fn revoke_session(
     Json(input): Json<RevokeSessionInput>,
 ) -> Result<Response, ApiError> {
     if let Some(jwt_id) = input.session_id.strip_prefix("jwt:") {
-        let session_id: i32 = jwt_id
-            .parse()
+        let session_id = jwt_id
+            .parse::<i32>()
+            .map(SessionId::new)
             .map_err(|_| ApiError::InvalidRequest("Invalid session ID".into()))?;
         let access_jti = state
             .session_repo
             .get_session_access_jti_by_id(session_id, &auth.did)
             .await
-            .map_err(|e| {
-                error!("DB error in revoke_session: {:?}", e);
-                ApiError::InternalError(None)
-            })?
+            .log_db_err("in revoke_session")?
             .ok_or(ApiError::SessionNotFound)?;
         state
             .session_repo
             .delete_session_by_id(session_id)
             .await
-            .map_err(|e| {
-                error!("DB error deleting session: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("deleting session")?;
         let cache_key = format!("auth:session:{}:{}", &auth.did, access_jti);
         if let Err(e) = state.cache.delete(&cache_key).await {
             warn!("Failed to invalidate session cache: {:?}", e);
         }
         info!(did = %&auth.did, session_id = %session_id, "JWT session revoked");
     } else if let Some(oauth_id) = input.session_id.strip_prefix("oauth:") {
-        let session_id: i32 = oauth_id
-            .parse()
+        let session_id = oauth_id
+            .parse::<i32>()
+            .map(TokenFamilyId::new)
             .map_err(|_| ApiError::InvalidRequest("Invalid session ID".into()))?;
         let deleted = state
             .oauth_repo
             .delete_session_by_id(session_id, &auth.did)
             .await
-            .map_err(|e| {
-                error!("DB error deleting OAuth session: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("deleting OAuth session")?;
         if deleted == 0 {
             return Err(ApiError::SessionNotFound);
         }
@@ -932,36 +889,24 @@ pub async fn revoke_all_sessions(
             .session_repo
             .delete_sessions_by_did(&auth.did)
             .await
-            .map_err(|e| {
-                error!("DB error revoking JWT sessions: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("revoking JWT sessions")?;
         let jti_typed = TokenId::from(jti.clone());
         state
             .oauth_repo
             .delete_sessions_by_did_except(&auth.did, &jti_typed)
             .await
-            .map_err(|e| {
-                error!("DB error revoking OAuth sessions: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("revoking OAuth sessions")?;
     } else {
         state
             .session_repo
             .delete_sessions_by_did_except_jti(&auth.did, &jti)
             .await
-            .map_err(|e| {
-                error!("DB error revoking JWT sessions: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("revoking JWT sessions")?;
         state
             .oauth_repo
             .delete_sessions_by_did(&auth.did)
             .await
-            .map_err(|e| {
-                error!("DB error revoking OAuth sessions: {:?}", e);
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("revoking OAuth sessions")?;
     }
 
     info!(did = %&auth.did, "All other sessions revoked");
@@ -983,10 +928,7 @@ pub async fn get_legacy_login_preference(
         .user_repo
         .get_legacy_login_pref(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting legacy login pref")?
         .ok_or(ApiError::AccountNotFound)?;
     Ok(Json(LegacyLoginPreferenceOutput {
         allow_legacy_login: pref.allow_legacy_login,
@@ -1006,38 +948,26 @@ pub async fn update_legacy_login_preference(
     auth: Auth<Active>,
     Json(input): Json<UpdateLegacyLoginInput>,
 ) -> Result<Response, ApiError> {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
-    {
-        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
-    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.did).await {
-        return Ok(crate::api::server::reauth::reauth_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    let reauth_mfa = match require_reauth_window(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
     let updated = state
         .user_repo
-        .update_legacy_login(&auth.did, input.allow_legacy_login)
+        .update_legacy_login(reauth_mfa.did(), input.allow_legacy_login)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating legacy login")?;
     if !updated {
         return Err(ApiError::AccountNotFound);
     }
     info!(
-        did = %&auth.did,
+        did = %session_mfa.did(),
         allow_legacy_login = input.allow_legacy_login,
         "Legacy login preference updated"
     );
@@ -1071,10 +1001,7 @@ pub async fn update_locale(
         .user_repo
         .update_locale(&auth.did, &input.preferred_locale)
         .await
-        .map_err(|e| {
-            error!("DB error updating locale: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating locale")?;
     if !updated {
         return Err(ApiError::AccountNotFound);
     }

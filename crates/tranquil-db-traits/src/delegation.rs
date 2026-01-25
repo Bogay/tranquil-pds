@@ -5,13 +5,14 @@ use tranquil_types::{Did, Handle};
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::scope::DbScope;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegationGrant {
     pub id: Uuid,
     pub delegated_did: Did,
     pub controller_did: Did,
-    pub granted_scopes: String,
+    pub granted_scopes: DbScope,
     pub granted_at: DateTime<Utc>,
     pub granted_by: Did,
     pub revoked_at: Option<DateTime<Utc>>,
@@ -22,7 +23,7 @@ pub struct DelegationGrant {
 pub struct DelegatedAccountInfo {
     pub did: Did,
     pub handle: Handle,
-    pub granted_scopes: String,
+    pub granted_scopes: DbScope,
     pub granted_at: DateTime<Utc>,
 }
 
@@ -30,7 +31,7 @@ pub struct DelegatedAccountInfo {
 pub struct ControllerInfo {
     pub did: Did,
     pub handle: Handle,
-    pub granted_scopes: String,
+    pub granted_scopes: DbScope,
     pub granted_at: DateTime<Utc>,
     pub is_active: bool,
 }
@@ -67,7 +68,7 @@ pub trait DelegationRepository: Send + Sync {
         &self,
         delegated_did: &Did,
         controller_did: &Did,
-        granted_scopes: &str,
+        granted_scopes: &DbScope,
         granted_by: &Did,
     ) -> Result<Uuid, DbError>;
 
@@ -82,7 +83,7 @@ pub trait DelegationRepository: Send + Sync {
         &self,
         delegated_did: &Did,
         controller_did: &Did,
-        new_scopes: &str,
+        new_scopes: &DbScope,
     ) -> Result<bool, DbError>;
 
     async fn get_delegation(

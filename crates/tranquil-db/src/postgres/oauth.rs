@@ -4,11 +4,12 @@ use rand::Rng;
 use sqlx::PgPool;
 use tranquil_db_traits::{
     DbError, DeviceAccountRow, DeviceTrustInfo, OAuthRepository, OAuthSessionListItem,
-    ScopePreference, TrustedDeviceRow, TwoFactorChallenge,
+    ScopePreference, TokenFamilyId, TrustedDeviceRow, TwoFactorChallenge,
 };
 use tranquil_oauth::{
-    AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, DeviceData, RequestData,
-    TokenData,
+    AuthorizationRequestParameters, AuthorizedClientData, ClientAuth, Code as OAuthCode,
+    DeviceData, DeviceId as OAuthDeviceId, RefreshToken as OAuthRefreshToken, RequestData,
+    SessionId as OAuthSessionId, TokenData, TokenId as OAuthTokenId,
 };
 use tranquil_types::{
     AuthorizationCode, ClientId, DPoPProofId, DeviceId, Did, Handle, RefreshToken, RequestId,
@@ -48,7 +49,7 @@ const REFRESH_GRACE_PERIOD_SECS: i64 = 60;
 
 #[async_trait]
 impl OAuthRepository for PostgresOAuthRepository {
-    async fn create_token(&self, data: &TokenData) -> Result<i32, DbError> {
+    async fn create_token(&self, data: &TokenData) -> Result<TokenFamilyId, DbError> {
         let client_auth_json = to_json(&data.client_auth)?;
         let parameters_json = to_json(&data.parameters)?;
         let row = sqlx::query!(
@@ -59,25 +60,25 @@ impl OAuthRepository for PostgresOAuthRepository {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING id
             "#,
-            data.did,
-            data.token_id,
+            data.did.as_str(),
+            &data.token_id.0,
             data.created_at,
             data.updated_at,
             data.expires_at,
             data.client_id,
             client_auth_json,
-            data.device_id,
+            data.device_id.as_ref().map(|d| d.0.as_str()),
             parameters_json,
             data.details,
-            data.code,
-            data.current_refresh_token,
+            data.code.as_ref().map(|c| c.0.as_str()),
+            data.current_refresh_token.as_ref().map(|r| r.0.as_str()),
             data.scope,
-            data.controller_did,
+            data.controller_did.as_ref().map(|d| d.as_str()),
         )
         .fetch_one(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row.id)
+        Ok(TokenFamilyId::new(row.id))
     }
 
     async fn get_token_by_id(&self, token_id: &TokenId) -> Result<Option<TokenData>, DbError> {
@@ -95,20 +96,27 @@ impl OAuthRepository for PostgresOAuthRepository {
         .map_err(map_sqlx_error)?;
         match row {
             Some(r) => Ok(Some(TokenData {
-                did: r.did,
-                token_id: r.token_id,
+                did: r
+                    .did
+                    .parse()
+                    .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                token_id: OAuthTokenId(r.token_id),
                 created_at: r.created_at,
                 updated_at: r.updated_at,
                 expires_at: r.expires_at,
                 client_id: r.client_id,
                 client_auth: from_json(r.client_auth)?,
-                device_id: r.device_id,
+                device_id: r.device_id.map(OAuthDeviceId),
                 parameters: from_json(r.parameters)?,
                 details: r.details,
-                code: r.code,
-                current_refresh_token: r.current_refresh_token,
+                code: r.code.map(OAuthCode),
+                current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
                 scope: r.scope,
-                controller_did: r.controller_did,
+                controller_did: r
+                    .controller_did
+                    .map(|s| s.parse())
+                    .transpose()
+                    .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
             })),
             None => Ok(None),
         }
@@ -117,7 +125,7 @@ impl OAuthRepository for PostgresOAuthRepository {
     async fn get_token_by_refresh_token(
         &self,
         refresh_token: &RefreshToken,
-    ) -> Result<Option<(i32, TokenData)>, DbError> {
+    ) -> Result<Option<(TokenFamilyId, TokenData)>, DbError> {
         let row = sqlx::query!(
             r#"
             SELECT id, did, token_id, created_at, updated_at, expires_at, client_id, client_auth,
@@ -132,22 +140,29 @@ impl OAuthRepository for PostgresOAuthRepository {
         .map_err(map_sqlx_error)?;
         match row {
             Some(r) => Ok(Some((
-                r.id,
+                TokenFamilyId::new(r.id),
                 TokenData {
-                    did: r.did,
-                    token_id: r.token_id,
+                    did: r
+                        .did
+                        .parse()
+                        .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                    token_id: OAuthTokenId(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                     expires_at: r.expires_at,
                     client_id: r.client_id,
                     client_auth: from_json(r.client_auth)?,
-                    device_id: r.device_id,
+                    device_id: r.device_id.map(OAuthDeviceId),
                     parameters: from_json(r.parameters)?,
                     details: r.details,
-                    code: r.code,
-                    current_refresh_token: r.current_refresh_token,
+                    code: r.code.map(OAuthCode),
+                    current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
                     scope: r.scope,
-                    controller_did: r.controller_did,
+                    controller_did: r
+                        .controller_did
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
                 },
             ))),
             None => Ok(None),
@@ -157,7 +172,7 @@ impl OAuthRepository for PostgresOAuthRepository {
     async fn get_token_by_previous_refresh_token(
         &self,
         refresh_token: &RefreshToken,
-    ) -> Result<Option<(i32, TokenData)>, DbError> {
+    ) -> Result<Option<(TokenFamilyId, TokenData)>, DbError> {
         let grace_cutoff = Utc::now() - Duration::seconds(REFRESH_GRACE_PERIOD_SECS);
         let row = sqlx::query!(
             r#"
@@ -174,22 +189,29 @@ impl OAuthRepository for PostgresOAuthRepository {
         .map_err(map_sqlx_error)?;
         match row {
             Some(r) => Ok(Some((
-                r.id,
+                TokenFamilyId::new(r.id),
                 TokenData {
-                    did: r.did,
-                    token_id: r.token_id,
+                    did: r
+                        .did
+                        .parse()
+                        .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                    token_id: OAuthTokenId(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                     expires_at: r.expires_at,
                     client_id: r.client_id,
                     client_auth: from_json(r.client_auth)?,
-                    device_id: r.device_id,
+                    device_id: r.device_id.map(OAuthDeviceId),
                     parameters: from_json(r.parameters)?,
                     details: r.details,
-                    code: r.code,
-                    current_refresh_token: r.current_refresh_token,
+                    code: r.code.map(OAuthCode),
+                    current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
                     scope: r.scope,
-                    controller_did: r.controller_did,
+                    controller_did: r
+                        .controller_did
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
                 },
             ))),
             None => Ok(None),
@@ -198,7 +220,7 @@ impl OAuthRepository for PostgresOAuthRepository {
 
     async fn rotate_token(
         &self,
-        old_db_id: i32,
+        old_db_id: TokenFamilyId,
         new_refresh_token: &RefreshToken,
         new_expires_at: DateTime<Utc>,
     ) -> Result<(), DbError> {
@@ -207,7 +229,7 @@ impl OAuthRepository for PostgresOAuthRepository {
             r#"
             SELECT current_refresh_token FROM oauth_token WHERE id = $1
             "#,
-            old_db_id
+            old_db_id.as_i32()
         )
         .fetch_one(&mut *tx)
         .await
@@ -219,7 +241,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                 VALUES ($1, $2)
                 "#,
                 old_rt,
-                old_db_id
+                old_db_id.as_i32()
             )
             .execute(&mut *tx)
             .await
@@ -232,7 +254,7 @@ impl OAuthRepository for PostgresOAuthRepository {
                 previous_refresh_token = $4, rotated_at = NOW()
             WHERE id = $1
             "#,
-            old_db_id,
+            old_db_id.as_i32(),
             new_refresh_token.as_str(),
             new_expires_at,
             old_refresh
@@ -247,7 +269,7 @@ impl OAuthRepository for PostgresOAuthRepository {
     async fn check_refresh_token_used(
         &self,
         refresh_token: &RefreshToken,
-    ) -> Result<Option<i32>, DbError> {
+    ) -> Result<Option<TokenFamilyId>, DbError> {
         let row = sqlx::query_scalar!(
             r#"
             SELECT token_id FROM oauth_used_refresh_token WHERE refresh_token = $1
@@ -257,7 +279,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
-        Ok(row)
+        Ok(row.map(TokenFamilyId::new))
     }
 
     async fn delete_token(&self, token_id: &TokenId) -> Result<(), DbError> {
@@ -273,12 +295,12 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(())
     }
 
-    async fn delete_token_family(&self, db_id: i32) -> Result<(), DbError> {
+    async fn delete_token_family(&self, db_id: TokenFamilyId) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             DELETE FROM oauth_token WHERE id = $1
             "#,
-            db_id
+            db_id.as_i32()
         )
         .execute(&self.pool)
         .await
@@ -302,20 +324,27 @@ impl OAuthRepository for PostgresOAuthRepository {
         rows.into_iter()
             .map(|r| {
                 Ok(TokenData {
-                    did: r.did,
-                    token_id: r.token_id,
+                    did: r
+                        .did
+                        .parse()
+                        .map_err(|_| DbError::Other("Invalid DID in token".into()))?,
+                    token_id: OAuthTokenId(r.token_id),
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                     expires_at: r.expires_at,
                     client_id: r.client_id,
                     client_auth: from_json(r.client_auth)?,
-                    device_id: r.device_id,
+                    device_id: r.device_id.map(OAuthDeviceId),
                     parameters: from_json(r.parameters)?,
                     details: r.details,
-                    code: r.code,
-                    current_refresh_token: r.current_refresh_token,
+                    code: r.code.map(OAuthCode),
+                    current_refresh_token: r.current_refresh_token.map(OAuthRefreshToken),
                     scope: r.scope,
-                    controller_did: r.controller_did,
+                    controller_did: r
+                        .controller_did
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| DbError::Other("Invalid controller DID".into()))?,
                 })
             })
             .collect()
@@ -407,13 +436,13 @@ impl OAuthRepository for PostgresOAuthRepository {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#,
             request_id.as_str(),
-            data.did,
-            data.device_id,
+            data.did.as_ref().map(|d| d.as_str()),
+            data.device_id.as_ref().map(|d| d.0.as_str()),
             data.client_id,
             client_auth_json,
             parameters_json,
             data.expires_at,
-            data.code,
+            data.code.as_ref().map(|c| c.0.as_str()),
         )
         .execute(&self.pool)
         .await
@@ -448,10 +477,18 @@ impl OAuthRepository for PostgresOAuthRepository {
                     client_auth,
                     parameters,
                     expires_at: r.expires_at,
-                    did: r.did,
-                    device_id: r.device_id,
-                    code: r.code,
-                    controller_did: r.controller_did,
+                    did: r
+                        .did
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| DbError::Other("Invalid DID in DB".into()))?,
+                    device_id: r.device_id.map(OAuthDeviceId),
+                    code: r.code.map(OAuthCode),
+                    controller_did: r
+                        .controller_did
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| DbError::Other("Invalid controller DID in DB".into()))?,
                 }))
             }
             None => Ok(None),
@@ -534,10 +571,18 @@ impl OAuthRepository for PostgresOAuthRepository {
                     client_auth,
                     parameters,
                     expires_at: r.expires_at,
-                    did: r.did,
-                    device_id: r.device_id,
-                    code: r.code,
-                    controller_did: r.controller_did,
+                    did: r
+                        .did
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| DbError::Other("Invalid DID in DB".into()))?,
+                    device_id: r.device_id.map(OAuthDeviceId),
+                    code: r.code.map(OAuthCode),
+                    controller_did: r
+                        .controller_did
+                        .map(|s| s.parse())
+                        .transpose()
+                        .map_err(|_| DbError::Other("Invalid controller DID in DB".into()))?,
                 }))
             }
             None => Ok(None),
@@ -655,7 +700,7 @@ impl OAuthRepository for PostgresOAuthRepository {
             VALUES ($1, $2, $3, $4, $5)
             "#,
             device_id.as_str(),
-            data.session_id,
+            &data.session_id.0,
             data.user_agent,
             data.ip_address,
             data.last_seen_at,
@@ -679,7 +724,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         .await
         .map_err(map_sqlx_error)?;
         Ok(row.map(|r| DeviceData {
-            session_id: r.session_id,
+            session_id: OAuthSessionId(r.session_id),
             user_agent: r.user_agent,
             ip_address: r.ip_address,
             last_seen_at: r.last_seen_at,
@@ -1207,7 +1252,7 @@ impl OAuthRepository for PostgresOAuthRepository {
         Ok(rows
             .into_iter()
             .map(|r| OAuthSessionListItem {
-                id: r.id,
+                id: TokenFamilyId::new(r.id),
                 token_id: TokenId::from(r.token_id),
                 created_at: r.created_at,
                 expires_at: r.expires_at,
@@ -1216,10 +1261,14 @@ impl OAuthRepository for PostgresOAuthRepository {
             .collect())
     }
 
-    async fn delete_session_by_id(&self, session_id: i32, did: &Did) -> Result<u64, DbError> {
+    async fn delete_session_by_id(
+        &self,
+        session_id: TokenFamilyId,
+        did: &Did,
+    ) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "DELETE FROM oauth_token WHERE id = $1 AND did = $2",
-            session_id,
+            session_id.as_i32(),
             did.as_str()
         )
         .execute(&self.pool)

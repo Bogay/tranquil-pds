@@ -1,5 +1,5 @@
 use crate::api::EmptyResponse;
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use axum::{
@@ -91,10 +91,7 @@ pub async fn get_invite_codes(
         .infra_repo
         .list_invite_codes(params.cursor.as_deref(), limit, sort_order)
         .await
-        .map_err(|e| {
-            error!("DB error fetching invite codes: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching invite codes")?;
 
     let user_ids: Vec<uuid::Uuid> = codes_rows.iter().map(|r| r.created_by_user).collect();
     let code_strings: Vec<String> = codes_rows.iter().map(|r| r.code.clone()).collect();
@@ -138,7 +135,7 @@ pub async fn get_invite_codes(
             InviteCodeInfo {
                 code: r.code.clone(),
                 available: r.available_uses,
-                disabled: r.disabled.unwrap_or(false),
+                disabled: r.state().is_disabled(),
                 for_account: creator_did.clone(),
                 created_by: creator_did,
                 created_at: r.created_at.to_rfc3339(),

@@ -5,12 +5,12 @@ use jacquard_repo::storage::BlockStore;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch;
 use tokio::time::interval;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_db_traits::{
-    BackupRepository, BlobRepository, BrokenGenesisCommit, RepoRepository, SsoRepository,
-    UserRepository,
+    BackupRepository, BlobRepository, BrokenGenesisCommit, RepoRepository, SequenceNumber,
+    SsoRepository, UserRepository,
 };
 use tranquil_types::{AtUri, CidLink, Did};
 
@@ -22,7 +22,7 @@ async fn process_genesis_commit(
     repo_repo: &dyn RepoRepository,
     block_store: &PostgresBlockStore,
     row: BrokenGenesisCommit,
-) -> Result<(Did, i64), (i64, &'static str)> {
+) -> Result<(Did, SequenceNumber), (SequenceNumber, &'static str)> {
     let commit_cid_str = row.commit_cid.ok_or((row.seq, "missing commit_cid"))?;
     let commit_cid = Cid::from_str(&commit_cid_str).map_err(|_| (row.seq, "invalid CID"))?;
     let block = block_store
@@ -73,12 +73,12 @@ pub async fn backfill_genesis_commit_blocks(
 
     let (success, failed) = results.iter().fold((0, 0), |(s, f), r| match r {
         Ok((did, seq)) => {
-            info!(seq = seq, did = %did, "Fixed genesis commit blocks_cids");
+            info!(seq = seq.as_i64(), did = %did, "Fixed genesis commit blocks_cids");
             (s + 1, f)
         }
         Err((seq, reason)) => {
             warn!(
-                seq = seq,
+                seq = seq.as_i64(),
                 reason = reason,
                 "Failed to process genesis commit"
             );
@@ -314,7 +314,7 @@ async fn process_record_blobs(
                             record.collection.as_str(),
                             record.rkey.as_str(),
                         );
-                        (record_uri, CidLink::new_unchecked(blob_ref.cid))
+                        (record_uri, unsafe { CidLink::new_unchecked(blob_ref.cid) })
                     })
                     .collect::<Vec<_>>(),
             )
@@ -392,7 +392,7 @@ pub async fn start_scheduled_tasks(
     blob_repo: Arc<dyn BlobRepository>,
     blob_store: Arc<dyn BlobStorage>,
     sso_repo: Arc<dyn SsoRepository>,
-    mut shutdown_rx: watch::Receiver<bool>,
+    shutdown: CancellationToken,
 ) {
     let check_interval = Duration::from_secs(
         std::env::var("SCHEDULED_DELETE_CHECK_INTERVAL_SECS")
@@ -411,11 +411,9 @@ pub async fn start_scheduled_tasks(
 
     loop {
         tokio::select! {
-            _ = shutdown_rx.changed() => {
-                if *shutdown_rx.borrow() {
-                    info!("Scheduled tasks service shutting down");
-                    break;
-                }
+            _ = shutdown.cancelled() => {
+                info!("Scheduled tasks service shutting down");
+                break;
             }
             _ = ticker.tick() => {
                 if let Err(e) = process_scheduled_deletions(
@@ -538,7 +536,7 @@ pub async fn start_backup_tasks(
     backup_repo: Arc<dyn BackupRepository>,
     block_store: PostgresBlockStore,
     backup_storage: Arc<dyn BackupStorage>,
-    mut shutdown_rx: watch::Receiver<bool>,
+    shutdown: CancellationToken,
 ) {
     let backup_interval = Duration::from_secs(backup_interval_secs());
 
@@ -553,11 +551,9 @@ pub async fn start_backup_tasks(
 
     loop {
         tokio::select! {
-            _ = shutdown_rx.changed() => {
-                if *shutdown_rx.borrow() {
-                    info!("Backup service shutting down");
-                    break;
-                }
+            _ = shutdown.cancelled() => {
+                info!("Backup service shutting down");
+                break;
             }
             _ = ticker.tick() => {
                 if let Err(e) = process_scheduled_backups(

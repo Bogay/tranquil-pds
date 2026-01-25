@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tranquil_db_traits::{
-    BrokenGenesisCommit, CommitEventData, DbError, EventBlocksCids, FullRecordInfo, ImportBlock,
-    ImportRecord, ImportRepoError, RecordInfo, RecordWithTakedown, RepoAccountInfo, RepoInfo,
-    RepoListItem, RepoRepository, RepoWithoutRev, SequencedEvent, UserNeedingRecordBlobsBackfill,
-    UserWithoutBlocks,
+    AccountStatus, BrokenGenesisCommit, CommitEventData, DbError, EventBlocksCids, FullRecordInfo,
+    ImportBlock, ImportRecord, ImportRepoError, RecordInfo, RecordWithTakedown, RepoAccountInfo,
+    RepoEventType, RepoInfo, RepoListItem, RepoRepository, RepoWithoutRev, SequenceNumber,
+    SequencedEvent, UserNeedingRecordBlobsBackfill, UserWithoutBlocks,
 };
 use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey};
 use uuid::Uuid;
@@ -21,7 +21,7 @@ struct SequencedEventRow {
     seq: i64,
     did: String,
     created_at: DateTime<Utc>,
-    event_type: String,
+    event_type: RepoEventType,
     commit_cid: Option<String>,
     prev_cid: Option<String>,
     prev_data_cid: Option<String>,
@@ -627,7 +627,7 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(rows.into_iter().map(|(cid,)| cid).collect())
     }
 
-    async fn insert_commit_event(&self, data: &CommitEventData) -> Result<i64, DbError> {
+    async fn insert_commit_event(&self, data: &CommitEventData) -> Result<SequenceNumber, DbError> {
         let seq = sqlx::query_scalar!(
             r#"
             INSERT INTO repo_seq (did, event_type, commit_cid, prev_cid, ops, blobs, blocks_cids, prev_data_cid, rev)
@@ -635,7 +635,7 @@ impl RepoRepository for PostgresRepoRepository {
             RETURNING seq
             "#,
             data.did.as_str(),
-            data.event_type,
+            data.event_type.as_str(),
             data.commit_cid.as_ref().map(|c| c.as_str()),
             data.prev_cid.as_ref().map(|c| c.as_str()),
             data.ops,
@@ -648,14 +648,14 @@ impl RepoRepository for PostgresRepoRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(seq)
+        Ok(seq.into())
     }
 
     async fn insert_identity_event(
         &self,
         did: &Did,
         handle: Option<&Handle>,
-    ) -> Result<i64, DbError> {
+    ) -> Result<SequenceNumber, DbError> {
         let handle_str = handle.map(|h| h.as_str());
         let seq = sqlx::query_scalar!(
             r#"
@@ -675,15 +675,16 @@ impl RepoRepository for PostgresRepoRepository {
             .await
             .map_err(map_sqlx_error)?;
 
-        Ok(seq)
+        Ok(seq.into())
     }
 
     async fn insert_account_event(
         &self,
         did: &Did,
-        active: bool,
-        status: Option<&str>,
-    ) -> Result<i64, DbError> {
+        status: AccountStatus,
+    ) -> Result<SequenceNumber, DbError> {
+        let active = status.is_active();
+        let status_str = status.for_firehose();
         let seq = sqlx::query_scalar!(
             r#"
             INSERT INTO repo_seq (did, event_type, active, status)
@@ -692,7 +693,7 @@ impl RepoRepository for PostgresRepoRepository {
             "#,
             did.as_str(),
             active,
-            status
+            status_str
         )
         .fetch_one(&self.pool)
         .await
@@ -703,7 +704,7 @@ impl RepoRepository for PostgresRepoRepository {
             .await
             .map_err(map_sqlx_error)?;
 
-        Ok(seq)
+        Ok(seq.into())
     }
 
     async fn insert_sync_event(
@@ -711,7 +712,7 @@ impl RepoRepository for PostgresRepoRepository {
         did: &Did,
         commit_cid: &CidLink,
         rev: Option<&str>,
-    ) -> Result<i64, DbError> {
+    ) -> Result<SequenceNumber, DbError> {
         let seq = sqlx::query_scalar!(
             r#"
             INSERT INTO repo_seq (did, event_type, commit_cid, rev)
@@ -731,7 +732,7 @@ impl RepoRepository for PostgresRepoRepository {
             .await
             .map_err(map_sqlx_error)?;
 
-        Ok(seq)
+        Ok(seq.into())
     }
 
     async fn insert_genesis_commit_event(
@@ -740,7 +741,7 @@ impl RepoRepository for PostgresRepoRepository {
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
         rev: &str,
-    ) -> Result<i64, DbError> {
+    ) -> Result<SequenceNumber, DbError> {
         let ops = serde_json::json!([]);
         let blobs: Vec<String> = vec![];
         let blocks_cids: Vec<String> = vec![mst_root_cid.to_string(), commit_cid.to_string()];
@@ -769,18 +770,18 @@ impl RepoRepository for PostgresRepoRepository {
             .await
             .map_err(map_sqlx_error)?;
 
-        Ok(seq)
+        Ok(seq.into())
     }
 
     async fn update_seq_blocks_cids(
         &self,
-        seq: i64,
+        seq: SequenceNumber,
         blocks_cids: &[String],
     ) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE repo_seq SET blocks_cids = $1 WHERE seq = $2",
             blocks_cids,
-            seq
+            seq.as_i64()
         )
         .execute(&self.pool)
         .await
@@ -789,11 +790,15 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(())
     }
 
-    async fn delete_sequences_except(&self, did: &Did, keep_seq: i64) -> Result<(), DbError> {
+    async fn delete_sequences_except(
+        &self,
+        did: &Did,
+        keep_seq: SequenceNumber,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "DELETE FROM repo_seq WHERE did = $1 AND seq != $2",
             did.as_str(),
-            keep_seq
+            keep_seq.as_i64()
         )
         .execute(&self.pool)
         .await
@@ -802,16 +807,19 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(())
     }
 
-    async fn get_max_seq(&self) -> Result<i64, DbError> {
+    async fn get_max_seq(&self) -> Result<SequenceNumber, DbError> {
         let seq = sqlx::query_scalar!(r#"SELECT COALESCE(MAX(seq), 0) as "max!" FROM repo_seq"#)
             .fetch_one(&self.pool)
             .await
             .map_err(map_sqlx_error)?;
 
-        Ok(seq)
+        Ok(seq.into())
     }
 
-    async fn get_min_seq_since(&self, since: DateTime<Utc>) -> Result<Option<i64>, DbError> {
+    async fn get_min_seq_since(
+        &self,
+        since: DateTime<Utc>,
+    ) -> Result<Option<SequenceNumber>, DbError> {
         let seq = sqlx::query_scalar!(
             "SELECT MIN(seq) FROM repo_seq WHERE created_at >= $1",
             since
@@ -820,7 +828,7 @@ impl RepoRepository for PostgresRepoRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(seq)
+        Ok(seq.map(SequenceNumber::from))
     }
 
     async fn get_account_with_repo(&self, did: &Did) -> Result<Option<RepoAccountInfo>, DbError> {
@@ -846,36 +854,43 @@ impl RepoRepository for PostgresRepoRepository {
 
     async fn get_events_since_seq(
         &self,
-        since_seq: i64,
+        since_seq: SequenceNumber,
         limit: Option<i64>,
     ) -> Result<Vec<SequencedEvent>, DbError> {
-        let map_row = |r: SequencedEventRow| SequencedEvent {
-            seq: r.seq,
-            did: Did::from(r.did),
-            created_at: r.created_at,
-            event_type: r.event_type,
-            commit_cid: r.commit_cid.map(CidLink::from),
-            prev_cid: r.prev_cid.map(CidLink::from),
-            prev_data_cid: r.prev_data_cid.map(CidLink::from),
-            ops: r.ops,
-            blobs: r.blobs,
-            blocks_cids: r.blocks_cids,
-            handle: r.handle.map(Handle::from),
-            active: r.active,
-            status: r.status,
-            rev: r.rev,
+        let map_row = |r: SequencedEventRow| {
+            let status = r
+                .status
+                .as_deref()
+                .and_then(AccountStatus::parse)
+                .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
+            SequencedEvent {
+                seq: r.seq.into(),
+                did: Did::from(r.did),
+                created_at: r.created_at,
+                event_type: r.event_type,
+                commit_cid: r.commit_cid.map(CidLink::from),
+                prev_cid: r.prev_cid.map(CidLink::from),
+                prev_data_cid: r.prev_data_cid.map(CidLink::from),
+                ops: r.ops,
+                blobs: r.blobs,
+                blocks_cids: r.blocks_cids,
+                handle: r.handle.map(Handle::from),
+                active: r.active,
+                status,
+                rev: r.rev,
+            }
         };
         match limit {
             Some(lim) => {
                 let rows = sqlx::query_as!(
                     SequencedEventRow,
-                    r#"SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid,
+                    r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
                               ops, blobs, blocks_cids, handle, active, status, rev
                        FROM repo_seq
                        WHERE seq > $1
                        ORDER BY seq ASC
                        LIMIT $2"#,
-                    since_seq,
+                    since_seq.as_i64(),
                     lim
                 )
                 .fetch_all(&self.pool)
@@ -886,12 +901,12 @@ impl RepoRepository for PostgresRepoRepository {
             None => {
                 let rows = sqlx::query_as!(
                     SequencedEventRow,
-                    r#"SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid,
+                    r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
                               ops, blobs, blocks_cids, handle, active, status, rev
                        FROM repo_seq
                        WHERE seq > $1
                        ORDER BY seq ASC"#,
-                    since_seq
+                    since_seq.as_i64()
                 )
                 .fetch_all(&self.pool)
                 .await
@@ -903,25 +918,71 @@ impl RepoRepository for PostgresRepoRepository {
 
     async fn get_events_in_seq_range(
         &self,
-        start_seq: i64,
-        end_seq: i64,
+        start_seq: SequenceNumber,
+        end_seq: SequenceNumber,
     ) -> Result<Vec<SequencedEvent>, DbError> {
         let rows = sqlx::query!(
-            r#"SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid,
+            r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
                       ops, blobs, blocks_cids, handle, active, status, rev
                FROM repo_seq
                WHERE seq > $1 AND seq < $2
                ORDER BY seq ASC"#,
-            start_seq,
-            end_seq
+            start_seq.as_i64(),
+            end_seq.as_i64()
         )
         .fetch_all(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
         Ok(rows
             .into_iter()
-            .map(|r| SequencedEvent {
-                seq: r.seq,
+            .map(|r| {
+                let status = r
+                    .status
+                    .as_deref()
+                    .and_then(AccountStatus::parse)
+                    .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
+                SequencedEvent {
+                    seq: r.seq.into(),
+                    did: Did::from(r.did),
+                    created_at: r.created_at,
+                    event_type: r.event_type,
+                    commit_cid: r.commit_cid.map(CidLink::from),
+                    prev_cid: r.prev_cid.map(CidLink::from),
+                    prev_data_cid: r.prev_data_cid.map(CidLink::from),
+                    ops: r.ops,
+                    blobs: r.blobs,
+                    blocks_cids: r.blocks_cids,
+                    handle: r.handle.map(Handle::from),
+                    active: r.active,
+                    status,
+                    rev: r.rev,
+                }
+            })
+            .collect())
+    }
+
+    async fn get_event_by_seq(
+        &self,
+        seq: SequenceNumber,
+    ) -> Result<Option<SequencedEvent>, DbError> {
+        let row = sqlx::query!(
+            r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
+                      ops, blobs, blocks_cids, handle, active, status, rev
+               FROM repo_seq
+               WHERE seq = $1"#,
+            seq.as_i64()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(row.map(|r| {
+            let status = r
+                .status
+                .as_deref()
+                .and_then(AccountStatus::parse)
+                .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
+            SequencedEvent {
+                seq: r.seq.into(),
                 did: Did::from(r.did),
                 created_at: r.created_at,
                 event_type: r.event_type,
@@ -933,54 +994,25 @@ impl RepoRepository for PostgresRepoRepository {
                 blocks_cids: r.blocks_cids,
                 handle: r.handle.map(Handle::from),
                 active: r.active,
-                status: r.status,
+                status,
                 rev: r.rev,
-            })
-            .collect())
-    }
-
-    async fn get_event_by_seq(&self, seq: i64) -> Result<Option<SequencedEvent>, DbError> {
-        let row = sqlx::query!(
-            r#"SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid,
-                      ops, blobs, blocks_cids, handle, active, status, rev
-               FROM repo_seq
-               WHERE seq = $1"#,
-            seq
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_error)?;
-        Ok(row.map(|r| SequencedEvent {
-            seq: r.seq,
-            did: Did::from(r.did),
-            created_at: r.created_at,
-            event_type: r.event_type,
-            commit_cid: r.commit_cid.map(CidLink::from),
-            prev_cid: r.prev_cid.map(CidLink::from),
-            prev_data_cid: r.prev_data_cid.map(CidLink::from),
-            ops: r.ops,
-            blobs: r.blobs,
-            blocks_cids: r.blocks_cids,
-            handle: r.handle.map(Handle::from),
-            active: r.active,
-            status: r.status,
-            rev: r.rev,
+            }
         }))
     }
 
     async fn get_events_since_cursor(
         &self,
-        cursor: i64,
+        cursor: SequenceNumber,
         limit: i64,
     ) -> Result<Vec<SequencedEvent>, DbError> {
         let rows = sqlx::query!(
-            r#"SELECT seq, did, created_at, event_type, commit_cid, prev_cid, prev_data_cid,
+            r#"SELECT seq, did, created_at, event_type as "event_type: RepoEventType", commit_cid, prev_cid, prev_data_cid,
                       ops, blobs, blocks_cids, handle, active, status, rev
                FROM repo_seq
                WHERE seq > $1
                ORDER BY seq ASC
                LIMIT $2"#,
-            cursor,
+            cursor.as_i64(),
             limit
         )
         .fetch_all(&self.pool)
@@ -988,21 +1020,28 @@ impl RepoRepository for PostgresRepoRepository {
         .map_err(map_sqlx_error)?;
         Ok(rows
             .into_iter()
-            .map(|r| SequencedEvent {
-                seq: r.seq,
-                did: Did::from(r.did),
-                created_at: r.created_at,
-                event_type: r.event_type,
-                commit_cid: r.commit_cid.map(CidLink::from),
-                prev_cid: r.prev_cid.map(CidLink::from),
-                prev_data_cid: r.prev_data_cid.map(CidLink::from),
-                ops: r.ops,
-                blobs: r.blobs,
-                blocks_cids: r.blocks_cids,
-                handle: r.handle.map(Handle::from),
-                active: r.active,
-                status: r.status,
-                rev: r.rev,
+            .map(|r| {
+                let status = r
+                    .status
+                    .as_deref()
+                    .and_then(AccountStatus::parse)
+                    .or_else(|| r.active.filter(|a| *a).map(|_| AccountStatus::Active));
+                SequencedEvent {
+                    seq: r.seq.into(),
+                    did: Did::from(r.did),
+                    created_at: r.created_at,
+                    event_type: r.event_type,
+                    commit_cid: r.commit_cid.map(CidLink::from),
+                    prev_cid: r.prev_cid.map(CidLink::from),
+                    prev_data_cid: r.prev_data_cid.map(CidLink::from),
+                    ops: r.ops,
+                    blobs: r.blobs,
+                    blocks_cids: r.blocks_cids,
+                    handle: r.handle.map(Handle::from),
+                    active: r.active,
+                    status,
+                    rev: r.rev,
+                }
             })
             .collect())
     }
@@ -1079,8 +1118,8 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(cid.map(CidLink::from))
     }
 
-    async fn notify_update(&self, seq: i64) -> Result<(), DbError> {
-        sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq))
+    async fn notify_update(&self, seq: SequenceNumber) -> Result<(), DbError> {
+        sqlx::query(&format!("NOTIFY repo_updates, '{}'", seq.as_i64()))
             .execute(&self.pool)
             .await
             .map_err(map_sqlx_error)?;
@@ -1329,7 +1368,7 @@ impl RepoRepository for PostgresRepoRepository {
             "#,
         )
         .bind(&event.did)
-        .bind(&event.event_type)
+        .bind(event.event_type.as_str())
         .bind(&event.commit_cid)
         .bind(&event.prev_cid)
         .bind(&event.ops)
@@ -1375,7 +1414,7 @@ impl RepoRepository for PostgresRepoRepository {
         Ok(rows
             .into_iter()
             .map(|r| BrokenGenesisCommit {
-                seq: r.seq,
+                seq: r.seq.into(),
                 did: Did::from(r.did),
                 commit_cid: r.commit_cid.map(CidLink::from),
             })

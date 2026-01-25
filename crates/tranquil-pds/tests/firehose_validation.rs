@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::Cursor;
 use tokio_tungstenite::{connect_async, tungstenite};
+use tranquil_scopes::RepoAction;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct FrameHeader {
@@ -39,7 +40,7 @@ struct CommitFrame {
 
 #[derive(Debug, Deserialize)]
 struct RepoOp {
-    action: String,
+    action: RepoAction,
     path: String,
     cid: Option<Cid>,
     prev: Option<Cid>,
@@ -292,7 +293,7 @@ async fn test_firehose_frame_structure() {
     println!("\nOps validation:");
     for (i, op) in frame.ops.iter().enumerate() {
         println!("  Op {}:", i);
-        println!("    action: {}", op.action);
+        println!("    action: {:?}", op.action);
         println!("    path: {}", op.path);
         println!("    cid: {:?}", op.cid);
         println!(
@@ -301,17 +302,12 @@ async fn test_firehose_frame_structure() {
         );
 
         assert!(
-            ["create", "update", "delete"].contains(&op.action.as_str()),
-            "Invalid action: {}",
-            op.action
-        );
-        assert!(
             op.path.contains('/'),
             "Path should contain collection/rkey: {}",
             op.path
         );
 
-        if op.action == "create" {
+        if op.action == RepoAction::Create {
             assert!(op.cid.is_some(), "Create op should have cid");
         }
     }
@@ -445,11 +441,11 @@ async fn test_firehose_update_has_prev_field() {
 
     for op in &frame.ops {
         println!(
-            "Op: action={}, path={}, cid={:?}, prev={:?}",
+            "Op: action={:?}, path={}, cid={:?}, prev={:?}",
             op.action, op.path, op.cid, op.prev
         );
 
-        if op.action == "update" && op.path.contains("app.bsky.actor.profile") {
+        if op.action == RepoAction::Update && op.path.contains("app.bsky.actor.profile") {
             assert!(
                 op.prev.is_some(),
                 "Update operation should have 'prev' field with old CID! Got: {:?}",

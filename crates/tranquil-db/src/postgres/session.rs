@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tranquil_db_traits::{
-    AppPasswordCreate, AppPasswordRecord, DbError, RefreshSessionResult, SessionForRefresh,
-    SessionListItem, SessionMfaStatus, SessionRefreshData, SessionRepository, SessionToken,
-    SessionTokenCreate,
+    AppPasswordCreate, AppPasswordPrivilege, AppPasswordRecord, DbError, LoginType,
+    RefreshSessionResult, SessionForRefresh, SessionId, SessionListItem, SessionMfaStatus,
+    SessionRefreshData, SessionRepository, SessionToken, SessionTokenCreate,
 };
 use tranquil_types::Did;
 use uuid::Uuid;
@@ -23,7 +23,7 @@ impl PostgresSessionRepository {
 
 #[async_trait]
 impl SessionRepository for PostgresSessionRepository {
-    async fn create_session(&self, data: &SessionTokenCreate) -> Result<i32, DbError> {
+    async fn create_session(&self, data: &SessionTokenCreate) -> Result<SessionId, DbError> {
         let row = sqlx::query!(
             r#"
             INSERT INTO session_tokens
@@ -37,7 +37,7 @@ impl SessionRepository for PostgresSessionRepository {
             data.refresh_jti,
             data.access_expires_at,
             data.refresh_expires_at,
-            data.legacy_login,
+            bool::from(data.login_type),
             data.mfa_verified,
             data.scope,
             data.controller_did.as_ref().map(|d| d.as_str()),
@@ -47,7 +47,7 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.id)
+        Ok(SessionId::new(row.id))
     }
 
     async fn get_session_by_access_jti(
@@ -69,13 +69,13 @@ impl SessionRepository for PostgresSessionRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(row.map(|r| SessionToken {
-            id: r.id,
+            id: SessionId::new(r.id),
             did: Did::from(r.did),
             access_jti: r.access_jti,
             refresh_jti: r.refresh_jti,
             access_expires_at: r.access_expires_at,
             refresh_expires_at: r.refresh_expires_at,
-            legacy_login: r.legacy_login,
+            login_type: LoginType::from(r.legacy_login),
             mfa_verified: r.mfa_verified,
             scope: r.scope,
             controller_did: r.controller_did.map(Did::from),
@@ -104,7 +104,7 @@ impl SessionRepository for PostgresSessionRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(row.map(|r| SessionForRefresh {
-            id: r.id,
+            id: SessionId::new(r.id),
             did: Did::from(r.did),
             scope: r.scope,
             controller_did: r.controller_did.map(Did::from),
@@ -115,7 +115,7 @@ impl SessionRepository for PostgresSessionRepository {
 
     async fn update_session_tokens(
         &self,
-        session_id: i32,
+        session_id: SessionId,
         new_access_jti: &str,
         new_refresh_jti: &str,
         new_access_expires_at: DateTime<Utc>,
@@ -132,7 +132,7 @@ impl SessionRepository for PostgresSessionRepository {
             new_refresh_jti,
             new_access_expires_at,
             new_refresh_expires_at,
-            session_id
+            session_id.as_i32()
         )
         .execute(&self.pool)
         .await
@@ -153,11 +153,14 @@ impl SessionRepository for PostgresSessionRepository {
         Ok(result.rows_affected())
     }
 
-    async fn delete_session_by_id(&self, session_id: i32) -> Result<u64, DbError> {
-        let result = sqlx::query!("DELETE FROM session_tokens WHERE id = $1", session_id)
-            .execute(&self.pool)
-            .await
-            .map_err(map_sqlx_error)?;
+    async fn delete_session_by_id(&self, session_id: SessionId) -> Result<u64, DbError> {
+        let result = sqlx::query!(
+            "DELETE FROM session_tokens WHERE id = $1",
+            session_id.as_i32()
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
 
         Ok(result.rows_affected())
     }
@@ -205,7 +208,7 @@ impl SessionRepository for PostgresSessionRepository {
         Ok(rows
             .into_iter()
             .map(|r| SessionListItem {
-                id: r.id,
+                id: SessionId::new(r.id),
                 access_jti: r.access_jti,
                 created_at: r.created_at,
                 refresh_expires_at: r.refresh_expires_at,
@@ -215,12 +218,12 @@ impl SessionRepository for PostgresSessionRepository {
 
     async fn get_session_access_jti_by_id(
         &self,
-        session_id: i32,
+        session_id: SessionId,
         did: &Did,
     ) -> Result<Option<String>, DbError> {
         let row = sqlx::query_scalar!(
             "SELECT access_jti FROM session_tokens WHERE id = $1 AND did = $2",
-            session_id,
+            session_id.as_i32(),
             did.as_str()
         )
         .fetch_optional(&self.pool)
@@ -264,7 +267,10 @@ impl SessionRepository for PostgresSessionRepository {
         Ok(rows)
     }
 
-    async fn check_refresh_token_used(&self, refresh_jti: &str) -> Result<Option<i32>, DbError> {
+    async fn check_refresh_token_used(
+        &self,
+        refresh_jti: &str,
+    ) -> Result<Option<SessionId>, DbError> {
         let row = sqlx::query_scalar!(
             "SELECT session_id FROM used_refresh_tokens WHERE refresh_jti = $1",
             refresh_jti
@@ -273,13 +279,13 @@ impl SessionRepository for PostgresSessionRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row)
+        Ok(row.map(SessionId::new))
     }
 
     async fn mark_refresh_token_used(
         &self,
         refresh_jti: &str,
-        session_id: i32,
+        session_id: SessionId,
     ) -> Result<bool, DbError> {
         let result = sqlx::query!(
             r#"
@@ -288,7 +294,7 @@ impl SessionRepository for PostgresSessionRepository {
             ON CONFLICT (refresh_jti) DO NOTHING
             "#,
             refresh_jti,
-            session_id
+            session_id.as_i32()
         )
         .execute(&self.pool)
         .await
@@ -319,7 +325,7 @@ impl SessionRepository for PostgresSessionRepository {
                 name: r.name,
                 password_hash: r.password_hash,
                 created_at: r.created_at,
-                privileged: r.privileged,
+                privilege: AppPasswordPrivilege::from(r.privileged),
                 scopes: r.scopes,
                 created_by_controller_did: r.created_by_controller_did.map(Did::from),
             })
@@ -352,7 +358,7 @@ impl SessionRepository for PostgresSessionRepository {
                 name: r.name,
                 password_hash: r.password_hash,
                 created_at: r.created_at,
-                privileged: r.privileged,
+                privilege: AppPasswordPrivilege::from(r.privileged),
                 scopes: r.scopes,
                 created_by_controller_did: r.created_by_controller_did.map(Did::from),
             })
@@ -383,7 +389,7 @@ impl SessionRepository for PostgresSessionRepository {
             name: r.name,
             password_hash: r.password_hash,
             created_at: r.created_at,
-            privileged: r.privileged,
+            privilege: AppPasswordPrivilege::from(r.privileged),
             scopes: r.scopes,
             created_by_controller_did: r.created_by_controller_did.map(Did::from),
         }))
@@ -399,7 +405,7 @@ impl SessionRepository for PostgresSessionRepository {
             data.user_id,
             data.name,
             data.password_hash,
-            data.privileged,
+            bool::from(data.privilege),
             data.scopes,
             data.created_by_controller_did.as_ref().map(|d| d.as_str())
         )
@@ -480,7 +486,7 @@ impl SessionRepository for PostgresSessionRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(row.map(|r| SessionMfaStatus {
-            legacy_login: r.legacy_login,
+            login_type: LoginType::from(r.legacy_login),
             mfa_verified: r.mfa_verified,
             last_reauth_at: r.last_reauth_at,
         }))
@@ -535,16 +541,19 @@ impl SessionRepository for PostgresSessionRepository {
         let result = sqlx::query!(
             "INSERT INTO used_refresh_tokens (refresh_jti, session_id) VALUES ($1, $2) ON CONFLICT (refresh_jti) DO NOTHING",
             data.old_refresh_jti,
-            data.session_id
+            data.session_id.as_i32()
         )
         .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
 
         if result.rows_affected() == 0 {
-            let _ = sqlx::query!("DELETE FROM session_tokens WHERE id = $1", data.session_id)
-                .execute(&mut *tx)
-                .await;
+            let _ = sqlx::query!(
+                "DELETE FROM session_tokens WHERE id = $1",
+                data.session_id.as_i32()
+            )
+            .execute(&mut *tx)
+            .await;
             tx.commit().await.map_err(map_sqlx_error)?;
             return Ok(RefreshSessionResult::ConcurrentRefresh);
         }
@@ -555,7 +564,7 @@ impl SessionRepository for PostgresSessionRepository {
             data.new_refresh_jti,
             data.new_access_expires_at,
             data.new_refresh_expires_at,
-            data.session_id
+            data.session_id.as_i32()
         )
         .execute(&mut *tx)
         .await

@@ -1,10 +1,11 @@
 use crate::api::EmptyResponse;
-use crate::api::error::ApiError;
-use crate::auth::{Auth, NotTakendown, Permissive};
+use crate::api::error::{ApiError, DbResultExt};
+use crate::auth::{Auth, NotTakendown, Permissive, require_legacy_session_mfa};
 use crate::cache::Cache;
 use crate::plc::PlcClient;
 use crate::state::AppState;
 use crate::types::PlainPassword;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -130,7 +131,7 @@ async fn assert_valid_did_document_for_service(
     did: &crate::types::Did,
     with_retry: bool,
 ) -> Result<(), ApiError> {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     let expected_endpoint = format!("https://{}", hostname);
 
     if did.as_str().starts_with("did:plc:") {
@@ -219,10 +220,10 @@ async fn assert_valid_did_document_for_service(
             .and_then(|v| v.get("atproto"))
             .and_then(|k| k.as_str());
 
-        let user_key = user_repo.get_user_key_by_did(did).await.map_err(|e| {
-            error!("Failed to fetch user key: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        let user_key = user_repo
+            .get_user_key_by_did(did)
+            .await
+            .log_db_err("fetching user key")?;
 
         if let Some(key_info) = user_key {
             let key_bytes =
@@ -379,8 +380,12 @@ pub async fn activate_account(
                 "[MIGRATION] activateAccount: Sequencing account event (active=true) for did={}",
                 did
             );
-            if let Err(e) =
-                crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+            if let Err(e) = crate::api::repo::record::sequence_account_event(
+                &state,
+                &did,
+                tranquil_db_traits::AccountStatus::Active,
+            )
+            .await
             {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to sequence account activation event: {}",
@@ -502,8 +507,7 @@ pub async fn deactivate_account(
             if let Err(e) = crate::api::repo::record::sequence_account_event(
                 &state,
                 &did,
-                false,
-                Some("deactivated"),
+                tranquil_db_traits::AccountStatus::Deactivated,
             )
             .await
             {
@@ -523,20 +527,14 @@ pub async fn request_account_delete(
     State(state): State<AppState>,
     auth: Auth<NotTakendown>,
 ) -> Result<Response, ApiError> {
-    let did = &auth.did;
-
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, did).await {
-        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            did,
-        )
-        .await);
-    }
+    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
     let user_id = state
         .user_repo
-        .get_id_by_did(did)
+        .get_id_by_did(session_mfa.did())
         .await
         .ok()
         .flatten()
@@ -545,25 +543,22 @@ pub async fn request_account_delete(
     let expires_at = Utc::now() + Duration::minutes(15);
     state
         .infra_repo
-        .create_deletion_request(&confirmation_token, did, expires_at)
+        .create_deletion_request(&confirmation_token, session_mfa.did(), expires_at)
         .await
-        .map_err(|e| {
-            error!("DB error creating deletion token: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        .log_db_err("creating deletion token")?;
+    let hostname = pds_hostname();
     if let Err(e) = crate::comms::comms_repo::enqueue_account_deletion(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         user_id,
         &confirmation_token,
-        &hostname,
+        hostname,
     )
     .await
     {
         warn!("Failed to enqueue account deletion notification: {:?}", e);
     }
-    info!("Account deletion requested for user {}", did);
+    info!("Account deletion requested for user {}", session_mfa.did());
     Ok(EmptyResponse::ok().into_response())
 }
 
@@ -642,8 +637,12 @@ pub async fn delete_account(
         error!("DB error deleting account: {:?}", e);
         return ApiError::InternalError(None).into_response();
     }
-    let account_seq =
-        crate::api::repo::record::sequence_account_event(&state, did, false, Some("deleted")).await;
+    let account_seq = crate::api::repo::record::sequence_account_event(
+        &state,
+        did,
+        tranquil_db_traits::AccountStatus::Deleted,
+    )
+    .await;
     match account_seq {
         Ok(seq) => {
             if let Err(e) = state.repo_repo.delete_sequences_except(did, seq).await {

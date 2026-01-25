@@ -1,4 +1,4 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{Did, Handle};
@@ -10,7 +10,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::error;
 
 #[derive(Deserialize)]
 pub struct GetAccountInfoParams {
@@ -74,10 +73,7 @@ pub async fn get_account_info(
         .infra_repo
         .get_admin_account_info_by_did(&params.did)
         .await
-        .map_err(|e| {
-            error!("DB error in get_account_info: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("in get_account_info")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let invited_by = get_invited_by(&state, account.id).await;
@@ -153,7 +149,7 @@ async fn get_invites_for_user(
         .map(|ic| InviteCodeInfo {
             code: ic.code.clone(),
             available: ic.available_uses,
-            disabled: ic.disabled,
+            disabled: ic.state.is_disabled(),
             for_account: ic.for_account,
             created_by: ic.created_by,
             created_at: ic.created_at.to_rfc3339(),
@@ -181,7 +177,7 @@ async fn get_invite_code_info(state: &AppState, code: &str) -> Option<InviteCode
     Some(InviteCodeInfo {
         code: info.code,
         available: info.available_uses,
-        disabled: info.disabled,
+        disabled: info.state.is_disabled(),
         for_account: info.for_account,
         created_by: info.created_by,
         created_at: info.created_at.to_rfc3339(),
@@ -214,10 +210,7 @@ pub async fn get_account_infos(
         .infra_repo
         .get_admin_account_infos_by_dids(&dids_typed)
         .await
-        .map_err(|e| {
-            error!("Failed to fetch account infos: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching account infos")?;
 
     let user_ids: Vec<uuid::Uuid> = accounts.iter().map(|u| u.id).collect();
 
@@ -272,7 +265,7 @@ pub async fn get_account_infos(
             let info = InviteCodeInfo {
                 code: ic.code.clone(),
                 available: ic.available_uses,
-                disabled: ic.disabled,
+                disabled: ic.state.is_disabled(),
                 for_account: ic.for_account,
                 created_by: ic.created_by,
                 created_at: ic.created_at.to_rfc3339(),

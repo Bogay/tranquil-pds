@@ -1,4 +1,4 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{Did, Handle};
@@ -9,7 +9,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
 
 #[derive(Deserialize)]
 pub struct SearchAccountsParams {
@@ -66,10 +65,7 @@ pub async fn search_accounts(
             limit + 1,
         )
         .await
-        .map_err(|e| {
-            error!("DB error in search_accounts: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("in search_accounts")?;
 
     let has_more = rows.len() > limit as usize;
     let accounts: Vec<AccountView> = rows

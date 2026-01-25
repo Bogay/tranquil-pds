@@ -10,8 +10,10 @@ pub use dpop::{
 };
 pub use error::OAuthError;
 pub use types::{
-    AuthFlowState, AuthorizationRequestParameters, AuthorizationServerMetadata,
-    AuthorizedClientData, ClientAuth, Code, DPoPClaims, DeviceData, DeviceId, JwkPublicKey, Jwks,
-    OAuthClientMetadata, ParResponse, ProtectedResourceMetadata, RefreshToken, RefreshTokenState,
-    RequestData, RequestId, SessionId, TokenData, TokenId, TokenRequest, TokenResponse,
+    AuthFlow, AuthFlowWithUser, AuthorizationRequestParameters, AuthorizationServerMetadata,
+    AuthorizedClientData, ClientAuth, Code, CodeChallengeMethod, DPoPClaims, DeviceData, DeviceId,
+    FlowAuthenticated, FlowAuthorized, FlowExpired, FlowNotAuthenticated, FlowNotAuthorized,
+    FlowPending, JwkPublicKey, Jwks, OAuthClientMetadata, ParResponse, Prompt,
+    ProtectedResourceMetadata, RefreshToken, RefreshTokenState, RequestData, RequestId,
+    ResponseMode, ResponseType, SessionId, TokenData, TokenId, TokenRequest, TokenResponse,
 };

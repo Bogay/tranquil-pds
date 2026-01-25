@@ -1,7 +1,9 @@
 use crate::api::ApiError;
+use crate::api::error::DbResultExt;
 use crate::auth::{Admin, Auth, NotTakendown};
 use crate::state::AppState;
 use crate::types::Did;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -24,7 +26,7 @@ fn gen_random_token() -> String {
 }
 
 fn gen_invite_code() -> String {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     let hostname_prefix = hostname.replace('.', "-");
     format!("{}-{}", hostname_prefix, gen_random_token())
 }
@@ -121,10 +123,7 @@ pub async fn create_invite_codes(
         .user_repo
         .get_any_admin_user_id()
         .await
-        .map_err(|e| {
-            error!("DB error looking up admin user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("looking up admin user")?
         .ok_or_else(|| {
             error!("No admin user found to create invite codes");
             ApiError::InternalError(None)
@@ -202,14 +201,11 @@ pub async fn get_account_invite_codes(
         .infra_repo
         .get_invite_codes_for_account(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching invite codes: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching invite codes")?;
 
     let filtered_codes: Vec<_> = codes_info
         .into_iter()
-        .filter(|info| !info.disabled)
+        .filter(|info| info.state.is_active())
         .collect();
 
     let codes = futures::future::join_all(filtered_codes.into_iter().map(|info| {

@@ -1,9 +1,14 @@
 pub mod batch;
 pub mod delete;
+pub mod pagination;
 pub mod read;
 pub mod utils;
 pub mod validation;
+pub mod validation_mode;
 pub mod write;
+
+pub use pagination::PaginationDirection;
+pub use validation_mode::ValidationMode;
 
 pub use batch::apply_writes;
 pub use delete::{DeleteRecordInput, delete_record, delete_record_internal};

@@ -1,8 +1,10 @@
 use super::helpers::extract_token_claims;
 use crate::oauth::OAuthError;
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{OAuthIntrospectLimit, OAuthRateLimited};
+use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::{Form, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -17,17 +19,9 @@ pub struct RevokeRequest {
 
 pub async fn revoke_token(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: OAuthRateLimited<OAuthIntrospectLimit>,
     Form(request): Form<RevokeRequest>,
 ) -> Result<StatusCode, OAuthError> {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::OAuthIntrospect, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "OAuth revoke rate limit exceeded");
-        return Err(OAuthError::RateLimited);
-    }
     if let Some(token) = &request.token {
         let refresh_token = RefreshToken::from(token.clone());
         if let Some((db_id, _)) = state
@@ -89,17 +83,9 @@ pub struct IntrospectResponse {
 
 pub async fn introspect_token(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: OAuthRateLimited<OAuthIntrospectLimit>,
     Form(request): Form<IntrospectRequest>,
 ) -> Result<Json<IntrospectResponse>, OAuthError> {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::OAuthIntrospect, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "OAuth introspect rate limit exceeded");
-        return Err(OAuthError::RateLimited);
-    }
     let inactive_response = IntrospectResponse {
         active: false,
         scope: None,
@@ -126,7 +112,7 @@ pub async fn introspect_token(
     if token_data.expires_at < Utc::now() {
         return Ok(Json(inactive_response));
     }
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_hostname = pds_hostname();
     let issuer = format!("https://{}", pds_hostname);
     Ok(Json(IntrospectResponse {
         active: true,
@@ -141,7 +127,7 @@ pub async fn introspect_token(
         exp: Some(token_info.exp),
         iat: Some(token_info.iat),
         nbf: Some(token_info.iat),
-        sub: Some(token_data.did),
+        sub: Some(token_data.did.to_string()),
         aud: Some(issuer.clone()),
         iss: Some(issuer),
         jti: Some(token_info.jti),

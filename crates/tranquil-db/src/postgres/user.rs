@@ -5,15 +5,16 @@ use tranquil_types::{Did, Handle};
 use uuid::Uuid;
 
 use tranquil_db_traits::{
-    AccountSearchResult, CommsChannel, DbError, DidWebOverrides, NotificationPrefs,
-    OAuthTokenWithUser, PasswordResetResult, SsoProviderType, StoredBackupCode, StoredPasskey,
-    TotpRecord, User2faStatus, UserAuthInfo, UserCommsPrefs, UserConfirmSignup, UserDidWebInfo,
-    UserEmailInfo, UserForDeletion, UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery,
-    UserForPasskeySetup, UserForRecovery, UserForVerification, UserIdAndHandle,
-    UserIdAndPasswordHash, UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId,
-    UserLegacyLoginPref, UserLoginCheck, UserLoginFull, UserLoginInfo, UserPasswordInfo,
-    UserRepository, UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo,
-    UserStatus, UserVerificationInfo, UserWithKey,
+    AccountSearchResult, AccountType, ChannelVerificationStatus, CommsChannel, DbError,
+    DidWebOverrides, NotificationPrefs, OAuthTokenWithUser, PasswordResetResult, SsoProviderType,
+    StoredBackupCode, StoredPasskey, TotpRecord, TotpRecordState, User2faStatus, UserAuthInfo,
+    UserCommsPrefs, UserConfirmSignup, UserDidWebInfo, UserEmailInfo, UserForDeletion,
+    UserForDidDoc, UserForDidDocBuild, UserForPasskeyRecovery, UserForPasskeySetup,
+    UserForRecovery, UserForVerification, UserIdAndHandle, UserIdAndPasswordHash,
+    UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref,
+    UserLoginCheck, UserLoginFull, UserLoginInfo, UserPasswordInfo, UserRepository,
+    UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
+    UserVerificationInfo, UserWithKey,
 };
 
 pub struct PostgresUserRepository {
@@ -280,10 +281,12 @@ impl UserRepository for PostgresUserRepository {
             password_hash: r.password_hash,
             deactivated_at: r.deactivated_at,
             takedown_ref: r.takedown_ref,
-            email_verified: r.email_verified,
-            discord_verified: r.discord_verified,
-            telegram_verified: r.telegram_verified,
-            signal_verified: r.signal_verified,
+            channel_verification: ChannelVerificationStatus::new(
+                r.email_verified,
+                r.discord_verified,
+                r.telegram_verified,
+                r.signal_verified,
+            ),
         }))
     }
 
@@ -308,7 +311,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_comms_prefs(&self, user_id: Uuid) -> Result<Option<UserCommsPrefs>, DbError> {
         let row = sqlx::query!(
-            r#"SELECT email, handle, preferred_comms_channel::text as "preferred_channel!", preferred_locale
+            r#"SELECT email, handle, preferred_comms_channel as "preferred_channel!: CommsChannel", preferred_locale
                FROM users WHERE id = $1"#,
             user_id
         )
@@ -601,7 +604,7 @@ impl UserRepository for PostgresUserRepository {
         let row = sqlx::query!(
             r#"SELECT
                 email,
-                preferred_comms_channel::text as "preferred_channel!",
+                preferred_comms_channel as "preferred_channel!: CommsChannel",
                 discord_id,
                 discord_verified,
                 telegram_username,
@@ -647,13 +650,13 @@ impl UserRepository for PostgresUserRepository {
     async fn update_preferred_comms_channel(
         &self,
         did: &Did,
-        channel: &str,
+        channel: CommsChannel,
     ) -> Result<(), DbError> {
-        sqlx::query(
-            "UPDATE users SET preferred_comms_channel = $1::comms_channel, updated_at = NOW() WHERE did = $2",
+        sqlx::query!(
+            "UPDATE users SET preferred_comms_channel = $1, updated_at = NOW() WHERE did = $2",
+            channel as CommsChannel,
+            did.as_str()
         )
-        .bind(channel)
-        .bind(did.as_str())
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_error)?;
@@ -709,10 +712,12 @@ impl UserRepository for PostgresUserRepository {
             id: r.id,
             handle: Handle::from(r.handle),
             email: r.email,
-            email_verified: r.email_verified,
-            discord_verified: r.discord_verified,
-            telegram_verified: r.telegram_verified,
-            signal_verified: r.signal_verified,
+            channel_verification: ChannelVerificationStatus::new(
+                r.email_verified,
+                r.discord_verified,
+                r.telegram_verified,
+                r.signal_verified,
+            ),
         }))
     }
 
@@ -1065,6 +1070,12 @@ impl UserRepository for PostgresUserRepository {
         }))
     }
 
+    async fn get_totp_record_state(&self, did: &Did) -> Result<Option<TotpRecordState>, DbError> {
+        self.get_totp_record(did)
+            .await
+            .map(|opt| opt.map(TotpRecordState::from))
+    }
+
     async fn upsert_totp_secret(
         &self,
         did: &Did,
@@ -1300,7 +1311,7 @@ impl UserRepository for PostgresUserRepository {
                    preferred_comms_channel as "preferred_comms_channel!: CommsChannel",
                    deactivated_at, takedown_ref,
                    email_verified, discord_verified, telegram_verified, signal_verified,
-                   account_type::text as "account_type!"
+                   account_type as "account_type!: AccountType"
             FROM users
             WHERE handle = $1 OR email = $1
             "#,
@@ -1320,10 +1331,12 @@ impl UserRepository for PostgresUserRepository {
                 preferred_comms_channel: row.preferred_comms_channel,
                 deactivated_at: row.deactivated_at,
                 takedown_ref: row.takedown_ref,
-                email_verified: row.email_verified,
-                discord_verified: row.discord_verified,
-                telegram_verified: row.telegram_verified,
-                signal_verified: row.signal_verified,
+                channel_verification: ChannelVerificationStatus::new(
+                    row.email_verified,
+                    row.discord_verified,
+                    row.telegram_verified,
+                    row.signal_verified,
+                ),
                 account_type: row.account_type,
             })
         })
@@ -1348,10 +1361,12 @@ impl UserRepository for PostgresUserRepository {
                 id: row.id,
                 two_factor_enabled: row.two_factor_enabled,
                 preferred_comms_channel: row.preferred_comms_channel,
-                email_verified: row.email_verified,
-                discord_verified: row.discord_verified,
-                telegram_verified: row.telegram_verified,
-                signal_verified: row.signal_verified,
+                channel_verification: ChannelVerificationStatus::new(
+                    row.email_verified,
+                    row.discord_verified,
+                    row.telegram_verified,
+                    row.signal_verified,
+                ),
             })
         })
     }
@@ -1376,15 +1391,17 @@ impl UserRepository for PostgresUserRepository {
             opt.map(|row| UserSessionInfo {
                 handle: Handle::from(row.handle),
                 email: row.email,
-                email_verified: row.email_verified,
                 is_admin: row.is_admin,
                 deactivated_at: row.deactivated_at,
                 takedown_ref: row.takedown_ref,
                 preferred_locale: row.preferred_locale,
                 preferred_comms_channel: row.preferred_comms_channel,
-                discord_verified: row.discord_verified,
-                telegram_verified: row.telegram_verified,
-                signal_verified: row.signal_verified,
+                channel_verification: ChannelVerificationStatus::new(
+                    row.email_verified,
+                    row.discord_verified,
+                    row.telegram_verified,
+                    row.signal_verified,
+                ),
                 migrated_to_pds: row.migrated_to_pds,
                 migrated_at: row.migrated_at,
             })
@@ -1469,10 +1486,12 @@ impl UserRepository for PostgresUserRepository {
                 email: row.email,
                 deactivated_at: row.deactivated_at,
                 takedown_ref: row.takedown_ref,
-                email_verified: row.email_verified,
-                discord_verified: row.discord_verified,
-                telegram_verified: row.telegram_verified,
-                signal_verified: row.signal_verified,
+                channel_verification: ChannelVerificationStatus::new(
+                    row.email_verified,
+                    row.discord_verified,
+                    row.telegram_verified,
+                    row.signal_verified,
+                ),
                 allow_legacy_login: row.allow_legacy_login,
                 migrated_to_pds: row.migrated_to_pds,
                 preferred_comms_channel: row.preferred_comms_channel,
@@ -1543,10 +1562,12 @@ impl UserRepository for PostgresUserRepository {
                 discord_id: row.discord_id,
                 telegram_username: row.telegram_username,
                 signal_number: row.signal_number,
-                email_verified: row.email_verified,
-                discord_verified: row.discord_verified,
-                telegram_verified: row.telegram_verified,
-                signal_verified: row.signal_verified,
+                channel_verification: ChannelVerificationStatus::new(
+                    row.email_verified,
+                    row.discord_verified,
+                    row.telegram_verified,
+                    row.signal_verified,
+                ),
             })
         })
     }

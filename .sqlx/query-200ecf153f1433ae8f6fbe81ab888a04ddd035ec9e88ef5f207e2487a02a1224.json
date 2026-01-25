@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT available_uses, COALESCE(disabled, false) as \"disabled!\" FROM invite_codes WHERE code = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "available_uses",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "disabled!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "200ecf153f1433ae8f6fbe81ab888a04ddd035ec9e88ef5f207e2487a02a1224"
+}

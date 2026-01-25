@@ -1,5 +1,6 @@
 use crate::oauth::jwks::{JwkSet, create_jwk_set};
 use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 
@@ -57,7 +58,7 @@ pub struct AuthorizationServerMetadata {
 pub async fn oauth_protected_resource(
     State(_state): State<AppState>,
 ) -> Json<ProtectedResourceMetadata> {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_hostname = pds_hostname();
     let public_url = format!("https://{}", pds_hostname);
     Json(ProtectedResourceMetadata {
         resource: public_url.clone(),
@@ -71,7 +72,7 @@ pub async fn oauth_protected_resource(
 pub async fn oauth_authorization_server(
     State(_state): State<AppState>,
 ) -> Json<AuthorizationServerMetadata> {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_hostname = pds_hostname();
     let issuer = format!("https://{}", pds_hostname);
     Json(AuthorizationServerMetadata {
         issuer: issuer.clone(),

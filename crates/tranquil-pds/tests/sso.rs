@@ -232,10 +232,12 @@ async fn test_external_identity_repository_crud() {
     let _url = base_url().await;
     let pool = get_test_db_pool().await;
 
-    let did = Did::new_unchecked(format!(
-        "did:plc:test{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..12]
-    ));
+    let did = unsafe {
+        Did::new_unchecked(format!(
+            "did:plc:test{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..12]
+        ))
+    };
     let provider = SsoProviderType::Github;
     let provider_user_id = format!("github_user_{}", uuid::Uuid::new_v4().simple());
 
@@ -350,14 +352,18 @@ async fn test_external_identity_unique_constraints() {
     let _url = base_url().await;
     let pool = get_test_db_pool().await;
 
-    let did1 = Did::new_unchecked(format!(
-        "did:plc:uc1{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..10]
-    ));
-    let did2 = Did::new_unchecked(format!(
-        "did:plc:uc2{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..10]
-    ));
+    let did1 = unsafe {
+        Did::new_unchecked(format!(
+            "did:plc:uc1{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..10]
+        ))
+    };
+    let did2 = unsafe {
+        Did::new_unchecked(format!(
+            "did:plc:uc2{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..10]
+        ))
+    };
     let provider_user_id = format!("unique_test_{}", uuid::Uuid::new_v4().simple());
 
     sqlx::query!(
@@ -577,11 +583,13 @@ async fn test_delete_external_identity_wrong_did() {
     let _url = base_url().await;
     let pool = get_test_db_pool().await;
 
-    let did = Did::new_unchecked(format!(
-        "did:plc:del{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..10]
-    ));
-    let wrong_did = Did::new_unchecked("did:plc:wrongdid12345");
+    let did = unsafe {
+        Did::new_unchecked(format!(
+            "did:plc:del{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..10]
+        ))
+    };
+    let wrong_did = unsafe { Did::new_unchecked("did:plc:wrongdid12345") };
 
     sqlx::query!(
         "INSERT INTO users (did, handle, email, password_hash) VALUES ($1, $2, $3, 'hash')",

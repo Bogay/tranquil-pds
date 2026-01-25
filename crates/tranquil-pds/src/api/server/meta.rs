@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 
@@ -30,9 +31,9 @@ pub fn is_self_hosted_did_web_enabled() -> bool {
 }
 
 pub async fn describe_server() -> impl IntoResponse {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_hostname = pds_hostname();
     let domains_str =
-        std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| pds_hostname.clone());
+        std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| pds_hostname.to_string());
     let domains: Vec<&str> = domains_str.split(',').map(|s| s.trim()).collect();
     let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
         .map(|v| v == "true" || v == "1")

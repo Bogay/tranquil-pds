@@ -1,5 +1,5 @@
 use crate::api::EmptyResponse;
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::Did;
@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
-use tracing::{error, warn};
+use tracing::warn;
 
 #[derive(Deserialize)]
 pub struct DeleteAccountInput {
@@ -26,10 +26,7 @@ pub async fn delete_account(
         .user_repo
         .get_id_and_handle_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error in delete_account: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("in delete_account")?
         .ok_or(ApiError::AccountNotFound)
         .map(|row| (row.id, row.handle))?;
 
@@ -37,13 +34,14 @@ pub async fn delete_account(
         .user_repo
         .admin_delete_account_complete(user_id, did)
         .await
-        .map_err(|e| {
-            error!("Failed to delete account {}: {:?}", did, e);
-            ApiError::InternalError(Some("Failed to delete account".into()))
-        })?;
+        .log_db_err("deleting account")?;
 
-    if let Err(e) =
-        crate::api::repo::record::sequence_account_event(&state, did, false, Some("deleted")).await
+    if let Err(e) = crate::api::repo::record::sequence_account_event(
+        &state,
+        did,
+        tranquil_db_traits::AccountStatus::Deleted,
+    )
+    .await
     {
         warn!(
             "Failed to sequence account deletion event for {}: {}",

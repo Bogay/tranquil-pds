@@ -1,13 +1,15 @@
 use crate::api::EmptyResponse;
-use crate::api::error::ApiError;
-use crate::auth::{Active, Auth};
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{
-    decrypt_totp_secret, encrypt_totp_secret, generate_backup_codes, generate_qr_png_base64,
-    generate_totp_secret, generate_totp_uri, hash_backup_code, is_backup_code_format,
-    verify_backup_code, verify_totp_code,
+    Active, Auth, decrypt_totp_secret, encrypt_totp_secret, generate_backup_codes,
+    generate_qr_png_base64, generate_totp_secret, generate_totp_uri, hash_backup_code,
+    is_backup_code_format, require_legacy_session_mfa, verify_backup_code, verify_password_mfa,
+    verify_totp_code, verify_totp_mfa,
 };
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{TotpVerifyLimit, check_user_rate_limit_with_message};
+use crate::state::AppState;
 use crate::types::PlainPassword;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -30,9 +32,11 @@ pub async fn create_totp_secret(
     State(state): State<AppState>,
     auth: Auth<Active>,
 ) -> Result<Response, ApiError> {
-    match state.user_repo.get_totp_record(&auth.did).await {
-        Ok(Some(record)) if record.verified => return Err(ApiError::TotpAlreadyEnabled),
-        Ok(_) => {}
+    use tranquil_db_traits::TotpRecordState;
+
+    match state.user_repo.get_totp_record_state(&auth.did).await {
+        Ok(Some(TotpRecordState::Verified(_))) => return Err(ApiError::TotpAlreadyEnabled),
+        Ok(Some(TotpRecordState::Unverified(_))) | Ok(None) => {}
         Err(e) => {
             error!("DB error checking TOTP: {:?}", e);
             return Err(ApiError::InternalError(None));
@@ -45,16 +49,13 @@ pub async fn create_totp_secret(
         .user_repo
         .get_handle_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching handle: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching handle")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let uri = generate_totp_uri(&secret, &handle, &hostname);
+    let hostname = pds_hostname();
+    let uri = generate_totp_uri(&secret, &handle, hostname);
 
-    let qr_code = generate_qr_png_base64(&secret, &handle, &hostname).map_err(|e| {
+    let qr_code = generate_qr_png_base64(&secret, &handle, hostname).map_err(|e| {
         error!("Failed to generate QR code: {:?}", e);
         ApiError::InternalError(Some("Failed to generate QR code".into()))
     })?;
@@ -68,10 +69,7 @@ pub async fn create_totp_secret(
         .user_repo
         .upsert_totp_secret(&auth.did, &encrypted_secret, ENCRYPTION_VERSION)
         .await
-        .map_err(|e| {
-            error!("Failed to store TOTP secret: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("storing TOTP secret")?;
 
     let secret_base32 = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &secret);
 
@@ -101,16 +99,18 @@ pub async fn enable_totp(
     auth: Auth<Active>,
     Json(input): Json<EnableTotpInput>,
 ) -> Result<Response, ApiError> {
-    if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &auth.did)
-        .await
-    {
-        warn!(did = %&auth.did, "TOTP verification rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
+    use tranquil_db_traits::TotpRecordState;
 
-    let totp_record = match state.user_repo.get_totp_record(&auth.did).await {
-        Ok(Some(row)) => row,
+    let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
+        &state,
+        &auth.did,
+        "Too many verification attempts. Please try again in a few minutes.",
+    )
+    .await?;
+
+    let unverified_record = match state.user_repo.get_totp_record_state(&auth.did).await {
+        Ok(Some(TotpRecordState::Unverified(record))) => record,
+        Ok(Some(TotpRecordState::Verified(_))) => return Err(ApiError::TotpAlreadyEnabled),
         Ok(None) => return Err(ApiError::TotpNotEnabled),
         Err(e) => {
             error!("DB error fetching TOTP: {:?}", e);
@@ -118,13 +118,9 @@ pub async fn enable_totp(
         }
     };
 
-    if totp_record.verified {
-        return Err(ApiError::TotpAlreadyEnabled);
-    }
-
     let secret = decrypt_totp_secret(
-        &totp_record.secret_encrypted,
-        totp_record.encryption_version,
+        &unverified_record.secret_encrypted,
+        unverified_record.encryption_version,
     )
     .map_err(|e| {
         error!("Failed to decrypt TOTP secret: {:?}", e);
@@ -152,10 +148,7 @@ pub async fn enable_totp(
         .user_repo
         .enable_totp_with_backup_codes(&auth.did, &backup_hashes)
         .await
-        .map_err(|e| {
-            error!("Failed to enable TOTP: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("enabling TOTP")?;
 
     info!(did = %&auth.did, "TOTP enabled with {} backup codes", backup_codes.len());
 
@@ -173,79 +166,28 @@ pub async fn disable_totp(
     auth: Auth<Active>,
     Json(input): Json<DisableTotpInput>,
 ) -> Result<Response, ApiError> {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
-    {
-        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
-
-    if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &auth.did)
-        .await
-    {
-        warn!(did = %&auth.did, "TOTP verification rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
-    let password_hash = state
-        .user_repo
-        .get_password_hash_by_did(&auth.did)
-        .await
-        .map_err(|e| {
-            error!("DB error fetching user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
-        .ok_or(ApiError::AccountNotFound)?;
-
-    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
-    if !password_valid {
-        return Err(ApiError::InvalidPassword("Password is incorrect".into()));
-    }
-
-    let totp_record = match state.user_repo.get_totp_record(&auth.did).await {
-        Ok(Some(row)) if row.verified => row,
-        Ok(Some(_)) | Ok(None) => return Err(ApiError::TotpNotEnabled),
-        Err(e) => {
-            error!("DB error fetching TOTP: {:?}", e);
-            return Err(ApiError::InternalError(None));
-        }
+    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
     };
 
-    let code = input.code.trim();
-    let code_valid = if is_backup_code_format(code) {
-        verify_backup_code_for_user(&state, &auth.did, code).await
-    } else {
-        let secret = decrypt_totp_secret(
-            &totp_record.secret_encrypted,
-            totp_record.encryption_version,
-        )
-        .map_err(|e| {
-            error!("Failed to decrypt TOTP secret: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
-        verify_totp_code(&secret, code)
-    };
+    let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
+        &state,
+        session_mfa.did(),
+        "Too many verification attempts. Please try again in a few minutes.",
+    )
+    .await?;
 
-    if !code_valid {
-        return Err(ApiError::InvalidCode(Some(
-            "Invalid verification code".into(),
-        )));
-    }
+    let password_mfa = verify_password_mfa(&state, &auth, &input.password).await?;
+    let totp_mfa = verify_totp_mfa(&state, &auth, &input.code).await?;
 
     state
         .user_repo
-        .delete_totp_and_backup_codes(&auth.did)
+        .delete_totp_and_backup_codes(totp_mfa.did())
         .await
-        .map_err(|e| {
-            error!("Failed to delete TOTP: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("deleting TOTP")?;
 
-    info!(did = %&auth.did, "TOTP disabled");
+    info!(did = %session_mfa.did(), "TOTP disabled (verified via {} and {})", password_mfa.method(), totp_mfa.method());
 
     Ok(EmptyResponse::ok().into_response())
 }
@@ -262,9 +204,11 @@ pub async fn get_totp_status(
     State(state): State<AppState>,
     auth: Auth<Active>,
 ) -> Result<Response, ApiError> {
-    let enabled = match state.user_repo.get_totp_record(&auth.did).await {
-        Ok(Some(row)) => row.verified,
-        Ok(None) => false,
+    use tranquil_db_traits::TotpRecordState;
+
+    let enabled = match state.user_repo.get_totp_record_state(&auth.did).await {
+        Ok(Some(TotpRecordState::Verified(_))) => true,
+        Ok(Some(TotpRecordState::Unverified(_))) | Ok(None) => false,
         Err(e) => {
             error!("DB error fetching TOTP status: {:?}", e);
             return Err(ApiError::InternalError(None));
@@ -275,10 +219,7 @@ pub async fn get_totp_status(
         .user_repo
         .count_unused_backup_codes(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error counting backup codes: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("counting backup codes")?;
 
     Ok(Json(GetTotpStatusResponse {
         enabled,
@@ -305,53 +246,15 @@ pub async fn regenerate_backup_codes(
     auth: Auth<Active>,
     Json(input): Json<RegenerateBackupCodesInput>,
 ) -> Result<Response, ApiError> {
-    if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &auth.did)
-        .await
-    {
-        warn!(did = %&auth.did, "TOTP verification rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
-    let password_hash = state
-        .user_repo
-        .get_password_hash_by_did(&auth.did)
-        .await
-        .map_err(|e| {
-            error!("DB error fetching user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
-        .ok_or(ApiError::AccountNotFound)?;
-
-    let password_valid = bcrypt::verify(&input.password, &password_hash).unwrap_or(false);
-    if !password_valid {
-        return Err(ApiError::InvalidPassword("Password is incorrect".into()));
-    }
-
-    let totp_record = match state.user_repo.get_totp_record(&auth.did).await {
-        Ok(Some(row)) if row.verified => row,
-        Ok(Some(_)) | Ok(None) => return Err(ApiError::TotpNotEnabled),
-        Err(e) => {
-            error!("DB error fetching TOTP: {:?}", e);
-            return Err(ApiError::InternalError(None));
-        }
-    };
-
-    let secret = decrypt_totp_secret(
-        &totp_record.secret_encrypted,
-        totp_record.encryption_version,
+    let _rate_limit = check_user_rate_limit_with_message::<TotpVerifyLimit>(
+        &state,
+        &auth.did,
+        "Too many verification attempts. Please try again in a few minutes.",
     )
-    .map_err(|e| {
-        error!("Failed to decrypt TOTP secret: {:?}", e);
-        ApiError::InternalError(None)
-    })?;
+    .await?;
 
-    let code = input.code.trim();
-    if !verify_totp_code(&secret, code) {
-        return Err(ApiError::InvalidCode(Some(
-            "Invalid verification code".into(),
-        )));
-    }
+    let password_mfa = verify_password_mfa(&state, &auth, &input.password).await?;
+    let totp_mfa = verify_totp_mfa(&state, &auth, &input.code).await?;
 
     let backup_codes = generate_backup_codes();
     let backup_hashes: Vec<_> = backup_codes
@@ -365,14 +268,11 @@ pub async fn regenerate_backup_codes(
 
     state
         .user_repo
-        .replace_backup_codes(&auth.did, &backup_hashes)
+        .replace_backup_codes(totp_mfa.did(), &backup_hashes)
         .await
-        .map_err(|e| {
-            error!("Failed to regenerate backup codes: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("replacing backup codes")?;
 
-    info!(did = %&auth.did, "Backup codes regenerated");
+    info!(did = %password_mfa.did(), "Backup codes regenerated (verified via {} and {})", password_mfa.method(), totp_mfa.method());
 
     Ok(Json(RegenerateBackupCodesResponse { backup_codes }).into_response())
 }
@@ -410,20 +310,22 @@ pub async fn verify_totp_or_backup_for_user(
     did: &crate::types::Did,
     code: &str,
 ) -> bool {
+    use tranquil_db_traits::TotpRecordState;
+
     let code = code.trim();
 
     if is_backup_code_format(code) {
         return verify_backup_code_for_user(state, did, code).await;
     }
 
-    let totp_record = match state.user_repo.get_totp_record(did).await {
-        Ok(Some(row)) if row.verified => row,
+    let verified_record = match state.user_repo.get_totp_record_state(did).await {
+        Ok(Some(TotpRecordState::Verified(record))) => record,
         _ => return false,
     };
 
     let secret = match decrypt_totp_secret(
-        &totp_record.secret_encrypted,
-        totp_record.encryption_version,
+        &verified_record.secret_encrypted,
+        verified_record.encryption_version,
     ) {
         Ok(s) => s,
         Err(_) => return false,

@@ -6,6 +6,111 @@ use uuid::Uuid;
 
 use crate::DbError;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExternalUserId(String);
+
+impl ExternalUserId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ExternalUserId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for ExternalUserId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<ExternalUserId> for String {
+    fn from(id: ExternalUserId) -> Self {
+        id.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExternalUsername(String);
+
+impl ExternalUsername {
+    pub fn new(username: impl Into<String>) -> Self {
+        Self(username.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ExternalUsername {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for ExternalUsername {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<ExternalUsername> for String {
+    fn from(username: ExternalUsername) -> Self {
+        username.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExternalEmail(String);
+
+impl ExternalEmail {
+    pub fn new(email: impl Into<String>) -> Self {
+        Self(email.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ExternalEmail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for ExternalEmail {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<ExternalEmail> for String {
+    fn from(email: ExternalEmail) -> Self {
+        email.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "sso_provider_type", rename_all = "lowercase")]
 pub enum SsoProviderType {
@@ -15,6 +120,40 @@ pub enum SsoProviderType {
     Gitlab,
     Oidc,
     Apple,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum SsoAction {
+    Login,
+    Link,
+    Register,
+}
+
+impl SsoAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Login => "login",
+            Self::Link => "link",
+            Self::Register => "register",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "login" => Some(Self::Login),
+            "link" => Some(Self::Link),
+            "register" => Some(Self::Register),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for SsoAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl SsoProviderType {
@@ -69,9 +208,9 @@ pub struct ExternalIdentity {
     pub id: Uuid,
     pub did: Did,
     pub provider: SsoProviderType,
-    pub provider_user_id: String,
-    pub provider_username: Option<String>,
-    pub provider_email: Option<String>,
+    pub provider_user_id: ExternalUserId,
+    pub provider_username: Option<ExternalUsername>,
+    pub provider_email: Option<ExternalEmail>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
@@ -82,7 +221,7 @@ pub struct SsoAuthState {
     pub state: String,
     pub request_uri: String,
     pub provider: SsoProviderType,
-    pub action: String,
+    pub action: SsoAction,
     pub nonce: Option<String>,
     pub code_verifier: Option<String>,
     pub did: Option<Did>,
@@ -95,9 +234,9 @@ pub struct SsoPendingRegistration {
     pub token: String,
     pub request_uri: String,
     pub provider: SsoProviderType,
-    pub provider_user_id: String,
-    pub provider_username: Option<String>,
-    pub provider_email: Option<String>,
+    pub provider_user_id: ExternalUserId,
+    pub provider_username: Option<ExternalUsername>,
+    pub provider_email: Option<ExternalEmail>,
     pub provider_email_verified: bool,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -140,7 +279,7 @@ pub trait SsoRepository: Send + Sync {
         state: &str,
         request_uri: &str,
         provider: SsoProviderType,
-        action: &str,
+        action: SsoAction,
         nonce: Option<&str>,
         code_verifier: Option<&str>,
         did: Option<&Did>,

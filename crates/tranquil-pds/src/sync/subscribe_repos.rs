@@ -13,6 +13,7 @@ use serde::Deserialize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{error, info, warn};
+use tranquil_db_traits::SequenceNumber;
 
 const BACKFILL_BATCH_SIZE: i64 = 1000;
 
@@ -69,12 +70,17 @@ async fn handle_socket_inner(
     params: SubscribeReposParams,
 ) -> Result<(), ()> {
     let mut rx = state.firehose_tx.subscribe();
-    let mut last_seen: i64 = -1;
+    let mut last_seen = SequenceNumber::UNSET;
 
     if let Some(cursor) = params.cursor {
-        let current_seq = state.repo_repo.get_max_seq().await.unwrap_or(0);
+        let cursor_seq = SequenceNumber::from_raw(cursor);
+        let current_seq = state
+            .repo_repo
+            .get_max_seq()
+            .await
+            .unwrap_or(SequenceNumber::ZERO);
 
-        if cursor > current_seq {
+        if cursor_seq > current_seq {
             if let Ok(error_bytes) =
                 format_error_frame("FutureCursor", Some("Cursor in the future."))
             {
@@ -88,12 +94,12 @@ async fn handle_socket_inner(
 
         let first_event = state
             .repo_repo
-            .get_events_since_cursor(cursor, 1)
+            .get_events_since_cursor(cursor_seq, 1)
             .await
             .ok()
             .and_then(|events| events.into_iter().next());
 
-        let mut current_cursor = cursor;
+        let mut current_cursor = cursor_seq;
 
         if let Some(ref event) = first_event
             && event.created_at < backfill_time
@@ -113,7 +119,7 @@ async fn handle_socket_inner(
                 .flatten();
 
             if let Some(earliest_seq) = earliest {
-                current_cursor = earliest_seq - 1;
+                current_cursor = SequenceNumber::from_raw(earliest_seq.as_i64() - 1);
             }
         }
 

@@ -1,5 +1,5 @@
 use crate::api::SuccessResponse;
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use axum::{
     Json,
     extract::State,
@@ -79,10 +79,7 @@ pub async fn list_trusted_devices(
         .oauth_repo
         .list_trusted_devices(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("listing trusted devices")?;
 
     let devices = rows
         .into_iter()
@@ -134,10 +131,7 @@ pub async fn revoke_trusted_device(
         .oauth_repo
         .revoke_device_trust(&device_id)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("revoking device trust")?;
 
     info!(did = %&auth.did, device_id = %input.device_id, "Trusted device revoked");
     Ok(SuccessResponse::ok().into_response())
@@ -175,10 +169,7 @@ pub async fn update_trusted_device(
         .oauth_repo
         .update_device_friendly_name(&device_id, input.friendly_name.as_deref())
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating device friendly name")?;
 
     info!(did = %auth.did, device_id = %input.device_id, "Trusted device updated");
     Ok(SuccessResponse::ok().into_response())

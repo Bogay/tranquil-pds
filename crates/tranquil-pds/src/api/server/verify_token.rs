@@ -1,8 +1,8 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::types::Did;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::auth::verification_token::{
     VerificationPurpose, normalize_token_input, verify_token_signature,
@@ -81,25 +81,19 @@ async fn handle_migration_verification(
         .user_repo
         .get_verification_info(&did_typed)
         .await
-        .map_err(|e| {
-            warn!(error = ?e, "Database error during migration verification");
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("during migration verification")?
         .ok_or(ApiError::AccountNotFound)?;
 
     if user.email.as_ref().map(|e| e.to_lowercase()) != Some(identifier.to_string()) {
         return Err(ApiError::IdentifierMismatch);
     }
 
-    if !user.email_verified {
+    if !user.channel_verification.email {
         state
             .user_repo
             .set_email_verified_flag(user.id)
             .await
-            .map_err(|e| {
-                warn!(error = ?e, "Failed to update email_verified status");
-                ApiError::InternalError(None)
-            })?;
+            .log_db_err("updating email_verified status")?;
     }
 
     info!(did = %did, "Migration email verified successfully");
@@ -125,7 +119,7 @@ async fn handle_channel_update(
         .user_repo
         .get_id_by_did(&did_typed)
         .await
-        .map_err(|_| ApiError::InternalError(None))?
+        .log_db_err("fetching user id")?
         .ok_or(ApiError::AccountNotFound)?;
 
     match channel {
@@ -134,10 +128,7 @@ async fn handle_channel_update(
                 .user_repo
                 .verify_email_channel(user_id, identifier)
                 .await
-                .map_err(|e| {
-                    error!("Failed to update email channel: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating email channel")?;
             if !success {
                 return Err(ApiError::EmailTaken);
             }
@@ -147,30 +138,21 @@ async fn handle_channel_update(
                 .user_repo
                 .verify_discord_channel(user_id, identifier)
                 .await
-                .map_err(|e| {
-                    error!("Failed to update discord channel: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating discord channel")?;
         }
         "telegram" => {
             state
                 .user_repo
                 .verify_telegram_channel(user_id, identifier)
                 .await
-                .map_err(|e| {
-                    error!("Failed to update telegram channel: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating telegram channel")?;
         }
         "signal" => {
             state
                 .user_repo
                 .verify_signal_channel(user_id, identifier)
                 .await
-                .map_err(|e| {
-                    error!("Failed to update signal channel: {:?}", e);
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating signal channel")?;
         }
         _ => {
             return Err(ApiError::InvalidChannel);
@@ -200,16 +182,10 @@ async fn handle_signup_verification(
         .user_repo
         .get_verification_info(&did_typed)
         .await
-        .map_err(|e| {
-            warn!(error = ?e, "Database error during signup verification");
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("during signup verification")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let is_verified = user.email_verified
-        || user.discord_verified
-        || user.telegram_verified
-        || user.signal_verified;
+    let is_verified = user.channel_verification.has_any_verified();
     if is_verified {
         info!(did = %did, "Account already verified");
         return Ok(Json(VerifyTokenOutput {
@@ -226,40 +202,28 @@ async fn handle_signup_verification(
                 .user_repo
                 .set_email_verified_flag(user.id)
                 .await
-                .map_err(|e| {
-                    warn!(error = ?e, "Failed to update email verified status");
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating email verified status")?;
         }
         "discord" => {
             state
                 .user_repo
                 .set_discord_verified_flag(user.id)
                 .await
-                .map_err(|e| {
-                    warn!(error = ?e, "Failed to update discord verified status");
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating discord verified status")?;
         }
         "telegram" => {
             state
                 .user_repo
                 .set_telegram_verified_flag(user.id)
                 .await
-                .map_err(|e| {
-                    warn!(error = ?e, "Failed to update telegram verified status");
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating telegram verified status")?;
         }
         "signal" => {
             state
                 .user_repo
                 .set_signal_verified_flag(user.id)
                 .await
-                .map_err(|e| {
-                    warn!(error = ?e, "Failed to update signal verified status");
-                    ApiError::InternalError(None)
-                })?;
+                .log_db_err("updating signal verified status")?;
         }
         _ => {
             return Err(ApiError::InvalidChannel);

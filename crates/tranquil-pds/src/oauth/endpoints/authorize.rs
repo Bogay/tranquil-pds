@@ -1,10 +1,16 @@
+use crate::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
 use crate::comms::{channel_display_name, comms_repo::enqueue_2fa_code};
 use crate::oauth::{
-    AuthFlowState, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, SessionId,
+    AuthFlow, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
     db::should_show_consent, scopes::expand_include_scopes,
 };
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{
+    OAuthAuthorizeLimit, OAuthRateLimited, OAuthRegisterCompleteLimit, TotpVerifyLimit,
+    check_user_rate_limit,
+};
+use crate::state::AppState;
 use crate::types::{Did, Handle, PlainPassword};
+use crate::util::{extract_client_ip, pds_hostname, pds_hostname_without_port};
 use axum::{
     Json,
     extract::{Query, State},
@@ -79,27 +85,6 @@ fn is_valid_scope(s: &str) -> bool {
         || s.starts_with("include:")
 }
 
-fn validate_auth_flow_state(
-    flow_state: &AuthFlowState,
-    require_authenticated: bool,
-) -> Option<Response> {
-    if flow_state.is_expired() {
-        return Some(json_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "Authorization request has expired",
-        ));
-    }
-    if require_authenticated && flow_state.is_pending() {
-        return Some(json_error(
-            StatusCode::FORBIDDEN,
-            "access_denied",
-            "Not authenticated",
-        ));
-    }
-    None
-}
-
 fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
     headers
         .get("cookie")
@@ -111,21 +96,6 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
                     .and_then(|value| crate::config::AuthConfig::get().verify_device_cookie(value))
             })
         })
-}
-
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for")
-        && let Ok(value) = forwarded.to_str()
-        && let Some(first_ip) = value.split(',').next()
-    {
-        return first_ip.trim().to_string();
-    }
-    if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str()
-    {
-        return value.trim().to_string();
-    }
-    "0.0.0.0".to_string()
 }
 
 fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
@@ -282,21 +252,13 @@ pub async fn authorize_get(
 
     if let Some(ref login_hint) = request_data.parameters.login_hint {
         tracing::info!(login_hint = %login_hint, "Checking login_hint for delegation");
-        let pds_hostname =
-            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-        let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
-        let normalized = if login_hint.contains('@') || login_hint.starts_with("did:") {
-            login_hint.clone()
-        } else if !login_hint.contains('.') {
-            format!("{}.{}", login_hint.to_lowercase(), hostname_for_handles)
-        } else {
-            login_hint.to_lowercase()
-        };
+        let hostname_for_handles = pds_hostname_without_port();
+        let normalized = NormalizedLoginIdentifier::normalize(login_hint, hostname_for_handles);
         tracing::info!(normalized = %normalized, "Normalized login_hint");
 
         match state
             .user_repo
-            .get_login_check_by_handle_or_email(&normalized)
+            .get_login_check_by_handle_or_email(normalized.as_str())
             .await
         {
             Ok(Some(user)) => {
@@ -340,7 +302,7 @@ pub async fn authorize_get(
         tracing::info!("No login_hint in request");
     }
 
-    if request_data.parameters.prompt.as_deref() == Some("create") {
+    if request_data.parameters.prompt == Some(Prompt::Create) {
         return redirect_see_other(&format!(
             "/app/oauth/register?request_uri={}",
             url_encode(&request_uri)
@@ -485,31 +447,11 @@ pub async fn authorize_accounts(
 
 pub async fn authorize_post(
     State(state): State<AppState>,
+    _rate_limit: OAuthRateLimited<OAuthAuthorizeLimit>,
     headers: HeaderMap,
     Json(form): Json<AuthorizeSubmit>,
 ) -> Response {
     let json_response = wants_json(&headers);
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "OAuth authorize rate limit exceeded");
-        if json_response {
-            return (
-                axum::http::StatusCode::TOO_MANY_REQUESTS,
-                Json(serde_json::json!({
-                    "error": "RateLimitExceeded",
-                    "error_description": "Too many login attempts. Please try again later."
-                })),
-            )
-                .into_response();
-        }
-        return redirect_to_frontend_error(
-            "RateLimitExceeded",
-            "Too many login attempts. Please try again later.",
-        );
-    }
     let form_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
         .oauth_repo
@@ -584,28 +526,18 @@ pub async fn authorize_post(
             url_encode(error_msg)
         ))
     };
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
-    let normalized_username = form.username.trim();
-    let normalized_username = normalized_username
-        .strip_prefix('@')
-        .unwrap_or(normalized_username);
-    let normalized_username = if normalized_username.contains('@') {
-        normalized_username.to_string()
-    } else if !normalized_username.contains('.') {
-        format!("{}.{}", normalized_username, hostname_for_handles)
-    } else {
-        normalized_username.to_string()
-    };
+    let hostname_for_handles = pds_hostname_without_port();
+    let normalized_username =
+        NormalizedLoginIdentifier::normalize(&form.username, hostname_for_handles);
     tracing::debug!(
         original_username = %form.username,
         normalized_username = %normalized_username,
-        pds_hostname = %pds_hostname,
+        pds_hostname = %pds_hostname(),
         "Normalized username for lookup"
     );
     let user = match state
         .user_repo
-        .get_login_info_by_handle_or_email(&normalized_username)
+        .get_login_info_by_handle_or_email(normalized_username.as_str())
         .await
     {
         Ok(Some(u)) => u,
@@ -624,10 +556,7 @@ pub async fn authorize_post(
     if user.takedown_ref.is_some() {
         return show_login_error("This account has been taken down.", json_response);
     }
-    let is_verified = user.email_verified
-        || user.discord_verified
-        || user.telegram_verified
-        || user.signal_verified;
+    let is_verified = user.channel_verification.has_any_verified();
     if !is_verified {
         return show_login_error(
             "Please verify your account before logging in.",
@@ -635,7 +564,7 @@ pub async fn authorize_post(
         );
     }
 
-    if user.account_type == "delegated" {
+    if user.account_type.is_delegated() {
         if state
             .oauth_repo
             .set_authorization_did(&form_request_id, &user.did, None)
@@ -748,14 +677,13 @@ pub async fn authorize_post(
             .await
         {
             Ok(challenge) => {
-                let hostname =
-                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let hostname = pds_hostname();
                 if let Err(e) = enqueue_2fa_code(
                     state.user_repo.as_ref(),
                     state.infra_repo.as_ref(),
                     user.id,
                     &challenge.code,
-                    &hostname,
+                    hostname,
                 )
                 .await
                 {
@@ -792,9 +720,9 @@ pub async fn authorize_post(
         } else {
             let new_id = DeviceId::generate();
             let device_data = DeviceData {
-                session_id: SessionId::generate().0,
+                session_id: SessionId::generate(),
                 user_agent: extract_user_agent(&headers),
-                ip_address: extract_client_ip(&headers),
+                ip_address: extract_client_ip(&headers, None),
                 last_seen_at: Utc::now(),
             };
             let new_device_id_typed = DeviceIdType::from(new_id.0.clone());
@@ -888,7 +816,7 @@ pub async fn authorize_post(
             &request_data.parameters.redirect_uri,
             &code.0,
             request_data.parameters.state.as_deref(),
-            request_data.parameters.response_mode.as_deref(),
+            request_data.parameters.response_mode.map(|m| m.as_str()),
         );
         if let Some(cookie) = new_cookie {
             (
@@ -905,7 +833,7 @@ pub async fn authorize_post(
             &request_data.parameters.redirect_uri,
             &code.0,
             request_data.parameters.state.as_deref(),
-            request_data.parameters.response_mode.as_deref(),
+            request_data.parameters.response_mode.map(|m| m.as_str()),
         );
         if let Some(cookie) = new_cookie {
             (
@@ -1026,10 +954,7 @@ pub async fn authorize_select(
             );
         }
     };
-    let is_verified = user.email_verified
-        || user.discord_verified
-        || user.telegram_verified
-        || user.signal_verified;
+    let is_verified = user.channel_verification.has_any_verified();
     if !is_verified {
         return json_error(
             StatusCode::FORBIDDEN,
@@ -1068,14 +993,13 @@ pub async fn authorize_select(
             .await
         {
             Ok(challenge) => {
-                let hostname =
-                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let hostname = pds_hostname();
                 if let Err(e) = enqueue_2fa_code(
                     state.user_repo.as_ref(),
                     state.infra_repo.as_ref(),
                     user.id,
                     &challenge.code,
-                    &hostname,
+                    hostname,
                 )
                 .await
                 {
@@ -1169,7 +1093,7 @@ pub async fn authorize_select(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.as_deref(),
+        request_data.parameters.response_mode.map(|m| m.as_str()),
     );
     Json(serde_json::json!({
         "redirect_uri": redirect_url
@@ -1193,10 +1117,10 @@ fn build_success_redirect(
         '?'
     };
     redirect_url.push(separator);
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_host = pds_hostname();
     redirect_url.push_str(&format!(
         "iss={}",
-        url_encode(&format!("https://{}", pds_hostname))
+        url_encode(&format!("https://{}", pds_host))
     ));
     if let Some(req_state) = state {
         redirect_url.push_str(&format!("&state={}", url_encode(req_state)));
@@ -1211,10 +1135,10 @@ fn build_intermediate_redirect_url(
     state: Option<&str>,
     response_mode: Option<&str>,
 ) -> String {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_host = pds_hostname();
     let mut url = format!(
         "https://{}/oauth/authorize/redirect?redirect_uri={}&code={}",
-        pds_hostname,
+        pds_host,
         url_encode(redirect_uri),
         url_encode(code)
     );
@@ -1459,29 +1383,27 @@ pub async fn consent_get(
             );
         }
     };
-    let flow_state = AuthFlowState::from_request_data(&request_data);
-
-    if let Some(err_response) = validate_auth_flow_state(&flow_state, true) {
-        if flow_state.is_expired() {
+    let flow_with_user = match AuthFlow::from_request_data(request_data.clone()) {
+        Ok(flow) => match flow.require_user() {
+            Ok(u) => u,
+            Err(_) => {
+                return json_error(StatusCode::FORBIDDEN, "access_denied", "Not authenticated");
+            }
+        },
+        Err(_) => {
             let _ = state
                 .oauth_repo
                 .delete_authorization_request(&consent_request_id)
                 .await;
-        }
-        return err_response;
-    }
-
-    let did_str = flow_state.did().unwrap().to_string();
-    let did: Did = match did_str.parse() {
-        Ok(d) => d,
-        Err(_) => {
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
-                "Invalid DID format in request.",
+                "Authorization request has expired",
             );
         }
     };
+
+    let did = flow_with_user.did().clone();
     let client_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_cache
         .get(&request_data.parameters.client_id)
@@ -1510,7 +1432,7 @@ pub async fn consent_get(
     };
 
     let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        crate::delegation::intersect_scopes(requested_scope_str, &grant.granted_scopes)
+        crate::delegation::intersect_scopes(requested_scope_str, grant.granted_scopes.as_str())
     } else {
         requested_scope_str.to_string()
     };
@@ -1609,7 +1531,7 @@ pub async fn consent_get(
             let level = if let Some(ref grant) = delegation_grant {
                 let preset = crate::delegation::SCOPE_PRESETS
                     .iter()
-                    .find(|p| p.scopes == grant.granted_scopes);
+                    .find(|p| p.scopes == grant.granted_scopes.as_str());
                 preset
                     .map(|p| p.label.to_string())
                     .unwrap_or_else(|| "Custom".to_string())
@@ -1635,7 +1557,7 @@ pub async fn consent_get(
         logo_uri: client_metadata.as_ref().and_then(|m| m.logo_uri.clone()),
         scopes,
         show_consent,
-        did: did_str,
+        did: did.to_string(),
         handle: account_handle,
         is_delegation,
         controller_did: controller_did_resp,
@@ -1676,34 +1598,27 @@ pub async fn consent_post(
             );
         }
     };
-    let flow_state = AuthFlowState::from_request_data(&request_data);
-
-    if flow_state.is_expired() {
-        let _ = state
-            .oauth_repo
-            .delete_authorization_request(&consent_post_request_id)
-            .await;
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "Authorization request has expired",
-        );
-    }
-    if flow_state.is_pending() {
-        return json_error(StatusCode::FORBIDDEN, "access_denied", "Not authenticated");
-    }
-
-    let did_str = flow_state.did().unwrap().to_string();
-    let did: Did = match did_str.parse() {
-        Ok(d) => d,
+    let flow_with_user = match AuthFlow::from_request_data(request_data.clone()) {
+        Ok(flow) => match flow.require_user() {
+            Ok(u) => u,
+            Err(_) => {
+                return json_error(StatusCode::FORBIDDEN, "access_denied", "Not authenticated");
+            }
+        },
         Err(_) => {
+            let _ = state
+                .oauth_repo
+                .delete_authorization_request(&consent_post_request_id)
+                .await;
             return json_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
-                "Invalid DID format",
+                "Authorization request has expired",
             );
         }
     };
+
+    let did = flow_with_user.did().clone();
     let original_scope_str = request_data
         .parameters
         .scope
@@ -1726,7 +1641,7 @@ pub async fn consent_post(
     };
 
     let effective_scope_str = if let Some(ref grant) = delegation_grant {
-        crate::delegation::intersect_scopes(original_scope_str, &grant.granted_scopes)
+        crate::delegation::intersect_scopes(original_scope_str, grant.granted_scopes.as_str())
     } else {
         original_scope_str.to_string()
     };
@@ -1799,7 +1714,7 @@ pub async fn consent_post(
     let consent_post_device_id = request_data
         .device_id
         .as_ref()
-        .map(|d| DeviceIdType::from(d.clone()));
+        .map(|d| DeviceIdType::from(d.0.clone()));
     let consent_post_code = AuthorizationCode::from(code.0.clone());
     if state
         .oauth_repo
@@ -1823,7 +1738,7 @@ pub async fn consent_post(
         redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.as_deref(),
+        request_data.parameters.response_mode.map(|m| m.as_str()),
     );
     tracing::info!(
         intermediate_url = %intermediate_url,
@@ -1835,6 +1750,7 @@ pub async fn consent_post(
 
 pub async fn authorize_2fa_post(
     State(state): State<AppState>,
+    _rate_limit: OAuthRateLimited<OAuthAuthorizeLimit>,
     headers: HeaderMap,
     Json(form): Json<Authorize2faSubmit>,
 ) -> Response {
@@ -1848,18 +1764,6 @@ pub async fn authorize_2fa_post(
         )
             .into_response()
     };
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "OAuth 2FA rate limit exceeded");
-        return json_error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "RateLimitExceeded",
-            "Too many attempts. Please try again later.",
-        );
-    }
     let twofa_post_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
         .oauth_repo
@@ -1956,7 +1860,7 @@ pub async fn authorize_2fa_post(
             &request_data.parameters.redirect_uri,
             &code.0,
             request_data.parameters.state.as_deref(),
-            request_data.parameters.response_mode.as_deref(),
+            request_data.parameters.response_mode.map(|m| m.as_str()),
         );
         return Json(serde_json::json!({
             "redirect_uri": redirect_url
@@ -1990,17 +1894,16 @@ pub async fn authorize_2fa_post(
             "No 2FA challenge found. Please start over.",
         );
     }
-    if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &did)
-        .await
-    {
-        tracing::warn!(did = %did, "TOTP verification rate limit exceeded");
-        return json_error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "RateLimitExceeded",
-            "Too many verification attempts. Please try again in a few minutes.",
-        );
-    }
+    let _rate_proof = match check_user_rate_limit::<TotpVerifyLimit>(&state, &did).await {
+        Ok(proof) => proof,
+        Err(_) => {
+            return json_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "RateLimitExceeded",
+                "Too many verification attempts. Please try again in a few minutes.",
+            );
+        }
+    };
     let totp_valid =
         crate::api::server::verify_totp_or_backup_for_user(&state, &did, &form.code).await;
     if !totp_valid {
@@ -2065,7 +1968,7 @@ pub async fn authorize_2fa_post(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.as_deref(),
+        request_data.parameters.response_mode.map(|m| m.as_str()),
     );
     Json(serde_json::json!({
         "redirect_uri": redirect_url
@@ -2089,23 +1992,13 @@ pub async fn check_user_has_passkeys(
     State(state): State<AppState>,
     Query(query): Query<CheckPasskeysQuery>,
 ) -> Response {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
-    let normalized_identifier = query.identifier.trim();
-    let normalized_identifier = normalized_identifier
-        .strip_prefix('@')
-        .unwrap_or(normalized_identifier);
-    let normalized_identifier = if let Some(bare_handle) =
-        normalized_identifier.strip_suffix(&format!(".{}", hostname_for_handles))
-    {
-        bare_handle.to_string()
-    } else {
-        normalized_identifier.to_string()
-    };
+    let hostname_for_handles = pds_hostname_without_port();
+    let bare_identifier =
+        BareLoginIdentifier::from_identifier(&query.identifier, hostname_for_handles);
 
     let user = state
         .user_repo
-        .get_login_check_by_handle_or_email(&normalized_identifier)
+        .get_login_check_by_handle_or_email(bare_identifier.as_str())
         .await;
 
     let has_passkeys = match user {
@@ -2131,21 +2024,13 @@ pub async fn check_user_security_status(
     State(state): State<AppState>,
     Query(query): Query<CheckPasskeysQuery>,
 ) -> Response {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
-    let identifier = query.identifier.trim();
-    let identifier = identifier.strip_prefix('@').unwrap_or(identifier);
-    let normalized_identifier = if identifier.contains('@') || identifier.starts_with("did:") {
-        identifier.to_string()
-    } else if !identifier.contains('.') {
-        format!("{}.{}", identifier.to_lowercase(), hostname_for_handles)
-    } else {
-        identifier.to_lowercase()
-    };
+    let hostname_for_handles = pds_hostname_without_port();
+    let normalized_identifier =
+        NormalizedLoginIdentifier::normalize(&query.identifier, hostname_for_handles);
 
     let user = state
         .user_repo
-        .get_login_check_by_handle_or_email(&normalized_identifier)
+        .get_login_check_by_handle_or_email(normalized_identifier.as_str())
         .await;
 
     let (has_passkeys, has_totp, has_password, is_delegated, did): (
@@ -2200,26 +2085,9 @@ pub struct PasskeyStartResponse {
 
 pub async fn passkey_start(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: OAuthRateLimited<OAuthAuthorizeLimit>,
     Json(form): Json<PasskeyStartInput>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-
-    if !state
-        .check_rate_limit(RateLimitKind::OAuthAuthorize, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "OAuth passkey rate limit exceeded");
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(serde_json::json!({
-                "error": "RateLimitExceeded",
-                "error_description": "Too many login attempts. Please try again later."
-            })),
-        )
-            .into_response();
-    }
-
     let passkey_start_request_id = RequestId::from(form.request_uri.clone());
     let request_data = match state
         .oauth_repo
@@ -2264,23 +2132,13 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
-    let normalized_username = form.identifier.trim();
-    let normalized_username = normalized_username
-        .strip_prefix('@')
-        .unwrap_or(normalized_username);
-    let normalized_username = if normalized_username.contains('@') {
-        normalized_username.to_string()
-    } else if !normalized_username.contains('.') {
-        format!("{}.{}", normalized_username, hostname_for_handles)
-    } else {
-        normalized_username.to_string()
-    };
+    let hostname_for_handles = pds_hostname_without_port();
+    let normalized_username =
+        NormalizedLoginIdentifier::normalize(&form.identifier, hostname_for_handles);
 
     let user = match state
         .user_repo
-        .get_login_info_by_handle_or_email(&normalized_username)
+        .get_login_info_by_handle_or_email(normalized_username.as_str())
         .await
     {
         Ok(Some(u)) => u,
@@ -2328,10 +2186,7 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    let is_verified = user.email_verified
-        || user.discord_verified
-        || user.telegram_verified
-        || user.signal_verified;
+    let is_verified = user.channel_verification.has_any_verified();
 
     if !is_verified {
         return (
@@ -2386,22 +2241,7 @@ pub async fn passkey_start(
             .into_response();
     }
 
-    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to create WebAuthn config");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "server_error",
-                    "error_description": "WebAuthn configuration failed."
-                })),
-            )
-                .into_response();
-        }
-    };
-
-    let (rcr, auth_state) = match webauthn.start_authentication(passkeys) {
+    let (rcr, auth_state) = match state.webauthn_config.start_authentication(passkeys) {
         Ok(result) => result,
         Err(e) => {
             tracing::error!(error = %e, "Failed to start passkey authentication");
@@ -2680,23 +2520,10 @@ pub async fn passkey_finish(
             }
         };
 
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to create WebAuthn config");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": "server_error",
-                    "error_description": "WebAuthn configuration failed."
-                })),
-            )
-                .into_response();
-        }
-    };
-
-    let auth_result = match webauthn.finish_authentication(&credential, &auth_state) {
+    let auth_result = match state
+        .webauthn_config
+        .finish_authentication(&credential, &auth_state)
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!(error = %e, did = %did, "Failed to verify passkey authentication");
@@ -2769,14 +2596,13 @@ pub async fn passkey_finish(
             .await
         {
             Ok(challenge) => {
-                let hostname =
-                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let hostname = pds_hostname();
                 if let Err(e) = enqueue_2fa_code(
                     state.user_repo.as_ref(),
                     state.infra_repo.as_ref(),
                     user.id,
                     &challenge.code,
-                    &hostname,
+                    hostname,
                 )
                 .await
                 {
@@ -2859,7 +2685,7 @@ pub async fn passkey_finish(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.as_deref(),
+        request_data.parameters.response_mode.map(|m| m.as_str()),
     );
 
     Json(serde_json::json!({
@@ -2884,8 +2710,6 @@ pub async fn authorize_passkey_start(
     State(state): State<AppState>,
     Query(query): Query<AuthorizePasskeyQuery>,
 ) -> Response {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-
     let auth_passkey_start_request_id = RequestId::from(query.request_uri.clone());
     let request_data = match state
         .oauth_repo
@@ -2994,19 +2818,7 @@ pub async fn authorize_passkey_start(
             .into_response();
     }
 
-    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!("Failed to create WebAuthn config: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
-            )
-                .into_response();
-        }
-    };
-
-    let (rcr, auth_state) = match webauthn.start_authentication(passkeys) {
+    let (rcr, auth_state) = match state.webauthn_config.start_authentication(passkeys) {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Failed to start passkey authentication: {:?}", e);
@@ -3063,7 +2875,7 @@ pub async fn authorize_passkey_finish(
     headers: HeaderMap,
     Json(form): Json<AuthorizePasskeySubmit>,
 ) -> Response {
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let pds_hostname = pds_hostname();
     let passkey_finish_request_id = RequestId::from(form.request_uri.clone());
 
     let request_data = match state
@@ -3193,19 +3005,10 @@ pub async fn authorize_passkey_finish(
             }
         };
 
-    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!("Failed to create WebAuthn config: {:?}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "server_error", "error_description": "An error occurred."})),
-            )
-                .into_response();
-        }
-    };
-
-    let auth_result = match webauthn.finish_authentication(&credential, &auth_state) {
+    let auth_result = match state
+        .webauthn_config
+        .finish_authentication(&credential, &auth_state)
+    {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Passkey authentication failed: {:?}", e);
@@ -3292,7 +3095,7 @@ pub async fn authorize_passkey_finish(
                         state.infra_repo.as_ref(),
                         user.id,
                         &challenge.code,
-                        &pds_hostname,
+                        pds_hostname,
                     )
                     .await
                     {
@@ -3347,25 +3150,9 @@ pub struct RegisterCompleteInput {
 
 pub async fn register_complete(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: OAuthRateLimited<OAuthRegisterCompleteLimit>,
     Json(form): Json<RegisterCompleteInput>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-
-    if !state
-        .check_rate_limit(RateLimitKind::OAuthRegisterComplete, &client_ip)
-        .await
-    {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(serde_json::json!({
-                "error": "RateLimitExceeded",
-                "error_description": "Too many attempts. Please try again later."
-            })),
-        )
-            .into_response();
-    }
-
     let did = Did::from(form.did.clone());
 
     let request_id = RequestId::from(form.request_uri.clone());
@@ -3417,7 +3204,7 @@ pub async fn register_complete(
             .into_response();
     }
 
-    if request_data.parameters.prompt.as_deref() != Some("create") {
+    if request_data.parameters.prompt != Some(Prompt::Create) {
         tracing::warn!(
             request_uri = %form.request_uri,
             prompt = ?request_data.parameters.prompt,
@@ -3506,12 +3293,7 @@ pub async fn register_complete(
     }
 
     let is_verified = match state.user_repo.get_session_info_by_did(&did).await {
-        Ok(Some(info)) => {
-            info.email_verified
-                || info.discord_verified
-                || info.telegram_verified
-                || info.signal_verified
-        }
+        Ok(Some(info)) => info.channel_verification.has_any_verified(),
         Ok(None) => {
             return (
                 StatusCode::FORBIDDEN,
@@ -3636,7 +3418,7 @@ pub async fn register_complete(
         &request_data.parameters.redirect_uri,
         &code.0,
         request_data.parameters.state.as_deref(),
-        request_data.parameters.response_mode.as_deref(),
+        request_data.parameters.response_mode.map(|m| m.as_str()),
     );
     Json(serde_json::json!({"redirect_uri": redirect_url})).into_response()
 }
@@ -3662,9 +3444,9 @@ pub async fn establish_session(
         None => {
             let new_id = DeviceId::generate();
             let device_data = DeviceData {
-                session_id: SessionId::generate().0,
+                session_id: SessionId::generate(),
                 user_agent: extract_user_agent(&headers),
-                ip_address: extract_client_ip(&headers),
+                ip_address: extract_client_ip(&headers, None),
                 last_seen_at: Utc::now(),
             };
             let device_typed = DeviceIdType::from(new_id.0.clone());

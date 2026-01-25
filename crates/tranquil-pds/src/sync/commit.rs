@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::state::AppState;
-use crate::sync::util::{AccountStatus, assert_repo_availability, get_account_with_status};
+use crate::sync::util::{assert_repo_availability, get_account_with_status};
 use axum::{
     Json,
     extract::{Query, State},
@@ -13,6 +13,7 @@ use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tracing::error;
+use tranquil_db_traits::AccountStatus;
 use tranquil_types::Did;
 
 async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<String> {
@@ -130,7 +131,7 @@ pub async fn list_repos(
                     head: cid_str,
                     rev,
                     active: status.is_active(),
-                    status: status.as_str().map(String::from),
+                    status: status.for_firehose().map(String::from),
                 });
             }
             let next_cursor = if has_more {
@@ -212,7 +213,7 @@ pub async fn get_repo_status(
         Json(GetRepoStatusOutput {
             did: account.did,
             active: account.status.is_active(),
-            status: account.status.as_str().map(String::from),
+            status: account.status.for_firehose().map(String::from),
             rev,
         }),
     )

@@ -6,15 +6,19 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
-use tranquil_db_traits::SsoProviderType;
+use tranquil_db_traits::{SsoAction, SsoProviderType};
 use tranquil_types::RequestId;
 
 use super::config::SsoConfig;
 use crate::api::error::ApiError;
 use crate::auth::extractor::extract_bearer_token_from_header;
 use crate::auth::{generate_app_password, validate_bearer_token_cached};
-use crate::rate_limit::extract_client_ip;
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{
+    AccountCreationLimit, RateLimited, SsoCallbackLimit, SsoInitiateLimit, SsoUnlinkLimit,
+    check_user_rate_limit_with_message,
+};
+use crate::state::AppState;
+use crate::util::{pds_hostname, pds_hostname_without_port};
 
 fn generate_state() -> String {
     use rand::RngCore;
@@ -71,18 +75,10 @@ pub struct SsoInitiateResponse {
 
 pub async fn sso_initiate(
     State(state): State<AppState>,
+    _rate_limit: RateLimited<SsoInitiateLimit>,
     headers: HeaderMap,
     Json(input): Json<SsoInitiateRequest>,
 ) -> Result<Json<SsoInitiateResponse>, ApiError> {
-    let client_ip = extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::SsoInitiate, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "SSO initiate rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
     if input.provider.len() > 20 {
         return Err(ApiError::SsoProviderNotFound);
     }
@@ -105,19 +101,21 @@ pub async fn sso_initiate(
         .get_provider(provider_type)
         .ok_or(ApiError::SsoProviderNotEnabled)?;
 
-    let action = input.action.as_deref().unwrap_or("login");
-    if !["login", "link", "register"].contains(&action) {
-        return Err(ApiError::SsoInvalidAction);
-    }
+    let action = input
+        .action
+        .as_deref()
+        .map(SsoAction::parse)
+        .unwrap_or(Some(SsoAction::Login))
+        .ok_or(ApiError::SsoInvalidAction)?;
 
-    let is_standalone = action == "register" && input.request_uri.is_none();
+    let is_standalone = action == SsoAction::Register && input.request_uri.is_none();
     let request_uri = input
         .request_uri
         .clone()
         .unwrap_or_else(|| "standalone".to_string());
 
     let auth_did = match action {
-        "link" => {
+        SsoAction::Link => {
             let auth_header = headers
                 .get(axum::http::header::AUTHORIZATION)
                 .and_then(|v| v.to_str().ok());
@@ -132,7 +130,7 @@ pub async fn sso_initiate(
             .map_err(|_| ApiError::SsoNotAuthenticated)?;
             Some(auth_user.did)
         }
-        "register" if is_standalone => None,
+        SsoAction::Register if is_standalone => None,
         _ => {
             let request_id = RequestId::new(request_uri.clone());
             let _request_data = state
@@ -217,24 +215,19 @@ fn redirect_to_login_with_error(request_uri: &str, message: &str) -> Response {
 
 pub async fn sso_callback(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<SsoCallbackLimit>,
     Query(query): Query<SsoCallbackQuery>,
 ) -> Response {
+    sso_callback_internal(&state, query).await
+}
+
+async fn sso_callback_internal(state: &AppState, query: SsoCallbackQuery) -> Response {
     tracing::debug!(
         has_code = query.code.is_some(),
         has_state = query.state.is_some(),
         has_error = query.error.is_some(),
         "SSO callback received"
     );
-
-    let client_ip = extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::SsoCallback, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "SSO callback rate limit exceeded");
-        return redirect_to_error("Too many requests. Please try again later.");
-    }
 
     if let Some(ref error) = query.error {
         tracing::warn!(
@@ -326,39 +319,38 @@ pub async fn sso_callback(
         }
     };
 
-    match auth_state.action.as_str() {
-        "login" => {
+    match auth_state.action {
+        SsoAction::Login => {
             handle_sso_login(
-                &state,
+                state,
                 &auth_state.request_uri,
                 auth_state.provider,
                 &user_info,
             )
             .await
         }
-        "link" => {
+        SsoAction::Link => {
             let did = match auth_state.did {
                 Some(d) => d,
                 None => return redirect_to_error("Not authenticated"),
             };
-            handle_sso_link(&state, did, auth_state.provider, &user_info).await
+            handle_sso_link(state, did, auth_state.provider, &user_info).await
         }
-        "register" => {
+        SsoAction::Register => {
             handle_sso_register(
-                &state,
+                state,
                 &auth_state.request_uri,
                 auth_state.provider,
                 &user_info,
             )
             .await
         }
-        _ => redirect_to_error("Unknown SSO action"),
     }
 }
 
 pub async fn sso_callback_post(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<SsoCallbackLimit>,
     Form(form): Form<SsoCallbackForm>,
 ) -> Response {
     tracing::debug!(
@@ -376,7 +368,7 @@ pub async fn sso_callback_post(
         error_description: form.error_description,
     };
 
-    sso_callback(State(state), headers, Query(query)).await
+    sso_callback_internal(&state, query).await
 }
 
 fn generate_registration_token() -> String {
@@ -429,12 +421,7 @@ async fn handle_sso_login(
     };
 
     let is_verified = match state.user_repo.get_session_info_by_did(&identity.did).await {
-        Ok(Some(info)) => {
-            info.email_verified
-                || info.discord_verified
-                || info.telegram_verified
-                || info.signal_verified
-        }
+        Ok(Some(info)) => info.channel_verification.has_any_verified(),
         Ok(None) => {
             tracing::error!("User not found for SSO login: {}", identity.did);
             return redirect_to_error("Account not found");
@@ -486,10 +473,10 @@ async fn handle_sso_login(
         "SSO login successful"
     );
 
-    let has_totp = match state.user_repo.get_totp_record(&identity.did).await {
-        Ok(Some(record)) => record.verified,
-        _ => false,
-    };
+    let has_totp = matches!(
+        state.user_repo.get_totp_record_state(&identity.did).await,
+        Ok(Some(tranquil_db_traits::TotpRecordState::Verified(_)))
+    );
 
     if has_totp {
         return Redirect::to(&format!(
@@ -657,8 +644,8 @@ pub async fn get_linked_accounts(
             id: id.id.to_string(),
             provider: id.provider.as_str().to_string(),
             provider_name: id.provider.display_name().to_string(),
-            provider_username: id.provider_username,
-            provider_email: id.provider_email,
+            provider_username: id.provider_username.map(|u| u.into_inner()),
+            provider_email: id.provider_email.map(|e| e.into_inner()),
             created_at: id.created_at.to_rfc3339(),
             last_login_at: id.last_login_at.map(|t| t.to_rfc3339()),
         })
@@ -682,13 +669,12 @@ pub async fn unlink_account(
     auth: crate::auth::Auth<crate::auth::Active>,
     Json(input): Json<UnlinkAccountRequest>,
 ) -> Result<Json<UnlinkAccountResponse>, ApiError> {
-    if !state
-        .check_rate_limit(RateLimitKind::SsoUnlink, auth.did.as_str())
-        .await
-    {
-        tracing::warn!(did = %auth.did, "SSO unlink rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
+    let _rate_limit = check_user_rate_limit_with_message::<SsoUnlinkLimit>(
+        &state,
+        auth.did.as_str(),
+        "Too many unlink attempts. Please try again later.",
+    )
+    .await?;
 
     let id = uuid::Uuid::parse_str(&input.id).map_err(|_| ApiError::InvalidId)?;
 
@@ -746,18 +732,9 @@ pub struct PendingRegistrationResponse {
 
 pub async fn get_pending_registration(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<SsoCallbackLimit>,
     Query(query): Query<PendingRegistrationQuery>,
 ) -> Result<Json<PendingRegistrationResponse>, ApiError> {
-    let client_ip = extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::SsoCallback, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "SSO pending registration rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
     if query.token.len() > 100 {
         return Err(ApiError::InvalidRequest("Invalid token".into()));
     }
@@ -771,9 +748,9 @@ pub async fn get_pending_registration(
     Ok(Json(PendingRegistrationResponse {
         request_uri: pending.request_uri,
         provider: pending.provider.as_str().to_string(),
-        provider_user_id: pending.provider_user_id,
-        provider_username: pending.provider_username,
-        provider_email: pending.provider_email,
+        provider_user_id: pending.provider_user_id.into_inner(),
+        provider_username: pending.provider_username.map(|u| u.into_inner()),
+        provider_email: pending.provider_email.map(|e| e.into_inner()),
         provider_email_verified: pending.provider_email_verified,
     }))
 }
@@ -810,10 +787,9 @@ pub async fn check_handle_available(
         }
     };
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let full_handle = format!("{}.{}", validated, hostname_for_handles);
-    let handle_typed = crate::types::Handle::new_unchecked(&full_handle);
+    let handle_typed = unsafe { crate::types::Handle::new_unchecked(&full_handle) };
 
     let db_available = state
         .user_repo
@@ -866,24 +842,16 @@ pub struct CompleteRegistrationResponse {
 
 pub async fn complete_registration(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    rate_limit: RateLimited<AccountCreationLimit>,
     Json(input): Json<CompleteRegistrationInput>,
 ) -> Result<Json<CompleteRegistrationResponse>, ApiError> {
+    let client_ip = rate_limit.client_ip();
     use jacquard_common::types::{integer::LimitedU32, string::Tid};
     use jacquard_repo::{mst::Mst, storage::BlockStore};
     use k256::ecdsa::SigningKey;
     use rand::rngs::OsRng;
     use serde_json::json;
     use std::sync::Arc;
-
-    let client_ip = extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::AccountCreation, &client_ip)
-        .await
-    {
-        tracing::warn!(ip = %client_ip, "SSO registration rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
 
     if input.token.len() > 100 {
         return Err(ApiError::InvalidRequest("Invalid token".into()));
@@ -899,8 +867,8 @@ pub async fn complete_registration(
         .await?
         .ok_or(ApiError::SsoSessionExpired)?;
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname = pds_hostname();
+    let hostname_for_handles = pds_hostname_without_port();
 
     let handle = match crate::api::validation::validate_short_handle(&input.handle) {
         Ok(h) => format!("{}.{}", h, hostname_for_handles),
@@ -913,7 +881,12 @@ pub async fn complete_registration(
             let email = input
                 .email
                 .clone()
-                .or_else(|| pending_preview.provider_email.clone())
+                .or_else(|| {
+                    pending_preview
+                        .provider_email
+                        .clone()
+                        .map(|e| e.into_inner())
+                })
                 .map(|e| e.trim().to_string())
                 .filter(|e| !e.is_empty());
             match email {
@@ -939,7 +912,12 @@ pub async fn complete_registration(
     let email = input
         .email
         .clone()
-        .or_else(|| pending_preview.provider_email.clone())
+        .or_else(|| {
+            pending_preview
+                .provider_email
+                .clone()
+                .map(|e| e.into_inner())
+        })
         .map(|e| e.trim().to_string())
         .filter(|e| !e.is_empty());
 
@@ -956,14 +934,10 @@ pub async fn complete_registration(
         None => None,
     };
 
-    if let Some(ref code) = input.invite_code {
-        let valid = state
-            .infra_repo
-            .is_invite_code_valid(code)
-            .await
-            .unwrap_or(false);
-        if !valid {
-            return Err(ApiError::InvalidInviteCode);
+    let _validated_invite_code = if let Some(ref code) = input.invite_code {
+        match state.infra_repo.validate_invite_code(code).await {
+            Ok(validated) => Some(validated),
+            Err(_) => return Err(ApiError::InvalidInviteCode),
         }
     } else {
         let invite_required = std::env::var("INVITE_CODE_REQUIRED")
@@ -972,12 +946,13 @@ pub async fn complete_registration(
         if invite_required {
             return Err(ApiError::InviteCodeRequired);
         }
-    }
+        None
+    };
 
-    let handle_typed = crate::types::Handle::new_unchecked(&handle);
+    let handle_typed = unsafe { crate::types::Handle::new_unchecked(&handle) };
     let reserved = state
         .user_repo
-        .reserve_handle(&handle_typed, &client_ip)
+        .reserve_handle(&handle_typed, client_ip)
         .await
         .unwrap_or(false);
 
@@ -1076,7 +1051,7 @@ pub async fn complete_registration(
     };
 
     let rev = Tid::now(LimitedU32::MIN);
-    let did_typed = crate::types::Did::new_unchecked(&did);
+    let did_typed = unsafe { crate::types::Did::new_unchecked(&did) };
     let (commit_bytes, _sig) = match crate::api::repo::record::utils::create_signed_commit(
         &did_typed,
         mst_root,
@@ -1144,9 +1119,15 @@ pub async fn complete_registration(
         invite_code: input.invite_code.clone(),
         birthdate_pref,
         sso_provider: pending_preview.provider,
-        sso_provider_user_id: pending_preview.provider_user_id.clone(),
-        sso_provider_username: pending_preview.provider_username.clone(),
-        sso_provider_email: pending_preview.provider_email.clone(),
+        sso_provider_user_id: pending_preview.provider_user_id.clone().into_inner(),
+        sso_provider_username: pending_preview
+            .provider_username
+            .clone()
+            .map(|u| u.into_inner()),
+        sso_provider_email: pending_preview
+            .provider_email
+            .clone()
+            .map(|e| e.into_inner()),
         sso_provider_email_verified: pending_preview.provider_email_verified,
         pending_registration_token: input.token.clone(),
     };
@@ -1179,8 +1160,12 @@ pub async fn complete_registration(
     {
         tracing::warn!("Failed to sequence identity event for {}: {}", did, e);
     }
-    if let Err(e) =
-        crate::api::repo::record::sequence_account_event(&state, &did_typed, true, None).await
+    if let Err(e) = crate::api::repo::record::sequence_account_event(
+        &state,
+        &did_typed,
+        tranquil_db_traits::AccountStatus::Active,
+    )
+    .await
     {
         tracing::warn!("Failed to sequence account event for {}: {}", did, e);
     }
@@ -1189,8 +1174,8 @@ pub async fn complete_registration(
         "$type": "app.bsky.actor.profile",
         "displayName": handle_typed.as_str()
     });
-    let profile_collection = crate::types::Nsid::new_unchecked("app.bsky.actor.profile");
-    let profile_rkey = crate::types::Rkey::new_unchecked("self");
+    let profile_collection = unsafe { crate::types::Nsid::new_unchecked("app.bsky.actor.profile") };
+    let profile_rkey = unsafe { crate::types::Rkey::new_unchecked("self") };
     if let Err(e) = crate::api::repo::record::create_record_internal(
         &state,
         &did_typed,
@@ -1217,7 +1202,7 @@ pub async fn complete_registration(
         user_id: create_result.user_id,
         name: app_password_name.clone(),
         password_hash: app_password_hash,
-        privileged: false,
+        privilege: tranquil_db_traits::AppPasswordPrivilege::Standard,
         scopes: None,
         created_by_controller_did: None,
     };
@@ -1260,7 +1245,7 @@ pub async fn complete_registration(
 
     let channel_auto_verified = verification_channel == "email"
         && pending_preview.provider_email_verified
-        && pending_preview.provider_email.as_ref() == email.as_ref();
+        && pending_preview.provider_email.as_ref().map(|e| e.as_str()) == email.as_deref();
 
     if channel_auto_verified {
         let _ = state
@@ -1304,7 +1289,7 @@ pub async fn complete_registration(
                 refresh_jti: refresh_meta.jti.clone(),
                 access_expires_at: access_meta.expires_at,
                 refresh_expires_at: refresh_meta.expires_at,
-                legacy_login: false,
+                login_type: tranquil_db_traits::LoginType::Modern,
                 mfa_verified: false,
                 scope: None,
                 controller_did: None,
@@ -1315,13 +1300,12 @@ pub async fn complete_registration(
                 return Err(ApiError::InternalError(None));
             }
 
-            let hostname =
-                std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+            let hostname = pds_hostname();
             if let Err(e) = crate::comms::comms_repo::enqueue_welcome(
                 state.user_repo.as_ref(),
                 state.infra_repo.as_ref(),
                 user_id.unwrap_or(uuid::Uuid::nil()),
-                &hostname,
+                hostname,
             )
             .await
             {
@@ -1367,7 +1351,7 @@ pub async fn complete_registration(
             verification_channel,
             &verification_recipient,
             &formatted_token,
-            &hostname,
+            hostname,
         )
         .await
         {

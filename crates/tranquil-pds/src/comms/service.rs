@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use tokio::sync::watch;
 use tokio::time::interval;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_comms::{
     CommsChannel, CommsSender, CommsStatus, CommsType, NewComms, SendError, format_message,
@@ -96,7 +96,7 @@ impl CommsService {
         !self.senders.is_empty()
     }
 
-    pub async fn run(self, mut shutdown: watch::Receiver<bool>) {
+    pub async fn run(self, shutdown: CancellationToken) {
         if self.senders.is_empty() {
             warn!(
                 "Comms service starting with no senders configured. Messages will be queued but not delivered until senders are configured."
@@ -116,11 +116,9 @@ impl CommsService {
                         error!(error = %e, "Failed to process comms batch");
                     }
                 }
-                _ = shutdown.changed() => {
-                    if *shutdown.borrow() {
-                        info!("Comms service shutting down");
-                        break;
-                    }
+                _ = shutdown.cancelled() => {
+                    info!("Comms service shutting down");
+                    break;
                 }
             }
         }
@@ -278,7 +276,7 @@ pub mod repo {
             &[("hostname", hostname), ("handle", &prefs.handle)],
         );
         let subject = format_message(strings.welcome_subject, &[("hostname", hostname)]);
-        let channel = channel_from_str(&prefs.preferred_channel);
+        let channel = prefs.preferred_channel;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
@@ -309,7 +307,7 @@ pub mod repo {
             &[("handle", &prefs.handle), ("code", code)],
         );
         let subject = format_message(strings.password_reset_subject, &[("hostname", hostname)]);
-        let channel = channel_from_str(&prefs.preferred_channel);
+        let channel = prefs.preferred_channel;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
@@ -422,7 +420,7 @@ pub mod repo {
             &[("handle", &prefs.handle), ("code", code)],
         );
         let subject = format_message(strings.account_deletion_subject, &[("hostname", hostname)]);
-        let channel = channel_from_str(&prefs.preferred_channel);
+        let channel = prefs.preferred_channel;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
@@ -453,7 +451,7 @@ pub mod repo {
             &[("handle", &prefs.handle), ("token", token)],
         );
         let subject = format_message(strings.plc_operation_subject, &[("hostname", hostname)]);
-        let channel = channel_from_str(&prefs.preferred_channel);
+        let channel = prefs.preferred_channel;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
@@ -484,7 +482,7 @@ pub mod repo {
             &[("handle", &prefs.handle), ("url", recovery_url)],
         );
         let subject = format_message(strings.passkey_recovery_subject, &[("hostname", hostname)]);
-        let channel = channel_from_str(&prefs.preferred_channel);
+        let channel = prefs.preferred_channel;
         infra_repo
             .enqueue_comms(
                 Some(user_id),
@@ -614,7 +612,7 @@ pub mod repo {
             &[("handle", &prefs.handle), ("code", code)],
         );
         let subject = format_message(strings.two_factor_code_subject, &[("hostname", hostname)]);
-        let channel = channel_from_str(&prefs.preferred_channel);
+        let channel = prefs.preferred_channel;
         infra_repo
             .enqueue_comms(
                 Some(user_id),

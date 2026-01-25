@@ -1,7 +1,9 @@
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::api::{EmptyResponse, TokenRequiredResponse, VerifiedResponse};
 use crate::auth::{Auth, NotTakendown};
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{EmailUpdateLimit, RateLimited, VerificationCheckLimit};
+use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -44,19 +46,10 @@ pub struct RequestEmailUpdateInput {
 
 pub async fn request_email_update(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _rate_limit: RateLimited<EmailUpdateLimit>,
     auth: Auth<NotTakendown>,
     input: Option<Json<RequestEmailUpdateInput>>,
 ) -> Result<Response, ApiError> {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::EmailUpdate, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Email update rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
     if let Err(e) = crate::auth::scope_check::check_account_scope(
         auth.is_oauth(),
         auth.scope.as_deref(),
@@ -70,10 +63,7 @@ pub async fn request_email_update(
         .user_repo
         .get_email_info_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting email info")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let Some(current_email) = user.email else {
@@ -111,14 +101,14 @@ pub async fn request_email_update(
             }
         }
 
-        let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let hostname = pds_hostname();
         if let Err(e) = crate::comms::comms_repo::enqueue_email_update_token(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
             user.id,
             &code,
             &formatted_code,
-            &hostname,
+            hostname,
         )
         .await
         {
@@ -139,19 +129,10 @@ pub struct ConfirmEmailInput {
 
 pub async fn confirm_email(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _rate_limit: RateLimited<EmailUpdateLimit>,
     auth: Auth<NotTakendown>,
     Json(input): Json<ConfirmEmailInput>,
 ) -> Result<Response, ApiError> {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::EmailUpdate, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Confirm email rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
     if let Err(e) = crate::auth::scope_check::check_account_scope(
         auth.is_oauth(),
         auth.scope.as_deref(),
@@ -166,10 +147,7 @@ pub async fn confirm_email(
         .user_repo
         .get_email_info_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting email info")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let Some(ref email) = user.email else {
@@ -213,10 +191,7 @@ pub async fn confirm_email(
         .user_repo
         .set_email_verified(user.id, true)
         .await
-        .map_err(|e| {
-            error!("DB error confirming email: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("confirming email")?;
 
     info!("Email confirmed for user {}", user.id);
     Ok(EmptyResponse::ok().into_response())
@@ -250,10 +225,7 @@ pub async fn update_email(
         .user_repo
         .get_email_info_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting email info")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let user_id = user.id;
@@ -325,23 +297,20 @@ pub async fn update_email(
         .user_repo
         .update_email(user_id, &new_email)
         .await
-        .map_err(|e| {
-            error!("DB error updating email: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("updating email")?;
 
     let verification_token =
         crate::auth::verification_token::generate_signup_token(did, "email", &new_email);
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
         state.infra_repo.as_ref(),
         user_id,
         "email",
         &new_email,
         &formatted_token,
-        &hostname,
+        hostname,
     )
     .await
     {
@@ -371,17 +340,9 @@ pub struct CheckEmailVerifiedInput {
 
 pub async fn check_email_verified(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckEmailVerifiedInput>,
 ) -> Response {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
-        .await
-    {
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
-
     match state
         .user_repo
         .check_email_verified_by_identifier(&input.identifier)
@@ -403,17 +364,9 @@ pub struct AuthorizeEmailUpdateQuery {
 
 pub async fn authorize_email_update(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _rate_limit: RateLimited<VerificationCheckLimit>,
     axum::extract::Query(query): axum::extract::Query<AuthorizeEmailUpdateQuery>,
 ) -> Response {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
-        .await
-    {
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
-
     let verified = crate::auth::verification_token::verify_token_signature(&query.token);
 
     let token_data = match verified {
@@ -488,7 +441,7 @@ pub async fn authorize_email_update(
 
     info!(did = %did, "Email update authorized via link click");
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     let redirect_url = format!(
         "https://{}/app/verify?type=email-authorize-success",
         hostname
@@ -499,17 +452,9 @@ pub async fn authorize_email_update(
 
 pub async fn check_email_update_status(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _rate_limit: RateLimited<VerificationCheckLimit>,
     auth: Auth<NotTakendown>,
 ) -> Result<Response, ApiError> {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
-        .await
-    {
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
     if let Err(e) = crate::auth::scope_check::check_account_scope(
         auth.is_oauth(),
         auth.scope.as_deref(),
@@ -549,17 +494,9 @@ pub struct CheckEmailInUseInput {
 
 pub async fn check_email_in_use(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckEmailInUseInput>,
 ) -> Response {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
-        .await
-    {
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
-
     let email = input.email.trim().to_lowercase();
     if email.is_empty() {
         return ApiError::InvalidRequest("email is required".into()).into_response();
@@ -587,17 +524,9 @@ pub struct CheckCommsChannelInUseInput {
 
 pub async fn check_comms_channel_in_use(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckCommsChannelInUseInput>,
 ) -> Response {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::VerificationCheck, &client_ip)
-        .await
-    {
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
-
     let channel = match input.channel.to_lowercase().as_str() {
         "email" => CommsChannel::Email,
         "discord" => CommsChannel::Discord,

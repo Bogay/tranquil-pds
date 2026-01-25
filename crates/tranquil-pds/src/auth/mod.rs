@@ -10,15 +10,32 @@ use crate::types::Did;
 use tranquil_db::UserRepository;
 use tranquil_db_traits::OAuthRepository;
 
+pub mod account_verified;
 pub mod extractor;
+pub mod login_identifier;
+pub mod mfa_verified;
 pub mod scope_check;
+pub mod scope_verified;
 pub mod service;
 pub mod verification_token;
 pub mod webauthn;
 
+pub use login_identifier::{BareLoginIdentifier, NormalizedLoginIdentifier};
+
+pub use account_verified::{AccountVerified, require_not_migrated, require_verified_or_delegated};
 pub use extractor::{
     Active, Admin, AnyUser, Auth, AuthAny, AuthError, AuthPolicy, ExtractedToken, NotTakendown,
     Permissive, ServiceAuth, extract_auth_token_from_header, extract_bearer_token_from_header,
+};
+pub use mfa_verified::{
+    MfaMethod, MfaVerified, require_legacy_session_mfa, require_reauth_window,
+    require_reauth_window_if_available, verify_password_mfa, verify_totp_mfa,
+};
+pub use scope_verified::{
+    AccountManage, AccountRead, BatchWriteScopes, BlobScopeAction, BlobUpload, ControllerDid,
+    IdentityAccess, PrincipalDid, RepoCreate, RepoDelete, RepoScopeAction, RepoUpdate, RepoUpsert,
+    RpcCall, ScopeAction, ScopeVerificationError, ScopeVerified, VerifyScope, WriteOpKind,
+    verify_batch_write_scopes,
 };
 pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
 
@@ -409,7 +426,7 @@ async fn validate_bearer_token_with_options_internal(
                             .claims
                             .act
                             .as_ref()
-                            .map(|a| Did::new_unchecked(a.sub.clone()));
+                            .map(|a| unsafe { Did::new_unchecked(a.sub.clone()) });
                         let status =
                             AccountStatus::from_db_fields(takedown_ref.as_deref(), deactivated_at);
                         return Ok(AuthenticatedUser {
@@ -461,12 +478,14 @@ async fn validate_bearer_token_with_options_internal(
                 None
             };
             return Ok(AuthenticatedUser {
-                did: Did::new_unchecked(oauth_token.did),
+                did: unsafe { Did::new_unchecked(oauth_token.did) },
                 key_bytes,
                 is_admin: oauth_token.is_admin,
                 status,
                 scope: oauth_info.scope,
-                controller_did: oauth_info.controller_did.map(Did::new_unchecked),
+                controller_did: oauth_info
+                    .controller_did
+                    .map(|d| unsafe { Did::new_unchecked(d) }),
                 auth_source: AuthSource::OAuth,
             });
         } else {
@@ -545,7 +564,7 @@ pub async fn validate_token_with_dpop(
                 None
             };
             Ok(AuthenticatedUser {
-                did: Did::new_unchecked(result.did),
+                did: unsafe { Did::new_unchecked(result.did) },
                 key_bytes,
                 is_admin: user_info.is_admin,
                 status,

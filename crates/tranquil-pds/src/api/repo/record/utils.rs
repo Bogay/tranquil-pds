@@ -8,6 +8,7 @@ use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
 use std::str::FromStr;
+use tranquil_db_traits::SequenceNumber;
 use uuid::Uuid;
 
 pub fn extract_blob_cids(record: &Value) -> Vec<String> {
@@ -139,6 +140,7 @@ pub async fn commit_and_log(
 ) -> Result<CommitResult, String> {
     use tranquil_db_traits::{
         ApplyCommitError, ApplyCommitInput, CommitEventData, RecordDelete, RecordUpsert,
+        RepoEventType,
     };
 
     let CommitParams {
@@ -199,7 +201,7 @@ pub async fn commit_and_log(
                     upserts.push(RecordUpsert {
                         collection: collection.clone(),
                         rkey: rkey.clone(),
-                        cid: crate::types::CidLink::new_unchecked(cid.to_string()),
+                        cid: unsafe { crate::types::CidLink::new_unchecked(cid.to_string()) },
                     });
                 }
                 RecordOp::Delete {
@@ -263,15 +265,15 @@ pub async fn commit_and_log(
 
     let commit_event = CommitEventData {
         did: did.clone(),
-        event_type: "commit".to_string(),
-        commit_cid: Some(crate::types::CidLink::new_unchecked(
-            new_root_cid.to_string(),
-        )),
-        prev_cid: current_root_cid.map(|c| crate::types::CidLink::new_unchecked(c.to_string())),
+        event_type: RepoEventType::Commit,
+        commit_cid: Some(unsafe { crate::types::CidLink::new_unchecked(new_root_cid.to_string()) }),
+        prev_cid: current_root_cid
+            .map(|c| unsafe { crate::types::CidLink::new_unchecked(c.to_string()) }),
         ops: Some(json!(ops_json)),
         blobs: Some(blobs.to_vec()),
         blocks_cids: Some(blocks_cids.to_vec()),
-        prev_data_cid: prev_data_cid.map(|c| crate::types::CidLink::new_unchecked(c.to_string())),
+        prev_data_cid: prev_data_cid
+            .map(|c| unsafe { crate::types::CidLink::new_unchecked(c.to_string()) }),
         rev: Some(rev_str.clone()),
     };
 
@@ -279,8 +281,8 @@ pub async fn commit_and_log(
         user_id,
         did: did.clone(),
         expected_root_cid: current_root_cid
-            .map(|c| crate::types::CidLink::new_unchecked(c.to_string())),
-        new_root_cid: crate::types::CidLink::new_unchecked(new_root_cid.to_string()),
+            .map(|c| unsafe { crate::types::CidLink::new_unchecked(c.to_string()) }),
+        new_root_cid: unsafe { crate::types::CidLink::new_unchecked(new_root_cid.to_string()) },
         new_rev: rev_str.clone(),
         new_block_cids: all_block_cids,
         obsolete_block_cids: obsolete_bytes,
@@ -417,7 +419,7 @@ pub async fn sequence_identity_event(
     state: &AppState,
     did: &Did,
     handle: Option<&Handle>,
-) -> Result<i64, String> {
+) -> Result<SequenceNumber, String> {
     state
         .repo_repo
         .insert_identity_event(did, handle)
@@ -427,12 +429,11 @@ pub async fn sequence_identity_event(
 pub async fn sequence_account_event(
     state: &AppState,
     did: &Did,
-    active: bool,
-    status: Option<&str>,
-) -> Result<i64, String> {
+    status: tranquil_db_traits::AccountStatus,
+) -> Result<SequenceNumber, String> {
     state
         .repo_repo
-        .insert_account_event(did, active, status)
+        .insert_account_event(did, status)
         .await
         .map_err(|e| format!("DB Error (account event): {}", e))
 }
@@ -441,8 +442,8 @@ pub async fn sequence_sync_event(
     did: &Did,
     commit_cid: &str,
     rev: Option<&str>,
-) -> Result<i64, String> {
-    let cid_link = crate::types::CidLink::new_unchecked(commit_cid);
+) -> Result<SequenceNumber, String> {
+    let cid_link = unsafe { crate::types::CidLink::new_unchecked(commit_cid) };
     state
         .repo_repo
         .insert_sync_event(did, &cid_link, rev)
@@ -456,9 +457,10 @@ pub async fn sequence_genesis_commit(
     commit_cid: &Cid,
     mst_root_cid: &Cid,
     rev: &str,
-) -> Result<i64, String> {
-    let commit_cid_link = crate::types::CidLink::new_unchecked(commit_cid.to_string());
-    let mst_root_cid_link = crate::types::CidLink::new_unchecked(mst_root_cid.to_string());
+) -> Result<SequenceNumber, String> {
+    let commit_cid_link = unsafe { crate::types::CidLink::new_unchecked(commit_cid.to_string()) };
+    let mst_root_cid_link =
+        unsafe { crate::types::CidLink::new_unchecked(mst_root_cid.to_string()) };
     state
         .repo_repo
         .insert_genesis_commit_event(did, &commit_cid_link, &mst_root_cid_link, rev)

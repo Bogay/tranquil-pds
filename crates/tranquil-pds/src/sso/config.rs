@@ -1,3 +1,4 @@
+use crate::util::pds_hostname;
 use std::sync::OnceLock;
 use tranquil_db_traits::SsoProviderType;
 
@@ -50,7 +51,7 @@ impl SsoConfig {
             };
 
             if config.is_any_enabled() {
-                let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_default();
+                let hostname = pds_hostname();
                 if hostname.is_empty() || hostname == "localhost" {
                     panic!(
                         "PDS_HOSTNAME must be set to a valid hostname when SSO is enabled. \

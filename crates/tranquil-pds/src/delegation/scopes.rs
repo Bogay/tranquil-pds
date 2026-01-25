@@ -1,5 +1,9 @@
 use std::collections::HashSet;
 
+pub use tranquil_db_traits::{
+    DbScope as ValidatedDelegationScope, InvalidScopeError as InvalidDelegationScopeError,
+};
+
 pub struct ScopePreset {
     pub name: &'static str,
     pub label: &'static str,
@@ -107,35 +111,9 @@ fn split_scope(scope: &str) -> (&str, Option<&str>) {
     }
 }
 
-pub fn validate_delegation_scopes(scopes: &str) -> Result<(), String> {
-    if scopes.is_empty() {
-        return Ok(());
-    }
-
-    scopes.split_whitespace().try_for_each(|scope| {
-        let (base, _) = split_scope(scope);
-        if is_valid_scope_prefix(base) {
-            Ok(())
-        } else {
-            Err(format!("Invalid scope: {}", scope))
-        }
-    })
-}
-
-fn is_valid_scope_prefix(base: &str) -> bool {
-    const VALID_PREFIXES: [&str; 7] = [
-        "atproto",
-        "repo:",
-        "blob:",
-        "rpc:",
-        "account:",
-        "identity:",
-        "transition:",
-    ];
-
-    VALID_PREFIXES
-        .iter()
-        .any(|prefix| base == prefix.trim_end_matches(':') || base.starts_with(prefix))
+pub fn validate_delegation_scopes(scopes: &str) -> Result<(), InvalidDelegationScopeError> {
+    ValidatedDelegationScope::new(scopes)?;
+    Ok(())
 }
 
 #[cfg(test)]

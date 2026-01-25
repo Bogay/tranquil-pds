@@ -1,23 +1,36 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use tranquil_types::Did;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
 pub struct RequestId(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
 pub struct TokenId(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
 pub struct DeviceId(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
 pub struct SessionId(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
 pub struct Code(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(transparent)]
+#[sqlx(transparent)]
 pub struct RefreshToken(pub String);
 
 impl RequestId {
@@ -82,19 +95,76 @@ pub enum ClientAuth {
     PrivateKeyJwt { client_assertion: String },
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseType {
+    #[default]
+    Code,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CodeChallengeMethod {
+    #[default]
+    #[serde(rename = "S256")]
+    S256,
+    #[serde(rename = "plain")]
+    Plain,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseMode {
+    #[default]
+    Query,
+    Fragment,
+    FormPost,
+}
+
+impl ResponseMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Query => "query",
+            Self::Fragment => "fragment",
+            Self::FormPost => "form_post",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Prompt {
+    None,
+    Login,
+    Consent,
+    SelectAccount,
+    Create,
+}
+
+impl Prompt {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Login => "login",
+            Self::Consent => "consent",
+            Self::SelectAccount => "select_account",
+            Self::Create => "create",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorizationRequestParameters {
-    pub response_type: String,
+    pub response_type: ResponseType,
     pub client_id: String,
     pub redirect_uri: String,
     pub scope: Option<String>,
     pub state: Option<String>,
     pub code_challenge: String,
-    pub code_challenge_method: String,
-    pub response_mode: Option<String>,
+    pub code_challenge_method: CodeChallengeMethod,
+    pub response_mode: Option<ResponseMode>,
     pub login_hint: Option<String>,
     pub dpop_jkt: Option<String>,
-    pub prompt: Option<String>,
+    pub prompt: Option<Prompt>,
     #[serde(flatten)]
     pub extra: Option<JsonValue>,
 }
@@ -105,15 +175,15 @@ pub struct RequestData {
     pub client_auth: Option<ClientAuth>,
     pub parameters: AuthorizationRequestParameters,
     pub expires_at: DateTime<Utc>,
-    pub did: Option<String>,
-    pub device_id: Option<String>,
-    pub code: Option<String>,
-    pub controller_did: Option<String>,
+    pub did: Option<Did>,
+    pub device_id: Option<DeviceId>,
+    pub code: Option<Code>,
+    pub controller_did: Option<Did>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DeviceData {
-    pub session_id: String,
+    pub session_id: SessionId,
     pub user_agent: Option<String>,
     pub ip_address: String,
     pub last_seen_at: DateTime<Utc>,
@@ -121,20 +191,20 @@ pub struct DeviceData {
 
 #[derive(Debug, Clone)]
 pub struct TokenData {
-    pub did: String,
-    pub token_id: String,
+    pub did: Did,
+    pub token_id: TokenId,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub client_id: String,
     pub client_auth: ClientAuth,
-    pub device_id: Option<String>,
+    pub device_id: Option<DeviceId>,
     pub parameters: AuthorizationRequestParameters,
     pub details: Option<JsonValue>,
-    pub code: Option<String>,
-    pub current_refresh_token: Option<String>,
+    pub code: Option<Code>,
+    pub current_refresh_token: Option<RefreshToken>,
     pub scope: Option<String>,
-    pub controller_did: Option<String>,
+    pub controller_did: Option<Did>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,99 +317,144 @@ pub struct Jwks {
     pub keys: Vec<JwkPublicKey>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthFlowState {
-    Pending,
-    Authenticated {
-        did: String,
-        device_id: Option<String>,
-    },
-    Authorized {
-        did: String,
-        device_id: Option<String>,
-        code: String,
-    },
-    Expired,
+#[derive(Debug, Clone)]
+pub struct FlowPending {
+    pub parameters: AuthorizationRequestParameters,
+    pub client_id: String,
+    pub client_auth: Option<ClientAuth>,
+    pub expires_at: DateTime<Utc>,
+    pub controller_did: Option<Did>,
 }
 
-impl AuthFlowState {
-    pub fn from_request_data(data: &RequestData) -> Self {
+#[derive(Debug, Clone)]
+pub struct FlowAuthenticated {
+    pub parameters: AuthorizationRequestParameters,
+    pub client_id: String,
+    pub client_auth: Option<ClientAuth>,
+    pub expires_at: DateTime<Utc>,
+    pub did: Did,
+    pub device_id: Option<DeviceId>,
+    pub controller_did: Option<Did>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowAuthorized {
+    pub parameters: AuthorizationRequestParameters,
+    pub client_id: String,
+    pub client_auth: Option<ClientAuth>,
+    pub expires_at: DateTime<Utc>,
+    pub did: Did,
+    pub device_id: Option<DeviceId>,
+    pub code: Code,
+    pub controller_did: Option<Did>,
+}
+
+#[derive(Debug)]
+pub struct FlowExpired;
+
+#[derive(Debug)]
+pub struct FlowNotAuthenticated;
+
+#[derive(Debug)]
+pub struct FlowNotAuthorized;
+
+#[derive(Debug, Clone)]
+pub enum AuthFlow {
+    Pending(FlowPending),
+    Authenticated(FlowAuthenticated),
+    Authorized(FlowAuthorized),
+}
+
+#[derive(Debug, Clone)]
+pub enum AuthFlowWithUser {
+    Authenticated(FlowAuthenticated),
+    Authorized(FlowAuthorized),
+}
+
+impl AuthFlow {
+    pub fn from_request_data(data: RequestData) -> Result<Self, FlowExpired> {
         if data.expires_at < chrono::Utc::now() {
-            return AuthFlowState::Expired;
+            return Err(FlowExpired);
         }
-        match (&data.did, &data.code) {
-            (Some(did), Some(code)) => AuthFlowState::Authorized {
-                did: did.clone(),
-                device_id: data.device_id.clone(),
-                code: code.clone(),
-            },
-            (Some(did), None) => AuthFlowState::Authenticated {
-                did: did.clone(),
-                device_id: data.device_id.clone(),
-            },
-            (None, _) => AuthFlowState::Pending,
+        match (data.did, data.code) {
+            (None, _) => Ok(AuthFlow::Pending(FlowPending {
+                parameters: data.parameters,
+                client_id: data.client_id,
+                client_auth: data.client_auth,
+                expires_at: data.expires_at,
+                controller_did: data.controller_did,
+            })),
+            (Some(did), None) => Ok(AuthFlow::Authenticated(FlowAuthenticated {
+                parameters: data.parameters,
+                client_id: data.client_id,
+                client_auth: data.client_auth,
+                expires_at: data.expires_at,
+                did,
+                device_id: data.device_id,
+                controller_did: data.controller_did,
+            })),
+            (Some(did), Some(code)) => Ok(AuthFlow::Authorized(FlowAuthorized {
+                parameters: data.parameters,
+                client_id: data.client_id,
+                client_auth: data.client_auth,
+                expires_at: data.expires_at,
+                did,
+                device_id: data.device_id,
+                code,
+                controller_did: data.controller_did,
+            })),
         }
     }
 
-    pub fn is_pending(&self) -> bool {
-        matches!(self, AuthFlowState::Pending)
-    }
-
-    pub fn is_authenticated(&self) -> bool {
-        matches!(self, AuthFlowState::Authenticated { .. })
-    }
-
-    pub fn is_authorized(&self) -> bool {
-        matches!(self, AuthFlowState::Authorized { .. })
-    }
-
-    pub fn is_expired(&self) -> bool {
-        matches!(self, AuthFlowState::Expired)
-    }
-
-    pub fn can_authenticate(&self) -> bool {
-        matches!(self, AuthFlowState::Pending)
-    }
-
-    pub fn can_authorize(&self) -> bool {
-        matches!(self, AuthFlowState::Authenticated { .. })
-    }
-
-    pub fn can_exchange(&self) -> bool {
-        matches!(self, AuthFlowState::Authorized { .. })
-    }
-
-    pub fn did(&self) -> Option<&str> {
+    pub fn require_user(self) -> Result<AuthFlowWithUser, FlowNotAuthenticated> {
         match self {
-            AuthFlowState::Authenticated { did, .. } | AuthFlowState::Authorized { did, .. } => {
-                Some(did)
-            }
-            _ => None,
+            AuthFlow::Pending(_) => Err(FlowNotAuthenticated),
+            AuthFlow::Authenticated(a) => Ok(AuthFlowWithUser::Authenticated(a)),
+            AuthFlow::Authorized(a) => Ok(AuthFlowWithUser::Authorized(a)),
         }
     }
 
-    pub fn code(&self) -> Option<&str> {
+    pub fn require_authorized(self) -> Result<FlowAuthorized, FlowNotAuthorized> {
         match self {
-            AuthFlowState::Authorized { code, .. } => Some(code),
-            _ => None,
+            AuthFlow::Authorized(a) => Ok(a),
+            _ => Err(FlowNotAuthorized),
         }
     }
 }
 
-impl std::fmt::Display for AuthFlowState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl AuthFlowWithUser {
+    pub fn did(&self) -> &Did {
         match self {
-            AuthFlowState::Pending => write!(f, "pending"),
-            AuthFlowState::Authenticated { did, .. } => write!(f, "authenticated ({})", did),
-            AuthFlowState::Authorized { did, code, .. } => {
-                write!(
-                    f,
-                    "authorized ({}, code={}...)",
-                    did,
-                    &code[..8.min(code.len())]
-                )
-            }
-            AuthFlowState::Expired => write!(f, "expired"),
+            AuthFlowWithUser::Authenticated(a) => &a.did,
+            AuthFlowWithUser::Authorized(a) => &a.did,
+        }
+    }
+
+    pub fn device_id(&self) -> Option<&DeviceId> {
+        match self {
+            AuthFlowWithUser::Authenticated(a) => a.device_id.as_ref(),
+            AuthFlowWithUser::Authorized(a) => a.device_id.as_ref(),
+        }
+    }
+
+    pub fn parameters(&self) -> &AuthorizationRequestParameters {
+        match self {
+            AuthFlowWithUser::Authenticated(a) => &a.parameters,
+            AuthFlowWithUser::Authorized(a) => &a.parameters,
+        }
+    }
+
+    pub fn client_id(&self) -> &str {
+        match self {
+            AuthFlowWithUser::Authenticated(a) => &a.client_id,
+            AuthFlowWithUser::Authorized(a) => &a.client_id,
+        }
+    }
+
+    pub fn controller_did(&self) -> Option<&Did> {
+        match self {
+            AuthFlowWithUser::Authenticated(a) => a.controller_did.as_ref(),
+            AuthFlowWithUser::Authorized(a) => a.controller_did.as_ref(),
         }
     }
 }
@@ -406,21 +521,21 @@ mod tests {
     use chrono::{Duration, Utc};
 
     fn make_request_data(
-        did: Option<String>,
-        code: Option<String>,
+        did: Option<Did>,
+        code: Option<Code>,
         expires_in: Duration,
     ) -> RequestData {
         RequestData {
             client_id: "test-client".into(),
             client_auth: None,
             parameters: AuthorizationRequestParameters {
-                response_type: "code".into(),
+                response_type: ResponseType::Code,
                 client_id: "test-client".into(),
                 redirect_uri: "https://example.com/callback".into(),
                 scope: Some("atproto".into()),
                 state: None,
                 code_challenge: "test".into(),
-                code_challenge_method: "S256".into(),
+                code_challenge_method: CodeChallengeMethod::S256,
                 response_mode: None,
                 login_hint: None,
                 dpop_jkt: None,
@@ -435,67 +550,55 @@ mod tests {
         }
     }
 
+    fn test_did(s: &str) -> Did {
+        s.parse().expect("valid test DID")
+    }
+
+    fn test_code(s: &str) -> Code {
+        Code(s.to_string())
+    }
+
     #[test]
-    fn test_auth_flow_state_pending() {
+    fn test_auth_flow_pending() {
         let data = make_request_data(None, None, Duration::minutes(5));
-        let state = AuthFlowState::from_request_data(&data);
-        assert!(state.is_pending());
-        assert!(!state.is_authenticated());
-        assert!(!state.is_authorized());
-        assert!(!state.is_expired());
-        assert!(state.can_authenticate());
-        assert!(!state.can_authorize());
-        assert!(!state.can_exchange());
-        assert!(state.did().is_none());
-        assert!(state.code().is_none());
+        let flow = AuthFlow::from_request_data(data).expect("should not be expired");
+        assert!(matches!(flow, AuthFlow::Pending(_)));
+        assert!(flow.clone().require_user().is_err());
+        assert!(flow.require_authorized().is_err());
     }
 
     #[test]
-    fn test_auth_flow_state_authenticated() {
-        let data = make_request_data(Some("did:plc:test".into()), None, Duration::minutes(5));
-        let state = AuthFlowState::from_request_data(&data);
-        assert!(!state.is_pending());
-        assert!(state.is_authenticated());
-        assert!(!state.is_authorized());
-        assert!(!state.is_expired());
-        assert!(!state.can_authenticate());
-        assert!(state.can_authorize());
-        assert!(!state.can_exchange());
-        assert_eq!(state.did(), Some("did:plc:test"));
-        assert!(state.code().is_none());
+    fn test_auth_flow_authenticated() {
+        let did = test_did("did:plc:test");
+        let data = make_request_data(Some(did.clone()), None, Duration::minutes(5));
+        let flow = AuthFlow::from_request_data(data).expect("should not be expired");
+        assert!(matches!(flow, AuthFlow::Authenticated(_)));
+        let with_user = flow.clone().require_user().expect("should have user");
+        assert_eq!(with_user.did(), &did);
+        assert!(flow.require_authorized().is_err());
     }
 
     #[test]
-    fn test_auth_flow_state_authorized() {
-        let data = make_request_data(
-            Some("did:plc:test".into()),
-            Some("auth-code-123".into()),
-            Duration::minutes(5),
-        );
-        let state = AuthFlowState::from_request_data(&data);
-        assert!(!state.is_pending());
-        assert!(!state.is_authenticated());
-        assert!(state.is_authorized());
-        assert!(!state.is_expired());
-        assert!(!state.can_authenticate());
-        assert!(!state.can_authorize());
-        assert!(state.can_exchange());
-        assert_eq!(state.did(), Some("did:plc:test"));
-        assert_eq!(state.code(), Some("auth-code-123"));
+    fn test_auth_flow_authorized() {
+        let did = test_did("did:plc:test");
+        let code = test_code("auth-code-123");
+        let data = make_request_data(Some(did.clone()), Some(code.clone()), Duration::minutes(5));
+        let flow = AuthFlow::from_request_data(data).expect("should not be expired");
+        assert!(matches!(flow, AuthFlow::Authorized(_)));
+        let with_user = flow.clone().require_user().expect("should have user");
+        assert_eq!(with_user.did(), &did);
+        let authorized = flow.require_authorized().expect("should be authorized");
+        assert_eq!(authorized.did, did);
+        assert_eq!(authorized.code, code);
     }
 
     #[test]
-    fn test_auth_flow_state_expired() {
-        let data = make_request_data(
-            Some("did:plc:test".into()),
-            Some("code".into()),
-            Duration::minutes(-1),
-        );
-        let state = AuthFlowState::from_request_data(&data);
-        assert!(state.is_expired());
-        assert!(!state.can_authenticate());
-        assert!(!state.can_authorize());
-        assert!(!state.can_exchange());
+    fn test_auth_flow_expired() {
+        let did = test_did("did:plc:test");
+        let code = test_code("code");
+        let data = make_request_data(Some(did), Some(code), Duration::minutes(-1));
+        let result = AuthFlow::from_request_data(data);
+        assert!(result.is_err());
     }
 
     #[test]

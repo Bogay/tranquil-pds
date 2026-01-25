@@ -7,7 +7,7 @@ pub struct WebAuthnConfig {
 
 impl WebAuthnConfig {
     pub fn new(hostname: &str) -> Result<Self, String> {
-        let rp_id = hostname.to_string();
+        let rp_id = hostname.split(':').next().unwrap_or(hostname).to_string();
         let rp_origin = Url::parse(&format!("https://{}", hostname))
             .map_err(|e| format!("Invalid origin URL: {}", e))?;
 

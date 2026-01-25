@@ -33,13 +33,13 @@ pub async fn get_age_assurance_state() -> Response {
 }
 
 async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
+    let auth_header = crate::util::get_header_str(headers, "Authorization");
     tracing::debug!(?auth_header, "age assurance: extracting token");
 
     let extracted = extract_auth_token_from_header(auth_header)?;
     tracing::debug!("age assurance: got token, validating");
 
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let dpop_proof = crate::util::get_header_str(headers, "DPoP");
     let http_uri = "/";
 
     let auth_user = match validate_token_with_dpop(

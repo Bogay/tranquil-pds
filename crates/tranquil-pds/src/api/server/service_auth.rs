@@ -51,8 +51,8 @@ pub async fn get_service_auth(
     headers: axum::http::HeaderMap,
     Query(params): Query<GetServiceAuthParams>,
 ) -> Response {
-    let auth_header = headers.get("Authorization").and_then(|h| h.to_str().ok());
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let auth_header = crate::util::get_header_str(&headers, "Authorization");
+    let dpop_proof = crate::util::get_header_str(&headers, "DPoP");
     info!(
         has_auth_header = auth_header.is_some(),
         has_dpop_proof = dpop_proof.is_some(),
@@ -94,7 +94,7 @@ pub async fn get_service_auth(
         .await
         {
             Ok(result) => crate::auth::AuthenticatedUser {
-                did: Did::new_unchecked(result.did),
+                did: unsafe { Did::new_unchecked(result.did) },
                 is_admin: false,
                 status: AccountStatus::Active,
                 scope: result.scope,

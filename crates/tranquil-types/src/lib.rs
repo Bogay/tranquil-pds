@@ -166,7 +166,8 @@ macro_rules! validated_string_newtype {
                 Ok(Self(s))
             }
 
-            pub fn new_unchecked(s: impl Into<String>) -> Self {
+            #[allow(unsafe_code, clippy::missing_safety_doc)]
+            pub unsafe fn new_unchecked(s: impl Into<String>) -> Self {
                 Self(s.into())
             }
         }
@@ -228,7 +229,8 @@ impl Handle {
         Ok(Self(s))
     }
 
-    pub fn new_unchecked(s: impl Into<String>) -> Self {
+    #[allow(unsafe_code, clippy::missing_safety_doc)]
+    pub unsafe fn new_unchecked(s: impl Into<String>) -> Self {
         Self(s.into())
     }
 }
@@ -489,7 +491,8 @@ impl CidLink {
         Ok(Self(s))
     }
 
-    pub fn new_unchecked(s: impl Into<String>) -> Self {
+    #[allow(unsafe_code, clippy::missing_safety_doc)]
+    pub unsafe fn new_unchecked(s: impl Into<String>) -> Self {
         Self(s.into())
     }
 

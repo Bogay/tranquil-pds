@@ -19,13 +19,14 @@ use tranquil_types::Did;
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
 
 async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &str) -> bool {
-    let extracted = match crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
-    ) {
+    let extracted = match crate::auth::extract_auth_token_from_header(crate::util::get_header_str(
+        headers,
+        "Authorization",
+    )) {
         Some(t) => t,
         None => return false,
     };
-    let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+    let dpop_proof = crate::util::get_header_str(headers, "DPoP");
     let http_uri = "/";
     match crate::auth::validate_token_with_dpop(
         state.user_repo.as_ref(),

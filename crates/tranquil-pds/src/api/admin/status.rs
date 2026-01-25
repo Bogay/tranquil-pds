@@ -175,7 +175,7 @@ pub async fn update_subject_status(
         Some("com.atproto.admin.defs#repoRef") => {
             let did_str = input.subject.get("did").and_then(|d| d.as_str());
             if let Some(did_str) = did_str {
-                let did = Did::new_unchecked(did_str);
+                let did = unsafe { Did::new_unchecked(did_str) };
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.applied {
                         takedown.r#ref.as_deref()
@@ -207,34 +207,24 @@ pub async fn update_subject_status(
                 }
                 if let Some(takedown) = &input.takedown {
                     let status = if takedown.applied {
-                        Some("takendown")
+                        tranquil_db_traits::AccountStatus::Takendown
                     } else {
-                        None
+                        tranquil_db_traits::AccountStatus::Active
                     };
-                    if let Err(e) = crate::api::repo::record::sequence_account_event(
-                        &state,
-                        &did,
-                        !takedown.applied,
-                        status,
-                    )
-                    .await
+                    if let Err(e) =
+                        crate::api::repo::record::sequence_account_event(&state, &did, status).await
                     {
                         warn!("Failed to sequence account event for takedown: {}", e);
                     }
                 }
                 if let Some(deactivated) = &input.deactivated {
                     let status = if deactivated.applied {
-                        Some("deactivated")
+                        tranquil_db_traits::AccountStatus::Deactivated
                     } else {
-                        None
+                        tranquil_db_traits::AccountStatus::Active
                     };
-                    if let Err(e) = crate::api::repo::record::sequence_account_event(
-                        &state,
-                        &did,
-                        !deactivated.applied,
-                        status,
-                    )
-                    .await
+                    if let Err(e) =
+                        crate::api::repo::record::sequence_account_event(&state, &did, status).await
                     {
                         warn!("Failed to sequence account event for deactivation: {}", e);
                     }

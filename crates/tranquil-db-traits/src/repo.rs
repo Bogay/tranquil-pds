@@ -5,6 +5,116 @@ use tranquil_types::{AtUri, CidLink, Did, Handle, Nsid, Rkey};
 use uuid::Uuid;
 
 use crate::DbError;
+use crate::sequence::SequenceNumber;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum RepoEventType {
+    Commit,
+    Identity,
+    Account,
+    Sync,
+}
+
+impl RepoEventType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Commit => "commit",
+            Self::Identity => "identity",
+            Self::Account => "account",
+            Self::Sync => "sync",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum AccountStatus {
+    Active,
+    Takendown,
+    Suspended,
+    Deactivated,
+    Deleted,
+}
+
+impl AccountStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Takendown => "takendown",
+            Self::Suspended => "suspended",
+            Self::Deactivated => "deactivated",
+            Self::Deleted => "deleted",
+        }
+    }
+
+    pub fn for_firehose(&self) -> Option<&'static str> {
+        match self {
+            Self::Active => None,
+            other => Some(other.as_str()),
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "active" => Some(Self::Active),
+            "takendown" => Some(Self::Takendown),
+            "suspended" => Some(Self::Suspended),
+            "deactivated" => Some(Self::Deactivated),
+            "deleted" => Some(Self::Deleted),
+            _ => None,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn is_takendown(&self) -> bool {
+        matches!(self, Self::Takendown)
+    }
+
+    pub fn is_deactivated(&self) -> bool {
+        matches!(self, Self::Deactivated)
+    }
+
+    pub fn is_suspended(&self) -> bool {
+        matches!(self, Self::Suspended)
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        matches!(self, Self::Deleted)
+    }
+
+    pub fn allows_read(&self) -> bool {
+        matches!(self, Self::Active | Self::Deactivated)
+    }
+
+    pub fn allows_write(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    pub fn from_db_fields(
+        takedown_ref: Option<&str>,
+        deactivated_at: Option<DateTime<Utc>>,
+    ) -> Self {
+        if takedown_ref.is_some() {
+            Self::Takendown
+        } else if deactivated_at.is_some() {
+            Self::Deactivated
+        } else {
+            Self::Active
+        }
+    }
+}
+
+impl std::fmt::Display for AccountStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoAccountInfo {
@@ -49,7 +159,7 @@ pub struct RepoWithoutRev {
 
 #[derive(Debug, Clone)]
 pub struct BrokenGenesisCommit {
-    pub seq: i64,
+    pub seq: SequenceNumber,
     pub did: Did,
     pub commit_cid: Option<CidLink>,
 }
@@ -69,15 +179,15 @@ pub struct UserNeedingRecordBlobsBackfill {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoSeqEvent {
-    pub seq: i64,
+    pub seq: SequenceNumber,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SequencedEvent {
-    pub seq: i64,
+    pub seq: SequenceNumber,
     pub did: Did,
     pub created_at: DateTime<Utc>,
-    pub event_type: String,
+    pub event_type: RepoEventType,
     pub commit_cid: Option<CidLink>,
     pub prev_cid: Option<CidLink>,
     pub prev_data_cid: Option<CidLink>,
@@ -86,14 +196,14 @@ pub struct SequencedEvent {
     pub blocks_cids: Option<Vec<String>>,
     pub handle: Option<Handle>,
     pub active: Option<bool>,
-    pub status: Option<String>,
+    pub status: Option<AccountStatus>,
     pub rev: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct CommitEventData {
     pub did: Did,
-    pub event_type: String,
+    pub event_type: RepoEventType,
     pub commit_cid: Option<CidLink>,
     pub prev_cid: Option<CidLink>,
     pub ops: Option<serde_json::Value>,
@@ -283,27 +393,26 @@ pub trait RepoRepository: Send + Sync {
 
     async fn count_user_blocks(&self, user_id: Uuid) -> Result<i64, DbError>;
 
-    async fn insert_commit_event(&self, data: &CommitEventData) -> Result<i64, DbError>;
+    async fn insert_commit_event(&self, data: &CommitEventData) -> Result<SequenceNumber, DbError>;
 
     async fn insert_identity_event(
         &self,
         did: &Did,
         handle: Option<&Handle>,
-    ) -> Result<i64, DbError>;
+    ) -> Result<SequenceNumber, DbError>;
 
     async fn insert_account_event(
         &self,
         did: &Did,
-        active: bool,
-        status: Option<&str>,
-    ) -> Result<i64, DbError>;
+        status: AccountStatus,
+    ) -> Result<SequenceNumber, DbError>;
 
     async fn insert_sync_event(
         &self,
         did: &Did,
         commit_cid: &CidLink,
         rev: Option<&str>,
-    ) -> Result<i64, DbError>;
+    ) -> Result<SequenceNumber, DbError>;
 
     async fn insert_genesis_commit_event(
         &self,
@@ -311,36 +420,49 @@ pub trait RepoRepository: Send + Sync {
         commit_cid: &CidLink,
         mst_root_cid: &CidLink,
         rev: &str,
-    ) -> Result<i64, DbError>;
+    ) -> Result<SequenceNumber, DbError>;
 
-    async fn update_seq_blocks_cids(&self, seq: i64, blocks_cids: &[String])
-    -> Result<(), DbError>;
+    async fn update_seq_blocks_cids(
+        &self,
+        seq: SequenceNumber,
+        blocks_cids: &[String],
+    ) -> Result<(), DbError>;
 
-    async fn delete_sequences_except(&self, did: &Did, keep_seq: i64) -> Result<(), DbError>;
+    async fn delete_sequences_except(
+        &self,
+        did: &Did,
+        keep_seq: SequenceNumber,
+    ) -> Result<(), DbError>;
 
-    async fn get_max_seq(&self) -> Result<i64, DbError>;
+    async fn get_max_seq(&self) -> Result<SequenceNumber, DbError>;
 
-    async fn get_min_seq_since(&self, since: DateTime<Utc>) -> Result<Option<i64>, DbError>;
+    async fn get_min_seq_since(
+        &self,
+        since: DateTime<Utc>,
+    ) -> Result<Option<SequenceNumber>, DbError>;
 
     async fn get_account_with_repo(&self, did: &Did) -> Result<Option<RepoAccountInfo>, DbError>;
 
     async fn get_events_since_seq(
         &self,
-        since_seq: i64,
+        since_seq: SequenceNumber,
         limit: Option<i64>,
     ) -> Result<Vec<SequencedEvent>, DbError>;
 
     async fn get_events_in_seq_range(
         &self,
-        start_seq: i64,
-        end_seq: i64,
+        start_seq: SequenceNumber,
+        end_seq: SequenceNumber,
     ) -> Result<Vec<SequencedEvent>, DbError>;
 
-    async fn get_event_by_seq(&self, seq: i64) -> Result<Option<SequencedEvent>, DbError>;
+    async fn get_event_by_seq(
+        &self,
+        seq: SequenceNumber,
+    ) -> Result<Option<SequencedEvent>, DbError>;
 
     async fn get_events_since_cursor(
         &self,
-        cursor: i64,
+        cursor: SequenceNumber,
         limit: i64,
     ) -> Result<Vec<SequencedEvent>, DbError>;
 
@@ -359,7 +481,7 @@ pub trait RepoRepository: Send + Sync {
     async fn get_repo_root_cid_by_user_id(&self, user_id: Uuid)
     -> Result<Option<CidLink>, DbError>;
 
-    async fn notify_update(&self, seq: i64) -> Result<(), DbError>;
+    async fn notify_update(&self, seq: SequenceNumber) -> Result<(), DbError>;
 
     async fn import_repo_data(
         &self,

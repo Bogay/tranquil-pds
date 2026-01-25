@@ -1,6 +1,7 @@
 use crate::api::error::ApiError;
 use crate::auth::{Active, Auth};
 use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::{
     Json,
     extract::State,
@@ -9,11 +10,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
+use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationPrefsResponse {
-    pub preferred_channel: String,
+    pub preferred_channel: CommsChannel,
     pub email: String,
     pub discord_id: Option<String>,
     pub discord_verified: bool,
@@ -50,9 +52,9 @@ pub async fn get_notification_prefs(
 #[serde(rename_all = "camelCase")]
 pub struct NotificationHistoryEntry {
     pub created_at: String,
-    pub channel: String,
-    pub comms_type: String,
-    pub status: String,
+    pub channel: CommsChannel,
+    pub comms_type: CommsType,
+    pub status: CommsStatus,
     pub subject: Option<String>,
     pub body: String,
 }
@@ -81,30 +83,29 @@ pub async fn get_notification_history(
         .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
 
     let sensitive_types = [
-        "email_verification",
-        "password_reset",
-        "email_update",
-        "two_factor_code",
-        "passkey_recovery",
-        "migration_verification",
-        "plc_operation",
-        "channel_verification",
-        "signup_verification",
+        CommsType::EmailVerification,
+        CommsType::PasswordReset,
+        CommsType::EmailUpdate,
+        CommsType::TwoFactorCode,
+        CommsType::PasskeyRecovery,
+        CommsType::MigrationVerification,
+        CommsType::PlcOperation,
+        CommsType::ChannelVerification,
     ];
 
     let notifications = rows
         .iter()
         .map(|row| {
-            let body = if sensitive_types.contains(&row.comms_type.as_str()) {
+            let body = if sensitive_types.contains(&row.comms_type) {
                 "[Code redacted for security]".to_string()
             } else {
                 row.body.clone()
             };
             NotificationHistoryEntry {
                 created_at: row.created_at.to_rfc3339(),
-                channel: row.channel.clone(),
-                comms_type: row.comms_type.clone(),
-                status: row.status.clone(),
+                channel: row.channel,
+                comms_type: row.comms_type,
+                status: row.status,
                 subject: row.subject.clone(),
                 body,
             }
@@ -145,7 +146,7 @@ pub async fn request_channel_verification(
     let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
 
     if channel == "email" {
-        let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let hostname = pds_hostname();
         let handle_str = handle.unwrap_or("user");
         crate::comms::comms_repo::enqueue_email_update(
             state.infra_repo.as_ref(),
@@ -153,7 +154,7 @@ pub async fn request_channel_verification(
             identifier,
             handle_str,
             &formatted_token,
-            &hostname,
+            hostname,
         )
         .await
         .map_err(|e| format!("Failed to enqueue email notification: {}", e))?;
@@ -200,19 +201,24 @@ pub async fn update_notification_prefs(
 
     let mut verification_required: Vec<String> = Vec::new();
 
-    if let Some(ref channel) = input.preferred_channel {
-        let valid_channels = ["email", "discord", "telegram", "signal"];
-        if !valid_channels.contains(&channel.as_str()) {
-            return Err(ApiError::InvalidRequest(
-                "Invalid channel. Must be one of: email, discord, telegram, signal".into(),
-            ));
-        }
+    if let Some(ref channel_str) = input.preferred_channel {
+        let channel = match channel_str.as_str() {
+            "email" => CommsChannel::Email,
+            "discord" => CommsChannel::Discord,
+            "telegram" => CommsChannel::Telegram,
+            "signal" => CommsChannel::Signal,
+            _ => {
+                return Err(ApiError::InvalidRequest(
+                    "Invalid channel. Must be one of: email, discord, telegram, signal".into(),
+                ));
+            }
+        };
         state
             .user_repo
             .update_preferred_comms_channel(&auth.did, channel)
             .await
             .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-        info!(did = %auth.did, channel = %channel, "Updated preferred notification channel");
+        info!(did = %auth.did, channel = ?channel, "Updated preferred notification channel");
     }
 
     if let Some(ref new_email) = input.email {

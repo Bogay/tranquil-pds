@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use sqlx::PgPool;
 use tranquil_db_traits::{
-    DbError, ExternalIdentity, SsoAuthState, SsoPendingRegistration, SsoProviderType, SsoRepository,
+    DbError, ExternalEmail, ExternalIdentity, ExternalUserId, ExternalUsername, SsoAction,
+    SsoAuthState, SsoPendingRegistration, SsoProviderType, SsoRepository,
 };
 use tranquil_types::Did;
 use uuid::Uuid;
@@ -69,11 +70,11 @@ impl SsoRepository for PostgresSsoRepository {
 
         Ok(row.map(|r| ExternalIdentity {
             id: r.id,
-            did: Did::new_unchecked(&r.did),
+            did: unsafe { Did::new_unchecked(&r.did) },
             provider: r.provider,
-            provider_user_id: r.provider_user_id,
-            provider_username: r.provider_username,
-            provider_email: r.provider_email,
+            provider_user_id: ExternalUserId::from(r.provider_user_id),
+            provider_username: r.provider_username.map(ExternalUsername::from),
+            provider_email: r.provider_email.map(ExternalEmail::from),
             created_at: r.created_at,
             updated_at: r.updated_at,
             last_login_at: r.last_login_at,
@@ -102,11 +103,11 @@ impl SsoRepository for PostgresSsoRepository {
             .into_iter()
             .map(|r| ExternalIdentity {
                 id: r.id,
-                did: Did::new_unchecked(&r.did),
+                did: unsafe { Did::new_unchecked(&r.did) },
                 provider: r.provider,
-                provider_user_id: r.provider_user_id,
-                provider_username: r.provider_username,
-                provider_email: r.provider_email,
+                provider_user_id: ExternalUserId::from(r.provider_user_id),
+                provider_username: r.provider_username.map(ExternalUsername::from),
+                provider_email: r.provider_email.map(ExternalEmail::from),
                 created_at: r.created_at,
                 updated_at: r.updated_at,
                 last_login_at: r.last_login_at,
@@ -161,7 +162,7 @@ impl SsoRepository for PostgresSsoRepository {
         state: &str,
         request_uri: &str,
         provider: SsoProviderType,
-        action: &str,
+        action: SsoAction,
         nonce: Option<&str>,
         code_verifier: Option<&str>,
         did: Option<&Did>,
@@ -174,7 +175,7 @@ impl SsoRepository for PostgresSsoRepository {
             state,
             request_uri,
             provider as SsoProviderType,
-            action,
+            action.as_str(),
             nonce,
             code_verifier,
             did.map(|d| d.as_str()),
@@ -200,17 +201,21 @@ impl SsoRepository for PostgresSsoRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| SsoAuthState {
-            state: r.state,
-            request_uri: r.request_uri,
-            provider: r.provider,
-            action: r.action,
-            nonce: r.nonce,
-            code_verifier: r.code_verifier,
-            did: r.did.map(|d| Did::new_unchecked(&d)),
-            created_at: r.created_at,
-            expires_at: r.expires_at,
-        }))
+        row.map(|r| {
+            let action = SsoAction::parse(&r.action).ok_or(DbError::NotFound)?;
+            Ok(SsoAuthState {
+                state: r.state,
+                request_uri: r.request_uri,
+                provider: r.provider,
+                action,
+                nonce: r.nonce,
+                code_verifier: r.code_verifier,
+                did: r.did.map(|d| unsafe { Did::new_unchecked(&d) }),
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+            })
+        })
+        .transpose()
     }
 
     async fn cleanup_expired_sso_auth_states(&self) -> Result<u64, DbError> {
@@ -280,9 +285,9 @@ impl SsoRepository for PostgresSsoRepository {
             token: r.token,
             request_uri: r.request_uri,
             provider: r.provider,
-            provider_user_id: r.provider_user_id,
-            provider_username: r.provider_username,
-            provider_email: r.provider_email,
+            provider_user_id: ExternalUserId::from(r.provider_user_id),
+            provider_username: r.provider_username.map(ExternalUsername::from),
+            provider_email: r.provider_email.map(ExternalEmail::from),
             provider_email_verified: r.provider_email_verified,
             created_at: r.created_at,
             expires_at: r.expires_at,
@@ -311,9 +316,9 @@ impl SsoRepository for PostgresSsoRepository {
             token: r.token,
             request_uri: r.request_uri,
             provider: r.provider,
-            provider_user_id: r.provider_user_id,
-            provider_username: r.provider_username,
-            provider_email: r.provider_email,
+            provider_user_id: ExternalUserId::from(r.provider_user_id),
+            provider_username: r.provider_username.map(ExternalUsername::from),
+            provider_email: r.provider_email.map(ExternalEmail::from),
             provider_email_verified: r.provider_email_verified,
             created_at: r.created_at,
             expires_at: r.expires_at,

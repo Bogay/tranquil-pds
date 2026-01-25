@@ -3,13 +3,14 @@ use super::types::{TokenGrant, TokenResponse, ValidatedTokenRequest};
 use crate::config::AuthConfig;
 use crate::delegation::intersect_scopes;
 use crate::oauth::{
-    AuthFlowState, ClientAuth, ClientMetadataCache, DPoPVerifier, OAuthError, RefreshToken,
-    TokenData, TokenId,
+    AuthFlow, ClientAuth, ClientMetadataCache, DPoPVerifier, OAuthError, RefreshToken, TokenData,
+    TokenId,
     db::{enforce_token_limit_for_user, lookup_refresh_token},
     scopes::expand_include_scopes,
     verify_client_auth,
 };
 use crate::state::AppState;
+use crate::util::pds_hostname;
 use axum::Json;
 use axum::http::HeaderMap;
 use chrono::{Duration, Utc};
@@ -51,26 +52,21 @@ pub async fn handle_authorization_code_grant(
         .map_err(crate::oauth::db_err_to_oauth)?
         .ok_or_else(|| OAuthError::InvalidGrant("Invalid or expired code".to_string()))?;
 
-    let flow_state = AuthFlowState::from_request_data(&auth_request);
-    if flow_state.is_expired() {
-        return Err(OAuthError::InvalidGrant(
-            "Authorization code has expired".to_string(),
-        ));
-    }
-    if !flow_state.can_exchange() {
-        return Err(OAuthError::InvalidGrant(
-            "Authorization not completed".to_string(),
-        ));
-    }
+    let flow = AuthFlow::from_request_data(auth_request)
+        .map_err(|_| OAuthError::InvalidGrant("Authorization code has expired".to_string()))?;
+
+    let authorized = flow
+        .require_authorized()
+        .map_err(|_| OAuthError::InvalidGrant("Authorization not completed".to_string()))?;
 
     if let Some(request_client_id) = &request.client_auth.client_id
-        && request_client_id != &auth_request.client_id
+        && request_client_id != &authorized.client_id
     {
         return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
     }
-    let did = flow_state.did().unwrap().to_string();
+    let did = authorized.did.to_string();
     let client_metadata_cache = ClientMetadataCache::new(3600);
-    let client_metadata = client_metadata_cache.get(&auth_request.client_id).await?;
+    let client_metadata = client_metadata_cache.get(&authorized.client_id).await?;
     let client_auth = if let (Some(assertion), Some(assertion_type)) = (
         &request.client_auth.client_assertion,
         &request.client_auth.client_assertion_type,
@@ -91,9 +87,9 @@ pub async fn handle_authorization_code_grant(
         ClientAuth::None
     };
     verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
-    verify_pkce(&auth_request.parameters.code_challenge, &code_verifier)?;
+    verify_pkce(&authorized.parameters.code_challenge, &code_verifier)?;
     if let Some(req_redirect_uri) = &redirect_uri
-        && req_redirect_uri != &auth_request.parameters.redirect_uri
+        && req_redirect_uri != &authorized.parameters.redirect_uri
     {
         return Err(OAuthError::InvalidGrant(
             "redirect_uri mismatch".to_string(),
@@ -102,8 +98,7 @@ pub async fn handle_authorization_code_grant(
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-        let pds_hostname =
-            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let pds_hostname = pds_hostname();
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
         if !state
@@ -116,7 +111,7 @@ pub async fn handle_authorization_code_grant(
                 "DPoP proof has already been used".to_string(),
             ));
         }
-        if let Some(expected_jkt) = &auth_request.parameters.dpop_jkt
+        if let Some(expected_jkt) = &authorized.parameters.dpop_jkt
             && result.jkt.as_str() != expected_jkt
         {
             return Err(OAuthError::InvalidDpopProof(
@@ -124,7 +119,7 @@ pub async fn handle_authorization_code_grant(
             ));
         }
         Some(result.jkt.as_str().to_string())
-    } else if auth_request.parameters.dpop_jkt.is_some() || client_metadata.requires_dpop() {
+    } else if authorized.parameters.dpop_jkt.is_some() || client_metadata.requires_dpop() {
         return Err(OAuthError::UseDpopNonce(
             DPoPVerifier::new(AuthConfig::get().dpop_secret().as_bytes()).generate_nonce(),
         ));
@@ -135,7 +130,7 @@ pub async fn handle_authorization_code_grant(
     let refresh_token = RefreshToken::generate();
     let now = Utc::now();
 
-    let (raw_scope, controller_did) = if let Some(ref controller) = auth_request.controller_did {
+    let (raw_scope, controller_did) = if let Some(ref controller) = authorized.controller_did {
         let did_parsed: Did = did
             .parse()
             .map_err(|_| OAuthError::InvalidRequest("Invalid DID format".to_string()))?;
@@ -149,15 +144,11 @@ pub async fn handle_authorization_code_grant(
             .ok()
             .flatten();
         let granted_scopes = grant.map(|g| g.granted_scopes).unwrap_or_default();
-        let requested = auth_request
-            .parameters
-            .scope
-            .as_deref()
-            .unwrap_or("atproto");
-        let intersected = intersect_scopes(requested, &granted_scopes);
+        let requested = authorized.parameters.scope.as_deref().unwrap_or("atproto");
+        let intersected = intersect_scopes(requested, granted_scopes.as_str());
         (Some(intersected), Some(controller.clone()))
     } else {
-        (auth_request.parameters.scope.clone(), None)
+        (authorized.parameters.scope.clone(), None)
     };
 
     let final_scope = if let Some(ref scope) = raw_scope {
@@ -177,27 +168,30 @@ pub async fn handle_authorization_code_grant(
         final_scope.as_deref(),
         controller_did.as_deref(),
     )?;
-    let stored_client_auth = auth_request.client_auth.unwrap_or(ClientAuth::None);
+    let stored_client_auth = authorized.client_auth.unwrap_or(ClientAuth::None);
     let refresh_expiry_days = if matches!(stored_client_auth, ClientAuth::None) {
         REFRESH_TOKEN_EXPIRY_DAYS_PUBLIC
     } else {
         REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL
     };
-    let mut stored_parameters = auth_request.parameters.clone();
+    let mut stored_parameters = authorized.parameters.clone();
     stored_parameters.dpop_jkt = dpop_jkt.clone();
+    let did_typed: Did = did
+        .parse()
+        .map_err(|_| OAuthError::InvalidRequest("Invalid DID format".to_string()))?;
     let token_data = TokenData {
-        did: did.clone(),
-        token_id: token_id.0.clone(),
+        did: did_typed,
+        token_id: token_id.clone(),
         created_at: now,
         updated_at: now,
         expires_at: now + Duration::days(refresh_expiry_days),
-        client_id: auth_request.client_id.clone(),
+        client_id: authorized.client_id.clone(),
         client_auth: stored_client_auth,
-        device_id: auth_request.device_id,
+        device_id: authorized.device_id.clone(),
         parameters: stored_parameters,
         details: None,
         code: None,
-        current_refresh_token: Some(refresh_token.0.clone()),
+        current_refresh_token: Some(refresh_token.clone()),
         scope: final_scope.clone(),
         controller_did: controller_did.clone(),
     };
@@ -209,7 +203,7 @@ pub async fn handle_authorization_code_grant(
     tracing::info!(
         did = %did,
         token_id = %token_id.0,
-        client_id = %auth_request.client_id,
+        client_id = %authorized.client_id,
         "Authorization code grant completed, token created"
     );
     tokio::spawn({
@@ -280,11 +274,11 @@ pub async fn handle_refresh_token_grant(
             );
             let dpop_jkt = token_data.parameters.dpop_jkt.as_deref();
             let access_token = create_access_token_with_delegation(
-                &token_data.token_id,
-                &token_data.did,
+                &token_data.token_id.0,
+                token_data.did.as_str(),
                 dpop_jkt,
                 token_data.scope.as_deref(),
-                token_data.controller_did.as_deref(),
+                token_data.controller_did.as_ref().map(|d| d.as_str()),
             )?;
             let mut response_headers = HeaderMap::new();
             let config = AuthConfig::get();
@@ -296,9 +290,9 @@ pub async fn handle_refresh_token_grant(
                     access_token,
                     token_type: if dpop_jkt.is_some() { "DPoP" } else { "Bearer" }.to_string(),
                     expires_in: ACCESS_TOKEN_EXPIRY_SECONDS as u64,
-                    refresh_token: token_data.current_refresh_token,
+                    refresh_token: token_data.current_refresh_token.map(|r| r.0),
                     scope: token_data.scope,
-                    sub: Some(token_data.did),
+                    sub: Some(token_data.did.to_string()),
                 }),
             ));
         }
@@ -337,8 +331,7 @@ pub async fn handle_refresh_token_grant(
     let dpop_jkt = if let Some(proof) = &dpop_proof {
         let config = AuthConfig::get();
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-        let pds_hostname =
-            std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+        let pds_hostname = pds_hostname();
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
         let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
         if !state
@@ -385,11 +378,11 @@ pub async fn handle_refresh_token_grant(
         "Refresh token rotated successfully"
     );
     let access_token = create_access_token_with_delegation(
-        &token_data.token_id,
-        &token_data.did,
+        &token_data.token_id.0,
+        token_data.did.as_str(),
         dpop_jkt.as_deref(),
         token_data.scope.as_deref(),
-        token_data.controller_did.as_deref(),
+        token_data.controller_did.as_ref().map(|d| d.as_str()),
     )?;
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();
@@ -403,7 +396,7 @@ pub async fn handle_refresh_token_grant(
             expires_in: ACCESS_TOKEN_EXPIRY_SECONDS as u64,
             refresh_token: Some(new_refresh_token.0),
             scope: token_data.scope,
-            sub: Some(token_data.did),
+            sub: Some(token_data.did.to_string()),
         }),
     ))
 }

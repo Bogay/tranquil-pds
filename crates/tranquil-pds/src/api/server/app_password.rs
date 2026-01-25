@@ -1,17 +1,17 @@
 use crate::api::EmptyResponse;
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Auth, NotTakendown, Permissive, generate_app_password};
 use crate::delegation::{DelegationActionType, intersect_scopes};
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{AppPasswordLimit, RateLimited};
+use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{error, warn};
+use tracing::error;
 use tranquil_db_traits::AppPasswordCreate;
 
 #[derive(Serialize)]
@@ -39,26 +39,20 @@ pub async fn list_app_passwords(
         .user_repo
         .get_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error getting user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let rows = state
         .session_repo
         .list_app_passwords(user.id)
         .await
-        .map_err(|e| {
-            error!("DB error listing app passwords: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("listing app passwords")?;
     let passwords: Vec<AppPassword> = rows
         .iter()
         .map(|row| AppPassword {
             name: row.name.clone(),
             created_at: row.created_at.to_rfc3339(),
-            privileged: row.privileged,
+            privileged: row.privilege.is_privileged(),
             scopes: row.scopes.clone(),
             created_by_controller: row
                 .created_by_controller_did
@@ -89,27 +83,15 @@ pub struct CreateAppPasswordOutput {
 
 pub async fn create_app_password(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<AppPasswordLimit>,
     auth: Auth<NotTakendown>,
     Json(input): Json<CreateAppPasswordInput>,
 ) -> Result<Response, ApiError> {
-    let client_ip = crate::rate_limit::extract_client_ip(&headers, None);
-    if !state
-        .check_rate_limit(RateLimitKind::AppPassword, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "App password creation rate limit exceeded");
-        return Err(ApiError::RateLimitExceeded(None));
-    }
-
     let user = state
         .user_repo
         .get_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error getting user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let name = input.name.trim();
@@ -121,10 +103,7 @@ pub async fn create_app_password(
         .session_repo
         .get_app_password_by_name(user.id, name)
         .await
-        .map_err(|e| {
-            error!("DB error checking app password: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("checking app password")?
         .is_some()
     {
         return Err(ApiError::DuplicateAppPassword);
@@ -140,7 +119,7 @@ pub async fn create_app_password(
         let granted_scopes = grant.map(|g| g.granted_scopes).unwrap_or_default();
 
         let requested = input.scopes.as_deref().unwrap_or("atproto");
-        let intersected = intersect_scopes(requested, &granted_scopes);
+        let intersected = intersect_scopes(requested, granted_scopes.as_str());
 
         if intersected.is_empty() && !granted_scopes.is_empty() {
             return Err(ApiError::InsufficientScope(None));
@@ -171,14 +150,15 @@ pub async fn create_app_password(
                 ApiError::InternalError(None)
             })?;
 
-    let privileged = input.privileged.unwrap_or(false);
+    let privilege =
+        tranquil_db_traits::AppPasswordPrivilege::from(input.privileged.unwrap_or(false));
     let created_at = chrono::Utc::now();
 
     let create_data = AppPasswordCreate {
         user_id: user.id,
         name: name.to_string(),
         password_hash,
-        privileged,
+        privilege,
         scopes: final_scopes.clone(),
         created_by_controller_did: controller_did.clone(),
     };
@@ -187,10 +167,7 @@ pub async fn create_app_password(
         .session_repo
         .create_app_password(&create_data)
         .await
-        .map_err(|e| {
-            error!("DB error creating app password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("creating app password")?;
 
     if let Some(ref controller) = controller_did {
         let _ = state
@@ -214,7 +191,7 @@ pub async fn create_app_password(
         name: name.to_string(),
         password,
         created_at: created_at.to_rfc3339(),
-        privileged,
+        privileged: privilege.is_privileged(),
         scopes: final_scopes,
     })
     .into_response())
@@ -234,10 +211,7 @@ pub async fn revoke_app_password(
         .user_repo
         .get_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error getting user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("getting user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let name = input.name.trim();
@@ -255,10 +229,7 @@ pub async fn revoke_app_password(
         .session_repo
         .delete_sessions_by_app_password(&auth.did, name)
         .await
-        .map_err(|e| {
-            error!("DB error revoking sessions for app password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("revoking sessions for app password")?;
 
     futures::future::join_all(sessions_to_invalidate.iter().map(|jti| {
         let cache_key = format!("auth:session:{}:{}", &auth.did, jti);
@@ -273,10 +244,7 @@ pub async fn revoke_app_password(
         .session_repo
         .delete_app_password(user.id, name)
         .await
-        .map_err(|e| {
-            error!("DB error revoking app password: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("revoking app password")?;
 
     Ok(EmptyResponse::ok().into_response())
 }

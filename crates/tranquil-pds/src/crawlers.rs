@@ -1,11 +1,14 @@
 use crate::circuit_breaker::CircuitBreaker;
 use crate::sync::firehose::SequencedEvent;
+use crate::util::pds_hostname;
 use reqwest::Client;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+use tranquil_db_traits::RepoEventType;
 
 const NOTIFY_THRESHOLD_SECS: u64 = 20 * 60;
 
@@ -40,7 +43,10 @@ impl Crawlers {
     }
 
     pub fn from_env() -> Option<Self> {
-        let hostname = std::env::var("PDS_HOSTNAME").ok()?;
+        let hostname = pds_hostname();
+        if hostname == "localhost" {
+            return None;
+        }
 
         let crawler_urls: Vec<String> = std::env::var("CRAWLERS")
             .unwrap_or_default()
@@ -53,7 +59,7 @@ impl Crawlers {
             return None;
         }
 
-        Some(Self::new(hostname, crawler_urls))
+        Some(Self::new(hostname.to_string(), crawler_urls))
     }
 
     fn should_notify(&self) -> bool {
@@ -143,7 +149,7 @@ impl Crawlers {
 pub async fn start_crawlers_service(
     crawlers: Arc<Crawlers>,
     mut firehose_rx: broadcast::Receiver<SequencedEvent>,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: CancellationToken,
 ) {
     info!(
         hostname = %crawlers.hostname,
@@ -157,7 +163,7 @@ pub async fn start_crawlers_service(
             result = firehose_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        if event.event_type == "commit" {
+                        if event.event_type == RepoEventType::Commit {
                             crawlers.notify_of_update().await;
                         }
                     }
@@ -171,11 +177,9 @@ pub async fn start_crawlers_service(
                     }
                 }
             }
-            _ = shutdown.changed() => {
-                if *shutdown.borrow() {
-                    info!("Crawlers service shutting down");
-                    break;
-                }
+            _ = shutdown.cancelled() => {
+                info!("Crawlers service shutting down");
+                break;
             }
         }
     }

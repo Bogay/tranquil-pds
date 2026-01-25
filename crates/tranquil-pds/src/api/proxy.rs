@@ -3,6 +3,7 @@ use std::convert::Infallible;
 use crate::api::error::ApiError;
 use crate::api::proxy_client::proxy_client;
 use crate::state::AppState;
+use crate::util::get_header_str;
 use axum::{
     body::Bytes,
     extract::{RawQuery, Request, State},
@@ -191,11 +192,7 @@ async fn proxy_handler(
             .into_response();
     }
 
-    let Some(proxy_header) = headers
-        .get("atproto-proxy")
-        .and_then(|h| h.to_str().ok())
-        .map(String::from)
-    else {
+    let Some(proxy_header) = get_header_str(&headers, "atproto-proxy").map(String::from) else {
         return ApiError::InvalidRequest("Missing required atproto-proxy header".into())
             .into_response();
     };
@@ -217,10 +214,10 @@ async fn proxy_handler(
 
     let mut auth_header_val = headers.get("Authorization").cloned();
     if let Some(extracted) = crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
+        crate::util::get_header_str(&headers, "Authorization"),
     ) {
         let token = extracted.token;
-        let dpop_proof = headers.get("DPoP").and_then(|h| h.to_str().ok());
+        let dpop_proof = crate::util::get_header_str(&headers, "DPoP");
         let http_uri = crate::util::build_full_url(&uri.to_string());
 
         match crate::auth::validate_token_with_dpop(

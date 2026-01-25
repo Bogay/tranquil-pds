@@ -1,9 +1,9 @@
-use crate::api::error::ApiError;
-use crate::auth::{Auth, AuthAny, NotTakendown, Permissive};
+use crate::api::error::{ApiError, DbResultExt};
+use crate::auth::{Auth, AuthAny, NotTakendown, Permissive, VerifyScope};
 use crate::delegation::DelegationActionType;
 use crate::state::AppState;
 use crate::types::{CidLink, Did};
-use crate::util::get_max_blob_size;
+use crate::util::{get_header_str, get_max_blob_size};
 use axum::body::Body;
 use axum::{
     Json,
@@ -56,18 +56,16 @@ pub async fn upload_blob(
             if user.status.is_takendown() {
                 return Err(ApiError::AccountTakedown);
             }
-            let mime_type_for_check = headers
-                .get("content-type")
-                .and_then(|h| h.to_str().ok())
-                .unwrap_or("application/octet-stream");
-            if let Err(e) = crate::auth::scope_check::check_blob_scope(
-                user.is_oauth(),
-                user.scope.as_deref(),
-                mime_type_for_check,
-            ) {
-                return Ok(e);
-            }
-            (user.did.clone(), user.controller_did.clone())
+            let mime_type_for_check =
+                get_header_str(&headers, "content-type").unwrap_or("application/octet-stream");
+            let scope_proof = match user.verify_blob_upload(mime_type_for_check) {
+                Ok(proof) => proof,
+                Err(e) => return Ok(e.into_response()),
+            };
+            (
+                scope_proof.principal_did().into_did(),
+                scope_proof.controller_did().map(|c| c.into_did()),
+            )
         }
     };
 
@@ -80,10 +78,8 @@ pub async fn upload_blob(
         return Err(ApiError::Forbidden);
     }
 
-    let client_mime_hint = headers
-        .get("content-type")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("application/octet-stream");
+    let client_mime_hint =
+        get_header_str(&headers, "content-type").unwrap_or("application/octet-stream");
 
     let user_id = state
         .user_repo
@@ -140,7 +136,7 @@ pub async fn upload_blob(
     };
     let cid = Cid::new_v1(0x55, multihash);
     let cid_str = cid.to_string();
-    let cid_link: CidLink = CidLink::new_unchecked(&cid_str);
+    let cid_link: CidLink = unsafe { CidLink::new_unchecked(&cid_str) };
     let storage_key = cid_str.clone();
 
     info!(
@@ -232,10 +228,7 @@ pub async fn list_missing_blobs(
         .user_repo
         .get_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching user")?
         .ok_or(ApiError::InternalError(None))?;
 
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
@@ -244,10 +237,7 @@ pub async fn list_missing_blobs(
         .blob_repo
         .list_missing_blobs(user.id, cursor, limit + 1)
         .await
-        .map_err(|e| {
-            error!("DB error fetching missing blobs: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching missing blobs")?;
 
     let has_more = missing.len() > limit as usize;
     let blobs: Vec<RecordBlob> = missing

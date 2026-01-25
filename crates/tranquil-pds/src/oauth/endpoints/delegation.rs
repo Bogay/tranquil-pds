@@ -1,12 +1,13 @@
 use crate::auth::{Active, Auth};
 use crate::delegation::DelegationActionType;
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{LoginLimit, OAuthRateLimited, TotpVerifyLimit};
+use crate::state::AppState;
 use crate::types::PlainPassword;
 use crate::util::extract_client_ip;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -35,26 +36,11 @@ pub struct DelegationAuthResponse {
 
 pub async fn delegation_auth(
     State(state): State<AppState>,
+    rate_limit: OAuthRateLimited<LoginLimit>,
     headers: HeaderMap,
     Json(form): Json<DelegationAuthSubmit>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::Login, &client_ip)
-        .await
-    {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(DelegationAuthResponse {
-                success: false,
-                needs_totp: None,
-                redirect_uri: None,
-                error: Some("Too many login attempts. Please try again later.".to_string()),
-            }),
-        )
-            .into_response();
-    }
-
+    let client_ip = rate_limit.client_ip();
     let request_id = RequestId::from(form.request_uri.clone());
     let request = match state
         .oauth_repo
@@ -82,30 +68,29 @@ pub async fn delegation_auth(
         }
     };
 
-    let delegated_did_str = match form.delegated_did.as_ref().or(request.did.as_ref()) {
-        Some(did) => did.clone(),
-        None => {
-            return Json(DelegationAuthResponse {
-                success: false,
-                needs_totp: None,
-                redirect_uri: None,
-                error: Some("No delegated account selected".to_string()),
-            })
-            .into_response();
+    let delegated_did: Did = if let Some(did_str) = form.delegated_did.as_ref() {
+        match did_str.parse() {
+            Ok(d) => d,
+            Err(_) => {
+                return Json(DelegationAuthResponse {
+                    success: false,
+                    needs_totp: None,
+                    redirect_uri: None,
+                    error: Some("Invalid delegated DID".to_string()),
+                })
+                .into_response();
+            }
         }
-    };
-
-    let delegated_did: Did = match delegated_did_str.parse() {
-        Ok(d) => d,
-        Err(_) => {
-            return Json(DelegationAuthResponse {
-                success: false,
-                needs_totp: None,
-                redirect_uri: None,
-                error: Some("Invalid delegated DID".to_string()),
-            })
-            .into_response();
-        }
+    } else if let Some(did) = request.did.as_ref() {
+        did.clone()
+    } else {
+        return Json(DelegationAuthResponse {
+            success: false,
+            needs_totp: None,
+            redirect_uri: None,
+            error: Some("No delegated account selected".to_string()),
+        })
+        .into_response();
     };
 
     let controller_did: Did = match form.controller_did.parse() {
@@ -249,7 +234,6 @@ pub async fn delegation_auth(
         .into_response();
     }
 
-    let ip = extract_client_ip(&headers);
     let user_agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
@@ -266,7 +250,7 @@ pub async fn delegation_auth(
                 "client_id": request.client_id,
                 "granted_scopes": grant.granted_scopes
             })),
-            Some(&ip),
+            Some(client_ip),
             user_agent.as_deref(),
         )
         .await;
@@ -291,26 +275,11 @@ pub struct DelegationTotpSubmit {
 
 pub async fn delegation_totp_verify(
     State(state): State<AppState>,
+    rate_limit: OAuthRateLimited<TotpVerifyLimit>,
     headers: HeaderMap,
     Json(form): Json<DelegationTotpSubmit>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::TotpVerify, &client_ip)
-        .await
-    {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(DelegationAuthResponse {
-                success: false,
-                needs_totp: None,
-                redirect_uri: None,
-                error: Some("Too many verification attempts. Please try again later.".to_string()),
-            }),
-        )
-            .into_response();
-    }
-
+    let client_ip = rate_limit.client_ip();
     let totp_request_id = RequestId::from(form.request_uri.clone());
     let request = match state
         .oauth_repo
@@ -420,7 +389,6 @@ pub async fn delegation_totp_verify(
         .into_response();
     }
 
-    let ip = extract_client_ip(&headers);
     let user_agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
@@ -437,7 +405,7 @@ pub async fn delegation_totp_verify(
                 "client_id": request.client_id,
                 "granted_scopes": grant.granted_scopes
             })),
-            Some(&ip),
+            Some(client_ip),
             user_agent.as_deref(),
         )
         .await;
@@ -564,7 +532,7 @@ pub async fn delegation_auth_token(
         .into_response();
     }
 
-    let ip = extract_client_ip(&headers);
+    let ip = extract_client_ip(&headers, None);
     let user_agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())

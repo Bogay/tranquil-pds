@@ -1,6 +1,8 @@
+use super::pagination::{PaginationDirection, deserialize_pagination_direction};
 use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::types::{AtIdentifier, Nsid, Rkey};
+use crate::util::pds_hostname_without_port;
 use axum::{
     Json,
     extract::{Query, State},
@@ -58,8 +60,7 @@ pub async fn get_record(
     _headers: HeaderMap,
     Query(input): Query<GetRecordInput>,
 ) -> Response {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let user_id_opt = if input.repo.is_did() {
         let did: crate::types::Did = match input.repo.as_str().parse() {
             Ok(d) => d,
@@ -144,7 +145,8 @@ pub struct ListRecordsInput {
     pub rkey_start: Option<Rkey>,
     #[serde(rename = "rkeyEnd")]
     pub rkey_end: Option<Rkey>,
-    pub reverse: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_pagination_direction")]
+    pub reverse: PaginationDirection,
 }
 #[derive(Serialize)]
 pub struct ListRecordsOutput {
@@ -157,8 +159,7 @@ pub async fn list_records(
     State(state): State<AppState>,
     Query(input): Query<ListRecordsInput>,
 ) -> Response {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let user_id_opt = if input.repo.is_did() {
         let did: crate::types::Did = match input.repo.as_str().parse() {
             Ok(d) => d,
@@ -194,7 +195,6 @@ pub async fn list_records(
         }
     };
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
-    let reverse = input.reverse.unwrap_or(false);
     let limit_i64 = limit as i64;
     let cursor_rkey = input
         .cursor
@@ -207,7 +207,7 @@ pub async fn list_records(
             &input.collection,
             cursor_rkey.as_ref(),
             limit_i64,
-            reverse,
+            input.reverse.is_reverse(),
             input.rkey_start.as_ref(),
             input.rkey_end.as_ref(),
         )

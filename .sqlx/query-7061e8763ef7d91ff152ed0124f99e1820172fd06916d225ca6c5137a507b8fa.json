@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, did, email, password_hash, password_required, two_factor_enabled,\n                   preferred_comms_channel as \"preferred_comms_channel!: CommsChannel\",\n                   deactivated_at, takedown_ref,\n                   email_verified, discord_verified, telegram_verified, signal_verified,\n                   account_type::text as \"account_type!\"\n            FROM users\n            WHERE handle = $1 OR email = $1\n            ",
+  "query": "\n            SELECT id, did, email, password_hash, password_required, two_factor_enabled,\n                   preferred_comms_channel as \"preferred_comms_channel!: CommsChannel\",\n                   deactivated_at, takedown_ref,\n                   email_verified, discord_verified, telegram_verified, signal_verified,\n                   account_type as \"account_type!: AccountType\"\n            FROM users\n            WHERE handle = $1 OR email = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -82,8 +82,18 @@
       },
       {
         "ordinal": 13,
-        "name": "account_type!",
-        "type_info": "Text"
+        "name": "account_type!: AccountType",
+        "type_info": {
+          "Custom": {
+            "name": "account_type",
+            "kind": {
+              "Enum": [
+                "personal",
+                "delegated"
+              ]
+            }
+          }
+        }
       }
     ],
     "parameters": {
@@ -105,8 +115,8 @@
       false,
       false,
       false,
-      null
+      false
     ]
   },
-  "hash": "445c2ebb72f3833119f32284b9e721cf34c8ae581e6ae58a392fc93e77a7a015"
+  "hash": "7061e8763ef7d91ff152ed0124f99e1820172fd06916d225ca6c5137a507b8fa"
 }

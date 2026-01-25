@@ -20,12 +20,12 @@ use crate::config::AuthConfig;
 use crate::state::AppState;
 
 pub struct OAuthTokenInfo {
-    pub did: String,
-    pub token_id: String,
-    pub client_id: String,
+    pub did: Did,
+    pub token_id: TokenId,
+    pub client_id: ClientId,
     pub scope: Option<String>,
     pub dpop_jkt: Option<String>,
-    pub controller_did: Option<String>,
+    pub controller_did: Option<Did>,
 }
 
 pub struct VerifyResult {
@@ -48,7 +48,7 @@ pub async fn verify_oauth_access_token(
         has_dpop_proof = dpop_proof.is_some(),
         "Verifying OAuth access token"
     );
-    let token_id = TokenId::from(token_info.token_id.clone());
+    let token_id = token_info.token_id.clone();
     let token_data = oauth_repo
         .get_token_by_id(&token_id)
         .await
@@ -154,16 +154,18 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
     if exp < now {
         return Err(OAuthError::ExpiredToken("Token has expired".to_string()));
     }
-    let token_id = payload
+    let token_id_str = payload
         .get("sid")
         .and_then(|j| j.as_str())
-        .ok_or_else(|| OAuthError::InvalidToken("Missing sid claim".to_string()))?
-        .to_string();
-    let did = payload
+        .ok_or_else(|| OAuthError::InvalidToken("Missing sid claim".to_string()))?;
+    let token_id = TokenId::new(token_id_str);
+    let did_str = payload
         .get("sub")
         .and_then(|s| s.as_str())
-        .ok_or_else(|| OAuthError::InvalidToken("Missing sub claim".to_string()))?
-        .to_string();
+        .ok_or_else(|| OAuthError::InvalidToken("Missing sub claim".to_string()))?;
+    let did: Did = did_str
+        .parse()
+        .map_err(|_| OAuthError::InvalidToken("Invalid sub claim (not a valid DID)".to_string()))?;
     let scope = payload
         .get("scope")
         .and_then(|s| s.as_str())
@@ -173,16 +175,20 @@ pub fn extract_oauth_token_info(token: &str) -> Result<OAuthTokenInfo, OAuthErro
         .and_then(|c| c.get("jkt"))
         .and_then(|j| j.as_str())
         .map(|s| s.to_string());
-    let client_id = payload
+    let client_id_str = payload
         .get("client_id")
         .and_then(|c| c.as_str())
-        .map(|s| s.to_string())
         .unwrap_or_default();
+    let client_id = ClientId::new(client_id_str);
     let controller_did = payload
         .get("act")
         .and_then(|a| a.get("sub"))
         .and_then(|s| s.as_str())
-        .map(|s| s.to_string());
+        .map(|s| s.parse::<Did>())
+        .transpose()
+        .map_err(|_| {
+            OAuthError::InvalidToken("Invalid act.sub claim (not a valid DID)".to_string())
+        })?;
     Ok(OAuthTokenInfo {
         did,
         token_id,

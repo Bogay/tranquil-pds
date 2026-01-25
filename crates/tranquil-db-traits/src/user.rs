@@ -1,9 +1,23 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use tranquil_types::{Did, Handle};
 use uuid::Uuid;
 
-use crate::{CommsChannel, DbError, SsoProviderType};
+use crate::{ChannelVerificationStatus, CommsChannel, DbError, SsoProviderType};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "account_type", rename_all = "snake_case")]
+pub enum AccountType {
+    Personal,
+    Delegated,
+}
+
+impl AccountType {
+    pub fn is_delegated(&self) -> bool {
+        matches!(self, Self::Delegated)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct UserRow {
@@ -62,11 +76,8 @@ pub struct UserLoginInfo {
     pub preferred_comms_channel: CommsChannel,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub takedown_ref: Option<String>,
-    pub email_verified: bool,
-    pub discord_verified: bool,
-    pub telegram_verified: bool,
-    pub signal_verified: bool,
-    pub account_type: String,
+    pub channel_verification: ChannelVerificationStatus,
+    pub account_type: AccountType,
 }
 
 #[derive(Debug, Clone)]
@@ -74,10 +85,7 @@ pub struct User2faStatus {
     pub id: Uuid,
     pub two_factor_enabled: bool,
     pub preferred_comms_channel: CommsChannel,
-    pub email_verified: bool,
-    pub discord_verified: bool,
-    pub telegram_verified: bool,
-    pub signal_verified: bool,
+    pub channel_verification: ChannelVerificationStatus,
 }
 
 #[async_trait]
@@ -202,8 +210,11 @@ pub trait UserRepository: Send + Sync {
         did: &Did,
     ) -> Result<Option<UserIdHandleEmail>, DbError>;
 
-    async fn update_preferred_comms_channel(&self, did: &Did, channel: &str)
-    -> Result<(), DbError>;
+    async fn update_preferred_comms_channel(
+        &self,
+        did: &Did,
+        channel: CommsChannel,
+    ) -> Result<(), DbError>;
 
     async fn clear_discord(&self, user_id: Uuid) -> Result<(), DbError>;
 
@@ -291,6 +302,8 @@ pub trait UserRepository: Send + Sync {
     ) -> Result<(), DbError>;
 
     async fn get_totp_record(&self, did: &Did) -> Result<Option<TotpRecord>, DbError>;
+
+    async fn get_totp_record_state(&self, did: &Did) -> Result<Option<TotpRecordState>, DbError>;
 
     async fn upsert_totp_secret(
         &self,
@@ -560,7 +573,7 @@ pub struct DidWebOverrides {
 pub struct UserCommsPrefs {
     pub email: Option<String>,
     pub handle: Handle,
-    pub preferred_channel: String,
+    pub preferred_channel: CommsChannel,
     pub preferred_locale: Option<String>,
 }
 
@@ -611,16 +624,13 @@ pub struct UserAuthInfo {
     pub password_hash: Option<String>,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub takedown_ref: Option<String>,
-    pub email_verified: bool,
-    pub discord_verified: bool,
-    pub telegram_verified: bool,
-    pub signal_verified: bool,
+    pub channel_verification: ChannelVerificationStatus,
 }
 
 #[derive(Debug, Clone)]
 pub struct NotificationPrefs {
     pub email: String,
-    pub preferred_channel: String,
+    pub preferred_channel: CommsChannel,
     pub discord_id: Option<String>,
     pub discord_verified: bool,
     pub telegram_username: Option<String>,
@@ -641,10 +651,7 @@ pub struct UserVerificationInfo {
     pub id: Uuid,
     pub handle: Handle,
     pub email: Option<String>,
-    pub email_verified: bool,
-    pub discord_verified: bool,
-    pub telegram_verified: bool,
-    pub signal_verified: bool,
+    pub channel_verification: ChannelVerificationStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -676,6 +683,74 @@ pub struct TotpRecord {
 }
 
 #[derive(Debug, Clone)]
+pub struct VerifiedTotpRecord {
+    pub secret_encrypted: Vec<u8>,
+    pub encryption_version: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnverifiedTotpRecord {
+    pub secret_encrypted: Vec<u8>,
+    pub encryption_version: i32,
+}
+
+#[derive(Debug, Clone)]
+pub enum TotpRecordState {
+    Verified(VerifiedTotpRecord),
+    Unverified(UnverifiedTotpRecord),
+}
+
+impl TotpRecordState {
+    pub fn is_verified(&self) -> bool {
+        matches!(self, Self::Verified(_))
+    }
+
+    pub fn as_verified(&self) -> Option<&VerifiedTotpRecord> {
+        match self {
+            Self::Verified(r) => Some(r),
+            Self::Unverified(_) => None,
+        }
+    }
+
+    pub fn as_unverified(&self) -> Option<&UnverifiedTotpRecord> {
+        match self {
+            Self::Unverified(r) => Some(r),
+            Self::Verified(_) => None,
+        }
+    }
+
+    pub fn into_verified(self) -> Option<VerifiedTotpRecord> {
+        match self {
+            Self::Verified(r) => Some(r),
+            Self::Unverified(_) => None,
+        }
+    }
+
+    pub fn into_unverified(self) -> Option<UnverifiedTotpRecord> {
+        match self {
+            Self::Unverified(r) => Some(r),
+            Self::Verified(_) => None,
+        }
+    }
+}
+
+impl From<TotpRecord> for TotpRecordState {
+    fn from(record: TotpRecord) -> Self {
+        if record.verified {
+            Self::Verified(VerifiedTotpRecord {
+                secret_encrypted: record.secret_encrypted,
+                encryption_version: record.encryption_version,
+            })
+        } else {
+            Self::Unverified(UnverifiedTotpRecord {
+                secret_encrypted: record.secret_encrypted,
+                encryption_version: record.encryption_version,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct StoredBackupCode {
     pub id: Uuid,
     pub code_hash: String,
@@ -685,15 +760,12 @@ pub struct StoredBackupCode {
 pub struct UserSessionInfo {
     pub handle: Handle,
     pub email: Option<String>,
-    pub email_verified: bool,
     pub is_admin: bool,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub takedown_ref: Option<String>,
     pub preferred_locale: Option<String>,
     pub preferred_comms_channel: CommsChannel,
-    pub discord_verified: bool,
-    pub telegram_verified: bool,
-    pub signal_verified: bool,
+    pub channel_verification: ChannelVerificationStatus,
     pub migrated_to_pds: Option<String>,
     pub migrated_at: Option<DateTime<Utc>>,
 }
@@ -713,10 +785,7 @@ pub struct UserLoginFull {
     pub email: Option<String>,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub takedown_ref: Option<String>,
-    pub email_verified: bool,
-    pub discord_verified: bool,
-    pub telegram_verified: bool,
-    pub signal_verified: bool,
+    pub channel_verification: ChannelVerificationStatus,
     pub allow_legacy_login: bool,
     pub migrated_to_pds: Option<String>,
     pub preferred_comms_channel: CommsChannel,
@@ -748,10 +817,7 @@ pub struct UserResendVerification {
     pub discord_id: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_number: Option<String>,
-    pub email_verified: bool,
-    pub discord_verified: bool,
-    pub telegram_verified: bool,
-    pub signal_verified: bool,
+    pub channel_verification: ChannelVerificationStatus,
 }
 
 #[derive(Debug, Clone)]

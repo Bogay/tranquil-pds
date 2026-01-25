@@ -2,6 +2,7 @@ pub mod api;
 pub mod appview;
 pub mod auth;
 pub mod cache;
+pub mod cid_types;
 pub mod circuit_breaker;
 pub mod comms;
 pub mod config;
@@ -35,9 +36,9 @@ use axum::{
 use http::StatusCode;
 use serde_json::json;
 use state::AppState;
-pub use sync::util::AccountStatus;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
+pub use tranquil_db_traits::AccountStatus;
 pub use types::{AccountState, AtIdentifier, AtUri, Did, Handle, Nsid, Rkey};
 
 pub fn app(state: AppState) -> Router {

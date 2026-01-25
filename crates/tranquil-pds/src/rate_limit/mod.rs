@@ -1,17 +1,13 @@
-use axum::{
-    Json,
-    body::Body,
-    extract::ConnectInfo,
-    http::{HeaderMap, Request, StatusCode},
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
+mod extractor;
+
+pub use extractor::*;
+
 use governor::{
     Quota, RateLimiter,
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed, keyed::DefaultKeyedStateStore},
 };
-use std::{net::SocketAddr, num::NonZeroU32, sync::Arc};
+use std::{num::NonZeroU32, sync::Arc};
 
 pub type KeyedRateLimiter = RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>;
 pub type GlobalRateLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
@@ -164,99 +160,6 @@ impl RateLimiters {
         )));
         self
     }
-}
-
-pub fn extract_client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for")
-        && let Ok(value) = forwarded.to_str()
-        && let Some(first_ip) = value.split(',').next()
-    {
-        return first_ip.trim().to_string();
-    }
-
-    if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str()
-    {
-        return value.trim().to_string();
-    }
-
-    addr.map(|a| a.ip().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
-fn rate_limit_response() -> Response {
-    (
-        StatusCode::TOO_MANY_REQUESTS,
-        Json(serde_json::json!({
-            "error": "RateLimitExceeded",
-            "message": "Too many requests. Please try again later."
-        })),
-    )
-        .into_response()
-}
-
-pub async fn login_rate_limit(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    axum::extract::State(limiters): axum::extract::State<Arc<RateLimiters>>,
-    request: Request<Body>,
-    next: Next,
-) -> Response {
-    let client_ip = extract_client_ip(request.headers(), Some(addr));
-
-    if limiters.login.check_key(&client_ip).is_err() {
-        tracing::warn!(ip = %client_ip, "Login rate limit exceeded");
-        return rate_limit_response();
-    }
-
-    next.run(request).await
-}
-
-pub async fn oauth_token_rate_limit(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    axum::extract::State(limiters): axum::extract::State<Arc<RateLimiters>>,
-    request: Request<Body>,
-    next: Next,
-) -> Response {
-    let client_ip = extract_client_ip(request.headers(), Some(addr));
-
-    if limiters.oauth_token.check_key(&client_ip).is_err() {
-        tracing::warn!(ip = %client_ip, "OAuth token rate limit exceeded");
-        return rate_limit_response();
-    }
-
-    next.run(request).await
-}
-
-pub async fn password_reset_rate_limit(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    axum::extract::State(limiters): axum::extract::State<Arc<RateLimiters>>,
-    request: Request<Body>,
-    next: Next,
-) -> Response {
-    let client_ip = extract_client_ip(request.headers(), Some(addr));
-
-    if limiters.password_reset.check_key(&client_ip).is_err() {
-        tracing::warn!(ip = %client_ip, "Password reset rate limit exceeded");
-        return rate_limit_response();
-    }
-
-    next.run(request).await
-}
-
-pub async fn account_creation_rate_limit(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    axum::extract::State(limiters): axum::extract::State<Arc<RateLimiters>>,
-    request: Request<Body>,
-    next: Next,
-) -> Response {
-    let client_ip = extract_client_ip(request.headers(), Some(addr));
-
-    if limiters.account_creation.check_key(&client_ip).is_err() {
-        tracing::warn!(ip = %client_ip, "Account creation rate limit exceeded");
-        return rate_limit_response();
-    }
-
-    next.run(request).await
 }
 
 #[cfg(test)]

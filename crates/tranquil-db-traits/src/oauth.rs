@@ -10,6 +10,37 @@ use uuid::Uuid;
 
 use crate::DbError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TokenFamilyId(i32);
+
+impl TokenFamilyId {
+    pub fn new(id: i32) -> Self {
+        Self(id)
+    }
+
+    pub fn as_i32(self) -> i32 {
+        self.0
+    }
+}
+
+impl From<i32> for TokenFamilyId {
+    fn from(id: i32) -> Self {
+        Self(id)
+    }
+}
+
+impl From<TokenFamilyId> for i32 {
+    fn from(id: TokenFamilyId) -> Self {
+        id.0
+    }
+}
+
+impl std::fmt::Display for TokenFamilyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScopePreference {
     pub scope: String,
@@ -53,7 +84,7 @@ pub struct DeviceTrustInfo {
 
 #[derive(Debug, Clone)]
 pub struct OAuthSessionListItem {
-    pub id: i32,
+    pub id: TokenFamilyId,
     pub token_id: TokenId,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -62,19 +93,19 @@ pub struct OAuthSessionListItem {
 
 pub enum RefreshTokenLookup {
     Valid {
-        db_id: i32,
+        db_id: TokenFamilyId,
         token_data: TokenData,
     },
     InGracePeriod {
-        db_id: i32,
+        db_id: TokenFamilyId,
         token_data: TokenData,
         rotated_at: DateTime<Utc>,
     },
     Used {
-        original_token_id: i32,
+        original_token_id: TokenFamilyId,
     },
     Expired {
-        db_id: i32,
+        db_id: TokenFamilyId,
     },
     NotFound,
 }
@@ -93,28 +124,28 @@ impl RefreshTokenLookup {
 
 #[async_trait]
 pub trait OAuthRepository: Send + Sync {
-    async fn create_token(&self, data: &TokenData) -> Result<i32, DbError>;
+    async fn create_token(&self, data: &TokenData) -> Result<TokenFamilyId, DbError>;
     async fn get_token_by_id(&self, token_id: &TokenId) -> Result<Option<TokenData>, DbError>;
     async fn get_token_by_refresh_token(
         &self,
         refresh_token: &RefreshToken,
-    ) -> Result<Option<(i32, TokenData)>, DbError>;
+    ) -> Result<Option<(TokenFamilyId, TokenData)>, DbError>;
     async fn get_token_by_previous_refresh_token(
         &self,
         refresh_token: &RefreshToken,
-    ) -> Result<Option<(i32, TokenData)>, DbError>;
+    ) -> Result<Option<(TokenFamilyId, TokenData)>, DbError>;
     async fn rotate_token(
         &self,
-        old_db_id: i32,
+        old_db_id: TokenFamilyId,
         new_refresh_token: &RefreshToken,
         new_expires_at: DateTime<Utc>,
     ) -> Result<(), DbError>;
     async fn check_refresh_token_used(
         &self,
         refresh_token: &RefreshToken,
-    ) -> Result<Option<i32>, DbError>;
+    ) -> Result<Option<TokenFamilyId>, DbError>;
     async fn delete_token(&self, token_id: &TokenId) -> Result<(), DbError>;
-    async fn delete_token_family(&self, db_id: i32) -> Result<(), DbError>;
+    async fn delete_token_family(&self, db_id: TokenFamilyId) -> Result<(), DbError>;
     async fn list_tokens_for_user(&self, did: &Did) -> Result<Vec<TokenData>, DbError>;
     async fn count_tokens_for_user(&self, did: &Did) -> Result<i64, DbError>;
     async fn delete_oldest_tokens_for_user(
@@ -274,7 +305,11 @@ pub trait OAuthRepository: Send + Sync {
     ) -> Result<(), DbError>;
 
     async fn list_sessions_by_did(&self, did: &Did) -> Result<Vec<OAuthSessionListItem>, DbError>;
-    async fn delete_session_by_id(&self, session_id: i32, did: &Did) -> Result<u64, DbError>;
+    async fn delete_session_by_id(
+        &self,
+        session_id: TokenFamilyId,
+        did: &Did,
+    ) -> Result<u64, DbError>;
     async fn delete_sessions_by_did(&self, did: &Did) -> Result<u64, DbError>;
     async fn delete_sessions_by_did_except(
         &self,

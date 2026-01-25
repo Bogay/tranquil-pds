@@ -11,98 +11,12 @@ use cid::Cid;
 use iroh_car::{CarHeader, CarWriter};
 use jacquard_repo::commit::Commit;
 use jacquard_repo::storage::BlockStore;
-use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
-use tranquil_db_traits::RepoRepository;
+use tranquil_db_traits::{AccountStatus, RepoEventType, RepoRepository};
 use tranquil_types::Did;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AccountStatus {
-    Active,
-    Takendown,
-    Suspended,
-    Deactivated,
-    Deleted,
-}
-
-impl AccountStatus {
-    pub fn as_str(&self) -> Option<&'static str> {
-        match self {
-            Self::Active => None,
-            Self::Takendown => Some("takendown"),
-            Self::Suspended => Some("suspended"),
-            Self::Deactivated => Some("deactivated"),
-            Self::Deleted => Some("deleted"),
-        }
-    }
-
-    pub fn is_active(&self) -> bool {
-        matches!(self, Self::Active)
-    }
-
-    pub fn is_takendown(&self) -> bool {
-        matches!(self, Self::Takendown)
-    }
-
-    pub fn is_suspended(&self) -> bool {
-        matches!(self, Self::Suspended)
-    }
-
-    pub fn is_deactivated(&self) -> bool {
-        matches!(self, Self::Deactivated)
-    }
-
-    pub fn is_deleted(&self) -> bool {
-        matches!(self, Self::Deleted)
-    }
-
-    pub fn allows_read(&self) -> bool {
-        matches!(self, Self::Active | Self::Deactivated)
-    }
-
-    pub fn allows_write(&self) -> bool {
-        matches!(self, Self::Active)
-    }
-
-    pub fn from_db_fields(
-        takedown_ref: Option<&str>,
-        deactivated_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> Self {
-        if takedown_ref.is_some() {
-            Self::Takendown
-        } else if deactivated_at.is_some() {
-            Self::Deactivated
-        } else {
-            Self::Active
-        }
-    }
-}
-
-impl From<crate::types::AccountState> for AccountStatus {
-    fn from(state: crate::types::AccountState) -> Self {
-        match state {
-            crate::types::AccountState::Active => AccountStatus::Active,
-            crate::types::AccountState::Deactivated { .. } => AccountStatus::Deactivated,
-            crate::types::AccountState::TakenDown { .. } => AccountStatus::Takendown,
-            crate::types::AccountState::Migrated { .. } => AccountStatus::Deactivated,
-        }
-    }
-}
-
-impl From<&crate::types::AccountState> for AccountStatus {
-    fn from(state: &crate::types::AccountState) -> Self {
-        match state {
-            crate::types::AccountState::Active => AccountStatus::Active,
-            crate::types::AccountState::Deactivated { .. } => AccountStatus::Deactivated,
-            crate::types::AccountState::TakenDown { .. } => AccountStatus::Takendown,
-            crate::types::AccountState::Migrated { .. } => AccountStatus::Deactivated,
-        }
-    }
-}
 
 pub struct RepoAccount {
     pub did: String,
@@ -233,7 +147,7 @@ fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Erro
     let frame = IdentityFrame {
         did: event.did.to_string(),
         handle: event.handle.as_ref().map(|h| h.to_string()),
-        seq: event.seq,
+        seq: event.seq.as_i64(),
         time: format_atproto_time(event.created_at),
     };
     let header = FrameHeader {
@@ -250,8 +164,10 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error
     let frame = AccountFrame {
         did: event.did.to_string(),
         active: event.active.unwrap_or(true),
-        status: event.status.clone(),
-        seq: event.seq,
+        status: event
+            .status
+            .and_then(|s| s.for_firehose().map(String::from)),
+        seq: event.seq.as_i64(),
         time: format_atproto_time(event.created_at),
     };
     let header = FrameHeader {
@@ -298,7 +214,7 @@ async fn format_sync_event(
         did: event.did.to_string(),
         rev,
         blocks: car_bytes,
-        seq: event.seq,
+        seq: event.seq.as_i64(),
         time: format_atproto_time(event.created_at),
     };
     let header = FrameHeader {
@@ -315,11 +231,11 @@ pub async fn format_event_for_sending(
     state: &AppState,
     event: SequencedEvent,
 ) -> Result<Vec<u8>, anyhow::Error> {
-    match event.event_type.as_str() {
-        "identity" => return format_identity_event(&event),
-        "account" => return format_account_event(&event),
-        "sync" => return format_sync_event(state, &event).await,
-        _ => {}
+    match event.event_type {
+        RepoEventType::Identity => return format_identity_event(&event),
+        RepoEventType::Account => return format_account_event(&event),
+        RepoEventType::Sync => return format_sync_event(state, &event).await,
+        RepoEventType::Commit => {}
     }
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
     let prev_cid_link = event.prev_cid.clone();
@@ -440,7 +356,7 @@ fn format_sync_event_with_prefetched(
         did: event.did.to_string(),
         rev,
         blocks: car_bytes,
-        seq: event.seq,
+        seq: event.seq.as_i64(),
         time: format_atproto_time(event.created_at),
     };
     let header = FrameHeader {
@@ -457,11 +373,11 @@ pub async fn format_event_with_prefetched_blocks(
     event: SequencedEvent,
     prefetched: &HashMap<Cid, Bytes>,
 ) -> Result<Vec<u8>, anyhow::Error> {
-    match event.event_type.as_str() {
-        "identity" => return format_identity_event(&event),
-        "account" => return format_account_event(&event),
-        "sync" => return format_sync_event_with_prefetched(&event, prefetched),
-        _ => {}
+    match event.event_type {
+        RepoEventType::Identity => return format_identity_event(&event),
+        RepoEventType::Account => return format_account_event(&event),
+        RepoEventType::Sync => return format_sync_event_with_prefetched(&event, prefetched),
+        RepoEventType::Commit => {}
     }
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
     let prev_cid_link = event.prev_cid.clone();

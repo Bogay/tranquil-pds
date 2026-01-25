@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                email,\n                preferred_comms_channel::text as \"preferred_channel!\",\n                discord_id,\n                discord_verified,\n                telegram_username,\n                telegram_verified,\n                signal_number,\n                signal_verified\n            FROM users WHERE did = $1",
+  "query": "SELECT\n                email,\n                preferred_comms_channel as \"preferred_channel!: CommsChannel\",\n                discord_id,\n                discord_verified,\n                telegram_username,\n                telegram_verified,\n                signal_number,\n                signal_verified\n            FROM users WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -10,8 +10,20 @@
       },
       {
         "ordinal": 1,
-        "name": "preferred_channel!",
-        "type_info": "Text"
+        "name": "preferred_channel!: CommsChannel",
+        "type_info": {
+          "Custom": {
+            "name": "comms_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
       },
       {
         "ordinal": 2,
@@ -51,7 +63,7 @@
     },
     "nullable": [
       true,
-      null,
+      false,
       true,
       false,
       true,
@@ -60,5 +72,5 @@
       false
     ]
   },
-  "hash": "426fedba6791c420fe7af6decc296c681d05a5c24a38b8cd7083c8dfa9178ded"
+  "hash": "247470d26a90617e7dc9b5b3a2146ee3f54448e3c24943f7005e3a8e28820d43"
 }

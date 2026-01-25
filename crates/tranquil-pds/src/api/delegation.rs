@@ -1,14 +1,18 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{Active, Auth};
-use crate::delegation::{DelegationActionType, SCOPE_PRESETS, scopes};
-use crate::state::{AppState, RateLimitKind};
+use crate::delegation::{
+    DelegationActionType, SCOPE_PRESETS, ValidatedDelegationScope, verify_can_add_controllers,
+    verify_can_be_controller, verify_can_control_accounts,
+};
+use crate::rate_limit::{AccountCreationLimit, RateLimited};
+use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, Rkey};
-use crate::util::extract_client_ip;
+use crate::util::{pds_hostname, pds_hostname_without_port};
 use axum::{
     Json,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use jacquard_common::types::{integer::LimitedU32, string::Tid};
@@ -57,7 +61,7 @@ pub async fn list_controllers(
             .map(|c| ControllerInfo {
                 did: c.did,
                 handle: c.handle,
-                granted_scopes: c.granted_scopes,
+                granted_scopes: c.granted_scopes.into_string(),
                 granted_at: c.granted_at,
                 is_active: c.is_active,
             })
@@ -69,7 +73,7 @@ pub async fn list_controllers(
 #[derive(Debug, Deserialize)]
 pub struct AddControllerInput {
     pub controller_did: Did,
-    pub granted_scopes: String,
+    pub granted_scopes: ValidatedDelegationScope,
 }
 
 pub async fn add_controller(
@@ -77,10 +81,6 @@ pub async fn add_controller(
     auth: Auth<Active>,
     Json(input): Json<AddControllerInput>,
 ) -> Result<Response, ApiError> {
-    if let Err(e) = scopes::validate_delegation_scopes(&input.granted_scopes) {
-        return Ok(ApiError::InvalidScopes(e).into_response());
-    }
-
     let controller_exists = state
         .user_repo
         .get_by_did(&input.controller_did)
@@ -93,51 +93,23 @@ pub async fn add_controller(
         return Ok(ApiError::ControllerNotFound.into_response());
     }
 
-    match state.delegation_repo.controls_any_accounts(&auth.did).await {
-        Ok(true) => {
-            return Ok(ApiError::InvalidDelegation(
-                "Cannot add controllers to an account that controls other accounts".into(),
-            )
-            .into_response());
-        }
-        Err(e) => {
-            tracing::error!("Failed to check delegation status: {:?}", e);
-            return Ok(
-                ApiError::InternalError(Some("Failed to verify delegation status".into()))
-                    .into_response(),
-            );
-        }
-        Ok(false) => {}
-    }
+    let can_add = match verify_can_add_controllers(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
-    match state
-        .delegation_repo
-        .has_any_controllers(&input.controller_did)
-        .await
-    {
-        Ok(true) => {
-            return Ok(ApiError::InvalidDelegation(
-                "Cannot add a controlled account as a controller".into(),
-            )
-            .into_response());
-        }
-        Err(e) => {
-            tracing::error!("Failed to check controller status: {:?}", e);
-            return Ok(
-                ApiError::InternalError(Some("Failed to verify controller status".into()))
-                    .into_response(),
-            );
-        }
-        Ok(false) => {}
-    }
+    let can_be_controller = match verify_can_be_controller(&state, &input.controller_did).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
     match state
         .delegation_repo
         .create_delegation(
-            &auth.did,
-            &input.controller_did,
+            can_add.did(),
+            can_be_controller.did(),
             &input.granted_scopes,
-            &auth.did,
+            can_add.did(),
         )
         .await
     {
@@ -145,12 +117,12 @@ pub async fn add_controller(
             let _ = state
                 .delegation_repo
                 .log_delegation_action(
-                    &auth.did,
-                    &auth.did,
-                    Some(&input.controller_did),
+                    can_add.did(),
+                    can_add.did(),
+                    Some(can_be_controller.did()),
                     DelegationActionType::GrantCreated,
                     Some(serde_json::json!({
-                        "granted_scopes": input.granted_scopes
+                        "granted_scopes": input.granted_scopes.as_str()
                     })),
                     None,
                     None,
@@ -235,7 +207,7 @@ pub async fn remove_controller(
 #[derive(Debug, Deserialize)]
 pub struct UpdateControllerScopesInput {
     pub controller_did: Did,
-    pub granted_scopes: String,
+    pub granted_scopes: ValidatedDelegationScope,
 }
 
 pub async fn update_controller_scopes(
@@ -243,10 +215,6 @@ pub async fn update_controller_scopes(
     auth: Auth<Active>,
     Json(input): Json<UpdateControllerScopesInput>,
 ) -> Result<Response, ApiError> {
-    if let Err(e) = scopes::validate_delegation_scopes(&input.granted_scopes) {
-        return Ok(ApiError::InvalidScopes(e).into_response());
-    }
-
     match state
         .delegation_repo
         .update_delegation_scopes(&auth.did, &input.controller_did, &input.granted_scopes)
@@ -261,7 +229,7 @@ pub async fn update_controller_scopes(
                     Some(&input.controller_did),
                     DelegationActionType::ScopesModified,
                     Some(serde_json::json!({
-                        "new_scopes": input.granted_scopes
+                        "new_scopes": input.granted_scopes.as_str()
                     })),
                     None,
                     None,
@@ -326,7 +294,7 @@ pub async fn list_controlled_accounts(
             .map(|a| DelegatedAccountInfo {
                 did: a.did,
                 handle: a.handle,
-                granted_scopes: a.granted_scopes,
+                granted_scopes: a.granted_scopes.into_string(),
                 granted_at: a.granted_at,
             })
             .collect(),
@@ -443,7 +411,7 @@ pub async fn get_scope_presets() -> Response {
 pub struct CreateDelegatedAccountInput {
     pub handle: String,
     pub email: Option<String>,
-    pub controller_scopes: String,
+    pub controller_scopes: ValidatedDelegationScope,
     pub invite_code: Option<String>,
 }
 
@@ -456,45 +424,17 @@ pub struct CreateDelegatedAccountResponse {
 
 pub async fn create_delegated_account(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<AccountCreationLimit>,
     auth: Auth<Active>,
     Json(input): Json<CreateDelegatedAccountInput>,
 ) -> Result<Response, ApiError> {
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::AccountCreation, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Delegated account creation rate limit exceeded");
-        return Ok(ApiError::RateLimitExceeded(Some(
-            "Too many account creation attempts. Please try again later.".into(),
-        ))
-        .into_response());
-    }
+    let can_control = match verify_can_control_accounts(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
-    if let Err(e) = scopes::validate_delegation_scopes(&input.controller_scopes) {
-        return Ok(ApiError::InvalidScopes(e).into_response());
-    }
-
-    match state.delegation_repo.has_any_controllers(&auth.did).await {
-        Ok(true) => {
-            return Ok(ApiError::InvalidDelegation(
-                "Cannot create delegated accounts from a controlled account".into(),
-            )
-            .into_response());
-        }
-        Err(e) => {
-            tracing::error!("Failed to check controller status: {:?}", e);
-            return Ok(
-                ApiError::InternalError(Some("Failed to verify controller status".into()))
-                    .into_response(),
-            );
-        }
-        Ok(false) => {}
-    }
-
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname = pds_hostname();
+    let hostname_for_handles = pds_hostname_without_port();
     let pds_suffix = format!(".{}", hostname_for_handles);
 
     let handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
@@ -527,15 +467,10 @@ pub async fn create_delegated_account(
         return Ok(ApiError::InvalidEmail.into_response());
     }
 
-    if let Some(ref code) = input.invite_code {
-        let valid = state
-            .infra_repo
-            .is_invite_code_valid(code)
-            .await
-            .unwrap_or(false);
-
-        if !valid {
-            return Ok(ApiError::InvalidInviteCode.into_response());
+    let validated_invite_code = if let Some(ref code) = input.invite_code {
+        match state.infra_repo.validate_invite_code(code).await {
+            Ok(validated) => Some(validated),
+            Err(_) => return Ok(ApiError::InvalidInviteCode.into_response()),
         }
     } else {
         let invite_required = std::env::var("INVITE_CODE_REQUIRED")
@@ -544,7 +479,8 @@ pub async fn create_delegated_account(
         if invite_required {
             return Ok(ApiError::InviteCodeRequired.into_response());
         }
-    }
+        None
+    };
 
     use k256::ecdsa::SigningKey;
     use rand::rngs::OsRng;
@@ -593,9 +529,9 @@ pub async fn create_delegated_account(
         .into_response());
     }
 
-    let did = Did::new_unchecked(&genesis_result.did);
-    let handle = Handle::new_unchecked(&handle);
-    info!(did = %did, handle = %handle, controller = %&auth.did, "Created DID for delegated account");
+    let did = unsafe { Did::new_unchecked(&genesis_result.did) };
+    let handle = unsafe { Handle::new_unchecked(&handle) };
+    info!(did = %did, handle = %handle, controller = %can_control.did(), "Created DID for delegated account");
 
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
         Ok(bytes) => bytes,
@@ -635,8 +571,8 @@ pub async fn create_delegated_account(
         handle: handle.clone(),
         email: email.clone(),
         did: did.clone(),
-        controller_did: auth.did.clone(),
-        controller_scopes: input.controller_scopes.clone(),
+        controller_did: can_control.did().clone(),
+        controller_scopes: input.controller_scopes.as_str().to_string(),
         encrypted_key_bytes,
         encryption_version: crate::config::ENCRYPTION_VERSION,
         commit_cid: commit_cid.to_string(),
@@ -645,7 +581,7 @@ pub async fn create_delegated_account(
         invite_code: input.invite_code.clone(),
     };
 
-    let _user_id = match state
+    let user_id = match state
         .user_repo
         .create_delegated_account(&create_input)
         .await
@@ -663,12 +599,26 @@ pub async fn create_delegated_account(
         }
     };
 
+    if let Some(validated) = validated_invite_code
+        && let Err(e) = state
+            .infra_repo
+            .record_invite_code_use(&validated, user_id)
+            .await
+    {
+        warn!("Failed to record invite code use for {}: {:?}", did, e);
+    }
+
     if let Err(e) =
         crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle)).await
     {
         warn!("Failed to sequence identity event for {}: {}", did, e);
     }
-    if let Err(e) = crate::api::repo::record::sequence_account_event(&state, &did, true, None).await
+    if let Err(e) = crate::api::repo::record::sequence_account_event(
+        &state,
+        &did,
+        tranquil_db_traits::AccountStatus::Active,
+    )
+    .await
     {
         warn!("Failed to sequence account event for {}: {}", did, e);
     }
@@ -677,8 +627,8 @@ pub async fn create_delegated_account(
         "$type": "app.bsky.actor.profile",
         "displayName": handle
     });
-    let profile_collection = Nsid::new_unchecked("app.bsky.actor.profile");
-    let profile_rkey = Rkey::new_unchecked("self");
+    let profile_collection = unsafe { Nsid::new_unchecked("app.bsky.actor.profile") };
+    let profile_rkey = unsafe { Rkey::new_unchecked("self") };
     if let Err(e) = crate::api::repo::record::create_record_internal(
         &state,
         &did,
@@ -700,7 +650,7 @@ pub async fn create_delegated_account(
             DelegationActionType::GrantCreated,
             Some(json!({
                 "account_created": true,
-                "granted_scopes": input.controller_scopes
+                "granted_scopes": input.controller_scopes.as_str()
             })),
             None,
             None,

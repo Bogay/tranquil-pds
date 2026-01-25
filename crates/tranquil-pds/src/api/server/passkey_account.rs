@@ -1,5 +1,6 @@
 use crate::api::SuccessResponse;
 use crate::api::error::ApiError;
+use crate::auth::NormalizedLoginIdentifier;
 use axum::{
     Json,
     extract::State,
@@ -19,24 +20,11 @@ use uuid::Uuid;
 
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{ServiceTokenVerifier, generate_app_password, is_service_token};
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{AccountCreationLimit, PasswordResetLimit, RateLimited};
+use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, PlainPassword, Rkey};
+use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
-
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for")
-        && let Ok(value) = forwarded.to_str()
-        && let Some(first_ip) = value.split(',').next()
-    {
-        return first_ip.trim().to_string();
-    }
-    if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str()
-    {
-        return value.trim().to_string();
-    }
-    "unknown".to_string()
-}
 
 fn generate_setup_token() -> String {
     let mut rng = rand::thread_rng();
@@ -80,23 +68,12 @@ pub struct CreatePasskeyAccountResponse {
 
 pub async fn create_passkey_account(
     State(state): State<AppState>,
+    _rate_limit: RateLimited<AccountCreationLimit>,
     headers: HeaderMap,
     Json(input): Json<CreatePasskeyAccountInput>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::AccountCreation, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Account creation rate limit exceeded");
-        return ApiError::RateLimitExceeded(Some(
-            "Too many account creation attempts. Please try again later.".into(),
-        ))
-        .into_response();
-    }
-
     let byod_auth = if let Some(extracted) = crate::auth::extract_auth_token_from_header(
-        headers.get("Authorization").and_then(|h| h.to_str().ok()),
+        crate::util::get_header_str(&headers, "Authorization"),
     ) {
         let token = extracted.token;
         if is_service_token(&token) {
@@ -135,8 +112,8 @@ pub async fn create_passkey_account(
             .map(|d| d.starts_with("did:web:"))
             .unwrap_or(false);
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname = pds_hostname();
+    let hostname_for_handles = pds_hostname_without_port();
     let pds_suffix = format!(".{}", hostname_for_handles);
 
     let handle = if !input.handle.contains('.') || input.handle.ends_with(&pds_suffix) {
@@ -169,15 +146,10 @@ pub async fn create_passkey_account(
         return ApiError::InvalidEmail.into_response();
     }
 
-    if let Some(ref code) = input.invite_code {
-        let valid = state
-            .infra_repo
-            .is_invite_code_valid(code)
-            .await
-            .unwrap_or(false);
-
-        if !valid {
-            return ApiError::InvalidInviteCode.into_response();
+    let _validated_invite_code = if let Some(ref code) = input.invite_code {
+        match state.infra_repo.validate_invite_code(code).await {
+            Ok(validated) => Some(validated),
+            Err(_) => return ApiError::InvalidInviteCode.into_response(),
         }
     } else {
         let invite_required = std::env::var("INVITE_CODE_REQUIRED")
@@ -186,7 +158,8 @@ pub async fn create_passkey_account(
         if invite_required {
             return ApiError::InviteCodeRequired.into_response();
         }
-    }
+        None
+    };
 
     let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
     let verification_recipient = match verification_channel {
@@ -268,7 +241,7 @@ pub async fn create_passkey_account(
             }
             if is_byod_did_web {
                 if let Some(ref auth_did) = byod_auth
-                    && d != auth_did
+                    && d != auth_did.as_str()
                 {
                     return ApiError::AuthorizationError(format!(
                         "Service token issuer {} does not match DID {}",
@@ -280,7 +253,7 @@ pub async fn create_passkey_account(
             } else {
                 if let Err(e) = crate::api::identity::did::verify_did_web(
                     d,
-                    &hostname,
+                    hostname,
                     &input.handle,
                     input.signing_key.as_deref(),
                 )
@@ -296,7 +269,7 @@ pub async fn create_passkey_account(
             if let Some(ref auth_did) = byod_auth {
                 if let Some(ref provided_did) = input.did {
                     if provided_did.starts_with("did:plc:") {
-                        if provided_did != auth_did {
+                        if provided_did != auth_did.as_str() {
                             return ApiError::AuthorizationError(format!(
                                 "Service token issuer {} does not match DID {}",
                                 auth_did, provided_did
@@ -389,7 +362,7 @@ pub async fn create_passkey_account(
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
-    let did_typed = Did::new_unchecked(&did);
+    let did_typed = unsafe { Did::new_unchecked(&did) };
     let (commit_bytes, _sig) =
         match create_signed_commit(&did_typed, mst_root, rev.as_ref(), None, &secret_key) {
             Ok(result) => result,
@@ -422,7 +395,7 @@ pub async fn create_passkey_account(
         _ => tranquil_db_traits::CommsChannel::Email,
     };
 
-    let handle_typed = Handle::new_unchecked(&handle);
+    let handle_typed = unsafe { Handle::new_unchecked(&handle) };
     let create_input = tranquil_db_traits::CreatePasskeyAccountInput {
         handle: handle_typed.clone(),
         email: email.clone().unwrap_or_default(),
@@ -484,8 +457,12 @@ pub async fn create_passkey_account(
         {
             warn!("Failed to sequence identity event for {}: {}", did, e);
         }
-        if let Err(e) =
-            crate::api::repo::record::sequence_account_event(&state, &did_typed, true, None).await
+        if let Err(e) = crate::api::repo::record::sequence_account_event(
+            &state,
+            &did_typed,
+            tranquil_db_traits::AccountStatus::Active,
+        )
+        .await
         {
             warn!("Failed to sequence account event for {}: {}", did, e);
         }
@@ -493,8 +470,8 @@ pub async fn create_passkey_account(
             "$type": "app.bsky.actor.profile",
             "displayName": handle
         });
-        let profile_collection = Nsid::new_unchecked("app.bsky.actor.profile");
-        let profile_rkey = Rkey::new_unchecked("self");
+        let profile_collection = unsafe { Nsid::new_unchecked("app.bsky.actor.profile") };
+        let profile_rkey = unsafe { Rkey::new_unchecked("self") };
         if let Err(e) = crate::api::repo::record::create_record_internal(
             &state,
             &did_typed,
@@ -521,7 +498,7 @@ pub async fn create_passkey_account(
         verification_channel,
         &verification_recipient,
         &formatted_token,
-        &hostname,
+        hostname,
     )
     .await
     {
@@ -541,7 +518,7 @@ pub async fn create_passkey_account(
                     refresh_jti,
                     access_expires_at: token_meta.expires_at,
                     refresh_expires_at: refresh_expires,
-                    legacy_login: false,
+                    login_type: tranquil_db::LoginType::Modern,
                     mfa_verified: false,
                     scope: None,
                     controller_did: None,
@@ -626,14 +603,7 @@ pub async fn complete_passkey_setup(
         return ApiError::InvalidToken(None).into_response();
     }
 
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
-        Ok(w) => w,
-        Err(e) => {
-            error!("Failed to create WebAuthn config: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let webauthn = &state.webauthn_config;
 
     let reg_state = match state
         .user_repo
@@ -768,14 +738,7 @@ pub async fn start_passkey_registration_for_setup(
         return ApiError::InvalidToken(None).into_response();
     }
 
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let webauthn = match crate::auth::webauthn::WebAuthnConfig::new(&pds_hostname) {
-        Ok(w) => w,
-        Err(e) => {
-            error!("Failed to create WebAuthn config: {:?}", e);
-            return ApiError::InternalError(None).into_response();
-        }
-    };
+    let webauthn = &state.webauthn_config;
 
     let existing_passkeys = state
         .user_repo
@@ -840,30 +803,18 @@ pub struct RequestPasskeyRecoveryInput {
 
 pub async fn request_passkey_recovery(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _rate_limit: RateLimited<PasswordResetLimit>,
     Json(input): Json<RequestPasskeyRecoveryInput>,
 ) -> Response {
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::PasswordReset, &client_ip)
-        .await
-    {
-        return ApiError::RateLimitExceeded(None).into_response();
-    }
-
-    let pds_hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = pds_hostname.split(':').next().unwrap_or(&pds_hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let identifier = input.email.trim().to_lowercase();
     let identifier = identifier.strip_prefix('@').unwrap_or(&identifier);
-    let normalized_handle = if identifier.contains('@') || identifier.contains('.') {
-        identifier.to_string()
-    } else {
-        format!("{}.{}", identifier, hostname_for_handles)
-    };
+    let normalized_handle =
+        NormalizedLoginIdentifier::normalize(&input.email, hostname_for_handles);
 
     let user = match state
         .user_repo
-        .get_user_for_passkey_recovery(identifier, &normalized_handle)
+        .get_user_for_passkey_recovery(identifier, normalized_handle.as_str())
         .await
     {
         Ok(Some(u)) if !u.password_required => u,
@@ -890,7 +841,7 @@ pub async fn request_passkey_recovery(
         return ApiError::InternalError(None).into_response();
     }
 
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     let recovery_url = format!(
         "https://{}/app/recover-passkey?did={}&token={}",
         hostname,
@@ -903,7 +854,7 @@ pub async fn request_passkey_recovery(
         state.infra_repo.as_ref(),
         user.id,
         &recovery_url,
-        &hostname,
+        hostname,
     )
     .await;
 

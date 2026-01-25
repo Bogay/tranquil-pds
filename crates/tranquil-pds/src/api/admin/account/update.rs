@@ -3,6 +3,7 @@ use crate::api::error::ApiError;
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::{Did, Handle, PlainPassword};
+use crate::util::pds_hostname_without_port;
 use axum::{
     Json,
     extract::State,
@@ -69,8 +70,7 @@ pub async fn update_account_handle(
     {
         return Err(ApiError::InvalidHandle(None));
     }
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let handle = if !input_handle.contains('.') {
         format!("{}.{}", input_handle, hostname_for_handles)
     } else {
@@ -84,7 +84,7 @@ pub async fn update_account_handle(
         .ok()
         .flatten()
         .ok_or(ApiError::AccountNotFound)?;
-    let handle_for_check = Handle::new_unchecked(&handle);
+    let handle_for_check = unsafe { Handle::new_unchecked(&handle) };
     if let Ok(true) = state
         .user_repo
         .check_handle_exists(&handle_for_check, user_id)

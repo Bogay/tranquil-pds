@@ -1,7 +1,8 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
 use crate::api::repo::record::write::{CommitInfo, prepare_repo_write};
-use crate::auth::{Active, Auth};
+use crate::auth::{Active, Auth, VerifyScope};
+use crate::cid_types::CommitCid;
 use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
@@ -43,19 +44,15 @@ pub async fn delete_record(
     auth: Auth<Active>,
     Json(input): Json<DeleteRecordInput>,
 ) -> Result<Response, crate::api::error::ApiError> {
-    let repo_auth = match prepare_repo_write(&state, &auth, &input.repo).await {
+    let scope_proof = match auth.verify_repo_delete(&input.collection) {
+        Ok(proof) => proof,
+        Err(e) => return Ok(e.into_response()),
+    };
+
+    let repo_auth = match prepare_repo_write(&state, &scope_proof, &input.repo).await {
         Ok(res) => res,
         Err(err_res) => return Ok(err_res),
     };
-
-    if let Err(e) = crate::auth::scope_check::check_repo_scope(
-        repo_auth.is_oauth,
-        repo_auth.scope.as_deref(),
-        crate::oauth::RepoAction::Delete,
-        &input.collection,
-    ) {
-        return Ok(e);
-    }
 
     let did = repo_auth.did;
     let user_id = repo_auth.user_id;
@@ -63,12 +60,12 @@ pub async fn delete_record(
     let controller_did = repo_auth.controller_did;
 
     if let Some(swap_commit) = &input.swap_commit
-        && Cid::from_str(swap_commit).ok() != Some(current_root_cid)
+        && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
     {
         return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
     }
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
-    let commit_bytes = match tracking_store.get(&current_root_cid).await {
+    let commit_bytes = match tracking_store.get(current_root_cid.as_cid()).await {
         Ok(Some(b)) => b,
         _ => {
             return Ok(
@@ -159,7 +156,7 @@ pub async fn delete_record(
         .into_iter()
         .collect();
     let written_cids_str: Vec<String> = written_cids.iter().map(|c| c.to_string()).collect();
-    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid)
+    let obsolete_cids: Vec<Cid> = std::iter::once(current_root_cid.into_cid())
         .chain(
             old_mst_blocks
                 .keys()
@@ -173,7 +170,7 @@ pub async fn delete_record(
         CommitParams {
             did: &did,
             user_id,
-            current_root_cid: Some(current_root_cid),
+            current_root_cid: Some(current_root_cid.into_cid()),
             prev_data_cid: Some(commit.data),
             new_mst_root,
             ops: vec![op],

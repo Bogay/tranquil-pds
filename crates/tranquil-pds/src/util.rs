@@ -4,6 +4,7 @@ use ipld_core::ipld::Ipld;
 use rand::Rng;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::OnceLock;
 
@@ -11,6 +12,8 @@ const BASE32_ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz234567";
 const DEFAULT_MAX_BLOB_SIZE: usize = 10 * 1024 * 1024 * 1024;
 
 static MAX_BLOB_SIZE: OnceLock<usize> = OnceLock::new();
+static PDS_HOSTNAME: OnceLock<String> = OnceLock::new();
+static PDS_HOSTNAME_WITHOUT_PORT: OnceLock<String> = OnceLock::new();
 
 pub fn get_max_blob_size() -> usize {
     *MAX_BLOB_SIZE.get_or_init(|| {
@@ -69,7 +72,11 @@ pub fn parse_repeated_query_param(query: Option<&str>, key: &str) -> Vec<String>
         .unwrap_or_default()
 }
 
-pub fn extract_client_ip(headers: &HeaderMap) -> String {
+pub fn get_header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|h| h.to_str().ok())
+}
+
+pub fn extract_client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
     if let Some(forwarded) = headers.get("x-forwarded-for")
         && let Ok(value) = forwarded.to_str()
         && let Some(first_ip) = value.split(',').next()
@@ -81,11 +88,20 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
     {
         return value.trim().to_string();
     }
-    "unknown".to_string()
+    addr.map(|a| a.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
-pub fn pds_hostname() -> String {
-    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
+pub fn pds_hostname() -> &'static str {
+    PDS_HOSTNAME
+        .get_or_init(|| std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string()))
+}
+
+pub fn pds_hostname_without_port() -> &'static str {
+    PDS_HOSTNAME_WITHOUT_PORT.get_or_init(|| {
+        let hostname = pds_hostname();
+        hostname.split(':').next().unwrap_or(hostname).to_string()
+    })
 }
 
 pub fn pds_public_url() -> String {

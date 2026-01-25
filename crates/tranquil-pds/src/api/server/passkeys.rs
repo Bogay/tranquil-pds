@@ -1,7 +1,6 @@
 use crate::api::EmptyResponse;
-use crate::api::error::ApiError;
-use crate::auth::webauthn::WebAuthnConfig;
-use crate::auth::{Active, Auth};
+use crate::api::error::{ApiError, DbResultExt};
+use crate::auth::{Active, Auth, require_legacy_session_mfa, require_reauth_window};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -11,14 +10,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use webauthn_rs::prelude::*;
-
-fn get_webauthn() -> Result<WebAuthnConfig, ApiError> {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    WebAuthnConfig::new(&hostname).map_err(|e| {
-        error!("Failed to create WebAuthn config: {}", e);
-        ApiError::InternalError(Some("WebAuthn configuration failed".into()))
-    })
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,26 +28,20 @@ pub async fn start_passkey_registration(
     auth: Auth<Active>,
     Json(input): Json<StartRegistrationInput>,
 ) -> Result<Response, ApiError> {
-    let webauthn = get_webauthn()?;
+    let webauthn = &state.webauthn_config;
 
     let handle = state
         .user_repo
         .get_handle_by_did(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching user")?
         .ok_or(ApiError::AccountNotFound)?;
 
     let existing_passkeys = state
         .user_repo
         .get_passkeys_for_user(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching existing passkeys: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching existing passkeys")?;
 
     let exclude_credentials: Vec<CredentialID> = existing_passkeys
         .iter()
@@ -81,10 +66,7 @@ pub async fn start_passkey_registration(
         .user_repo
         .save_webauthn_challenge(&auth.did, "registration", &state_json)
         .await
-        .map_err(|e| {
-            error!("Failed to save registration state: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("saving registration state")?;
 
     let options = serde_json::to_value(&ccr).unwrap_or(serde_json::json!({}));
 
@@ -112,16 +94,13 @@ pub async fn finish_passkey_registration(
     auth: Auth<Active>,
     Json(input): Json<FinishRegistrationInput>,
 ) -> Result<Response, ApiError> {
-    let webauthn = get_webauthn()?;
+    let webauthn = &state.webauthn_config;
 
     let reg_state_json = state
         .user_repo
         .load_webauthn_challenge(&auth.did, "registration")
         .await
-        .map_err(|e| {
-            error!("DB error loading registration state: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("loading registration state")?
         .ok_or(ApiError::NoRegistrationInProgress)?;
 
     let reg_state: SecurityKeyRegistration =
@@ -157,10 +136,7 @@ pub async fn finish_passkey_registration(
             input.friendly_name.as_deref(),
         )
         .await
-        .map_err(|e| {
-            error!("Failed to save passkey: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("saving passkey")?;
 
     if let Err(e) = state
         .user_repo
@@ -208,10 +184,7 @@ pub async fn list_passkeys(
         .user_repo
         .get_passkeys_for_user(&auth.did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching passkeys: {:?}", e);
-            ApiError::InternalError(None)
-        })?;
+        .log_db_err("fetching passkeys")?;
 
     let passkey_infos: Vec<PasskeyInfo> = passkeys
         .into_iter()
@@ -241,30 +214,21 @@ pub async fn delete_passkey(
     auth: Auth<Active>,
     Json(input): Json<DeletePasskeyInput>,
 ) -> Result<Response, ApiError> {
-    if !crate::api::server::reauth::check_legacy_session_mfa(&*state.session_repo, &auth.did).await
-    {
-        return Ok(crate::api::server::reauth::legacy_mfa_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    let session_mfa = match require_legacy_session_mfa(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
-    if crate::api::server::reauth::check_reauth_required(&*state.session_repo, &auth.did).await {
-        return Ok(crate::api::server::reauth::reauth_required_response(
-            &*state.user_repo,
-            &*state.session_repo,
-            &auth.did,
-        )
-        .await);
-    }
+    let reauth_mfa = match require_reauth_window(&state, &auth).await {
+        Ok(proof) => proof,
+        Err(response) => return Ok(response),
+    };
 
     let id: uuid::Uuid = input.id.parse().map_err(|_| ApiError::InvalidId)?;
 
-    match state.user_repo.delete_passkey(id, &auth.did).await {
+    match state.user_repo.delete_passkey(id, reauth_mfa.did()).await {
         Ok(true) => {
-            info!(did = %auth.did, passkey_id = %id, "Passkey deleted");
+            info!(did = %session_mfa.did(), passkey_id = %id, "Passkey deleted");
             Ok(EmptyResponse::ok().into_response())
         }
         Ok(false) => Err(ApiError::PasskeyNotFound),

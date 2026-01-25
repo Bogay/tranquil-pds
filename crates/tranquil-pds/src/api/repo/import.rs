@@ -1,5 +1,5 @@
 use crate::api::EmptyResponse;
-use crate::api::error::ApiError;
+use crate::api::error::{ApiError, DbResultExt};
 use crate::api::repo::record::create_signed_commit;
 use crate::auth::{Auth, NotTakendown};
 use crate::state::AppState;
@@ -49,10 +49,7 @@ pub async fn import_repo(
         .user_repo
         .get_by_did(did)
         .await
-        .map_err(|e| {
-            error!("DB error fetching user: {:?}", e);
-            ApiError::InternalError(None)
-        })?
+        .log_db_err("fetching user")?
         .ok_or(ApiError::AccountNotFound)?;
     if user.takedown_ref.is_some() {
         return Err(ApiError::AccountTakedown);
@@ -207,10 +204,9 @@ pub async fn import_repo(
                     let record_uri =
                         AtUri::from_parts(did.as_str(), &record.collection, &record.rkey);
                     record.blob_refs.iter().map(move |blob_ref| {
-                        (
-                            record_uri.clone(),
-                            CidLink::new_unchecked(blob_ref.cid.clone()),
-                        )
+                        (record_uri.clone(), unsafe {
+                            CidLink::new_unchecked(blob_ref.cid.clone())
+                        })
                     })
                 })
                 .collect();
@@ -275,7 +271,7 @@ pub async fn import_repo(
                     error!("Failed to store new commit block: {:?}", e);
                     ApiError::InternalError(None)
                 })?;
-            let new_root_cid_link = CidLink::new_unchecked(new_root_cid.to_string());
+            let new_root_cid_link = unsafe { CidLink::new_unchecked(new_root_cid.to_string()) };
             state
                 .repo_repo
                 .update_repo_root(user_id, &new_root_cid_link, &new_rev_str)
@@ -368,8 +364,8 @@ async fn sequence_import_event(
 ) -> Result<(), tranquil_db::DbError> {
     let data = tranquil_db::CommitEventData {
         did: did.clone(),
-        event_type: "commit".to_string(),
-        commit_cid: Some(CidLink::new_unchecked(commit_cid)),
+        event_type: tranquil_db::RepoEventType::Commit,
+        commit_cid: Some(unsafe { CidLink::new_unchecked(commit_cid) }),
         prev_cid: None,
         ops: Some(serde_json::json!([])),
         blobs: Some(vec![]),

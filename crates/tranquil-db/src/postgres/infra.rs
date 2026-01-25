@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tranquil_db_traits::{
     AdminAccountInfo, CommsChannel, CommsStatus, CommsType, DbError, DeletionRequest,
-    InfraRepository, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder, InviteCodeUse,
-    NotificationHistoryRow, QueuedComms, ReservedSigningKey,
+    InfraRepository, InviteCodeError, InviteCodeInfo, InviteCodeRow, InviteCodeSortOrder,
+    InviteCodeState, InviteCodeUse, NotificationHistoryRow, QueuedComms, ReservedSigningKey,
+    ValidatedInviteCode,
 };
 use tranquil_types::{CidLink, Did, Handle};
 use uuid::Uuid;
@@ -182,22 +183,33 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(result)
     }
 
-    async fn is_invite_code_valid(&self, code: &str) -> Result<bool, DbError> {
-        let result = sqlx::query_scalar!(
-            r#"SELECT (available_uses > 0 AND NOT COALESCE(disabled, false)) as "valid!" FROM invite_codes WHERE code = $1"#,
+    async fn validate_invite_code<'a>(
+        &self,
+        code: &'a str,
+    ) -> Result<ValidatedInviteCode<'a>, InviteCodeError> {
+        let result = sqlx::query!(
+            r#"SELECT available_uses, COALESCE(disabled, false) as "disabled!" FROM invite_codes WHERE code = $1"#,
             code
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(map_sqlx_error)?;
+        .map_err(|e| InviteCodeError::DatabaseError(map_sqlx_error(e)))?;
 
-        Ok(result.unwrap_or(false))
+        match result {
+            None => Err(InviteCodeError::NotFound),
+            Some(row) if row.disabled => Err(InviteCodeError::Disabled),
+            Some(row) if row.available_uses <= 0 => Err(InviteCodeError::ExhaustedUses),
+            Some(_) => Ok(ValidatedInviteCode::new_validated(code)),
+        }
     }
 
-    async fn decrement_invite_code_uses(&self, code: &str) -> Result<(), DbError> {
+    async fn decrement_invite_code_uses(
+        &self,
+        code: &ValidatedInviteCode<'_>,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "UPDATE invite_codes SET available_uses = available_uses - 1 WHERE code = $1",
-            code
+            code.code()
         )
         .execute(&self.pool)
         .await
@@ -206,10 +218,14 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(())
     }
 
-    async fn record_invite_code_use(&self, code: &str, used_by_user: Uuid) -> Result<(), DbError> {
+    async fn record_invite_code_use(
+        &self,
+        code: &ValidatedInviteCode<'_>,
+        used_by_user: Uuid,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "INSERT INTO invite_code_uses (code, used_by_user) VALUES ($1, $2)",
-            code,
+            code.code(),
             used_by_user
         )
         .execute(&self.pool)
@@ -245,7 +261,7 @@ impl InfraRepository for PostgresInfraRepository {
             .map(|r| InviteCodeInfo {
                 code: r.code,
                 available_uses: r.available_uses,
-                disabled: r.disabled.unwrap_or(false),
+                state: InviteCodeState::from(r.disabled),
                 for_account: Some(Did::from(r.for_account)),
                 created_at: r.created_at,
                 created_by: None,
@@ -422,7 +438,7 @@ impl InfraRepository for PostgresInfraRepository {
             .map(|r| InviteCodeInfo {
                 code: r.code,
                 available_uses: r.available_uses,
-                disabled: r.disabled.unwrap_or(false),
+                state: InviteCodeState::from(r.disabled),
                 for_account: Some(Did::from(r.for_account)),
                 created_at: r.created_at,
                 created_by: Some(Did::from(r.created_by)),
@@ -445,7 +461,7 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(result.map(|r| InviteCodeInfo {
             code: r.code,
             available_uses: r.available_uses,
-            disabled: r.disabled.unwrap_or(false),
+            state: InviteCodeState::from(r.disabled),
             for_account: Some(Did::from(r.for_account)),
             created_at: r.created_at,
             created_by: Some(Did::from(r.created_by)),
@@ -476,7 +492,7 @@ impl InfraRepository for PostgresInfraRepository {
                     InviteCodeInfo {
                         code: r.code,
                         available_uses: r.available_uses,
-                        disabled: r.disabled.unwrap_or(false),
+                        state: InviteCodeState::from(r.disabled),
                         for_account: Some(Did::from(r.for_account)),
                         created_at: r.created_at,
                         created_by: Some(Did::from(r.created_by)),
@@ -841,9 +857,9 @@ impl InfraRepository for PostgresInfraRepository {
             r#"
             SELECT
                 created_at,
-                channel as "channel: String",
-                comms_type as "comms_type: String",
-                status as "status: String",
+                channel as "channel: CommsChannel",
+                comms_type as "comms_type: CommsType",
+                status as "status: CommsStatus",
                 subject,
                 body
             FROM comms_queue

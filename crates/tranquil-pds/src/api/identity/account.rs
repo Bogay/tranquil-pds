@@ -3,8 +3,10 @@ use crate::api::error::ApiError;
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_service_token};
 use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
-use crate::state::{AppState, RateLimitKind};
+use crate::rate_limit::{AccountCreationLimit, RateLimited};
+use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, PlainPassword, Rkey};
+use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
 use axum::{
     Json,
@@ -21,21 +23,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for")
-        && let Ok(value) = forwarded.to_str()
-        && let Some(first_ip) = value.split(',').next()
-    {
-        return first_ip.trim().to_string();
-    }
-    if let Some(real_ip) = headers.get("x-real-ip")
-        && let Ok(value) = real_ip.to_str()
-    {
-        return value.trim().to_string();
-    }
-    "unknown".to_string()
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +55,7 @@ pub struct CreateAccountOutput {
 
 pub async fn create_account(
     State(state): State<AppState>,
+    _rate_limit: RateLimited<AccountCreationLimit>,
     headers: HeaderMap,
     Json(input): Json<CreateAccountInput>,
 ) -> Response {
@@ -84,20 +72,9 @@ pub async fn create_account(
     } else {
         info!("create_account called");
     }
-    let client_ip = extract_client_ip(&headers);
-    if !state
-        .check_rate_limit(RateLimitKind::AccountCreation, &client_ip)
-        .await
-    {
-        warn!(ip = %client_ip, "Account creation rate limit exceeded");
-        return ApiError::RateLimitExceeded(Some(
-            "Too many account creation attempts. Please try again later.".into(),
-        ))
-        .into_response();
-    }
 
     let migration_auth = if let Some(extracted) =
-        extract_auth_token_from_header(headers.get("Authorization").and_then(|h| h.to_str().ok()))
+        extract_auth_token_from_header(crate::util::get_header_str(&headers, "Authorization"))
     {
         let token = extracted.token;
         if is_service_token(&token) {
@@ -143,7 +120,7 @@ pub async fn create_account(
     if (is_migration || is_did_web_byod)
         && let (Some(provided_did), Some(auth_did)) = (input.did.as_ref(), migration_auth.as_ref())
     {
-        if provided_did != auth_did {
+        if provided_did != auth_did.as_str() {
             info!(
                 "[MIGRATION] createAccount: Service token mismatch - token_did={} provided_did={}",
                 auth_did, provided_did
@@ -164,8 +141,7 @@ pub async fn create_account(
         }
     }
 
-    let hostname_for_validation =
-        std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname_for_validation = pds_hostname_without_port();
     let pds_suffix = format!(".{}", hostname_for_validation);
 
     let validated_short_handle = if !input.handle.contains('.')
@@ -242,8 +218,8 @@ pub async fn create_account(
             _ => return ApiError::InvalidVerificationChannel.into_response(),
         })
     };
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname = pds_hostname();
+    let hostname_for_handles = pds_hostname_without_port();
     let pds_endpoint = format!("https://{}", hostname);
     let suffix = format!(".{}", hostname_for_handles);
     let handle = if input.handle.ends_with(&suffix) {
@@ -308,7 +284,7 @@ pub async fn create_account(
             }
             if !is_did_web_byod
                 && let Err(e) =
-                    verify_did_web(d, &hostname, &input.handle, input.signing_key.as_deref()).await
+                    verify_did_web(d, hostname, &input.handle, input.signing_key.as_deref()).await
             {
                 return ApiError::InvalidDid(e).into_response();
             }
@@ -322,13 +298,9 @@ pub async fn create_account(
                     d.clone()
                 } else if d.starts_with("did:web:") {
                     if !is_did_web_byod
-                        && let Err(e) = verify_did_web(
-                            d,
-                            &hostname,
-                            &input.handle,
-                            input.signing_key.as_deref(),
-                        )
-                        .await
+                        && let Err(e) =
+                            verify_did_web(d, hostname, &input.handle, input.signing_key.as_deref())
+                                .await
                     {
                         return ApiError::InvalidDid(e).into_response();
                     }
@@ -408,8 +380,8 @@ pub async fn create_account(
     };
     if is_migration {
         let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
-            did: Did::new_unchecked(&did),
-            new_handle: Handle::new_unchecked(&handle),
+            did: unsafe { Did::new_unchecked(&did) },
+            new_handle: unsafe { Handle::new_unchecked(&handle) },
             new_email: email.clone(),
         };
         match state
@@ -463,12 +435,12 @@ pub async fn create_account(
                     }
                 };
                 let session_data = tranquil_db_traits::SessionTokenCreate {
-                    did: Did::new_unchecked(&did),
+                    did: unsafe { Did::new_unchecked(&did) },
                     access_jti: access_meta.jti.clone(),
                     refresh_jti: refresh_meta.jti.clone(),
                     access_expires_at: access_meta.expires_at,
                     refresh_expires_at: refresh_meta.expires_at,
-                    legacy_login: false,
+                    login_type: tranquil_db_traits::LoginType::Modern,
                     mfa_verified: false,
                     scope: None,
                     controller_did: None,
@@ -478,8 +450,7 @@ pub async fn create_account(
                     error!("Error creating session: {:?}", e);
                     return ApiError::InternalError(None).into_response();
                 }
-                let hostname =
-                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let hostname = pds_hostname();
                 let verification_required = if let Some(ref user_email) = email {
                     let token =
                         crate::auth::verification_token::generate_migration_token(&did, user_email);
@@ -491,7 +462,7 @@ pub async fn create_account(
                         reactivated.user_id,
                         user_email,
                         &formatted_token,
-                        &hostname,
+                        hostname,
                     )
                     .await
                     {
@@ -505,7 +476,7 @@ pub async fn create_account(
                     axum::http::StatusCode::OK,
                     Json(CreateAccountOutput {
                         handle: handle.clone().into(),
-                        did: Did::new_unchecked(&did),
+                        did: unsafe { Did::new_unchecked(&did) },
                         did_doc: state.did_resolver.resolve_did_document(&did).await,
                         access_jwt: access_meta.token,
                         refresh_jwt: refresh_meta.token,
@@ -529,7 +500,7 @@ pub async fn create_account(
         }
     }
 
-    let handle_typed = Handle::new_unchecked(&handle);
+    let handle_typed = unsafe { Handle::new_unchecked(&handle) };
     let handle_available = match state
         .user_repo
         .check_handle_available_for_new_account(&handle_typed)
@@ -613,7 +584,7 @@ pub async fn create_account(
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
-    let did_for_commit = Did::new_unchecked(&did);
+    let did_for_commit = unsafe { Did::new_unchecked(&did) };
     let (commit_bytes, _sig) =
         match create_signed_commit(&did_for_commit, mst_root, rev.as_ref(), None, &signing_key) {
             Ok(result) => result,
@@ -649,9 +620,9 @@ pub async fn create_account(
     };
 
     let create_input = tranquil_db_traits::CreatePasswordAccountInput {
-        handle: Handle::new_unchecked(&handle),
+        handle: unsafe { Handle::new_unchecked(&handle) },
         email: email.clone(),
-        did: Did::new_unchecked(&did),
+        did: unsafe { Did::new_unchecked(&did) },
         password_hash,
         preferred_comms_channel,
         discord_id: input
@@ -701,8 +672,8 @@ pub async fn create_account(
     };
     let user_id = create_result.user_id;
     if !is_migration && !is_did_web_byod {
-        let did_typed = Did::new_unchecked(&did);
-        let handle_typed = Handle::new_unchecked(&handle);
+        let did_typed = unsafe { Did::new_unchecked(&did) };
+        let handle_typed = unsafe { Handle::new_unchecked(&handle) };
         if let Err(e) = crate::api::repo::record::sequence_identity_event(
             &state,
             &did_typed,
@@ -712,8 +683,12 @@ pub async fn create_account(
         {
             warn!("Failed to sequence identity event for {}: {}", did, e);
         }
-        if let Err(e) =
-            crate::api::repo::record::sequence_account_event(&state, &did_typed, true, None).await
+        if let Err(e) = crate::api::repo::record::sequence_account_event(
+            &state,
+            &did_typed,
+            tranquil_db_traits::AccountStatus::Active,
+        )
+        .await
         {
             warn!("Failed to sequence account event for {}: {}", did, e);
         }
@@ -742,8 +717,8 @@ pub async fn create_account(
             "$type": "app.bsky.actor.profile",
             "displayName": input.handle
         });
-        let profile_collection = Nsid::new_unchecked("app.bsky.actor.profile");
-        let profile_rkey = Rkey::new_unchecked("self");
+        let profile_collection = unsafe { Nsid::new_unchecked("app.bsky.actor.profile") };
+        let profile_rkey = unsafe { Rkey::new_unchecked("self") };
         if let Err(e) = crate::api::repo::record::create_record_internal(
             &state,
             &did_typed,
@@ -756,7 +731,7 @@ pub async fn create_account(
             warn!("Failed to create default profile for {}: {}", did, e);
         }
     }
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+    let hostname = pds_hostname();
     if !is_migration {
         if let Some(ref recipient) = verification_recipient {
             let verification_token = crate::auth::verification_token::generate_signup_token(
@@ -772,7 +747,7 @@ pub async fn create_account(
                 verification_channel,
                 recipient,
                 &formatted_token,
-                &hostname,
+                hostname,
             )
             .await
             {
@@ -791,7 +766,7 @@ pub async fn create_account(
             user_id,
             user_email,
             &formatted_token,
-            &hostname,
+            hostname,
         )
         .await
         {
@@ -816,12 +791,12 @@ pub async fn create_account(
             }
         };
     let session_data = tranquil_db_traits::SessionTokenCreate {
-        did: Did::new_unchecked(&did),
+        did: unsafe { Did::new_unchecked(&did) },
         access_jti: access_meta.jti.clone(),
         refresh_jti: refresh_meta.jti.clone(),
         access_expires_at: access_meta.expires_at,
         refresh_expires_at: refresh_meta.expires_at,
-        legacy_login: false,
+        login_type: tranquil_db_traits::LoginType::Modern,
         mfa_verified: false,
         scope: None,
         controller_did: None,
@@ -845,7 +820,7 @@ pub async fn create_account(
         StatusCode::OK,
         Json(CreateAccountOutput {
             handle: handle.clone().into(),
-            did: Did::new_unchecked(&did),
+            did: unsafe { Did::new_unchecked(&did) },
             did_doc,
             access_jwt: access_meta.token,
             refresh_jwt: refresh_meta.token,

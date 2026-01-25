@@ -2,6 +2,7 @@ use crate::sync::firehose::SequencedEvent;
 use cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use tranquil_scopes::RepoAction;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FrameHeader {
@@ -38,7 +39,7 @@ struct JsonRepoOp {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RepoOp {
-    pub action: String,
+    pub action: RepoAction,
     pub path: String,
     pub cid: Option<Cid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,11 +160,13 @@ impl CommitFrameBuilder {
             serde_json::from_value(self.ops_json).unwrap_or_else(|_| vec![]);
         let ops: Vec<RepoOp> = json_ops
             .into_iter()
-            .map(|op| RepoOp {
-                action: op.action,
-                path: op.path,
-                cid: op.cid.and_then(|s| Cid::from_str(&s).ok()),
-                prev: op.prev.and_then(|s| Cid::from_str(&s).ok()),
+            .filter_map(|op| {
+                Some(RepoOp {
+                    action: RepoAction::parse_str(&op.action)?,
+                    path: op.path,
+                    cid: op.cid.and_then(|s| Cid::from_str(&s).ok()),
+                    prev: op.prev.and_then(|s| Cid::from_str(&s).ok()),
+                })
             })
             .collect();
         let rev = self.rev.unwrap_or_else(placeholder_rev);
@@ -202,7 +205,7 @@ impl TryFrom<SequencedEvent> for CommitFrame {
             CommitFrameError::InvalidCommitCid("Missing commit_cid in event".to_string())
         })?;
         let builder = CommitFrameBuilder::new(
-            event.seq,
+            event.seq.as_i64(),
             event.did.to_string(),
             commit_cid.as_str(),
             event.prev_cid.as_ref().map(|c| c.as_str()),

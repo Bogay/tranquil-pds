@@ -1,6 +1,7 @@
 use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::types::AtIdentifier;
+use crate::util::pds_hostname_without_port;
 use axum::{
     Json,
     extract::{Query, State},
@@ -18,8 +19,7 @@ pub async fn describe_repo(
     State(state): State<AppState>,
     Query(input): Query<DescribeRepoInput>,
 ) -> Response {
-    let hostname = std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
-    let hostname_for_handles = hostname.split(':').next().unwrap_or(&hostname);
+    let hostname_for_handles = pds_hostname_without_port();
     let user_row = if input.repo.is_did() {
         let did: crate::types::Did = match input.repo.as_str().parse() {
             Ok(d) => d,
