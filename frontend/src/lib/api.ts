@@ -7,6 +7,7 @@ import type {
   Nsid,
   RefreshToken,
   Rkey,
+  ScopeSet,
 } from "./types/branded.ts";
 import {
   unsafeAsAccessToken,
@@ -15,6 +16,7 @@ import {
   unsafeAsHandle,
   unsafeAsISODate,
   unsafeAsRefreshToken,
+  unsafeAsScopeSet,
 } from "./types/branded.ts";
 import {
   createDPoPProofForRequest,
@@ -23,15 +25,21 @@ import {
 } from "./oauth.ts";
 import type {
   AccountInfo,
+  AccountState,
   ApiErrorCode,
   AppPassword,
   CompletePasskeySetupResponse,
   ConfirmSignupResult,
+  ContactState,
   CreateAccountParams,
   CreateAccountResult,
   CreateBackupResponse,
   CreatedAppPassword,
   CreateRecordResponse,
+  DelegationAuditEntry,
+  DelegationControlledAccount,
+  DelegationController,
+  DelegationScopePreset,
   DidDocument,
   DidType,
   EmailUpdateResponse,
@@ -65,6 +73,7 @@ import type {
   ServerStats,
   Session,
   SetBackupEnabledResponse,
+  SsoLinkedAccount,
   StartPasskeyRegistrationResponse,
   SuccessResponse,
   TotpSecret,
@@ -241,32 +250,119 @@ export interface VerificationMethod {
 }
 
 export type { AppPassword, DidDocument, InviteCodeInfo as InviteCode, Session };
-export type {
-  ConfirmSignupResult,
-  CreateAccountParams,
-  CreateAccountResult,
-  DidType,
-  VerificationChannel,
-};
+export type { DidType, VerificationChannel };
 
-function castSession(raw: unknown): Session {
+function buildContactState(s: Record<string, unknown>): ContactState {
+  const preferredChannel = s.preferredChannel as VerificationChannel | undefined;
+  const email = s.email ? unsafeAsEmail(s.email as string) : undefined;
+
+  if (preferredChannel) {
+    return {
+      contactKind: "channel",
+      preferredChannel,
+      preferredChannelVerified: Boolean(s.preferredChannelVerified),
+      email,
+    };
+  }
+
+  if (email) {
+    return {
+      contactKind: "email",
+      email,
+      emailConfirmed: Boolean(s.emailConfirmed),
+    };
+  }
+
+  return { contactKind: "none" };
+}
+
+function buildAccountState(s: Record<string, unknown>): AccountState {
+  const status = s.status as string | undefined;
+  const isAdmin = Boolean(s.isAdmin);
+  const active = s.active as boolean | undefined;
+
+  if (status === "migrated") {
+    return {
+      accountKind: "migrated",
+      migratedToPds: (s.migratedToPds as string) || "",
+      migratedAt: s.migratedAt
+        ? unsafeAsISODate(s.migratedAt as string)
+        : unsafeAsISODate(new Date().toISOString()),
+      isAdmin,
+    };
+  }
+
+  if (status === "deactivated" || active === false) {
+    return { accountKind: "deactivated", isAdmin };
+  }
+
+  if (status === "suspended") {
+    return { accountKind: "suspended", isAdmin };
+  }
+
+  return { accountKind: "active", isAdmin };
+}
+
+export function castSession(raw: unknown): Session {
   const s = raw as Record<string, unknown>;
+  const contact = buildContactState(s);
+  const account = buildAccountState(s);
+
   return {
     did: unsafeAsDid(s.did as string),
     handle: unsafeAsHandle(s.handle as string),
-    email: s.email ? unsafeAsEmail(s.email as string) : undefined,
-    emailConfirmed: s.emailConfirmed as boolean | undefined,
-    preferredChannel: s.preferredChannel as VerificationChannel | undefined,
-    preferredChannelVerified: s.preferredChannelVerified as boolean | undefined,
-    isAdmin: s.isAdmin as boolean | undefined,
-    active: s.active as boolean | undefined,
-    status: s.status as Session["status"],
-    migratedToPds: s.migratedToPds as string | undefined,
-    migratedAt: s.migratedAt
-      ? unsafeAsISODate(s.migratedAt as string)
-      : undefined,
     accessJwt: unsafeAsAccessToken(s.accessJwt as string),
     refreshJwt: unsafeAsRefreshToken(s.refreshJwt as string),
+    preferredLocale: s.preferredLocale as string | null | undefined,
+    ...contact,
+    ...account,
+  };
+}
+
+function castDelegationController(raw: unknown): DelegationController {
+  const c = raw as Record<string, unknown>;
+  return {
+    did: unsafeAsDid(c.did as string),
+    granted_scopes: unsafeAsScopeSet(c.granted_scopes as string),
+    added_at: unsafeAsISODate(c.added_at as string),
+  };
+}
+
+function castDelegationControlledAccount(
+  raw: unknown,
+): DelegationControlledAccount {
+  const a = raw as Record<string, unknown>;
+  return {
+    did: unsafeAsDid(a.did as string),
+    handle: unsafeAsHandle(a.handle as string),
+    granted_scopes: unsafeAsScopeSet(a.granted_scopes as string),
+  };
+}
+
+function castDelegationAuditEntry(raw: unknown): DelegationAuditEntry {
+  const e = raw as Record<string, unknown>;
+  return {
+    id: e.id as string,
+    action: e.action as string,
+    actor_did: unsafeAsDid(e.actor_did as string),
+    target_did: e.target_did ? unsafeAsDid(e.target_did as string) : undefined,
+    details: e.details as string | undefined,
+    created_at: unsafeAsISODate(e.created_at as string),
+  };
+}
+
+function castSsoLinkedAccount(raw: unknown): SsoLinkedAccount {
+  const a = raw as Record<string, unknown>;
+  return {
+    id: a.id as string,
+    provider: a.provider as string,
+    provider_name: a.provider_name as string,
+    provider_username: a.provider_username as string,
+    provider_email: a.provider_email as string | undefined,
+    created_at: unsafeAsISODate(a.created_at as string),
+    last_login_at: a.last_login_at
+      ? unsafeAsISODate(a.last_login_at as string)
+      : undefined,
   };
 }
 
@@ -1142,7 +1238,9 @@ export const api = {
   },
 
   async getRepo(token: AccessToken, did: Did): Promise<ArrayBuffer> {
-    const url = `${API_BASE}/com.atproto.sync.getRepo?did=${encodeURIComponent(did)}`;
+    const url = `${API_BASE}/com.atproto.sync.getRepo?did=${
+      encodeURIComponent(did)
+    }`;
     const res = await authenticatedFetch(url, { token });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
@@ -1198,12 +1296,15 @@ export const api = {
   },
 
   async importRepo(token: AccessToken, car: Uint8Array): Promise<void> {
-    const res = await authenticatedFetch(`${API_BASE}/com.atproto.repo.importRepo`, {
-      method: "POST",
-      token,
-      headers: { "Content-Type": "application/vnd.ipld.car" },
-      body: car as unknown as BodyInit,
-    });
+    const res = await authenticatedFetch(
+      `${API_BASE}/com.atproto.repo.importRepo`,
+      {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/vnd.ipld.car" },
+        body: car as unknown as BodyInit,
+      },
+    );
     if (!res.ok) {
       const errData = await res.json().catch(() => ({
         error: "Unknown",
@@ -1213,7 +1314,9 @@ export const api = {
     }
   },
 
-  async establishOAuthSession(token: AccessToken): Promise<{ success: boolean; device_id: string }> {
+  async establishOAuthSession(
+    token: AccessToken,
+  ): Promise<{ success: boolean; device_id: string }> {
     const res = await authenticatedFetch("/oauth/establish-session", {
       method: "POST",
       token,
@@ -1227,6 +1330,101 @@ export const api = {
       throw new ApiError(res.status, errData.error, errData.message);
     }
     return res.json();
+  },
+
+  async getSsoLinkedAccounts(
+    token: AccessToken,
+  ): Promise<{ accounts: SsoLinkedAccount[] }> {
+    const res = await authenticatedFetch("/oauth/sso/linked", { token });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
+    }
+    return res.json();
+  },
+
+  listDelegationControllers(
+    token: AccessToken,
+  ): Promise<Result<{ controllers: DelegationController[] }, ApiError>> {
+    return xrpcResult("_delegation.listControllers", { token });
+  },
+
+  listDelegationControlledAccounts(
+    token: AccessToken,
+  ): Promise<Result<{ accounts: DelegationControlledAccount[] }, ApiError>> {
+    return xrpcResult("_delegation.listControlledAccounts", { token });
+  },
+
+  getDelegationScopePresets(): Promise<
+    Result<{ presets: DelegationScopePreset[] }, ApiError>
+  > {
+    return xrpcResult("_delegation.getScopePresets");
+  },
+
+  addDelegationController(
+    token: AccessToken,
+    controllerDid: Did,
+    grantedScopes: ScopeSet,
+  ): Promise<Result<{ success: boolean }, ApiError>> {
+    return xrpcResult("_delegation.addController", {
+      method: "POST",
+      token,
+      body: { controller_did: controllerDid, granted_scopes: grantedScopes },
+    });
+  },
+
+  removeDelegationController(
+    token: AccessToken,
+    controllerDid: Did,
+  ): Promise<Result<{ success: boolean }, ApiError>> {
+    return xrpcResult("_delegation.removeController", {
+      method: "POST",
+      token,
+      body: { controller_did: controllerDid },
+    });
+  },
+
+  createDelegatedAccount(
+    token: AccessToken,
+    handle: Handle,
+    email?: EmailAddress,
+    controllerScopes?: ScopeSet,
+  ): Promise<Result<{ did: Did; handle: Handle }, ApiError>> {
+    return xrpcResult("_delegation.createDelegatedAccount", {
+      method: "POST",
+      token,
+      body: { handle, email, controllerScopes },
+    });
+  },
+
+  getDelegationAuditLog(
+    token: AccessToken,
+    limit: number,
+    offset: number,
+  ): Promise<
+    Result<{ entries: DelegationAuditEntry[]; total: number }, ApiError>
+  > {
+    return xrpcResult("_delegation.getAuditLog", {
+      token,
+      params: { limit: String(limit), offset: String(offset) },
+    });
+  },
+
+  async exportBlobs(token: AccessToken): Promise<Blob> {
+    const res = await authenticatedFetch(`${API_BASE}/_backup.exportBlobs`, {
+      token,
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(res.status, errData.error, errData.message);
+    }
+    return res.blob();
   },
 };
 

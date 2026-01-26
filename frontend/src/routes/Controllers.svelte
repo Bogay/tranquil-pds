@@ -1,23 +1,25 @@
 <script lang="ts">
-  import { getAuthState } from '../lib/auth.svelte'
-  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
+  import AuthenticatedRoute from '../components/AuthenticatedRoute.svelte'
   import { _ } from '../lib/i18n'
   import { formatDateTime } from '../lib/date'
-  import type { Session } from '../lib/types/api'
+  import type { Session, DelegationController, DelegationControlledAccount, DelegationScopePreset } from '../lib/types/api'
   import { toast } from '../lib/toast.svelte'
+  import type { AuthenticatedClient } from '../lib/authenticated-client'
+  import { unsafeAsDid, unsafeAsHandle, unsafeAsEmail, unsafeAsScopeSet } from '../lib/types/branded'
+  import type { Did, Handle, ScopeSet } from '../lib/types/branded'
 
   interface Controller {
-    did: string
-    handle: string
-    grantedScopes: string
+    did: Did
+    handle: Handle
+    grantedScopes: ScopeSet
     grantedAt: string
     isActive: boolean
   }
 
   interface ControlledAccount {
-    did: string
-    handle: string
-    grantedScopes: string
+    did: Did
+    handle: Handle
+    grantedScopes: ScopeSet
     grantedAt: string
   }
 
@@ -25,21 +27,8 @@
     name: string
     label: string
     description: string
-    scopes: string
+    scopes: ScopeSet
   }
-
-  const auth = $derived(getAuthState())
-
-  function getSession(): Session | null {
-    return auth.kind === 'authenticated' ? auth.session : null
-  }
-
-  function isLoading(): boolean {
-    return auth.kind === 'loading'
-  }
-
-  const session = $derived(getSession())
-  const authLoading = $derived(isLoading())
 
   let loading = $state(true)
   let controllers = $state<Controller[]>([])
@@ -63,394 +52,332 @@
   let newDelegatedScopes = $state('atproto')
   let creatingDelegated = $state(false)
 
-  $effect(() => {
-    if (!authLoading && !session) {
-      navigate(routes.login)
-    }
-  })
+  let currentClient: AuthenticatedClient | null = $state(null)
 
-  $effect(() => {
-    if (session) {
-      loadData()
-    }
-  })
+  function handleReady(_session: Session, client: AuthenticatedClient) {
+    currentClient = client
+    loadData(client)
+  }
 
-  async function loadData() {
+  async function loadData(client: AuthenticatedClient) {
     loading = true
-    try {
-      await Promise.all([loadControllers(), loadControlledAccounts(), loadScopePresets()])
-    } finally {
-      loading = false
+    await Promise.all([loadControllers(client), loadControlledAccounts(client), loadScopePresets(client)])
+    loading = false
+  }
+
+  async function loadControllers(client: AuthenticatedClient) {
+    const result = await client.listDelegationControllers()
+    if (result.ok) {
+      controllers = (result.value.controllers ?? []).map((c: DelegationController) => ({
+        did: c.did,
+        handle: c.did as unknown as Handle,
+        grantedScopes: c.grantedScopes,
+        grantedAt: c.grantedAt,
+        isActive: c.isActive
+      }))
     }
   }
 
-  async function loadControllers() {
-    if (!session) return
-    try {
-      const response = await fetch('/xrpc/_delegation.listControllers', {
-        headers: { 'Authorization': `Bearer ${session.accessJwt}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        controllers = data.controllers || []
-      }
-    } catch (e) {
-      console.error('Failed to load controllers:', e)
+  async function loadControlledAccounts(client: AuthenticatedClient) {
+    const result = await client.listDelegationControlledAccounts()
+    if (result.ok) {
+      controlledAccounts = (result.value.accounts ?? []).map((a: DelegationControlledAccount) => ({
+        did: a.did,
+        handle: a.handle,
+        grantedScopes: a.grantedScopes,
+        grantedAt: a.grantedAt
+      }))
     }
   }
 
-  async function loadControlledAccounts() {
-    if (!session) return
-    try {
-      const response = await fetch('/xrpc/_delegation.listControlledAccounts', {
-        headers: { 'Authorization': `Bearer ${session.accessJwt}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        controlledAccounts = data.accounts || []
-      }
-    } catch (e) {
-      console.error('Failed to load controlled accounts:', e)
-    }
-  }
-
-  async function loadScopePresets() {
-    try {
-      const response = await fetch('/xrpc/_delegation.getScopePresets')
-      if (response.ok) {
-        const data = await response.json()
-        scopePresets = data.presets || []
-      }
-    } catch (e) {
-      console.error('Failed to load scope presets:', e)
+  async function loadScopePresets(client: AuthenticatedClient) {
+    const result = await client.getDelegationScopePresets()
+    if (result.ok) {
+      scopePresets = (result.value.presets ?? []).map((p: DelegationScopePreset) => ({
+        name: p.name,
+        label: p.name,
+        description: p.description,
+        scopes: unsafeAsScopeSet(p.scopes)
+      }))
     }
   }
 
   async function addController() {
-    if (!session || !addControllerDid.trim()) return
+    if (!currentClient || !addControllerDid.trim()) return
     addingController = true
 
-    try {
-      const response = await fetch('/xrpc/_delegation.addController', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.accessJwt}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          controller_did: addControllerDid.trim(),
-          granted_scopes: addControllerScopes
-        })
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        toast.error(data.message || data.error || $_('delegation.failedToAddController'))
-        return
-      }
-
+    const controllerDid = unsafeAsDid(addControllerDid.trim())
+    const scopes = unsafeAsScopeSet(addControllerScopes)
+    const result = await currentClient.addDelegationController(controllerDid, scopes)
+    if (result.ok) {
       toast.success($_('delegation.controllerAdded'))
       addControllerDid = ''
       addControllerScopes = 'atproto'
       addControllerConfirmed = false
       showAddController = false
-      await loadControllers()
-    } catch (e) {
-      toast.error($_('delegation.failedToAddController'))
-    } finally {
-      addingController = false
+      await loadControllers(currentClient)
     }
+    addingController = false
   }
 
-  async function removeController(controllerDid: string) {
-    if (!session) return
+  async function removeController(controllerDid: Did) {
+    if (!currentClient) return
     if (!confirm($_('delegation.removeConfirm'))) return
 
-    try {
-      const response = await fetch('/xrpc/_delegation.removeController', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.accessJwt}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ controller_did: controllerDid })
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        toast.error(data.message || data.error || $_('delegation.failedToRemoveController'))
-        return
-      }
-
+    const result = await currentClient.removeDelegationController(controllerDid)
+    if (result.ok) {
       toast.success($_('delegation.controllerRemoved'))
-      await loadControllers()
-    } catch (e) {
-      toast.error($_('delegation.failedToRemoveController'))
+      await loadControllers(currentClient)
     }
   }
 
   async function createDelegatedAccount() {
-    if (!session || !newDelegatedHandle.trim()) return
+    if (!currentClient || !newDelegatedHandle.trim()) return
     creatingDelegated = true
 
-    try {
-      const response = await fetch('/xrpc/_delegation.createDelegatedAccount', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.accessJwt}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          handle: newDelegatedHandle.trim(),
-          email: newDelegatedEmail.trim() || undefined,
-          controllerScopes: newDelegatedScopes
-        })
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        toast.error(data.message || data.error || $_('delegation.failedToCreateAccount'))
-        return
-      }
-
-      const data = await response.json()
-      toast.success($_('delegation.accountCreated', { values: { handle: data.handle } }))
+    const handle = unsafeAsHandle(newDelegatedHandle.trim())
+    const email = newDelegatedEmail.trim() ? unsafeAsEmail(newDelegatedEmail.trim()) : undefined
+    const scopes = unsafeAsScopeSet(newDelegatedScopes)
+    const result = await currentClient.createDelegatedAccount(handle, email, scopes)
+    if (result.ok) {
+      toast.success($_('delegation.accountCreated', { values: { handle: result.value.handle } }))
       newDelegatedHandle = ''
       newDelegatedEmail = ''
       newDelegatedScopes = 'atproto'
       showCreateDelegated = false
-      await loadControlledAccounts()
-    } catch (e) {
-      toast.error($_('delegation.failedToCreateAccount'))
-    } finally {
-      creatingDelegated = false
+      await loadControlledAccounts(currentClient)
     }
+    creatingDelegated = false
   }
 
-  function getScopeLabel(scopes: string): string {
+  function getScopeLabel(scopes: ScopeSet): string {
     const preset = scopePresets.find(p => p.scopes === scopes)
     if (preset) return preset.label
-    if (scopes === 'atproto') return $_('delegation.scopeOwner')
-    if (scopes === '') return $_('delegation.scopeViewer')
+    if ((scopes as string) === 'atproto') return $_('delegation.scopeOwner')
+    if ((scopes as string) === '') return $_('delegation.scopeViewer')
     return $_('delegation.scopeCustom')
   }
 </script>
 
-<div class="page">
-  <header>
-    <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
-    <h1>{$_('delegation.title')}</h1>
-  </header>
+<AuthenticatedRoute onReady={handleReady}>
+  {#snippet children({ session, client })}
+    <div class="page">
+      <header>
+        <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
+        <h1>{$_('delegation.title')}</h1>
+      </header>
 
-  {#if loading}
-    <div class="skeleton-list">
-      {#each Array(2) as _}
-        <div class="skeleton-card"></div>
-      {/each}
-    </div>
-  {:else}
-    <section class="section">
-      <div class="section-header">
-        <h2>{$_('delegation.controllers')}</h2>
-        <p class="section-description">{$_('delegation.controllersDesc')}</p>
-      </div>
-
-      {#if controllers.length === 0}
-        <p class="empty">{$_('delegation.noControllers')}</p>
+      {#if loading}
+        <div class="skeleton-list">
+          {#each Array(2) as _}
+            <div class="skeleton-card"></div>
+          {/each}
+        </div>
       {:else}
-        <div class="items-list">
-          {#each controllers as controller}
-            <div class="item-card" class:inactive={!controller.isActive}>
-              <div class="item-info">
-                <div class="item-header">
-                  <span class="item-handle">@{controller.handle}</span>
-                  <span class="badge scope">{getScopeLabel(controller.grantedScopes)}</span>
-                  {#if !controller.isActive}
-                    <span class="badge inactive">{$_('delegation.inactive')}</span>
-                  {/if}
-                </div>
-                <div class="item-details">
-                  <div class="detail">
-                    <span class="label">{$_('delegation.did')}</span>
-                    <span class="value did">{controller.did}</span>
+        <section class="section">
+          <div class="section-header">
+            <h2>{$_('delegation.controllers')}</h2>
+            <p class="section-description">{$_('delegation.controllersDesc')}</p>
+          </div>
+
+          {#if controllers.length === 0}
+            <p class="empty">{$_('delegation.noControllers')}</p>
+          {:else}
+            <div class="items-list">
+              {#each controllers as controller}
+                <div class="item-card" class:inactive={!controller.isActive}>
+                  <div class="item-info">
+                    <div class="item-header">
+                      <span class="item-handle">@{controller.handle}</span>
+                      <span class="badge scope">{getScopeLabel(controller.grantedScopes)}</span>
+                      {#if !controller.isActive}
+                        <span class="badge inactive">{$_('delegation.inactive')}</span>
+                      {/if}
+                    </div>
+                    <div class="item-details">
+                      <div class="detail">
+                        <span class="label">{$_('delegation.did')}</span>
+                        <span class="value did">{controller.did}</span>
+                      </div>
+                      <div class="detail">
+                        <span class="label">{$_('delegation.granted')}</span>
+                        <span class="value">{formatDateTime(controller.grantedAt)}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div class="detail">
-                    <span class="label">{$_('delegation.granted')}</span>
-                    <span class="value">{formatDateTime(controller.grantedAt)}</span>
+                  <div class="item-actions">
+                    <button class="danger-outline" onclick={() => removeController(controller.did)}>
+                      {$_('delegation.remove')}
+                    </button>
                   </div>
                 </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if !canAddControllers}
+            <div class="constraint-notice">
+              <p>{$_('delegation.cannotAddControllers')}</p>
+            </div>
+          {:else if showAddController}
+            <div class="form-card">
+              <h3>{$_('delegation.addController')}</h3>
+
+              <div class="warning-box">
+                <div class="warning-header">
+                  <svg class="warning-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                  <span>{$_('delegation.addControllerWarningTitle')}</span>
+                </div>
+                <p class="warning-text">{$_('delegation.addControllerWarningText')}</p>
+                <ul class="warning-bullets">
+                  <li>{$_('delegation.addControllerWarningBullet1')}</li>
+                  <li>{$_('delegation.addControllerWarningBullet2')}</li>
+                  <li>{$_('delegation.addControllerWarningBullet3')}</li>
+                </ul>
               </div>
-              <div class="item-actions">
-                <button class="danger-outline" onclick={() => removeController(controller.did)}>
-                  {$_('delegation.remove')}
+
+              <div class="field">
+                <label for="controllerDid">{$_('delegation.controllerDid')}</label>
+                <input
+                  id="controllerDid"
+                  type="text"
+                  bind:value={addControllerDid}
+                  placeholder="did:plc:..."
+                  disabled={addingController}
+                />
+              </div>
+              <div class="field">
+                <label for="controllerScopes">{$_('delegation.accessLevel')}</label>
+                <select id="controllerScopes" bind:value={addControllerScopes} disabled={addingController}>
+                  {#each scopePresets as preset}
+                    <option value={preset.scopes}>{preset.label} - {preset.description}</option>
+                  {/each}
+                </select>
+              </div>
+              <label class="confirm-checkbox">
+                <input type="checkbox" bind:checked={addControllerConfirmed} disabled={addingController} />
+                <span>{$_('delegation.addControllerConfirm')}</span>
+              </label>
+              <div class="form-actions">
+                <button class="ghost" onclick={() => { showAddController = false; addControllerConfirmed = false }} disabled={addingController}>
+                  {$_('common.cancel')}
+                </button>
+                <button onclick={addController} disabled={addingController || !addControllerDid.trim() || !addControllerConfirmed}>
+                  {addingController ? $_('delegation.adding') : $_('delegation.addController')}
                 </button>
               </div>
             </div>
-          {/each}
-        </div>
-      {/if}
-
-      {#if !canAddControllers}
-        <div class="constraint-notice">
-          <p>{$_('delegation.cannotAddControllers')}</p>
-        </div>
-      {:else if showAddController}
-        <div class="form-card">
-          <h3>{$_('delegation.addController')}</h3>
-
-          <div class="warning-box">
-            <div class="warning-header">
-              <svg class="warning-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-              </svg>
-              <span>{$_('delegation.addControllerWarningTitle')}</span>
-            </div>
-            <p class="warning-text">{$_('delegation.addControllerWarningText')}</p>
-            <ul class="warning-bullets">
-              <li>{$_('delegation.addControllerWarningBullet1')}</li>
-              <li>{$_('delegation.addControllerWarningBullet2')}</li>
-              <li>{$_('delegation.addControllerWarningBullet3')}</li>
-            </ul>
-          </div>
-
-          <div class="field">
-            <label for="controllerDid">{$_('delegation.controllerDid')}</label>
-            <input
-              id="controllerDid"
-              type="text"
-              bind:value={addControllerDid}
-              placeholder="did:plc:..."
-              disabled={addingController}
-            />
-          </div>
-          <div class="field">
-            <label for="controllerScopes">{$_('delegation.accessLevel')}</label>
-            <select id="controllerScopes" bind:value={addControllerScopes} disabled={addingController}>
-              {#each scopePresets as preset}
-                <option value={preset.scopes}>{preset.label} - {preset.description}</option>
-              {/each}
-            </select>
-          </div>
-          <label class="confirm-checkbox">
-            <input type="checkbox" bind:checked={addControllerConfirmed} disabled={addingController} />
-            <span>{$_('delegation.addControllerConfirm')}</span>
-          </label>
-          <div class="form-actions">
-            <button class="ghost" onclick={() => { showAddController = false; addControllerConfirmed = false }} disabled={addingController}>
-              {$_('common.cancel')}
+          {:else}
+            <button class="ghost full-width" onclick={() => showAddController = true}>
+              {$_('delegation.addControllerButton')}
             </button>
-            <button onclick={addController} disabled={addingController || !addControllerDid.trim() || !addControllerConfirmed}>
-              {addingController ? $_('delegation.adding') : $_('delegation.addController')}
-            </button>
+          {/if}
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <h2>{$_('delegation.controlledAccounts')}</h2>
+            <p class="section-description">{$_('delegation.controlledAccountsDesc')}</p>
           </div>
-        </div>
-      {:else}
-        <button class="ghost full-width" onclick={() => showAddController = true}>
-          {$_('delegation.addControllerButton')}
-        </button>
-      {/if}
-    </section>
 
-    <section class="section">
-      <div class="section-header">
-        <h2>{$_('delegation.controlledAccounts')}</h2>
-        <p class="section-description">{$_('delegation.controlledAccountsDesc')}</p>
-      </div>
-
-      {#if controlledAccounts.length === 0}
-        <p class="empty">{$_('delegation.noControlledAccounts')}</p>
-      {:else}
-        <div class="items-list">
-          {#each controlledAccounts as account}
-            <div class="item-card">
-              <div class="item-info">
-                <div class="item-header">
-                  <span class="item-handle">@{account.handle}</span>
-                  <span class="badge scope">{getScopeLabel(account.grantedScopes)}</span>
-                </div>
-                <div class="item-details">
-                  <div class="detail">
-                    <span class="label">{$_('delegation.did')}</span>
-                    <span class="value did">{account.did}</span>
+          {#if controlledAccounts.length === 0}
+            <p class="empty">{$_('delegation.noControlledAccounts')}</p>
+          {:else}
+            <div class="items-list">
+              {#each controlledAccounts as account}
+                <div class="item-card">
+                  <div class="item-info">
+                    <div class="item-header">
+                      <span class="item-handle">@{account.handle}</span>
+                      <span class="badge scope">{getScopeLabel(account.grantedScopes)}</span>
+                    </div>
+                    <div class="item-details">
+                      <div class="detail">
+                        <span class="label">{$_('delegation.did')}</span>
+                        <span class="value did">{account.did}</span>
+                      </div>
+                      <div class="detail">
+                        <span class="label">{$_('delegation.granted')}</span>
+                        <span class="value">{formatDateTime(account.grantedAt)}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div class="detail">
-                    <span class="label">{$_('delegation.granted')}</span>
-                    <span class="value">{formatDateTime(account.grantedAt)}</span>
+                  <div class="item-actions">
+                    <a href="/app/act-as?did={encodeURIComponent(account.did)}" class="btn-link">
+                      {$_('delegation.actAs')}
+                    </a>
                   </div>
                 </div>
+              {/each}
+            </div>
+          {/if}
+
+          {#if !canControlAccounts}
+            <div class="constraint-notice">
+              <p>{$_('delegation.cannotControlAccounts')}</p>
+            </div>
+          {:else if showCreateDelegated}
+            <div class="form-card">
+              <h3>{$_('delegation.createDelegatedAccount')}</h3>
+              <div class="field">
+                <label for="delegatedHandle">{$_('delegation.handle')}</label>
+                <input
+                  id="delegatedHandle"
+                  type="text"
+                  bind:value={newDelegatedHandle}
+                  placeholder="username"
+                  disabled={creatingDelegated}
+                />
               </div>
-              <div class="item-actions">
-                <a href="/app/act-as?did={encodeURIComponent(account.did)}" class="btn-link">
-                  {$_('delegation.actAs')}
-                </a>
+              <div class="field">
+                <label for="delegatedEmail">{$_('delegation.emailOptional')}</label>
+                <input
+                  id="delegatedEmail"
+                  type="email"
+                  bind:value={newDelegatedEmail}
+                  placeholder="email@example.com"
+                  disabled={creatingDelegated}
+                />
+              </div>
+              <div class="field">
+                <label for="delegatedScopes">{$_('delegation.yourAccessLevel')}</label>
+                <select id="delegatedScopes" bind:value={newDelegatedScopes} disabled={creatingDelegated}>
+                  {#each scopePresets as preset}
+                    <option value={preset.scopes}>{preset.label} - {preset.description}</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="form-actions">
+                <button class="ghost" onclick={() => showCreateDelegated = false} disabled={creatingDelegated}>
+                  {$_('common.cancel')}
+                </button>
+                <button onclick={createDelegatedAccount} disabled={creatingDelegated || !newDelegatedHandle.trim()}>
+                  {creatingDelegated ? $_('common.creating') : $_('delegation.createAccount')}
+                </button>
               </div>
             </div>
-          {/each}
-        </div>
-      {/if}
-
-      {#if !canControlAccounts}
-        <div class="constraint-notice">
-          <p>{$_('delegation.cannotControlAccounts')}</p>
-        </div>
-      {:else if showCreateDelegated}
-        <div class="form-card">
-          <h3>{$_('delegation.createDelegatedAccount')}</h3>
-          <div class="field">
-            <label for="delegatedHandle">{$_('delegation.handle')}</label>
-            <input
-              id="delegatedHandle"
-              type="text"
-              bind:value={newDelegatedHandle}
-              placeholder="username"
-              disabled={creatingDelegated}
-            />
-          </div>
-          <div class="field">
-            <label for="delegatedEmail">{$_('delegation.emailOptional')}</label>
-            <input
-              id="delegatedEmail"
-              type="email"
-              bind:value={newDelegatedEmail}
-              placeholder="email@example.com"
-              disabled={creatingDelegated}
-            />
-          </div>
-          <div class="field">
-            <label for="delegatedScopes">{$_('delegation.yourAccessLevel')}</label>
-            <select id="delegatedScopes" bind:value={newDelegatedScopes} disabled={creatingDelegated}>
-              {#each scopePresets as preset}
-                <option value={preset.scopes}>{preset.label} - {preset.description}</option>
-              {/each}
-            </select>
-          </div>
-          <div class="form-actions">
-            <button class="ghost" onclick={() => showCreateDelegated = false} disabled={creatingDelegated}>
-              {$_('common.cancel')}
+          {:else}
+            <button class="ghost full-width" onclick={() => showCreateDelegated = true}>
+              {$_('delegation.createDelegatedAccountButton')}
             </button>
-            <button onclick={createDelegatedAccount} disabled={creatingDelegated || !newDelegatedHandle.trim()}>
-              {creatingDelegated ? $_('common.creating') : $_('delegation.createAccount')}
-            </button>
-          </div>
-        </div>
-      {:else}
-        <button class="ghost full-width" onclick={() => showCreateDelegated = true}>
-          {$_('delegation.createDelegatedAccountButton')}
-        </button>
-      {/if}
-    </section>
+          {/if}
+        </section>
 
-    <section class="section">
-      <div class="section-header">
-        <h2>{$_('delegation.auditLog')}</h2>
-        <p class="section-description">{$_('delegation.auditLogDesc')}</p>
-      </div>
-      <a href="/app/delegation-audit" class="btn-link">{$_('delegation.viewAuditLog')}</a>
-    </section>
-  {/if}
-</div>
+        <section class="section">
+          <div class="section-header">
+            <h2>{$_('delegation.auditLog')}</h2>
+            <p class="section-description">{$_('delegation.auditLogDesc')}</p>
+          </div>
+          <a href="/app/delegation-audit" class="btn-link">{$_('delegation.viewAuditLog')}</a>
+        </section>
+      {/if}
+    </div>
+  {/snippet}
+</AuthenticatedRoute>
 
 <style>
   .page {
@@ -769,5 +696,4 @@
     border-radius: var(--radius-xl);
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
-
 </style>

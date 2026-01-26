@@ -261,6 +261,7 @@ export function createInboundMigrationFlow() {
     state.sourceAccessToken = tokenResponse.access_token;
     state.sourceRefreshToken = tokenResponse.refresh_token ?? null;
     sourceClient.setAccessToken(tokenResponse.access_token);
+    sourceClient.setRefreshToken(tokenResponse.refresh_token ?? null);
     sourceClient.setDPoPKeyPair(dpopKeyPair);
 
     cleanupOAuthSessionData();

@@ -23,6 +23,7 @@ export type InviteCode = Brand<string, "InviteCode">;
 
 export type PublicKeyMultibase = Brand<string, "PublicKeyMultibase">;
 export type DidKeyString = Brand<string, "DidKeyString">;
+export type ScopeSet = Brand<string, "ScopeSet">;
 
 const DID_PLC_REGEX = /^did:plc:[a-z2-7]{24}$/;
 const DID_WEB_REGEX = /^did:web:.+$/;
@@ -177,6 +178,10 @@ export function unsafeAsPublicKeyMultibase(s: string): PublicKeyMultibase {
 
 export function unsafeAsDidKey(s: string): DidKeyString {
   return s as DidKeyString;
+}
+
+export function unsafeAsScopeSet(s: string): ScopeSet {
+  return s as ScopeSet;
 }
 
 export function parseAtUri(

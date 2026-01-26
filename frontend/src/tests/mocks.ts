@@ -12,6 +12,63 @@ import {
   unsafeAsRefreshToken,
 } from "../lib/types/branded.ts";
 
+function createMockIndexedDB() {
+  const stores: Map<string, Map<string, unknown>> = new Map();
+
+  return {
+    open: vi.fn((_name: string, _version?: number) => {
+      const createTransaction = (_storeName: string, _mode?: string) => {
+        const tx = {
+          objectStore: (name: string) => {
+            if (!stores.has(name)) {
+              stores.set(name, new Map());
+            }
+            const store = stores.get(name)!;
+            return {
+              put: (value: unknown, key: string) => {
+                store.set(key, value);
+                return { result: undefined };
+              },
+              get: (key: string) => ({
+                result: store.get(key),
+              }),
+            };
+          },
+          oncomplete: null as (() => void) | null,
+          onerror: null as (() => void) | null,
+        };
+        setTimeout(() => tx.oncomplete?.(), 0);
+        return tx;
+      };
+
+      const request = {
+        result: {
+          objectStoreNames: { contains: () => true },
+          createObjectStore: vi.fn(),
+          transaction: createTransaction,
+          close: vi.fn(),
+        },
+        error: null,
+        onsuccess: null as (() => void) | null,
+        onerror: null as (() => void) | null,
+        onupgradeneeded: null as (() => void) | null,
+      };
+
+      setTimeout(() => {
+        request.onupgradeneeded?.();
+        request.onsuccess?.();
+      }, 0);
+
+      return request;
+    }),
+  };
+}
+
+export function setupIndexedDBMock(): void {
+  (globalThis as unknown as { indexedDB: unknown }).indexedDB =
+    createMockIndexedDB();
+}
+
 const originalPushState = globalThis.history.pushState.bind(globalThis.history);
 const originalReplaceState = globalThis.history.replaceState.bind(
   globalThis.history,
@@ -165,15 +222,20 @@ export function errorResponse(
   };
 }
 export const mockData = {
-  session: (overrides?: Partial<Session>): Session => ({
-    did: unsafeAsDid("did:web:test.tranquil.dev:u:testuser"),
-    handle: unsafeAsHandle("testuser.test.tranquil.dev"),
-    email: unsafeAsEmail("test@example.com"),
-    emailConfirmed: true,
-    accessJwt: unsafeAsAccessToken("mock-access-jwt-token"),
-    refreshJwt: unsafeAsRefreshToken("mock-refresh-jwt-token"),
-    ...overrides,
-  }),
+  session: (overrides?: Partial<Session>): Session => {
+    const base = {
+      did: unsafeAsDid("did:web:test.tranquil.dev:u:testuser"),
+      handle: unsafeAsHandle("testuser.test.tranquil.dev"),
+      accessJwt: unsafeAsAccessToken("mock-access-jwt-token"),
+      refreshJwt: unsafeAsRefreshToken("mock-refresh-jwt-token"),
+      contactKind: "email" as const,
+      email: unsafeAsEmail("test@example.com"),
+      emailConfirmed: true,
+      accountKind: "active" as const,
+      isAdmin: false,
+    };
+    return { ...base, ...overrides } as Session;
+  },
   appPassword: (overrides?: Partial<AppPassword>): AppPassword => ({
     name: "Test App",
     createdAt: unsafeAsISODateString(new Date().toISOString()),
@@ -225,6 +287,7 @@ export const mockData = {
 };
 export function setupDefaultMocks(): void {
   setupFetchMock();
+  setupIndexedDBMock();
   mockEndpoint(
     "com.atproto.server.getSession",
     () => jsonResponse(mockData.session()),

@@ -1,7 +1,5 @@
 import {
   buildUrl,
-  isValidRoute,
-  parseRouteParams,
   type Route,
   type RouteParams,
   routes,
@@ -71,19 +69,6 @@ export function navigate<R extends Route>(
   updateState();
 }
 
-export function navigateTo(path: string, replace = false): void {
-  const normalizedPath = path.startsWith("/") ? path : "/" + path;
-  const fullPath = APP_BASE + normalizedPath;
-
-  if (replace) {
-    globalThis.history.replaceState(null, "", fullPath);
-  } else {
-    globalThis.history.pushState(null, "", fullPath);
-  }
-
-  updateState();
-}
-
 export function getCurrentPath(): AppPath {
   return state.current.path;
 }
@@ -100,43 +85,9 @@ export function getFullUrl(path: string): string {
   return APP_BASE + (path.startsWith("/") ? path : "/" + path);
 }
 
-export function matchRoute(path: AppPath): Route | null {
-  const pathWithoutQuery = path.split("?")[0];
-  if (isValidRoute(pathWithoutQuery)) {
-    return pathWithoutQuery;
-  }
-  return null;
-}
-
 export function isCurrentRoute(route: Route): boolean {
   const pathWithoutQuery = state.current.path.split("?")[0];
   return pathWithoutQuery === route;
 }
 
-export function getRouteParams<R extends RoutesWithParams>(
-  _route: R,
-): RouteParams[R] {
-  return parseRouteParams(_route);
-}
-
-export type RouteMatch =
-  | {
-    readonly matched: true;
-    readonly route: Route;
-    readonly params: URLSearchParams;
-  }
-  | { readonly matched: false };
-
-export function match(): RouteMatch {
-  const route = matchRoute(state.current.path);
-  if (route) {
-    return {
-      matched: true,
-      route,
-      params: state.current.searchParams,
-    };
-  }
-  return { matched: false };
-}
-
-export { type Route, type RouteParams, routes, type RoutesWithParams };
+export { type Route, type RouteParams, routes };

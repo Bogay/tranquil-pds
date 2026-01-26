@@ -7,8 +7,10 @@
   import { isOk } from '../lib/types/result'
   import { unsafeAsHandle } from '../lib/types/branded'
   import type { Session } from '../lib/types/api'
+  import { getSessionEmail } from '../lib/types/api'
   import { toast } from '../lib/toast.svelte'
   import ReauthModal from '../components/ReauthModal.svelte'
+  import { createAuthenticatedClient } from '../lib/authenticated-client'
 
   const auth = $derived(getAuthState())
   const supportedLocales = getSupportedLocales()
@@ -24,6 +26,7 @@
 
   const session = $derived(getSession())
   const loading = $derived(isLoading())
+  const client = $derived(session ? createAuthenticatedClient(session) : null)
 
   onMount(() => {
     api.describeServer().then(info => {
@@ -276,19 +279,10 @@
   }
 
   async function handleExportBlobs() {
-    if (!session) return
+    if (!client) return
     exportBlobsLoading = true
     try {
-      const response = await fetch('/xrpc/_backup.exportBlobs', {
-        headers: {
-          'Authorization': `Bearer ${session.accessJwt}`
-        }
-      })
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ message: 'Export failed' }))
-        throw new Error(err.message || 'Export failed')
-      }
-      const blob = await response.blob()
+      const blob = await client.exportBlobs()
       if (blob.size === 0) {
         toast.success($_('settings.messages.noBlobsToExport'))
         return
@@ -296,14 +290,13 @@
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${session.handle}-blobs.zip`
+      a.download = `${client.session.handle}-blobs.zip`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
       toast.success($_('settings.messages.blobsExported'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : $_('settings.messages.exportFailed'))
+    } catch {
     } finally {
       exportBlobsLoading = false
     }
@@ -531,8 +524,8 @@
   </section>
   <section>
     <h2>{$_('settings.changeEmail')}</h2>
-    {#if session?.email}
-      <p class="current">{$_('settings.currentEmail', { values: { email: session.email } })}</p>
+    {#if session && getSessionEmail(session)}
+      <p class="current">{$_('settings.currentEmail', { values: { email: getSessionEmail(session) } })}</p>
     {/if}
     {#if emailTokenRequired}
       <form onsubmit={handleConfirmEmailUpdate}>

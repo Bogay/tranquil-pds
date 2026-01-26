@@ -10,6 +10,7 @@ import type {
   Nsid,
   PublicKeyMultibase,
   RefreshToken,
+  ScopeSet,
 } from "./branded.ts";
 
 export type ApiErrorCode =
@@ -52,21 +53,76 @@ export type DidType = "plc" | "web" | "web-external";
 
 export type ReauthMethod = "password" | "totp" | "passkey";
 
-export interface Session {
-  did: Did;
-  handle: Handle;
-  email?: EmailAddress;
-  emailConfirmed?: boolean;
-  preferredChannel?: VerificationChannel;
-  preferredChannelVerified?: boolean;
-  preferredLocale?: string | null;
-  isAdmin?: boolean;
-  active?: boolean;
-  status?: AccountStatus;
-  migratedToPds?: string;
-  migratedAt?: ISODateString;
-  accessJwt: AccessToken;
-  refreshJwt: RefreshToken;
+export type ContactState =
+  | {
+    readonly contactKind: "channel";
+    readonly preferredChannel: VerificationChannel;
+    readonly preferredChannelVerified: boolean;
+    readonly email?: EmailAddress;
+  }
+  | {
+    readonly contactKind: "email";
+    readonly email: EmailAddress;
+    readonly emailConfirmed: boolean;
+  }
+  | { readonly contactKind: "none" };
+
+export type AccountState =
+  | { readonly accountKind: "active"; readonly isAdmin: boolean }
+  | {
+    readonly accountKind: "migrated";
+    readonly migratedToPds: string;
+    readonly migratedAt: ISODateString;
+    readonly isAdmin: boolean;
+  }
+  | { readonly accountKind: "deactivated"; readonly isAdmin: boolean }
+  | { readonly accountKind: "suspended"; readonly isAdmin: boolean };
+
+type SessionBase = {
+  readonly did: Did;
+  readonly handle: Handle;
+  readonly accessJwt: AccessToken;
+  readonly refreshJwt: RefreshToken;
+  readonly preferredLocale?: string | null;
+};
+
+export type Session = SessionBase & ContactState & AccountState;
+
+export function hasEmail(
+  session: Session,
+): session is Session & { email: EmailAddress } {
+  return session.contactKind === "email" ||
+    (session.contactKind === "channel" && session.email !== undefined);
+}
+
+export function getSessionEmail(session: Session): EmailAddress | undefined {
+  return session.contactKind === "email"
+    ? session.email
+    : session.contactKind === "channel"
+    ? session.email
+    : undefined;
+}
+
+export function isEmailVerified(session: Session): boolean {
+  return session.contactKind === "email"
+    ? session.emailConfirmed
+    : session.contactKind === "channel"
+    ? session.preferredChannelVerified
+    : false;
+}
+
+export function isMigrated(
+  session: Session,
+): session is Session & { accountKind: "migrated" } {
+  return session.accountKind === "migrated";
+}
+
+export function isDeactivated(session: Session): boolean {
+  return session.accountKind === "deactivated";
+}
+
+export function isActive(session: Session): boolean {
+  return session.accountKind === "active";
 }
 
 export interface VerificationMethod {
@@ -492,4 +548,43 @@ export interface VerifyMigrationEmailResponse {
 
 export interface ResendMigrationVerificationResponse {
   sent: boolean;
+}
+
+export interface SsoLinkedAccount {
+  id: string;
+  provider: string;
+  provider_name: string;
+  provider_username: string;
+  provider_email?: string;
+  created_at: ISODateString;
+  last_login_at?: ISODateString;
+}
+
+export interface DelegationController {
+  did: Did;
+  grantedScopes: ScopeSet;
+  grantedAt: ISODateString;
+  isActive: boolean;
+}
+
+export interface DelegationControlledAccount {
+  did: Did;
+  handle: Handle;
+  grantedScopes: ScopeSet;
+  grantedAt: ISODateString;
+}
+
+export interface DelegationScopePreset {
+  name: string;
+  scopes: ScopeSet;
+  description: string;
+}
+
+export interface DelegationAuditEntry {
+  id: string;
+  action: string;
+  actor_did: Did;
+  target_did?: Did;
+  details?: string;
+  created_at: ISODateString;
 }

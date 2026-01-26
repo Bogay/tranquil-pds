@@ -11,6 +11,7 @@
   import { isOk } from '../lib/types/result'
   import { unsafeAsDid, type Did } from '../lib/types/branded'
   import type { Session } from '../lib/types/api'
+  import { isMigrated, isDeactivated, getSessionEmail, isEmailVerified } from '../lib/types/api'
   import { onMount } from 'svelte'
 
   const auth = $derived(getAuthState())
@@ -123,12 +124,12 @@
       </div>
     </header>
 
-    {#if session.status === 'migrated'}
+    {#if session.accountKind === 'migrated'}
       <div class="migrated-banner">
         <strong>{$_('dashboard.migratedTitle')}</strong>
         <p>{$_('dashboard.migratedMessage', { values: { pds: session.migratedToPds || 'another PDS' } })}</p>
       </div>
-    {:else if session.status === 'deactivated' || session.active === false}
+    {:else if session.accountKind === 'deactivated'}
       <div class="deactivated-banner">
         <strong>{$_('dashboard.deactivatedTitle')}</strong>
         <p>{$_('dashboard.deactivatedMessage')}</p>
@@ -144,15 +145,15 @@
           {#if session.isAdmin}
             <span class="badge admin">{$_('dashboard.admin')}</span>
           {/if}
-          {#if session.status === 'migrated'}
+          {#if session.accountKind === 'migrated'}
             <span class="badge migrated">{$_('dashboard.migrated')}</span>
-          {:else if session.status === 'deactivated' || session.active === false}
+          {:else if session.accountKind === 'deactivated'}
             <span class="badge deactivated">{$_('dashboard.deactivated')}</span>
           {/if}
         </dd>
         <dt>{$_('dashboard.did')}</dt>
         <dd class="mono">{session.did}</dd>
-        {#if session.preferredChannel}
+        {#if session.contactKind === 'channel'}
           <dt>{$_('dashboard.primaryContact')}</dt>
           <dd>
             {#if session.preferredChannel === 'email'}
@@ -172,7 +173,7 @@
               <span class="badge warning">{$_('dashboard.unverified')}</span>
             {/if}
           </dd>
-        {:else if session.email}
+        {:else if session.contactKind === 'email'}
           <dt>{$_('register.email')}</dt>
           <dd>
             {session.email}
@@ -187,7 +188,7 @@
     </section>
 
     <nav class="nav-grid">
-      {#if session.status === 'migrated'}
+      {#if session.accountKind === 'migrated'}
         <a href={getFullUrl(routes.didDocument)} class="nav-card migrated-card">
           <h3>{$_('dashboard.navDidDocument')}</h3>
           <p>{$_('dashboard.navDidDocumentDesc')}</p>

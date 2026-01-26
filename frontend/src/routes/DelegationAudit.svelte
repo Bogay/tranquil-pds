@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { getAuthState } from '../lib/auth.svelte'
-  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
+  import AuthenticatedRoute from '../components/AuthenticatedRoute.svelte'
   import { _ } from '../lib/i18n'
   import { formatDateTime } from '../lib/date'
-  import type { Session } from '../lib/types/api'
-  import { toast } from '../lib/toast.svelte'
+  import type { DelegationAuditEntry } from '../lib/types/api'
+  import type { AuthenticatedClient } from '../lib/authenticated-client'
 
   interface AuditEntry {
     id: string
@@ -16,76 +15,49 @@
     createdAt: string
   }
 
-  const auth = $derived(getAuthState())
-
-  function getSession(): Session | null {
-    return auth.kind === 'authenticated' ? auth.session : null
-  }
-
-  function isLoading(): boolean {
-    return auth.kind === 'loading'
-  }
-
-  const session = $derived(getSession())
-  const authLoading = $derived(isLoading())
-
   let loading = $state(true)
   let entries = $state<AuditEntry[]>([])
   let total = $state(0)
   let offset = $state(0)
   const limit = 20
 
-  $effect(() => {
-    if (!authLoading && !session) {
-      navigate(routes.login)
-    }
-  })
+  let currentClient: AuthenticatedClient | null = $state(null)
 
-  $effect(() => {
-    if (session) {
-      loadAuditLog()
-    }
-  })
+  function handleReady(_session: unknown, client: AuthenticatedClient) {
+    currentClient = client
+    loadAuditLog(client)
+  }
 
-  async function loadAuditLog() {
-    if (!session) return
+  async function loadAuditLog(client: AuthenticatedClient) {
     loading = true
 
-    try {
-      const response = await fetch(
-        `/xrpc/_delegation.getAuditLog?limit=${limit}&offset=${offset}`,
-        {
-          headers: { 'Authorization': `Bearer ${session.accessJwt}` }
-        }
-      )
-
-      if (!response.ok) {
-        const data = await response.json()
-        toast.error(data.message || data.error || $_('delegation.failedToLoadAuditLog'))
-        return
-      }
-
-      const data = await response.json()
-      entries = data.entries || []
-      total = data.total || 0
-    } catch (e) {
-      toast.error($_('delegation.failedToLoadAuditLog'))
-    } finally {
-      loading = false
+    const result = await client.getDelegationAuditLog(limit, offset)
+    if (result.ok) {
+      entries = (result.value.entries ?? []).map((e: DelegationAuditEntry) => ({
+        id: e.id,
+        delegatedDid: e.target_did ?? '',
+        actorDid: e.actor_did,
+        controllerDid: null,
+        actionType: e.action,
+        actionDetails: e.details ? JSON.parse(e.details) : null,
+        createdAt: e.created_at
+      }))
+      total = result.value.total ?? 0
     }
+    loading = false
   }
 
   function prevPage() {
-    if (offset > 0) {
+    if (offset > 0 && currentClient) {
       offset = Math.max(0, offset - limit)
-      loadAuditLog()
+      loadAuditLog(currentClient)
     }
   }
 
   function nextPage() {
-    if (offset + limit < total) {
+    if (offset + limit < total && currentClient) {
       offset = offset + limit
-      loadAuditLog()
+      loadAuditLog(currentClient)
     }
   }
 
@@ -115,81 +87,85 @@
   }
 </script>
 
-<div class="page">
-  <header>
-    <a href="/app/controllers" class="back">{$_('delegation.backToControllers')}</a>
-    <h1>{$_('delegation.auditLogTitle')}</h1>
-  </header>
+<AuthenticatedRoute onReady={handleReady}>
+  {#snippet children({ session, client })}
+    <div class="page">
+      <header>
+        <a href="/app/controllers" class="back">{$_('delegation.backToControllers')}</a>
+        <h1>{$_('delegation.auditLogTitle')}</h1>
+      </header>
 
-  {#if loading}
-    <div class="skeleton-list">
-      {#each Array(3) as _}
-        <div class="skeleton-entry"></div>
-      {/each}
-    </div>
-  {:else}
-    {#if entries.length === 0}
-      <p class="empty">{$_('delegation.noActivity')}</p>
-    {:else}
-      <div class="audit-list">
-        {#each entries as entry}
-          <div class="audit-entry">
-            <div class="entry-header">
-              <span class="action-type">{formatActionType(entry.actionType)}</span>
-              <span class="timestamp">{formatDateTime(entry.createdAt)}</span>
-            </div>
-            <div class="entry-details">
-              <div class="detail">
-                <span class="label">{$_('delegation.actor')}</span>
-                <span class="value did" title={entry.actorDid}>{truncateDid(entry.actorDid)}</span>
-              </div>
-              {#if entry.controllerDid}
-                <div class="detail">
-                  <span class="label">{$_('delegation.controller')}</span>
-                  <span class="value did" title={entry.controllerDid}>{truncateDid(entry.controllerDid)}</span>
+      {#if loading}
+        <div class="skeleton-list">
+          {#each Array(3) as _}
+            <div class="skeleton-entry"></div>
+          {/each}
+        </div>
+      {:else}
+        {#if entries.length === 0}
+          <p class="empty">{$_('delegation.noActivity')}</p>
+        {:else}
+          <div class="audit-list">
+            {#each entries as entry}
+              <div class="audit-entry">
+                <div class="entry-header">
+                  <span class="action-type">{formatActionType(entry.actionType)}</span>
+                  <span class="timestamp">{formatDateTime(entry.createdAt)}</span>
                 </div>
-              {/if}
-              <div class="detail">
-                <span class="label">{$_('delegation.account')}</span>
-                <span class="value did" title={entry.delegatedDid}>{truncateDid(entry.delegatedDid)}</span>
-              </div>
-              {#if entry.actionDetails}
-                <div class="detail">
-                  <span class="label">{$_('delegation.details')}</span>
-                  <span class="value details">{formatActionDetails(entry.actionDetails)}</span>
+                <div class="entry-details">
+                  <div class="detail">
+                    <span class="label">{$_('delegation.actor')}</span>
+                    <span class="value did" title={entry.actorDid}>{truncateDid(entry.actorDid)}</span>
+                  </div>
+                  {#if entry.controllerDid}
+                    <div class="detail">
+                      <span class="label">{$_('delegation.controller')}</span>
+                      <span class="value did" title={entry.controllerDid}>{truncateDid(entry.controllerDid)}</span>
+                    </div>
+                  {/if}
+                  <div class="detail">
+                    <span class="label">{$_('delegation.account')}</span>
+                    <span class="value did" title={entry.delegatedDid}>{truncateDid(entry.delegatedDid)}</span>
+                  </div>
+                  {#if entry.actionDetails}
+                    <div class="detail">
+                      <span class="label">{$_('delegation.details')}</span>
+                      <span class="value details">{formatActionDetails(entry.actionDetails)}</span>
+                    </div>
+                  {/if}
                 </div>
-              {/if}
-            </div>
+              </div>
+            {/each}
           </div>
-        {/each}
-      </div>
 
-      <div class="pagination">
-        <button
-          class="ghost"
-          onclick={prevPage}
-          disabled={offset === 0}
-        >
-          {$_('delegation.previous')}
-        </button>
-        <span class="page-info">
-          {$_('delegation.showing', { values: { start: offset + 1, end: Math.min(offset + limit, total), total } })}
-        </span>
-        <button
-          class="ghost"
-          onclick={nextPage}
-          disabled={offset + limit >= total}
-        >
-          {$_('delegation.next')}
-        </button>
-      </div>
-    {/if}
+          <div class="pagination">
+            <button
+              class="ghost"
+              onclick={prevPage}
+              disabled={offset === 0}
+            >
+              {$_('delegation.previous')}
+            </button>
+            <span class="page-info">
+              {$_('delegation.showing', { values: { start: offset + 1, end: Math.min(offset + limit, total), total } })}
+            </span>
+            <button
+              class="ghost"
+              onclick={nextPage}
+              disabled={offset + limit >= total}
+            >
+              {$_('delegation.next')}
+            </button>
+          </div>
+        {/if}
 
-    <div class="actions-bar">
-      <button class="ghost" onclick={loadAuditLog}>{$_('delegation.refresh')}</button>
+        <div class="actions-bar">
+          <button class="ghost" onclick={() => currentClient && loadAuditLog(currentClient)}>{$_('delegation.refresh')}</button>
+        </div>
+      {/if}
     </div>
-  {/if}
-</div>
+  {/snippet}
+</AuthenticatedRoute>
 
 <style>
   .page {
@@ -332,5 +308,4 @@
     border-radius: var(--radius-lg);
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
-
 </style>

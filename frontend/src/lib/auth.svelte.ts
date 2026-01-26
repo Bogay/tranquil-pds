@@ -1,11 +1,9 @@
-import {
-  api,
-  ApiError,
-  type CreateAccountParams,
-  type CreateAccountResult,
-  typedApi,
-} from "./api.ts";
-import type { Session } from "./types/api.ts";
+import { api, ApiError, typedApi, castSession } from "./api.ts";
+import type {
+  CreateAccountParams,
+  CreateAccountResult,
+  Session,
+} from "./types/api.ts";
 import {
   type AccessToken,
   type Did,
@@ -436,8 +434,9 @@ export async function confirmSignup(
   setLoading();
   try {
     const result = await api.confirmSignup(did, verificationCode);
-    setAuthenticated(result);
-    return ok(result);
+    const session = castSession(result);
+    setAuthenticated(session);
+    return ok(session);
   } catch (e) {
     const error = toAuthError(e);
     setError(error);
@@ -467,6 +466,9 @@ export function setSession(session: {
     handle: unsafeAsHandle(session.handle),
     accessJwt: unsafeAsAccessToken(session.accessJwt),
     refreshJwt: unsafeAsRefreshToken(session.refreshJwt),
+    contactKind: "none",
+    accountKind: "active",
+    isAdmin: false,
   };
   setAuthenticated(newSession);
 }

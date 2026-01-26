@@ -7,6 +7,7 @@ import {
   mockData,
   mockEndpoint,
   setupFetchMock,
+  setupIndexedDBMock,
 } from "./mocks.ts";
 import { _testSetState, type SavedAccount } from "../lib/auth.svelte.ts";
 import {
@@ -21,6 +22,7 @@ describe("Login", () => {
   beforeEach(() => {
     clearMocks();
     setupFetchMock();
+    setupIndexedDBMock();
     mockEndpoint(
       "/oauth/par",
       () => jsonResponse({ request_uri: "urn:mock:request" }),

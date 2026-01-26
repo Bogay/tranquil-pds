@@ -33,8 +33,10 @@ function apiLog(
 export class AtprotoClient {
   private baseUrl: string;
   private accessToken: string | null = null;
+  private refreshToken: string | null = null;
   private dpopKeyPair: DPoPKeyPair | null = null;
   private dpopNonce: string | null = null;
+  private isRefreshing = false;
 
   constructor(pdsUrl: string) {
     this.baseUrl = pdsUrl.replace(/\/$/, "");
@@ -48,12 +50,83 @@ export class AtprotoClient {
     return this.accessToken;
   }
 
+  setRefreshToken(token: string | null) {
+    this.refreshToken = token;
+  }
+
+  getRefreshToken(): string | null {
+    return this.refreshToken;
+  }
+
   getBaseUrl(): string {
     return this.baseUrl;
   }
 
   setDPoPKeyPair(keyPair: DPoPKeyPair | null) {
     this.dpopKeyPair = keyPair;
+  }
+
+  private async tryRefreshToken(): Promise<boolean> {
+    if (!this.refreshToken || this.isRefreshing) return false;
+    this.isRefreshing = true;
+    try {
+      const session = await this.refreshSessionInternal(this.refreshToken);
+      this.accessToken = session.accessJwt;
+      this.refreshToken = session.refreshJwt;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
+  private async refreshSessionInternal(refreshJwt: string): Promise<Session> {
+    const url = `${this.baseUrl}/xrpc/com.atproto.server.refreshSession`;
+    const headers: Record<string, string> = {};
+
+    if (this.dpopKeyPair) {
+      headers["Authorization"] = `DPoP ${refreshJwt}`;
+      const tokenHash = await computeAccessTokenHash(refreshJwt);
+      const dpopProof = await createDPoPProof(
+        this.dpopKeyPair,
+        "POST",
+        url,
+        this.dpopNonce ?? undefined,
+        tokenHash,
+      );
+      headers["DPoP"] = dpopProof;
+    } else {
+      headers["Authorization"] = `Bearer ${refreshJwt}`;
+    }
+
+    let res = await fetch(url, { method: "POST", headers });
+
+    if (!res.ok && this.dpopKeyPair) {
+      const dpopNonce = res.headers.get("DPoP-Nonce");
+      if (dpopNonce && dpopNonce !== this.dpopNonce) {
+        this.dpopNonce = dpopNonce;
+        headers["DPoP"] = await createDPoPProof(
+          this.dpopKeyPair,
+          "POST",
+          url,
+          dpopNonce,
+          await computeAccessTokenHash(refreshJwt),
+        );
+        res = await fetch(url, { method: "POST", headers });
+      }
+    }
+
+    if (!res.ok) {
+      throw new Error("Token refresh failed");
+    }
+
+    const newNonce = res.headers.get("DPoP-Nonce");
+    if (newNonce) {
+      this.dpopNonce = newNonce;
+    }
+
+    return res.json();
   }
 
   private async xrpc<T>(
@@ -135,6 +208,46 @@ export class AtprotoClient {
         error: "Unknown",
         message: res.statusText,
       }));
+
+      const isTokenExpired = res.status === 401 &&
+        (err.error === "ExpiredToken" || err.error === "invalid_token" ||
+          (err.message && err.message.includes("expired")));
+
+      if (isTokenExpired && !authToken && await this.tryRefreshToken()) {
+        const retryNonce = res.headers.get("DPoP-Nonce") ?? this.dpopNonce;
+        if (retryNonce) this.dpopNonce = retryNonce;
+        res = await makeRequest(this.dpopNonce ?? undefined);
+
+        if (!res.ok && this.dpopKeyPair) {
+          const dpopNonce = res.headers.get("DPoP-Nonce");
+          if (dpopNonce && dpopNonce !== this.dpopNonce) {
+            this.dpopNonce = dpopNonce;
+            res = await makeRequest(dpopNonce);
+          }
+        }
+
+        if (res.ok) {
+          const newNonce = res.headers.get("DPoP-Nonce");
+          if (newNonce) this.dpopNonce = newNonce;
+          const responseContentType = res.headers.get("content-type") ?? "";
+          if (responseContentType.includes("application/json")) {
+            return res.json();
+          }
+          return res.arrayBuffer().then((buf) => new Uint8Array(buf)) as T;
+        }
+
+        const retryErr = await res.json().catch(() => ({
+          error: "Unknown",
+          message: res.statusText,
+        }));
+        const retryError = new Error(retryErr.message || retryErr.error || res.statusText) as
+          & Error
+          & { status: number; error: string };
+        retryError.status = res.status;
+        retryError.error = retryErr.error;
+        throw retryError;
+      }
+
       const error = new Error(err.message || err.error || res.statusText) as
         & Error
         & {

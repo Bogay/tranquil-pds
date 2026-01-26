@@ -6,70 +6,17 @@ import {
   mockData,
   mockEndpoint,
   setupFetchMock,
+  setupIndexedDBMock,
 } from "./mocks.ts";
 import { _testSetState } from "../lib/auth.svelte.ts";
-
-function createMockIndexedDB() {
-  const stores: Map<string, Map<string, unknown>> = new Map();
-
-  return {
-    open: vi.fn((_name: string, _version?: number) => {
-      const createTransaction = (_storeName: string, _mode?: string) => {
-        const tx = {
-          objectStore: (name: string) => {
-            if (!stores.has(name)) {
-              stores.set(name, new Map());
-            }
-            const store = stores.get(name)!;
-            return {
-              put: (value: unknown, key: string) => {
-                store.set(key, value);
-                return { result: undefined };
-              },
-              get: (key: string) => ({
-                result: store.get(key),
-              }),
-            };
-          },
-          oncomplete: null as (() => void) | null,
-          onerror: null as (() => void) | null,
-        };
-        setTimeout(() => tx.oncomplete?.(), 0);
-        return tx;
-      };
-
-      const request = {
-        result: {
-          objectStoreNames: { contains: () => true },
-          createObjectStore: vi.fn(),
-          transaction: createTransaction,
-          close: vi.fn(),
-        },
-        error: null,
-        onsuccess: null as (() => void) | null,
-        onerror: null as (() => void) | null,
-        onupgradeneeded: null as (() => void) | null,
-      };
-
-      setTimeout(() => {
-        request.onupgradeneeded?.();
-        request.onsuccess?.();
-      }, 0);
-
-      return request;
-    }),
-  };
-}
 
 describe("OAuth Registration Flow", () => {
   beforeEach(() => {
     clearMocks();
     setupFetchMock();
+    setupIndexedDBMock();
     sessionStorage.clear();
     vi.restoreAllMocks();
-
-    (globalThis as unknown as { indexedDB: unknown }).indexedDB =
-      createMockIndexedDB();
 
     Object.defineProperty(globalThis.location, "search", {
       value: "",

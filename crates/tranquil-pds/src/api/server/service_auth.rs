@@ -113,6 +113,10 @@ pub async fn get_service_auth(
                 )
                     .into_response();
             }
+            Err(crate::oauth::OAuthError::ExpiredToken(msg)) => {
+                warn!(error = %msg, "getServiceAuth DPoP token expired");
+                return ApiError::OAuthExpiredToken(Some(msg)).into_response();
+            }
             Err(e) => {
                 warn!(error = ?e, "getServiceAuth DPoP auth validation failed");
                 return ApiError::AuthenticationFailed(Some(format!("{:?}", e))).into_response();

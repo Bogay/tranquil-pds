@@ -1,18 +1,30 @@
 <script lang="ts">
-  import { getAuthState, getValidToken } from '../lib/auth.svelte'
-  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
+  import AuthenticatedRoute from '../components/AuthenticatedRoute.svelte'
+  import { getValidToken } from '../lib/auth.svelte'
+  import { routes, getFullUrl } from '../lib/router.svelte'
   import { api, ApiError } from '../lib/api'
   import ReauthModal from '../components/ReauthModal.svelte'
   import SsoIcon from '../components/SsoIcon.svelte'
   import { _ } from '../lib/i18n'
   import { formatDate as formatDateUtil } from '../lib/date'
-  import type { Session } from '../lib/types/api'
+  import type { Session, SsoLinkedAccount } from '../lib/types/api'
+  import type { AuthenticatedClient } from '../lib/authenticated-client'
   import {
     prepareCreationOptions,
     serializeAttestationResponse,
     type WebAuthnCreationOptionsResponse,
   } from '../lib/webauthn'
   import { toast } from '../lib/toast.svelte'
+  import {
+    type TotpSetupState,
+    idleState,
+    qrState,
+    verifyState,
+    backupState,
+    goBackToQr,
+    finish,
+    type TotpQr,
+  } from '../lib/types/totp-state'
 
   interface SsoProvider {
     provider: string
@@ -20,39 +32,16 @@
     icon: string
   }
 
-  interface LinkedAccount {
-    id: string
-    provider: string
-    provider_name: string
-    provider_username: string | null
-    provider_email: string | null
-    created_at: string
-    last_login_at: string | null
-  }
-
-  const auth = $derived(getAuthState())
-
-  function getSession(): Session | null {
-    return auth.kind === 'authenticated' ? auth.session : null
-  }
-
-  function isLoading(): boolean {
-    return auth.kind === 'loading'
-  }
-
-  const session = $derived(getSession())
-  const authLoading = $derived(isLoading())
+  let currentSession: Session | null = $state(null)
+  let currentClient: AuthenticatedClient | null = $state(null)
 
   let loading = $state(true)
   let totpEnabled = $state(false)
   let hasBackupCodes = $state(false)
-  let setupStep = $state<'idle' | 'qr' | 'verify' | 'backup'>('idle')
-  let qrBase64 = $state('')
-  let totpUri = $state('')
+  let totpSetup = $state<TotpSetupState>(idleState)
   let verifyCodeRaw = $state('')
   let verifyCode = $derived(verifyCodeRaw.replace(/\s/g, ''))
   let verifyLoading = $state(false)
-  let backupCodes = $state<string[]>([])
   let disablePassword = $state('')
   let disableCode = $state('')
   let disableLoading = $state(false)
@@ -87,7 +76,7 @@
   let legacyLoginUpdating = $state(false)
 
   let ssoProviders = $state<SsoProvider[]>([])
-  let linkedAccounts = $state<LinkedAccount[]>([])
+  let linkedAccounts = $state<SsoLinkedAccount[]>([])
   let linkedAccountsLoading = $state(true)
   let linkingProvider = $state<string | null>(null)
   let unlinkingId = $state<string | null>(null)
@@ -97,13 +86,7 @@
   let pendingAction = $state<(() => Promise<void>) | null>(null)
 
   $effect(() => {
-    if (!authLoading && !session) {
-      navigate(routes.login)
-    }
-  })
-
-  $effect(() => {
-    if (session) {
+    if (currentSession && currentClient) {
       loadTotpStatus()
       loadPasskeys()
       loadPasswordStatus()
@@ -126,16 +109,11 @@
   }
 
   async function loadLinkedAccounts() {
-    if (!session) return
+    if (!currentClient) return
     linkedAccountsLoading = true
     try {
-      const response = await fetch('/oauth/sso/linked', {
-        headers: { 'Authorization': `Bearer ${session.accessJwt}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        linkedAccounts = data.accounts || []
-      }
+      const data = await currentClient.getSsoLinkedAccounts()
+      linkedAccounts = data.accounts || []
     } catch {
       linkedAccounts = []
     } finally {
@@ -154,7 +132,7 @@
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'Authorization': `Bearer ${session?.accessJwt}`
+          'Authorization': `Bearer ${currentSession?.accessJwt}`
         },
         body: JSON.stringify({
           provider,
@@ -200,7 +178,7 @@
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.accessJwt}`
+          'Authorization': `Bearer ${currentSession?.accessJwt}`
         },
         body: JSON.stringify({ id })
       })
@@ -228,10 +206,10 @@
   }
 
   async function loadPasswordStatus() {
-    if (!session) return
+    if (!currentSession) return
     passwordLoading = true
     try {
-      const status = await api.getPasswordStatus(session.accessJwt)
+      const status = await api.getPasswordStatus(currentSession.accessJwt)
       hasPassword = status.hasPassword
     } catch {
       hasPassword = true
@@ -241,10 +219,10 @@
   }
 
   async function loadLegacyLoginPreference() {
-    if (!session) return
+    if (!currentSession) return
     legacyLoginLoading = true
     try {
-      const pref = await api.getLegacyLoginPreference(session.accessJwt)
+      const pref = await api.getLegacyLoginPreference(currentSession.accessJwt)
       allowLegacyLogin = pref.allowLegacyLogin
       hasMfa = pref.hasMfa
     } catch {
@@ -256,10 +234,10 @@
   }
 
   async function handleToggleLegacyLogin() {
-    if (!session) return
+    if (!currentSession) return
     legacyLoginUpdating = true
     try {
-      const result = await api.updateLegacyLoginPreference(session.accessJwt, !allowLegacyLogin)
+      const result = await api.updateLegacyLoginPreference(currentSession.accessJwt, !allowLegacyLogin)
       allowLegacyLogin = result.allowLegacyLogin
       toast.success(allowLegacyLogin
         ? $_('security.legacyLoginEnabled')
@@ -282,7 +260,7 @@
   }
 
   async function handleRemovePassword() {
-    if (!session) return
+    if (!currentSession) return
     removePasswordLoading = true
     try {
       const token = await getValidToken()
@@ -323,10 +301,10 @@
   }
 
   async function loadTotpStatus() {
-    if (!session) return
+    if (!currentSession) return
     loading = true
     try {
-      const status = await api.getTotpStatus(session.accessJwt)
+      const status = await api.getTotpStatus(currentSession.accessJwt)
       totpEnabled = status.enabled
       hasBackupCodes = status.hasBackupCodes
     } catch {
@@ -337,13 +315,11 @@
   }
 
   async function handleStartSetup() {
-    if (!session) return
+    if (!currentSession) return
     verifyLoading = true
     try {
-      const result = await api.createTotpSecret(session.accessJwt)
-      qrBase64 = result.qrBase64
-      totpUri = result.uri
-      setupStep = 'qr'
+      const result = await api.createTotpSecret(currentSession.accessJwt)
+      totpSetup = qrState(result.qrBase64, result.uri)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : 'Failed to generate TOTP secret')
     } finally {
@@ -353,12 +329,11 @@
 
   async function handleVerifySetup(e: Event) {
     e.preventDefault()
-    if (!session || !verifyCode) return
+    if (!currentSession || !verifyCode || totpSetup.step !== 'verify') return
     verifyLoading = true
     try {
-      const result = await api.enableTotp(session.accessJwt, verifyCode)
-      backupCodes = result.backupCodes
-      setupStep = 'backup'
+      const result = await api.enableTotp(currentSession.accessJwt, verifyCode)
+      totpSetup = backupState(totpSetup, result.backupCodes)
       totpEnabled = true
       hasBackupCodes = true
       verifyCodeRaw = ''
@@ -370,19 +345,17 @@
   }
 
   function handleFinishSetup() {
-    setupStep = 'idle'
-    backupCodes = []
-    qrBase64 = ''
-    totpUri = ''
+    if (totpSetup.step !== 'backup') return
+    totpSetup = finish(totpSetup)
     toast.success($_('security.totpEnabledSuccess'))
   }
 
   async function handleDisable(e: Event) {
     e.preventDefault()
-    if (!session || !disablePassword || !disableCode) return
+    if (!currentSession || !disablePassword || !disableCode) return
     disableLoading = true
     try {
-      await api.disableTotp(session.accessJwt, disablePassword, disableCode)
+      await api.disableTotp(currentSession.accessJwt, disablePassword, disableCode)
       totpEnabled = false
       hasBackupCodes = false
       showDisableForm = false
@@ -398,12 +371,12 @@
 
   async function handleRegenerate(e: Event) {
     e.preventDefault()
-    if (!session || !regenPassword || !regenCode) return
+    if (!currentSession || !regenPassword || !regenCode) return
     regenLoading = true
     try {
-      const result = await api.regenerateBackupCodes(session.accessJwt, regenPassword, regenCode)
-      backupCodes = result.backupCodes
-      setupStep = 'backup'
+      const result = await api.regenerateBackupCodes(currentSession.accessJwt, regenPassword, regenCode)
+      const dummyVerify = verifyState(qrState('', ''))
+      totpSetup = backupState(dummyVerify, result.backupCodes)
       showRegenForm = false
       regenPassword = ''
       regenCode = ''
@@ -415,16 +388,17 @@
   }
 
   function copyBackupCodes() {
-    const text = backupCodes.join('\n')
+    if (totpSetup.step !== 'backup') return
+    const text = totpSetup.backupCodes.join('\n')
     navigator.clipboard.writeText(text)
     toast.success($_('security.backupCodesCopied'))
   }
 
   async function loadPasskeys() {
-    if (!session) return
+    if (!currentSession) return
     passkeysLoading = true
     try {
-      const result = await api.listPasskeys(session.accessJwt)
+      const result = await api.listPasskeys(currentSession.accessJwt)
       passkeys = result.passkeys
     } catch {
       toast.error($_('security.failedToLoadPasskeys'))
@@ -434,14 +408,14 @@
   }
 
   async function handleAddPasskey() {
-    if (!session) return
+    if (!currentSession) return
     if (!window.PublicKeyCredential) {
       toast.error($_('security.passkeysNotSupported'))
       return
     }
     addingPasskey = true
     try {
-      const { options } = await api.startPasskeyRegistration(session.accessJwt, newPasskeyName || undefined)
+      const { options } = await api.startPasskeyRegistration(currentSession.accessJwt, newPasskeyName || undefined)
       const publicKeyOptions = prepareCreationOptions(options as unknown as WebAuthnCreationOptionsResponse)
       const credential = await navigator.credentials.create({
         publicKey: publicKeyOptions
@@ -451,7 +425,7 @@
         return
       }
       const credentialResponse = serializeAttestationResponse(credential as PublicKeyCredential)
-      await api.finishPasskeyRegistration(session.accessJwt, credentialResponse, newPasskeyName || undefined)
+      await api.finishPasskeyRegistration(currentSession.accessJwt, credentialResponse, newPasskeyName || undefined)
       await loadPasskeys()
       newPasskeyName = ''
       toast.success($_('security.passkeyAddedSuccess'))
@@ -467,12 +441,12 @@
   }
 
   async function handleDeletePasskey(id: string) {
-    if (!session) return
+    if (!currentSession) return
     const passkey = passkeys.find(p => p.id === id)
     const name = passkey?.friendlyName || 'this passkey'
     if (!confirm($_('security.deletePasskeyConfirm', { values: { name } }))) return
     try {
-      await api.deletePasskey(session.accessJwt, id)
+      await api.deletePasskey(currentSession.accessJwt, id)
       await loadPasskeys()
       toast.success($_('security.passkeyDeleted'))
     } catch (e) {
@@ -481,9 +455,9 @@
   }
 
   async function handleSavePasskeyName() {
-    if (!session || !editingPasskeyId || !editPasskeyName.trim()) return
+    if (!currentSession || !editingPasskeyId || !editPasskeyName.trim()) return
     try {
-      await api.updatePasskey(session.accessJwt, editingPasskeyId, editPasskeyName.trim())
+      await api.updatePasskey(currentSession.accessJwt, editingPasskeyId, editPasskeyName.trim())
       await loadPasskeys()
       editingPasskeyId = null
       editPasskeyName = ''
@@ -506,15 +480,22 @@
   function formatDate(dateStr: string): string {
     return formatDateUtil(dateStr)
   }
+
+  function handleReady(session: Session, client: AuthenticatedClient) {
+    currentSession = session
+    currentClient = client
+  }
 </script>
 
-<div class="page">
-  <header>
-    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
-    <h1>{$_('security.title')}</h1>
-  </header>
+<AuthenticatedRoute onReady={handleReady}>
+  {#snippet children({ session, client })}
+    <div class="page">
+      <header>
+        <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
+        <h1>{$_('security.title')}</h1>
+      </header>
 
-  {#if loading}
+      {#if loading}
     <div class="skeleton-grid">
       {#each Array(4) as _}
         <div class="skeleton-section"></div>
@@ -528,7 +509,7 @@
         {$_('security.totpDescription')}
       </p>
 
-      {#if setupStep === 'idle'}
+      {#if totpSetup.step === 'idle'}
         {#if totpEnabled}
           <div class="status enabled">
             <span>{$_('security.totpEnabled')}</span>
@@ -632,22 +613,24 @@
             {$_('security.enableTotp')}
           </button>
         {/if}
-      {:else if setupStep === 'qr'}
+      {:else if totpSetup.step === 'qr'}
+        {@const qrData = totpSetup as TotpQr}
         <div class="setup-step">
           <h3>{$_('security.totpSetup')}</h3>
           <p>{$_('security.totpSetupInstructions')}</p>
           <div class="qr-container">
-            <img src="data:image/png;base64,{qrBase64}" alt="TOTP QR Code" class="qr-code" />
+            <img src="data:image/png;base64,{qrData.qrBase64}" alt="TOTP QR Code" class="qr-code" />
           </div>
           <details class="manual-entry">
             <summary>{$_('security.cantScan')}</summary>
-            <code class="secret-code">{totpUri.split('secret=')[1]?.split('&')[0] || ''}</code>
+            <code class="secret-code">{qrData.totpUri.split('secret=')[1]?.split('&')[0] || ''}</code>
           </details>
-          <button onclick={() => setupStep = 'verify'}>
+          <button onclick={() => totpSetup = verifyState(qrData)}>
             {$_('security.next')}
           </button>
         </div>
-      {:else if setupStep === 'verify'}
+      {:else if totpSetup.step === 'verify'}
+        {@const verifyData = totpSetup}
         <div class="setup-step">
           <h3>{$_('security.totpSetup')}</h3>
           <p>{$_('security.totpCodePlaceholder')}</p>
@@ -663,7 +646,7 @@
               />
             </div>
             <div class="actions">
-              <button type="button" class="secondary" onclick={() => { setupStep = 'qr' }}>
+              <button type="button" class="secondary" onclick={() => totpSetup = goBackToQr(verifyData)}>
                 {$_('common.back')}
               </button>
               <button type="submit" disabled={verifyLoading || verifyCode.length !== 6}>
@@ -672,14 +655,14 @@
             </div>
           </form>
         </div>
-      {:else if setupStep === 'backup'}
+      {:else if totpSetup.step === 'backup'}
         <div class="setup-step">
           <h3>{$_('security.backupCodes')}</h3>
           <p class="warning-text">
             {$_('security.backupCodesDescription')}
           </p>
           <div class="backup-codes">
-            {#each backupCodes as code}
+            {#each totpSetup.backupCodes as code}
               <code class="backup-code">{code}</code>
             {/each}
           </div>
@@ -960,14 +943,16 @@
       </section>
     {/if}
   {/if}
-</div>
+    </div>
 
-<ReauthModal
-  bind:show={showReauthModal}
-  availableMethods={reauthMethods}
-  onSuccess={handleReauthSuccess}
-  onCancel={handleReauthCancel}
-/>
+    <ReauthModal
+      bind:show={showReauthModal}
+      availableMethods={reauthMethods}
+      onSuccess={handleReauthSuccess}
+      onCancel={handleReauthCancel}
+    />
+  {/snippet}
+</AuthenticatedRoute>
 
 <style>
   .page {

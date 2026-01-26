@@ -10,6 +10,7 @@ import {
   mockEndpoint,
   setupAuthenticatedUser,
   setupFetchMock,
+  setupIndexedDBMock,
   setupUnauthenticatedUser,
 } from "./mocks.ts";
 import { unsafeAsISODateString } from "../lib/types/branded.ts";
@@ -17,6 +18,7 @@ describe("AppPasswords", () => {
   beforeEach(() => {
     clearMocks();
     setupFetchMock();
+    setupIndexedDBMock();
     globalThis.confirm = vi.fn(() => true);
   });
   describe("authentication guard", () => {
