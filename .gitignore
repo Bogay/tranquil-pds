@@ -2,8 +2,5 @@
 .env
 .direnv
 result
-reference-pds-bsky/
-reference-relay-indigo/
-pds-moover/
 frontend/node_modules/
 frontend/dist/
