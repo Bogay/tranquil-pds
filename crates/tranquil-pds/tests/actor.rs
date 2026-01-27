@@ -75,6 +75,69 @@ async fn test_put_preferences_success() {
 }
 
 #[tokio::test]
+async fn test_put_preferences_multiple_same_type() {
+    let client = client();
+    let base = base_url().await;
+    let (token, _did) = create_account_and_login(&client).await;
+    let prefs = json!({
+        "preferences": [
+            {
+                "$type": "app.bsky.actor.defs#adultContentPref",
+                "enabled": false
+            },
+            {
+                "$type": "app.bsky.actor.defs#contentLabelPref",
+                "label": "dogs",
+                "visibility": "show"
+            },
+            {
+                "$type": "app.bsky.actor.defs#contentLabelPref",
+                "label": "cats",
+                "visibility": "warn"
+            }
+        ]
+    });
+    let resp = client
+        .post(format!("{}/xrpc/app.bsky.actor.putPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&prefs)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let resp = client
+        .get(format!("{}/xrpc/app.bsky.actor.getPreferences", base))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: Value = resp.json().await.unwrap();
+    let prefs_arr = body["preferences"].as_array().unwrap();
+    assert_eq!(prefs_arr.len(), 3);
+    let adult_pref = prefs_arr
+        .iter()
+        .find(|p| p.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.actor.defs#adultContentPref"));
+    assert!(adult_pref.is_some());
+    assert_eq!(adult_pref.unwrap()["enabled"], false);
+    let content_label_prefs: Vec<&Value> = prefs_arr
+        .iter()
+        .filter(|p| p.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.actor.defs#contentLabelPref"))
+        .collect();
+    assert_eq!(content_label_prefs.len(), 2);
+    let dogs_pref = content_label_prefs
+        .iter()
+        .find(|p| p.get("label").and_then(|l| l.as_str()) == Some("dogs"));
+    assert!(dogs_pref.is_some());
+    assert_eq!(dogs_pref.unwrap()["visibility"], "show");
+    let cats_pref = content_label_prefs
+        .iter()
+        .find(|p| p.get("label").and_then(|l| l.as_str()) == Some("cats"));
+    assert!(cats_pref.is_some());
+    assert_eq!(cats_pref.unwrap()["visibility"], "warn");
+}
+
+#[tokio::test]
 async fn test_put_preferences_no_auth() {
     let client = client();
     let base = base_url().await;

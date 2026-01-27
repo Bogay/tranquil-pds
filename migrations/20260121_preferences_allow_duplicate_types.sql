@@ -1,0 +1,1 @@
+ALTER TABLE account_preferences DROP CONSTRAINT IF EXISTS account_preferences_user_id_name_key;
