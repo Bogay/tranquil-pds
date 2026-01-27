@@ -1,7 +1,7 @@
 /target
 .env
 .direnv
-.result
+result
 reference-pds-bsky/
 reference-relay-indigo/
 pds-moover/

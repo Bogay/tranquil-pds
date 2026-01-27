@@ -4,7 +4,7 @@
   pkg-config,
   openssl,
 }: let
-  toml = (lib.importTOML ./Cargo.toml).package;
+  toml = (lib.importTOML ./Cargo.toml).workspace.package;
 in rustPlatform.buildRustPackage {
   pname = "tranquil-pds";
   inherit (toml) version;
@@ -15,10 +15,9 @@ in rustPlatform.buildRustPackage {
       lib.fileset.unions [
         ./Cargo.toml
         ./Cargo.lock
-        ./src
+        ./crates
       	./.sqlx
       	./migrations
-        ./frontend
       ]
     );
   };
