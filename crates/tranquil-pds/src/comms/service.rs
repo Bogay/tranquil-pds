@@ -403,6 +403,57 @@ pub mod repo {
             .await
     }
 
+    pub async fn enqueue_short_token_email(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        token: &str,
+        purpose: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let current_email = prefs.email.clone().unwrap_or_default();
+
+        let (subject_template, body_template, comms_type) = match purpose {
+            "email_update" => (
+                strings.email_update_subject,
+                strings.short_token_body,
+                CommsType::EmailUpdate,
+            ),
+            _ => (
+                strings.email_update_subject,
+                strings.short_token_body,
+                CommsType::EmailUpdate,
+            ),
+        };
+
+        let verify_page = format!("https://{}/app/settings", hostname);
+        let body = format_message(
+            body_template,
+            &[
+                ("handle", &prefs.handle),
+                ("code", token),
+                ("verify_page", &verify_page),
+            ],
+        );
+        let subject = format_message(subject_template, &[("hostname", hostname)]);
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                tranquil_db_traits::CommsChannel::Email,
+                comms_type,
+                &current_email,
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
+    }
+
     pub async fn enqueue_account_deletion(
         user_repo: &dyn UserRepository,
         infra_repo: &dyn InfraRepository,

@@ -768,6 +768,8 @@ pub struct UserSessionInfo {
     pub channel_verification: ChannelVerificationStatus,
     pub migrated_to_pds: Option<String>,
     pub migrated_at: Option<DateTime<Utc>>,
+    pub totp_enabled: bool,
+    pub email_2fa_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -792,6 +794,7 @@ pub struct UserLoginFull {
     pub key_bytes: Vec<u8>,
     pub encryption_version: Option<i32>,
     pub totp_enabled: bool,
+    pub email_2fa_enabled: bool,
 }
 
 #[derive(Debug, Clone)]

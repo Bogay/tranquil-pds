@@ -91,6 +91,10 @@ impl Cache for NoOpCache {
     async fn set_bytes(&self, _key: &str, _value: &[u8], _ttl: Duration) -> Result<(), CacheError> {
         Ok(())
     }
+
+    fn is_available(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone)]

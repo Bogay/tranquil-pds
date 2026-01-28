@@ -661,16 +661,28 @@ impl InfraRepository for PostgresInfraRepository {
         name: &str,
         value_json: serde_json::Value,
     ) -> Result<(), DbError> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
         sqlx::query!(
-            r#"INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
-               ON CONFLICT (user_id, name) DO UPDATE SET value_json = $3"#,
+            r#"DELETE FROM account_preferences WHERE user_id = $1 AND name = $2"#,
+            user_id,
+            name
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        sqlx::query!(
+            r#"INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)"#,
             user_id,
             name,
             value_json
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(map_sqlx_error)?;
+
+        tx.commit().await.map_err(map_sqlx_error)?;
 
         Ok(())
     }

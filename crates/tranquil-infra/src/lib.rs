@@ -73,6 +73,9 @@ pub trait Cache: Send + Sync {
     async fn delete(&self, key: &str) -> Result<(), CacheError>;
     async fn get_bytes(&self, key: &str) -> Option<Vec<u8>>;
     async fn set_bytes(&self, key: &str, value: &[u8], ttl: Duration) -> Result<(), CacheError>;
+    fn is_available(&self) -> bool {
+        true
+    }
 }
 
 #[async_trait]

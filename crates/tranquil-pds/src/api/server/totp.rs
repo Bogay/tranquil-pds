@@ -187,6 +187,8 @@ pub async fn disable_totp(
         .await
         .log_db_err("deleting TOTP")?;
 
+    crate::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &auth.did).await;
+
     info!(did = %session_mfa.did(), "TOTP disabled (verified via {} and {})", password_mfa.method(), totp_mfa.method());
 
     Ok(EmptyResponse::ok().into_response())

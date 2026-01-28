@@ -11,7 +11,9 @@ use tranquil_db::UserRepository;
 use tranquil_db_traits::OAuthRepository;
 
 pub mod account_verified;
+pub mod email_token;
 pub mod extractor;
+pub mod legacy_2fa;
 pub mod login_identifier;
 pub mod mfa_verified;
 pub mod scope_check;

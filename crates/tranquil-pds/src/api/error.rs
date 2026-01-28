@@ -114,6 +114,8 @@ pub enum ApiError {
     SsoSessionExpired,
     SsoAlreadyLinked,
     SsoLinkNotFound,
+    AuthFactorTokenRequired,
+    LegacyLoginBlocked,
 }
 
 impl ApiError {
@@ -132,11 +134,11 @@ impl ApiError {
             | Self::AuthenticationFailed(_)
             | Self::AccountDeactivated
             | Self::AccountTakedown
-            | Self::InvalidCode(_)
             | Self::InvalidPassword(_)
             | Self::InvalidToken(_)
             | Self::PasskeyCounterAnomaly
             | Self::OAuthExpiredToken(_) => StatusCode::UNAUTHORIZED,
+            Self::InvalidCode(_) => StatusCode::BAD_REQUEST,
             Self::ExpiredToken(_) => StatusCode::BAD_REQUEST,
             Self::Forbidden
             | Self::AdminRequired
@@ -210,7 +212,9 @@ impl ApiError {
             | Self::SsoInvalidAction
             | Self::SsoNotAuthenticated
             | Self::SsoSessionExpired
-            | Self::SsoAlreadyLinked => StatusCode::BAD_REQUEST,
+            | Self::SsoAlreadyLinked
+            | Self::AuthFactorTokenRequired
+            | Self::LegacyLoginBlocked => StatusCode::BAD_REQUEST,
             Self::PasskeyNotFound | Self::SsoLinkNotFound => StatusCode::NOT_FOUND,
         }
     }
@@ -313,6 +317,8 @@ impl ApiError {
             Self::SsoSessionExpired => Cow::Borrowed("SsoSessionExpired"),
             Self::SsoAlreadyLinked => Cow::Borrowed("SsoAlreadyLinked"),
             Self::SsoLinkNotFound => Cow::Borrowed("SsoLinkNotFound"),
+            Self::AuthFactorTokenRequired => Cow::Borrowed("AuthFactorTokenRequired"),
+            Self::LegacyLoginBlocked => Cow::Borrowed("MfaRequired"),
         }
     }
     fn message(&self) -> Option<String> {
@@ -436,6 +442,12 @@ impl ApiError {
             Self::InvalidEmail => Some("Please provide a valid email address".to_string()),
             Self::InvalidInviteCode => Some("The invite code provided is invalid".to_string()),
             Self::DuplicateCreate => Some("Account creation failed: duplicate request".to_string()),
+            Self::LegacyLoginBlocked => Some(
+                "This account requires MFA. Please use an OAuth client that supports TOTP verification.".to_string(),
+            ),
+            Self::AuthFactorTokenRequired => {
+                Some("A sign in code has been sent to your email address".to_string())
+            }
             _ => None,
         }
     }

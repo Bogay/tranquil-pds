@@ -60,11 +60,7 @@ async fn test_cancelled_future_completes_on_cancel() {
 
     shutdown.cancel();
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        handle,
-    )
-    .await;
+    let result = tokio::time::timeout(std::time::Duration::from_millis(100), handle).await;
 
     assert!(result.is_ok());
     assert!(result.unwrap().unwrap());

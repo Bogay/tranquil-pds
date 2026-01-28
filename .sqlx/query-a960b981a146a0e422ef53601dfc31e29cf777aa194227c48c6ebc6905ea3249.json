@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                u.id, u.did, u.handle, u.password_hash, u.email, u.deactivated_at, u.takedown_ref,\n                u.email_verified, u.discord_verified, u.telegram_verified, u.signal_verified,\n                u.allow_legacy_login, u.migrated_to_pds,\n                u.preferred_comms_channel as \"preferred_comms_channel: CommsChannel\",\n                k.key_bytes, k.encryption_version,\n                (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled,\n                COALESCE((SELECT (value_json)::boolean FROM account_preferences WHERE user_id = u.id AND name = 'email_auth_factor' ORDER BY created_at DESC LIMIT 1), false) as \"email_2fa_enabled!\"\n            FROM users u\n            JOIN user_keys k ON u.id = k.user_id\n            WHERE u.handle = $1 OR u.email = $1 OR u.did = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "did",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "password_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "deactivated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "takedown_ref",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "discord_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "telegram_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "signal_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "allow_legacy_login",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "migrated_to_pds",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "preferred_comms_channel: CommsChannel",
+        "type_info": {
+          "Custom": {
+            "name": "comms_channel",
+            "kind": {
+              "Enum": [
+                "email",
+                "discord",
+                "telegram",
+                "signal"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "key_bytes",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 15,
+        "name": "encryption_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "totp_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "email_2fa_enabled!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "a960b981a146a0e422ef53601dfc31e29cf777aa194227c48c6ebc6905ea3249"
+}

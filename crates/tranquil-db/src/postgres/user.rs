@@ -1374,13 +1374,15 @@ impl UserRepository for PostgresUserRepository {
     async fn get_session_info_by_did(&self, did: &Did) -> Result<Option<UserSessionInfo>, DbError> {
         sqlx::query!(
             r#"
-            SELECT handle, email, email_verified, is_admin, deactivated_at, takedown_ref,
-                   preferred_locale,
-                   preferred_comms_channel as "preferred_comms_channel!: CommsChannel",
-                   discord_verified, telegram_verified, signal_verified,
-                   migrated_to_pds, migrated_at
-            FROM users
-            WHERE did = $1
+            SELECT u.handle, u.email, u.email_verified, u.is_admin, u.deactivated_at, u.takedown_ref,
+                   u.preferred_locale,
+                   u.preferred_comms_channel as "preferred_comms_channel!: CommsChannel",
+                   u.discord_verified, u.telegram_verified, u.signal_verified,
+                   u.migrated_to_pds, u.migrated_at,
+                   (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled,
+                   COALESCE((SELECT (value_json)::boolean FROM account_preferences WHERE user_id = u.id AND name = 'email_auth_factor' ORDER BY created_at DESC LIMIT 1), false) as "email_2fa_enabled!"
+            FROM users u
+            WHERE u.did = $1
             "#,
             did.as_str()
         )
@@ -1404,6 +1406,8 @@ impl UserRepository for PostgresUserRepository {
                 ),
                 migrated_to_pds: row.migrated_to_pds,
                 migrated_at: row.migrated_at,
+                totp_enabled: row.totp_enabled.unwrap_or(false),
+                email_2fa_enabled: row.email_2fa_enabled,
             })
         })
     }
@@ -1468,7 +1472,8 @@ impl UserRepository for PostgresUserRepository {
                 u.allow_legacy_login, u.migrated_to_pds,
                 u.preferred_comms_channel as "preferred_comms_channel: CommsChannel",
                 k.key_bytes, k.encryption_version,
-                (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled
+                (SELECT verified FROM user_totp WHERE did = u.did) as totp_enabled,
+                COALESCE((SELECT (value_json)::boolean FROM account_preferences WHERE user_id = u.id AND name = 'email_auth_factor' ORDER BY created_at DESC LIMIT 1), false) as "email_2fa_enabled!"
             FROM users u
             JOIN user_keys k ON u.id = k.user_id
             WHERE u.handle = $1 OR u.email = $1 OR u.did = $1"#,
@@ -1498,6 +1503,7 @@ impl UserRepository for PostgresUserRepository {
                 key_bytes: row.key_bytes,
                 encryption_version: row.encryption_version,
                 totp_enabled: row.totp_enabled.unwrap_or(false),
+                email_2fa_enabled: row.email_2fa_enabled,
             })
         })
     }

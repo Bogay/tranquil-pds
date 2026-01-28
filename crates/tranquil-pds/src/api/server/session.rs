@@ -32,6 +32,7 @@ pub struct CreateSessionInput {
     pub password: PlainPassword,
     #[serde(default)]
     pub allow_takendown: bool,
+    pub auth_factor_token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -47,6 +48,8 @@ pub struct CreateSessionOutput {
     pub email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email_confirmed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_auth_factor: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,18 +161,82 @@ pub async fn create_session(
             .into_response();
     }
     let has_totp = row.totp_enabled;
-    let is_legacy_login = has_totp;
-    if has_totp && !row.allow_legacy_login {
-        warn!("Legacy login blocked for TOTP-enabled account: {}", row.did);
-        return (
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "MfaRequired",
-                "message": "This account requires MFA. Please use an OAuth client that supports TOTP verification.",
-                "did": row.did
-            })),
-        )
-            .into_response();
+    let email_2fa_enabled = row.email_2fa_enabled;
+    let is_legacy_login = has_totp || email_2fa_enabled;
+    let twofa_ctx = crate::auth::legacy_2fa::Legacy2faContext {
+        email_2fa_enabled,
+        has_totp,
+        allow_legacy_login: row.allow_legacy_login,
+    };
+    match crate::auth::legacy_2fa::process_legacy_2fa(
+        state.cache.as_ref(),
+        &row.did,
+        &twofa_ctx,
+        input.auth_factor_token.as_deref(),
+    )
+    .await
+    {
+        Ok(crate::auth::legacy_2fa::Legacy2faOutcome::NotRequired) => {}
+        Ok(crate::auth::legacy_2fa::Legacy2faOutcome::Blocked) => {
+            warn!("Legacy login blocked for TOTP-enabled account: {}", row.did);
+            return ApiError::LegacyLoginBlocked.into_response();
+        }
+        Ok(crate::auth::legacy_2fa::Legacy2faOutcome::ChallengeSent(code)) => {
+            let hostname = pds_hostname();
+            if let Err(e) = crate::comms::comms_repo::enqueue_2fa_code(
+                state.user_repo.as_ref(),
+                state.infra_repo.as_ref(),
+                row.id,
+                code.as_str(),
+                hostname,
+            )
+            .await
+            {
+                error!("Failed to send 2FA code: {:?}", e);
+                crate::auth::legacy_2fa::clear_challenge(state.cache.as_ref(), &row.did).await;
+                return ApiError::InternalError(Some(
+                    "Failed to send verification code. Please try again.".into(),
+                ))
+                .into_response();
+            }
+            return ApiError::AuthFactorTokenRequired.into_response();
+        }
+        Ok(crate::auth::legacy_2fa::Legacy2faOutcome::Verified) => {}
+        Err(crate::auth::legacy_2fa::Legacy2faFlowError::Challenge(e)) => {
+            use crate::auth::legacy_2fa::ChallengeError;
+            return match e {
+                ChallengeError::CacheUnavailable => {
+                    error!("Cache unavailable for 2FA, blocking legacy login");
+                    ApiError::ServiceUnavailable(Some(
+                        "2FA service temporarily unavailable. Please try again later or use an OAuth client.".into(),
+                    ))
+                    .into_response()
+                }
+                ChallengeError::RateLimited => ApiError::RateLimitExceeded(Some(
+                    "Please wait before requesting a new verification code.".into(),
+                ))
+                .into_response(),
+                ChallengeError::CacheError => {
+                    error!("Cache error during 2FA challenge creation");
+                    ApiError::InternalError(None).into_response()
+                }
+            };
+        }
+        Err(crate::auth::legacy_2fa::Legacy2faFlowError::Validation(e)) => {
+            use crate::auth::legacy_2fa::ValidationError;
+            warn!("Invalid 2FA code for {}: {:?}", row.did, e);
+            let msg = match e {
+                ValidationError::TooManyAttempts => "Too many attempts. Please request a new code.",
+                ValidationError::ChallengeExpired => "Code has expired. Please request a new code.",
+                ValidationError::CacheUnavailable => {
+                    "2FA service temporarily unavailable. Please try again later."
+                }
+                ValidationError::ChallengeNotFound
+                | ValidationError::InvalidCode
+                | ValidationError::CacheError => "Invalid verification code",
+            };
+            return ApiError::InvalidCode(Some(msg.into())).into_response();
+        }
     }
     let access_meta = match crate::auth::create_access_token_with_delegation(
         &row.did,
@@ -236,6 +303,11 @@ pub async fn create_session(
     let handle = full_handle(&row.handle, pds_host);
     let is_active = account_state.is_active();
     let status = account_state.status_for_session().map(String::from);
+    let email_auth_factor_out = if email_2fa_enabled || has_totp {
+        Some(true)
+    } else {
+        None
+    };
     Json(CreateSessionOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
@@ -244,6 +316,7 @@ pub async fn create_session(
         did_doc,
         email: row.email,
         email_confirmed: Some(row.channel_verification.email),
+        email_auth_factor: email_auth_factor_out,
         active: Some(is_active),
         status,
     })
@@ -300,6 +373,9 @@ pub async fn get_session(
             if can_read_email {
                 response["email"] = json!(email_value);
                 response["emailConfirmed"] = json!(email_confirmed_value);
+            }
+            if row.email_2fa_enabled || row.totp_enabled {
+                response["emailAuthFactor"] = json!(true);
             }
             if let Some(status) = account_state.status_for_session() {
                 response["status"] = json!(status);

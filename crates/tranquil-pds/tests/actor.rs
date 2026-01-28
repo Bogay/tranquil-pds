@@ -115,14 +115,16 @@ async fn test_put_preferences_multiple_same_type() {
     let body: Value = resp.json().await.unwrap();
     let prefs_arr = body["preferences"].as_array().unwrap();
     assert_eq!(prefs_arr.len(), 3);
-    let adult_pref = prefs_arr
-        .iter()
-        .find(|p| p.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.actor.defs#adultContentPref"));
+    let adult_pref = prefs_arr.iter().find(|p| {
+        p.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.actor.defs#adultContentPref")
+    });
     assert!(adult_pref.is_some());
     assert_eq!(adult_pref.unwrap()["enabled"], false);
     let content_label_prefs: Vec<&Value> = prefs_arr
         .iter()
-        .filter(|p| p.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.actor.defs#contentLabelPref"))
+        .filter(|p| {
+            p.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.actor.defs#contentLabelPref")
+        })
         .collect();
     assert_eq!(content_label_prefs.len(), 2);
     let dogs_pref = content_label_prefs

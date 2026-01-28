@@ -66,7 +66,7 @@ pub async fn request_email_update(
         .log_db_err("getting email info")?
         .ok_or(ApiError::AccountNotFound)?;
 
-    let Some(current_email) = user.email else {
+    let Some(_current_email) = user.email else {
         return Err(ApiError::InvalidRequest(
             "account does not have an email address".into(),
         ));
@@ -75,12 +75,16 @@ pub async fn request_email_update(
     let token_required = user.email_verified;
 
     if token_required {
-        let code = crate::auth::verification_token::generate_channel_update_token(
-            &auth.did,
-            "email_update",
-            &current_email.to_lowercase(),
-        );
-        let formatted_code = crate::auth::verification_token::format_token_for_display(&code);
+        let token = crate::auth::email_token::create_email_token(
+            state.cache.as_ref(),
+            auth.did.as_str(),
+            crate::auth::email_token::EmailTokenPurpose::UpdateEmail,
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to create email update token: {:?}", e);
+            ApiError::InternalError(Some("Failed to generate verification code".into()))
+        })?;
 
         if let Some(Json(ref inp)) = input
             && let Some(ref new_email) = inp.new_email
@@ -89,7 +93,7 @@ pub async fn request_email_update(
             if !new_email.is_empty() && crate::api::validation::is_valid_email(&new_email) {
                 let pending = PendingEmailUpdate {
                     new_email,
-                    token_hash: hash_token(&code),
+                    token_hash: hash_token(&token),
                     authorized: false,
                 };
                 if let Ok(json) = serde_json::to_string(&pending) {
@@ -102,12 +106,12 @@ pub async fn request_email_update(
         }
 
         let hostname = pds_hostname();
-        if let Err(e) = crate::comms::comms_repo::enqueue_email_update_token(
+        if let Err(e) = crate::comms::comms_repo::enqueue_short_token_email(
             state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
             user.id,
-            &code,
-            &formatted_code,
+            &token,
+            "email_update",
             hostname,
         )
         .await
@@ -239,9 +243,44 @@ pub async fn update_email(
         ));
     }
 
-    if let Some(ref current) = current_email
-        && new_email == current.to_lowercase()
-    {
+    let email_unchanged = current_email
+        .as_ref()
+        .map(|c| new_email == c.to_lowercase())
+        .unwrap_or(false);
+
+    if email_unchanged {
+        if let Some(email_auth_factor) = input.email_auth_factor {
+            if email_verified {
+                let token = input
+                    .token
+                    .as_ref()
+                    .filter(|t| !t.is_empty())
+                    .ok_or(ApiError::TokenRequired)?;
+
+                crate::auth::email_token::validate_email_token(
+                    state.cache.as_ref(),
+                    did.as_str(),
+                    crate::auth::email_token::EmailTokenPurpose::UpdateEmail,
+                    token,
+                )
+                .await
+                .map_err(|e| match e {
+                    crate::auth::email_token::TokenError::ExpiredToken => {
+                        ApiError::ExpiredToken(None)
+                    }
+                    _ => ApiError::InvalidToken(None),
+                })?;
+            }
+
+            state
+                .infra_repo
+                .upsert_account_preference(user_id, "email_auth_factor", json!(email_auth_factor))
+                .await
+                .map_err(|e| {
+                    error!("Failed to update email_auth_factor preference: {}", e);
+                    ApiError::InternalError(Some("Failed to update 2FA setting".into()))
+                })?;
+        }
         return Ok(EmptyResponse::ok().into_response());
     }
 
@@ -260,34 +299,57 @@ pub async fn update_email(
         }
 
         if !authorized_via_link {
-            let Some(ref t) = input.token else {
-                return Err(ApiError::TokenRequired);
-            };
-            let confirmation_token =
-                crate::auth::verification_token::normalize_token_input(t.trim());
-
-            let current_email_lower = current_email
+            let token = input
+                .token
                 .as_ref()
-                .map(|e| e.to_lowercase())
-                .unwrap_or_default();
+                .filter(|t| !t.is_empty())
+                .ok_or(ApiError::TokenRequired)?;
 
-            let verified = crate::auth::verification_token::verify_channel_update_token(
-                &confirmation_token,
-                "email_update",
-                &current_email_lower,
-            );
+            let short_token_result = crate::auth::email_token::validate_email_token(
+                state.cache.as_ref(),
+                did.as_str(),
+                crate::auth::email_token::EmailTokenPurpose::UpdateEmail,
+                token,
+            )
+            .await;
 
-            match verified {
-                Ok(token_data) => {
-                    if token_data.did != did.as_str() {
-                        return Err(ApiError::InvalidToken(None));
+            if let Err(e) = short_token_result {
+                let confirmation_token =
+                    crate::auth::verification_token::normalize_token_input(token.trim());
+
+                let current_email_lower = current_email
+                    .as_ref()
+                    .map(|e| e.to_lowercase())
+                    .unwrap_or_default();
+
+                let verified = crate::auth::verification_token::verify_channel_update_token(
+                    &confirmation_token,
+                    "email_update",
+                    &current_email_lower,
+                );
+
+                match verified {
+                    Ok(token_data) => {
+                        if token_data.did != did.as_str() {
+                            return Err(ApiError::InvalidToken(None));
+                        }
                     }
-                }
-                Err(crate::auth::verification_token::VerifyError::Expired) => {
-                    return Err(ApiError::ExpiredToken(None));
-                }
-                Err(_) => {
-                    return Err(ApiError::InvalidToken(None));
+                    Err(crate::auth::verification_token::VerifyError::Expired) => {
+                        return Err(match e {
+                            crate::auth::email_token::TokenError::ExpiredToken => {
+                                ApiError::ExpiredToken(None)
+                            }
+                            _ => ApiError::InvalidToken(None),
+                        });
+                    }
+                    Err(_) => {
+                        return Err(match e {
+                            crate::auth::email_token::TokenError::ExpiredToken => {
+                                ApiError::ExpiredToken(None)
+                            }
+                            _ => ApiError::InvalidToken(None),
+                        });
+                    }
                 }
             }
         }
