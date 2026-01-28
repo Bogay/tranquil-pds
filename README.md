@@ -14,7 +14,7 @@ Another excellent PDS is [Cocoon](https://tangled.org/hailey.at/cocoon), written
 
 It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), SSO login and signup, did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), account delegation (letting others manage an account with configurable permission levels), automatic backups (configurable retention and frequency, one-click restore), and a built-in web UI for account management, OAuth consent, repo browsing, and admin.
 
-The PDS itself is a single small binary with no node/npm runtime. It requires postgres and stores blobs on the local filesystem. Valkey is optional (enables distributed rate limiting for multi-node setups). The tradeoff vs the reference PDS's sqlite is that postgres is a battle-tested piece of infra that we already know how to scale, back up, and monitor. 
+The PDS itself is a single small binary with no node/npm runtime. It requires postgres and stores blobs on the local filesystem. Valkey is optional (enables distributed rate limiting for multi-node setups).
 
 ## Quick Start
 
@@ -56,9 +56,14 @@ podman-compose -f docker-compose.prod.yaml up -d
 | [Containers](docs/install-containers.md) | Podman with quadlets or OpenRC |
 | [Kubernetes](docs/install-kubernetes.md) | You know what you're doing |
 
+## Maintainers to ping
+
+- [@lewis.moe](https://bsky.app/profile/did:plc:3fwecdnvtcscjnrx2p4n7alz)
+- [@nel.pet](https://bsky.app/profile/did:plc:h5wsnqetncv6lu2weom35lg2)
+
 ## Thanks
 
-This project is very grateful to [@nel.pet](https://bsky.app/profile/did:plc:h5wsnqetncv6lu2weom35lg2), [@nonbinary.computer](https://bsky.app/profile/did:plc:yfvwmnlztr4dwkb7hwz55r2g), [@juli.ee](https://bsky.app/profile/did:plc:7vimlesenouvuaqvle42yhvo), [@mary.my.id](https://bsky.app/profile/did:plc:ia76kvnndjutgedggx2ibrem), and [@baileytownsend.dev](https://bsky.app/profile/did:plc:rnpkyqnmsw4ipey6eotbdnnf) for their help and their code to lean on.
+This project is very grateful to [@nonbinary.computer](https://bsky.app/profile/did:plc:yfvwmnlztr4dwkb7hwz55r2g), [@juli.ee](https://bsky.app/profile/did:plc:7vimlesenouvuaqvle42yhvo), [@mary.my.id](https://bsky.app/profile/did:plc:ia76kvnndjutgedggx2ibrem), and [@baileytownsend.dev](https://bsky.app/profile/did:plc:rnpkyqnmsw4ipey6eotbdnnf) for their help and their code to lean on.
 
 ## License
 
