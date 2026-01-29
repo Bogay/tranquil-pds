@@ -218,7 +218,7 @@ async fn proxy_handler(
     ) {
         let token = extracted.token;
         let dpop_proof = crate::util::get_header_str(&headers, "DPoP");
-        let http_uri = crate::util::build_full_url(&uri.to_string());
+        let http_uri = crate::util::build_full_url(&format!("/xrpc{}", uri));
 
         match crate::auth::validate_token_with_dpop(
             state.user_repo.as_ref(),
@@ -243,40 +243,66 @@ async fn proxy_handler(
                     return e;
                 }
 
-                if let Some(key_bytes) = auth_user.key_bytes {
-                    match crate::auth::create_service_token(
-                        &auth_user.did,
-                        &resolved.did,
-                        method,
-                        &key_bytes,
-                    ) {
-                        Ok(new_token) => {
-                            if let Ok(val) =
-                                axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))
-                            {
-                                auth_header_val = Some(val);
+                let key_bytes = match auth_user.key_bytes {
+                    Some(kb) => kb,
+                    None => {
+                        match state.user_repo.get_user_info_by_did(&auth_user.did).await {
+                            Ok(Some(info)) => match info.key_bytes {
+                                Some(key_bytes_enc) => {
+                                    match crate::config::decrypt_key(
+                                        &key_bytes_enc,
+                                        info.encryption_version,
+                                    ) {
+                                        Ok(key) => key,
+                                        Err(e) => {
+                                            error!(error = ?e, "Failed to decrypt user key for proxy");
+                                            return ApiError::UpstreamFailure.into_response();
+                                        }
+                                    }
+                                }
+                                None => {
+                                    warn!(did = %auth_user.did, "User has no signing key for proxy");
+                                    return ApiError::UpstreamFailure.into_response();
+                                }
+                            },
+                            Ok(None) => {
+                                warn!(did = %auth_user.did, "User not found for proxy service auth");
+                                return ApiError::UpstreamFailure.into_response();
+                            }
+                            Err(e) => {
+                                error!(error = ?e, "DB error fetching user key for proxy");
+                                return ApiError::UpstreamFailure.into_response();
                             }
                         }
-                        Err(e) => {
-                            warn!("Failed to create service token: {:?}", e);
+                    }
+                };
+
+                match crate::auth::create_service_token(
+                    &auth_user.did,
+                    &resolved.did,
+                    method,
+                    &key_bytes,
+                ) {
+                    Ok(new_token) => {
+                        if let Ok(val) =
+                            axum::http::HeaderValue::from_str(&format!("Bearer {}", new_token))
+                        {
+                            auth_header_val = Some(val);
                         }
+                    }
+                    Err(e) => {
+                        error!("Failed to create service token: {:?}", e);
+                        return ApiError::UpstreamFailure.into_response();
                     }
                 }
             }
             Err(e) => {
                 info!(error = ?e, "Proxy token validation failed, returning error to client");
-                if matches!(
-                    e,
-                    crate::auth::TokenValidationError::OAuthTokenExpired
-                        | crate::auth::TokenValidationError::TokenExpired
-                ) {
-                    let mut response = ApiError::from(e).into_response();
-                    let nonce = crate::oauth::verify::generate_dpop_nonce();
-                    if let Ok(nonce_val) = nonce.parse() {
-                        response.headers_mut().insert("DPoP-Nonce", nonce_val);
-                    }
-                    return response;
+                let mut response = ApiError::from(e).into_response();
+                if let Ok(nonce_val) = crate::oauth::verify::generate_dpop_nonce().parse() {
+                    response.headers_mut().insert("DPoP-Nonce", nonce_val);
                 }
+                return response;
             }
         }
     }

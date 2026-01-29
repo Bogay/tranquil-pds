@@ -142,9 +142,10 @@ fn parse_query_params(query: &str) -> HashMap<String, Vec<String>> {
         .split('&')
         .filter_map(|part| part.split_once('='))
         .fold(HashMap::new(), |mut acc, (key, value)| {
-            acc.entry(key.to_string())
-                .or_default()
-                .push(value.to_string());
+            let decoded = urlencoding::decode(value)
+                .map(|s| s.into_owned())
+                .unwrap_or_else(|_| value.to_string());
+            acc.entry(key.to_string()).or_default().push(decoded);
             acc
         })
 }
@@ -479,5 +480,32 @@ mod tests {
 
         let scope4 = parse_scope("rpc:*?aud=did:web:api.bsky.app");
         assert!(matches!(scope4, ParsedScope::Rpc(_)));
+    }
+
+    #[test]
+    fn test_url_encoded_aud_with_fragment() {
+        let scope =
+            parse_scope("include:app.bsky.authFullApp?aud=did:web:api.bsky.app%23bsky_appview");
+        match scope {
+            ParsedScope::Include(i) => {
+                assert_eq!(i.nsid, "app.bsky.authFullApp");
+                assert_eq!(i.aud, Some("did:web:api.bsky.app#bsky_appview".to_string()));
+            }
+            _ => panic!("Expected Include scope"),
+        }
+
+        let scope2 = parse_scope(
+            "rpc:com.atproto.moderation.createReport?aud=did:web:api.bsky.app%23bsky_appview",
+        );
+        match scope2 {
+            ParsedScope::Rpc(r) => {
+                assert_eq!(
+                    r.lxm,
+                    Some("com.atproto.moderation.createReport".to_string())
+                );
+                assert_eq!(r.aud, Some("did:web:api.bsky.app#bsky_appview".to_string()));
+            }
+            _ => panic!("Expected Rpc scope"),
+        }
     }
 }
