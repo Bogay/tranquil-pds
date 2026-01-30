@@ -2334,7 +2334,12 @@ impl UserRepository for PostgresUserRepository {
         tranquil_db_traits::CreatePasswordAccountResult,
         tranquil_db_traits::CreateAccountError,
     > {
+        tracing::info!(did = %input.did, handle = %input.handle, "create_password_account: starting transaction");
         let mut tx = self.pool.begin().await.map_err(|e: sqlx::Error| {
+            tracing::error!(
+                "create_password_account: failed to begin transaction: {}",
+                e
+            );
             tranquil_db_traits::CreateAccountError::Database(e.to_string())
         })?;
 
@@ -2366,8 +2371,12 @@ impl UserRepository for PostgresUserRepository {
         .await;
 
         let user_id = match user_insert {
-            Ok((id,)) => id,
+            Ok((id,)) => {
+                tracing::info!(did = %input.did, user_id = %id, "create_password_account: user row inserted");
+                id
+            }
             Err(e) => {
+                tracing::error!(did = %input.did, error = %e, "create_password_account: user insert failed");
                 if let Some(db_err) = e.as_database_error()
                     && db_err.code().as_deref() == Some("23505")
                 {
@@ -2455,8 +2464,7 @@ impl UserRepository for PostgresUserRepository {
 
         if let Some(birthdate_pref) = &input.birthdate_pref {
             let _ = sqlx::query!(
-                "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
-                 ON CONFLICT (user_id, name) DO NOTHING",
+                "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)",
                 user_id,
                 "app.bsky.actor.defs#personalDetailsPref",
                 birthdate_pref
@@ -2465,9 +2473,12 @@ impl UserRepository for PostgresUserRepository {
             .await;
         }
 
+        tracing::info!(did = %input.did, user_id = %user_id, "create_password_account: committing transaction");
         tx.commit().await.map_err(|e: sqlx::Error| {
+            tracing::error!(did = %input.did, user_id = %user_id, error = %e, "create_password_account: commit failed");
             tranquil_db_traits::CreateAccountError::Database(e.to_string())
         })?;
+        tracing::info!(did = %input.did, user_id = %user_id, "create_password_account: transaction committed successfully");
 
         Ok(tranquil_db_traits::CreatePasswordAccountResult {
             user_id,
@@ -2716,8 +2727,7 @@ impl UserRepository for PostgresUserRepository {
 
         if let Some(birthdate_pref) = &input.birthdate_pref {
             let _ = sqlx::query!(
-                "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
-                 ON CONFLICT (user_id, name) DO NOTHING",
+                "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)",
                 user_id,
                 "app.bsky.actor.defs#personalDetailsPref",
                 birthdate_pref
@@ -2865,8 +2875,7 @@ impl UserRepository for PostgresUserRepository {
 
         if let Some(birthdate_pref) = &input.birthdate_pref {
             let _ = sqlx::query!(
-                "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)
-                 ON CONFLICT (user_id, name) DO NOTHING",
+                "INSERT INTO account_preferences (user_id, name, value_json) VALUES ($1, $2, $3)",
                 user_id,
                 "app.bsky.actor.defs#personalDetailsPref",
                 birthdate_pref

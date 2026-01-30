@@ -227,13 +227,13 @@ async fn test_update_email_via_notification_prefs() {
         .skip_while(|line| !line.contains("verification code"))
         .nth(1)
         .map(|line| line.trim().to_string())
-        .filter(|line| !line.is_empty() && line.contains('-'))
+        .filter(|line| !line.is_empty())
         .unwrap_or_else(|| {
             body_text
                 .lines()
                 .find(|line| {
                     let trimmed = line.trim();
-                    trimmed.starts_with("MX") && trimmed.contains('-')
+                    trimmed.len() == 11 && trimmed.chars().nth(5) == Some('-')
                 })
                 .map(|s| s.trim().to_string())
                 .unwrap_or_default()

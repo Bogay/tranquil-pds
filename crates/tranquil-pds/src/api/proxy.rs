@@ -245,36 +245,34 @@ async fn proxy_handler(
 
                 let key_bytes = match auth_user.key_bytes {
                     Some(kb) => kb,
-                    None => {
-                        match state.user_repo.get_user_info_by_did(&auth_user.did).await {
-                            Ok(Some(info)) => match info.key_bytes {
-                                Some(key_bytes_enc) => {
-                                    match crate::config::decrypt_key(
-                                        &key_bytes_enc,
-                                        info.encryption_version,
-                                    ) {
-                                        Ok(key) => key,
-                                        Err(e) => {
-                                            error!(error = ?e, "Failed to decrypt user key for proxy");
-                                            return ApiError::UpstreamFailure.into_response();
-                                        }
+                    None => match state.user_repo.get_user_info_by_did(&auth_user.did).await {
+                        Ok(Some(info)) => match info.key_bytes {
+                            Some(key_bytes_enc) => {
+                                match crate::config::decrypt_key(
+                                    &key_bytes_enc,
+                                    info.encryption_version,
+                                ) {
+                                    Ok(key) => key,
+                                    Err(e) => {
+                                        error!(error = ?e, "Failed to decrypt user key for proxy");
+                                        return ApiError::UpstreamFailure.into_response();
                                     }
                                 }
-                                None => {
-                                    warn!(did = %auth_user.did, "User has no signing key for proxy");
-                                    return ApiError::UpstreamFailure.into_response();
-                                }
-                            },
-                            Ok(None) => {
-                                warn!(did = %auth_user.did, "User not found for proxy service auth");
+                            }
+                            None => {
+                                warn!(did = %auth_user.did, "User has no signing key for proxy");
                                 return ApiError::UpstreamFailure.into_response();
                             }
-                            Err(e) => {
-                                error!(error = ?e, "DB error fetching user key for proxy");
-                                return ApiError::UpstreamFailure.into_response();
-                            }
+                        },
+                        Ok(None) => {
+                            warn!(did = %auth_user.did, "User not found for proxy service auth");
+                            return ApiError::UpstreamFailure.into_response();
                         }
-                    }
+                        Err(e) => {
+                            error!(error = ?e, "DB error fetching user key for proxy");
+                            return ApiError::UpstreamFailure.into_response();
+                        }
+                    },
                 };
 
                 match crate::auth::create_service_token(

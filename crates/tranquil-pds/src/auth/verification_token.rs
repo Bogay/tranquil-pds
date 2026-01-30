@@ -296,21 +296,11 @@ pub fn verify_token_signature(token: &str) -> Result<VerificationToken, VerifyEr
 }
 
 pub fn format_token_for_display(token: &str) -> String {
-    token
-        .replace(['-', ' '], "")
-        .chars()
-        .collect::<Vec<_>>()
-        .chunks(4)
-        .map(|chunk| chunk.iter().collect::<String>())
-        .collect::<Vec<_>>()
-        .join("-")
+    token.to_string()
 }
 
 pub fn normalize_token_input(input: &str) -> String {
-    input
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '=')
-        .collect()
+    input.trim().to_string()
 }
 
 #[cfg(test)]
@@ -410,12 +400,12 @@ mod tests {
     fn test_format_token_for_display() {
         let token = "ABCDEFGHIJKLMNOP";
         let formatted = format_token_for_display(token);
-        assert_eq!(formatted, "ABCD-EFGH-IJKL-MNOP");
+        assert_eq!(formatted, "ABCDEFGHIJKLMNOP");
     }
 
     #[test]
     fn test_normalize_token_input() {
-        let input = "ABCD-EFGH IJKL-MNOP";
+        let input = "  ABCDEFGHIJKLMNOP  ";
         let normalized = normalize_token_input(input);
         assert_eq!(normalized, "ABCDEFGHIJKLMNOP");
     }

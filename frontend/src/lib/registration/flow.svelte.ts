@@ -34,7 +34,8 @@ export interface RegistrationFlowState {
   error: string | null;
   submitting: boolean;
   pdsHostname: string;
-  emailInUse: boolean;
+  handleAvailable: boolean | null;
+  checkingHandle: boolean;
   discordInUse: boolean;
   telegramInUse: boolean;
   signalInUse: boolean;
@@ -67,7 +68,8 @@ export function createRegistrationFlow(
     error: null,
     submitting: false,
     pdsHostname,
-    emailInUse: false,
+    handleAvailable: null,
+    checkingHandle: false,
     discordInUse: false,
     telegramInUse: false,
     signalInUse: false,
@@ -105,7 +107,16 @@ export function createRegistrationFlow(
 
   function setError(err: unknown) {
     if (err instanceof ApiError) {
-      state.error = err.message || "An error occurred";
+      const errorMessages: Record<string, string> = {
+        HandleNotAvailable: "This handle is already taken",
+        InvalidHandle: "Invalid handle format",
+        InvalidInviteCode: "Invalid invite code",
+        InviteCodeRequired: "An invite code is required",
+        InvalidEmail: "Invalid email address",
+        InvalidPassword: "Password must be at least 8 characters",
+      };
+      state.error = errorMessages[err.error] || err.message ||
+        "An error occurred";
     } else if (err instanceof Error) {
       state.error = err.message || "An error occurred";
     } else {
@@ -113,16 +124,25 @@ export function createRegistrationFlow(
     }
   }
 
-  async function checkEmailInUse(email: string): Promise<void> {
-    if (!email.trim() || !email.includes("@")) {
-      state.emailInUse = false;
+  async function checkHandleAvailability(handle: string): Promise<void> {
+    if (!handle.trim() || handle.length < 3) {
+      state.handleAvailable = null;
+      state.checkingHandle = false;
       return;
     }
+    state.checkingHandle = true;
     try {
-      const result = await api.checkEmailInUse(email.trim());
-      state.emailInUse = result.inUse;
+      const response = await fetch(
+        `${getPdsEndpoint()}/oauth/sso/check-handle-available?handle=${
+          encodeURIComponent(handle)
+        }`,
+      );
+      const data = await response.json();
+      state.handleAvailable = data.available === true;
     } catch {
-      state.emailInUse = false;
+      state.handleAvailable = null;
+    } finally {
+      state.checkingHandle = false;
     }
   }
 
@@ -522,7 +542,7 @@ export function createRegistrationFlow(
     activateAccount,
     finalizeSession,
     goBack,
-    checkEmailInUse,
+    checkHandleAvailability,
     checkCommsChannelInUse,
 
     setError(msg: string) {

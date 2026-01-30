@@ -605,9 +605,9 @@ pub async fn verify_new_account(client: &Client, did: &str) -> String {
         .and_then(|(i, _)| lines.get(i + 1).map(|s| s.trim().to_string()))
         .or_else(|| {
             body_text
-                .split_whitespace()
-                .find(|word| word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3)
-                .map(|s| s.to_string())
+                .lines()
+                .find(|line| line.trim().starts_with("MX"))
+                .map(|s| s.trim().to_string())
         })
         .unwrap_or_else(|| body_text.clone());
 
@@ -774,11 +774,9 @@ async fn create_account_and_login_internal(client: &Client, make_admin: bool) ->
                 .and_then(|(i, _)| lines.get(i + 1).map(|s: &&str| s.trim().to_string()))
                 .or_else(|| {
                     body_text
-                        .split_whitespace()
-                        .find(|word: &&str| {
-                            word.contains('-') && word.chars().filter(|c| *c == '-').count() >= 3
-                        })
-                        .map(|s: &str| s.to_string())
+                        .lines()
+                        .find(|line| line.trim().starts_with("MX"))
+                        .map(|s| s.trim().to_string())
                 })
                 .unwrap_or_else(|| body_text.clone());
 

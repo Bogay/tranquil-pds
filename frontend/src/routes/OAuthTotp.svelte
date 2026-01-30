@@ -74,9 +74,6 @@
 
 <div class="oauth-totp-container">
   <h1>{$_('oauth.totp.title')}</h1>
-  <p class="subtitle">
-    {$_('oauth.totp.subtitle')}
-  </p>
 
   {#if error}
     <div class="error">{error}</div>
@@ -96,15 +93,11 @@
         autocomplete="one-time-code"
         autocapitalize="characters"
       />
-      <p class="hint">
-        {#if isBackupCode}
-          {$_('oauth.totp.hintBackupCode')}
-        {:else if isTotpCode}
-          {$_('oauth.totp.hintTotpCode')}
-        {:else}
-          {$_('oauth.totp.hintDefault')}
-        {/if}
-      </p>
+      {#if isBackupCode || isTotpCode}
+        <p class="hint">
+          {isBackupCode ? $_('oauth.totp.hintBackupCode') : $_('oauth.totp.hintTotpCode')}
+        </p>
+      {/if}
     </div>
 
     <label class="trust-device-label">
@@ -135,12 +128,7 @@
   }
 
   h1 {
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-7) 0;
+    margin: 0 0 var(--space-6) 0;
   }
 
   form {

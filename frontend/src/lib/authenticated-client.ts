@@ -1,4 +1,10 @@
-import type { AccessToken, Did, EmailAddress, Handle, ScopeSet } from "./types/branded.ts";
+import type {
+  AccessToken,
+  Did,
+  EmailAddress,
+  Handle,
+  ScopeSet,
+} from "./types/branded.ts";
 import type { Session } from "./types/api.ts";
 import type {
   DelegationAuditEntry,

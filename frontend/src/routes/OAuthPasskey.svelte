@@ -119,9 +119,6 @@
 
 <div class="oauth-passkey-container">
   <h1>{t('oauth.passkey.title')}</h1>
-  <p class="subtitle">
-    {t('oauth.passkey.subtitle')}
-  </p>
 
   {#if error}
     <div class="error">{error}</div>
@@ -156,12 +153,7 @@
   }
 
   h1 {
-    margin: 0 0 0.5rem 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0 0 2rem 0;
+    margin: 0 0 1.5rem 0;
   }
 
   .error {

@@ -240,7 +240,9 @@ export class AtprotoClient {
           error: "Unknown",
           message: res.statusText,
         }));
-        const retryError = new Error(retryErr.message || retryErr.error || res.statusText) as
+        const retryError = new Error(
+          retryErr.message || retryErr.error || res.statusText,
+        ) as
           & Error
           & { status: number; error: string };
         retryError.status = res.status;

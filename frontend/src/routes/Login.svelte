@@ -156,74 +156,55 @@
   {:else}
     <header class="page-header">
       <h1>{$_('login.title')}</h1>
-      <p class="subtitle">{savedAccounts.length > 0 ? $_('login.chooseAccount') : $_('login.subtitle')}</p>
+      {#if savedAccounts.length > 0}
+        <p class="subtitle">{$_('login.chooseAccount')}</p>
+      {/if}
     </header>
 
-    <div class="split-layout sidebar-right">
-      <div class="main-section">
-        {#if savedAccounts.length > 0}
-          <div class="saved-accounts">
-            {#each savedAccounts as account}
-              <div
-                class="account-item"
-                class:disabled={submitting}
-                role="button"
-                tabindex="0"
-                onclick={() => !submitting && handleSwitchAccount(account.did)}
-                onkeydown={(e) => e.key === 'Enter' && !submitting && handleSwitchAccount(account.did)}
-              >
-                <div class="account-info">
-                  <span class="account-handle">@{account.handle}</span>
-                  <span class="account-did">{account.did}</span>
-                </div>
-                <button
-                  type="button"
-                  class="forget-btn"
-                  onclick={(e) => handleForgetAccount(account.did, e)}
-                  title={$_('login.removeAccount')}
-                >
-                  &times;
-                </button>
+    <div class="login-content">
+      {#if savedAccounts.length > 0}
+        <div class="saved-accounts" class:grid={savedAccounts.length > 1}>
+          {#each savedAccounts as account}
+            <div
+              class="account-item"
+              class:disabled={submitting}
+              role="button"
+              tabindex="0"
+              onclick={() => !submitting && handleSwitchAccount(account.did)}
+              onkeydown={(e) => e.key === 'Enter' && !submitting && handleSwitchAccount(account.did)}
+            >
+              <div class="account-info">
+                <span class="account-handle">@{account.handle}</span>
+                <span class="account-did">{account.did}</span>
               </div>
-            {/each}
-          </div>
+              <button
+                type="button"
+                class="forget-btn"
+                onclick={(e) => handleForgetAccount(account.did, e)}
+                title={$_('login.removeAccount')}
+              >
+                &times;
+              </button>
+            </div>
+          {/each}
+        </div>
 
-          <p class="or-divider">{$_('login.signInToAnother')}</p>
-        {/if}
+        <p class="or-divider">{$_('login.signInToAnother')}</p>
+      {/if}
 
-        <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || loading}>
-          {submitting ? $_('login.redirecting') : $_('login.button')}
-        </button>
+      <button type="button" class="oauth-btn" onclick={handleOAuthLogin} disabled={submitting || loading}>
+        {submitting ? $_('login.redirecting') : $_('login.button')}
+      </button>
 
-        <p class="forgot-links">
-          <a href="/app/reset-password">{$_('login.forgotPassword')}</a>
-          <span class="separator">&middot;</span>
-          <a href="/app/request-passkey-recovery">{$_('login.lostPasskey')}</a>
-        </p>
+      <p class="forgot-links">
+        <a href="/app/reset-password">{$_('login.forgotPassword')}</a>
+        <span class="separator">&middot;</span>
+        <a href="/app/request-passkey-recovery">{$_('login.lostPasskey')}</a>
+      </p>
 
-        <p class="link-text">
-          {$_('login.noAccount')} <a href="/app/register">{$_('login.createAccount')}</a>
-        </p>
-      </div>
-
-      <aside class="info-panel">
-        {#if savedAccounts.length > 0}
-          <h3>{$_('login.infoSavedAccountsTitle')}</h3>
-          <p>{$_('login.infoSavedAccountsDesc')}</p>
-
-          <h3>{$_('login.infoNewAccountTitle')}</h3>
-          <p>{$_('login.infoNewAccountDesc')}</p>
-        {:else}
-          <h3>{$_('login.infoSecureSignInTitle')}</h3>
-          <p>{$_('login.infoSecureSignInDesc')}</p>
-
-          <h3>{$_('login.infoStaySignedInTitle')}</h3>
-          <p>{$_('login.infoStaySignedInDesc')}</p>
-        {/if}
-
-        <h3>{$_('login.infoRecoveryTitle')}</h3>
-        <p>{$_('login.infoRecoveryDesc')}</p>
-      </aside>
+      <p class="link-text">
+        {$_('login.noAccount')} <a href="/app/register">{$_('login.createAccount')}</a>
+      </p>
     </div>
   {/if}
 </div>
@@ -237,6 +218,7 @@
 
   .page-header {
     margin-bottom: var(--space-6);
+    text-align: center;
   }
 
   h1 {
@@ -248,8 +230,9 @@
     margin: 0;
   }
 
-  .main-section {
-    min-width: 0;
+  .login-content {
+    max-width: var(--width-md);
+    margin: 0 auto;
   }
 
   form {
@@ -257,6 +240,7 @@
     flex-direction: column;
     gap: var(--space-4);
     max-width: var(--width-sm);
+    margin: 0 auto;
   }
 
   .actions {
@@ -286,6 +270,7 @@
     margin-top: var(--space-4);
     font-size: var(--text-sm);
     color: var(--text-secondary);
+    text-align: center;
   }
 
   .forgot-links a {
@@ -300,6 +285,7 @@
     margin-top: var(--space-6);
     font-size: var(--text-sm);
     color: var(--text-secondary);
+    text-align: center;
   }
 
   .link-text a {
@@ -311,6 +297,17 @@
     flex-direction: column;
     gap: var(--space-3);
     margin-bottom: var(--space-5);
+  }
+
+  .saved-accounts.grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  @media (min-width: 700px) {
+    .saved-accounts.grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
   .account-item {
@@ -339,6 +336,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+    min-width: 0;
   }
 
   .account-handle {
@@ -352,10 +350,10 @@
     font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 250px;
   }
 
   .forget-btn {
+    flex-shrink: 0;
     padding: var(--space-2) var(--space-3);
     background: transparent;
     border: none;

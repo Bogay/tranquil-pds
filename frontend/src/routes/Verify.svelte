@@ -451,13 +451,14 @@
         <p class="field-help">{$_('verify.codeHelp')}</p>
       </div>
 
-      <button type="submit" disabled={submitting || !verificationCode.trim()}>
-        {submitting ? $_('common.verifying') : $_('common.verify')}
-      </button>
-
-      <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
-        {resendingCode ? $_('common.sending') : $_('common.resendCode')}
-      </button>
+      <div class="form-actions">
+        <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
+          {resendingCode ? $_('common.sending') : $_('common.resendCode')}
+        </button>
+        <button type="submit" disabled={submitting || !verificationCode.trim()}>
+          {submitting ? $_('common.verifying') : $_('common.verify')}
+        </button>
+      </div>
     </form>
 
     <p class="link-text">
@@ -517,6 +518,12 @@
   .token-input {
     font-family: var(--font-mono);
     letter-spacing: 0.05em;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
   }
 
   .link-text {

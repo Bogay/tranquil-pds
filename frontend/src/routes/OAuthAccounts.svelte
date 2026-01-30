@@ -124,7 +124,6 @@
     </div>
   {:else}
     <h1>{$_('oauth.accounts.title')}</h1>
-    <p class="subtitle">{$_('oauth.accounts.subtitle')}</p>
 
     <div class="accounts-list">
       {#each accounts as account}
@@ -156,12 +155,7 @@
   }
 
   h1 {
-    margin: 0 0 var(--space-2) 0;
-  }
-
-  .subtitle {
-    color: var(--text-secondary);
-    margin: 0 0 var(--space-7) 0;
+    margin: 0 0 var(--space-6) 0;
   }
 
   .loading {

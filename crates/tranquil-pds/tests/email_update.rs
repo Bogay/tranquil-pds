@@ -17,11 +17,14 @@ async fn get_email_update_token(pool: &PgPool, did: &str) -> String {
         .skip_while(|line| !line.contains("verification code"))
         .nth(1)
         .map(|line| line.trim().to_string())
-        .filter(|line| !line.is_empty() && line.contains('-'))
+        .filter(|line| !line.is_empty())
         .unwrap_or_else(|| {
             body_text
                 .lines()
-                .find(|line| line.trim().starts_with("MX") && line.contains('-'))
+                .find(|line| {
+                    let trimmed = line.trim();
+                    trimmed.len() == 11 && trimmed.chars().nth(5) == Some('-')
+                })
                 .map(|s| s.trim().to_string())
                 .unwrap_or_default()
         })
@@ -271,7 +274,7 @@ async fn test_confirm_email_confirms_existing_email() {
 
     let code = body_text
         .lines()
-        .find(|line| line.trim().starts_with("MX") && line.contains('-'))
+        .find(|line| line.trim().starts_with("MX"))
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
 
@@ -334,7 +337,7 @@ async fn test_confirm_email_rejects_wrong_email() {
 
     let code = body_text
         .lines()
-        .find(|line| line.trim().starts_with("MX") && line.contains('-'))
+        .find(|line| line.trim().starts_with("MX"))
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
 

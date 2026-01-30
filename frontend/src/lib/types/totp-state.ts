@@ -34,16 +34,27 @@ export function qrState(qrBase64: string, totpUri: string): TotpQr {
 }
 
 export function verifyState(state: TotpQr): TotpVerify {
-  return { step: "verify", qrBase64: state.qrBase64, totpUri: state.totpUri } as TotpVerify;
+  return {
+    step: "verify",
+    qrBase64: state.qrBase64,
+    totpUri: state.totpUri,
+  } as TotpVerify;
 }
 
-export function backupState(state: TotpVerify, backupCodes: readonly string[]): TotpBackup {
+export function backupState(
+  state: TotpVerify,
+  backupCodes: readonly string[],
+): TotpBackup {
   void state;
   return { step: "backup", backupCodes } as TotpBackup;
 }
 
 export function goBackToQr(state: TotpVerify): TotpQr {
-  return { step: "qr", qrBase64: state.qrBase64, totpUri: state.totpUri } as TotpQr;
+  return {
+    step: "qr",
+    qrBase64: state.qrBase64,
+    totpUri: state.totpUri,
+  } as TotpQr;
 }
 
 export function finish(_state: TotpBackup): TotpIdle {

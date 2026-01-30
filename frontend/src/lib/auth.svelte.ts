@@ -1,4 +1,4 @@
-import { api, ApiError, typedApi, castSession } from "./api.ts";
+import { api, ApiError, castSession, typedApi } from "./api.ts";
 import type {
   CreateAccountParams,
   CreateAccountResult,

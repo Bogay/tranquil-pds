@@ -253,7 +253,9 @@ export type { AppPassword, DidDocument, InviteCodeInfo as InviteCode, Session };
 export type { DidType, VerificationChannel };
 
 function buildContactState(s: Record<string, unknown>): ContactState {
-  const preferredChannel = s.preferredChannel as VerificationChannel | undefined;
+  const preferredChannel = s.preferredChannel as
+    | VerificationChannel
+    | undefined;
   const email = s.email ? unsafeAsEmail(s.email as string) : undefined;
 
   if (preferredChannel) {
@@ -319,7 +321,7 @@ export function castSession(raw: unknown): Session {
   };
 }
 
-function castDelegationController(raw: unknown): DelegationController {
+function _castDelegationController(raw: unknown): DelegationController {
   const c = raw as Record<string, unknown>;
   return {
     did: unsafeAsDid(c.did as string),
@@ -328,7 +330,7 @@ function castDelegationController(raw: unknown): DelegationController {
   };
 }
 
-function castDelegationControlledAccount(
+function _castDelegationControlledAccount(
   raw: unknown,
 ): DelegationControlledAccount {
   const a = raw as Record<string, unknown>;
@@ -339,7 +341,7 @@ function castDelegationControlledAccount(
   };
 }
 
-function castDelegationAuditEntry(raw: unknown): DelegationAuditEntry {
+function _castDelegationAuditEntry(raw: unknown): DelegationAuditEntry {
   const e = raw as Record<string, unknown>;
   return {
     id: e.id as string,
@@ -351,7 +353,7 @@ function castDelegationAuditEntry(raw: unknown): DelegationAuditEntry {
   };
 }
 
-function castSsoLinkedAccount(raw: unknown): SsoLinkedAccount {
+function _castSsoLinkedAccount(raw: unknown): SsoLinkedAccount {
   const a = raw as Record<string, unknown>;
   return {
     id: a.id as string,

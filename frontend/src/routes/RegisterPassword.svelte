@@ -25,6 +25,18 @@
   let flow = $state<ReturnType<typeof createRegistrationFlow> | null>(null)
   let confirmPassword = $state('')
   let clientName = $state<string | null>(null)
+  let checkHandleTimeout: ReturnType<typeof setTimeout> | null = null
+
+  $effect(() => {
+    if (!flow) return
+    const handle = flow.info.handle
+    if (checkHandleTimeout) {
+      clearTimeout(checkHandleTimeout)
+    }
+    if (handle.length >= 3 && !handle.includes('.')) {
+      checkHandleTimeout = setTimeout(() => flow?.checkHandleAvailability(handle), 400)
+    }
+  })
 
   $effect(() => {
     if (!serverInfoLoaded) {
@@ -176,7 +188,7 @@
         body: JSON.stringify({
           request_uri: requestUri,
           did: flow.account.did,
-          app_password: flow.account.appPassword,
+          app_password: flow.account.appPassword || flow.info.password,
         }),
       })
 
@@ -226,18 +238,36 @@
     return did.replace('did:web:', '').replace(/%3A/g, ':')
   }
 
-  function getSubtitle(): string {
-    if (!flow) return ''
-    switch (flow.state.step) {
-      case 'info': return $_('register.subtitle')
-      case 'key-choice': return $_('register.subtitleKeyChoice')
-      case 'initial-did-doc': return $_('register.subtitleInitialDidDoc')
-      case 'creating': return $_('common.creating')
-      case 'verify': return $_('register.subtitleVerify', { values: { channel: channelLabel(flow.info.verificationChannel) } })
-      case 'updated-did-doc': return $_('register.subtitleUpdatedDidDoc')
-      case 'activating': return $_('register.subtitleActivating')
-      case 'redirect-to-dashboard': return $_('register.subtitleComplete')
-      default: return ''
+  async function handleCancel() {
+    const requestUri = getRequestUriFromUrl()
+    if (!requestUri) {
+      window.history.back()
+      return
+    }
+
+    try {
+      const response = await fetch('/oauth/authorize/deny', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ request_uri: requestUri })
+      })
+
+      if (!response.ok) {
+        window.history.back()
+        return
+      }
+
+      const data = await response.json()
+      if (data.redirect_uri) {
+        window.location.href = data.redirect_uri
+      } else {
+        window.history.back()
+      }
+    } catch {
+      window.history.back()
     }
   }
 </script>
@@ -245,9 +275,8 @@
 <div class="page">
   <header class="page-header">
     <h1>{$_('register.title')}</h1>
-    <p class="subtitle">{getSubtitle()}</p>
     {#if clientName}
-      <p class="client-name">{$_('oauth.login.subtitle')} <strong>{clientName}</strong></p>
+      <p class="subtitle">{$_('oauth.register.subtitle')} <strong>{clientName}</strong></p>
     {/if}
   </header>
 
@@ -273,239 +302,219 @@
 
     <AccountTypeSwitcher active="password" {ssoAvailable} oauthRequestUri={getRequestUriFromUrl()} />
 
-    <div class="split-layout sidebar-right">
-      <div class="form-section">
-        <form onsubmit={handleInfoSubmit}>
-          <div class="field">
-            <label for="handle">{$_('register.handle')}</label>
-            <input
-              id="handle"
-              type="text"
-              bind:value={flow.info.handle}
-              placeholder={$_('register.handlePlaceholder')}
-              disabled={flow.state.submitting}
-              required
-            />
-            {#if flow.info.handle.includes('.')}
-              <p class="hint warning">{$_('register.handleDotWarning')}</p>
-            {:else if fullHandle()}
-              <p class="hint">{$_('register.handleHint', { values: { handle: fullHandle() } })}</p>
-            {/if}
-          </div>
-
-          <div class="form-row">
-            <div class="field">
-              <label for="password">{$_('register.password')}</label>
-              <input
-                id="password"
-                type="password"
-                bind:value={flow.info.password}
-                placeholder={$_('register.passwordPlaceholder')}
-                disabled={flow.state.submitting}
-                required
-                minlength="8"
-              />
-            </div>
-
-            <div class="field">
-              <label for="confirm-password">{$_('register.confirmPassword')}</label>
-              <input
-                id="confirm-password"
-                type="password"
-                bind:value={confirmPassword}
-                placeholder={$_('register.confirmPasswordPlaceholder')}
-                disabled={flow.state.submitting}
-                required
-              />
-            </div>
-          </div>
-
-          <fieldset class="section-fieldset">
-            <legend>{$_('register.identityType')}</legend>
-            <div class="radio-group">
-              <label class="radio-label">
-                <input type="radio" name="didType" value="plc" bind:group={flow.info.didType} disabled={flow.state.submitting} />
-                <span class="radio-content">
-                  <strong>{$_('register.didPlc')}</strong> {$_('register.didPlcRecommended')}
-                  <span class="radio-hint">{$_('register.didPlcHint')}</span>
-                </span>
-              </label>
-
-              <label class="radio-label" class:disabled={serverInfo?.selfHostedDidWebEnabled === false}>
-                <input type="radio" name="didType" value="web" bind:group={flow.info.didType} disabled={flow.state.submitting || serverInfo?.selfHostedDidWebEnabled === false} />
-                <span class="radio-content">
-                  <strong>{$_('register.didWeb')}</strong>
-                  {#if serverInfo?.selfHostedDidWebEnabled === false}
-                    <span class="radio-hint disabled-hint">{$_('register.didWebDisabledHint')}</span>
-                  {:else}
-                    <span class="radio-hint">{$_('register.didWebHint')}</span>
-                  {/if}
-                </span>
-              </label>
-
-              <label class="radio-label">
-                <input type="radio" name="didType" value="web-external" bind:group={flow.info.didType} disabled={flow.state.submitting} />
-                <span class="radio-content">
-                  <strong>{$_('register.didWebBYOD')}</strong>
-                  <span class="radio-hint">{$_('register.didWebBYODHint')}</span>
-                </span>
-              </label>
-            </div>
-
-            {#if flow.info.didType === 'web'}
-              <div class="warning-box">
-                <strong>{$_('register.didWebWarningTitle')}</strong>
-                <ul>
-                  <li><strong>{$_('register.didWebWarning1')}</strong> {$_('register.didWebWarning1Detail', { values: { did: `did:web:yourhandle.${serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}` } })}</li>
-                  <li><strong>{$_('register.didWebWarning2')}</strong> {$_('register.didWebWarning2Detail')}</li>
-                  <li><strong>{$_('register.didWebWarning3')}</strong> {$_('register.didWebWarning3Detail')}</li>
-                  <li><strong>{$_('register.didWebWarning4')}</strong> {$_('register.didWebWarning4Detail')}</li>
-                </ul>
-              </div>
-            {/if}
-
-            {#if flow.info.didType === 'web-external'}
-              <div class="field">
-                <label for="external-did">{$_('register.externalDid')}</label>
-                <input
-                  id="external-did"
-                  type="text"
-                  bind:value={flow.info.externalDid}
-                  placeholder={$_('register.externalDidPlaceholder')}
-                  disabled={flow.state.submitting}
-                  required
-                />
-                <p class="hint">{$_('register.externalDidHint')}</p>
-              </div>
-            {/if}
-          </fieldset>
-
-          <fieldset class="section-fieldset">
-            <legend>{$_('register.contactMethod')}</legend>
-            <div class="contact-fields">
-              <div class="field">
-                <label for="verification-channel">{$_('register.verificationMethod')}</label>
-                <select id="verification-channel" bind:value={flow.info.verificationChannel} disabled={flow.state.submitting}>
-                  <option value="email">{$_('register.email')}</option>
-                  <option value="discord" disabled={!isChannelAvailable('discord')}>
-                    {$_('register.discord')}{isChannelAvailable('discord') ? '' : ` (${$_('register.notConfigured')})`}
-                  </option>
-                  <option value="telegram" disabled={!isChannelAvailable('telegram')}>
-                    {$_('register.telegram')}{isChannelAvailable('telegram') ? '' : ` (${$_('register.notConfigured')})`}
-                  </option>
-                  <option value="signal" disabled={!isChannelAvailable('signal')}>
-                    {$_('register.signal')}{isChannelAvailable('signal') ? '' : ` (${$_('register.notConfigured')})`}
-                  </option>
-                </select>
-              </div>
-
-              {#if flow.info.verificationChannel === 'email'}
-                <div class="field">
-                  <label for="email">{$_('register.emailAddress')}</label>
-                  <input
-                    id="email"
-                    type="email"
-                    bind:value={flow.info.email}
-                    onblur={() => flow?.checkEmailInUse(flow.info.email)}
-                    placeholder={$_('register.emailPlaceholder')}
-                    disabled={flow.state.submitting}
-                    required
-                  />
-                  {#if flow.state.emailInUse}
-                    <p class="hint warning">{$_('register.emailInUseWarning')}</p>
-                  {/if}
-                </div>
-              {:else if flow.info.verificationChannel === 'discord'}
-                <div class="field">
-                  <label for="discord-id">{$_('register.discordId')}</label>
-                  <input
-                    id="discord-id"
-                    type="text"
-                    bind:value={flow.info.discordId}
-                    onblur={() => flow?.checkCommsChannelInUse('discord', flow.info.discordId ?? '')}
-                    placeholder={$_('register.discordIdPlaceholder')}
-                    disabled={flow.state.submitting}
-                    required
-                  />
-                  <p class="hint">{$_('register.discordIdHint')}</p>
-                  {#if flow.state.discordInUse}
-                    <p class="hint warning">{$_('register.discordInUseWarning')}</p>
-                  {/if}
-                </div>
-              {:else if flow.info.verificationChannel === 'telegram'}
-                <div class="field">
-                  <label for="telegram-username">{$_('register.telegramUsername')}</label>
-                  <input
-                    id="telegram-username"
-                    type="text"
-                    bind:value={flow.info.telegramUsername}
-                    onblur={() => flow?.checkCommsChannelInUse('telegram', flow.info.telegramUsername ?? '')}
-                    placeholder={$_('register.telegramUsernamePlaceholder')}
-                    disabled={flow.state.submitting}
-                    required
-                  />
-                  {#if flow.state.telegramInUse}
-                    <p class="hint warning">{$_('register.telegramInUseWarning')}</p>
-                  {/if}
-                </div>
-              {:else if flow.info.verificationChannel === 'signal'}
-                <div class="field">
-                  <label for="signal-number">{$_('register.signalNumber')}</label>
-                  <input
-                    id="signal-number"
-                    type="tel"
-                    bind:value={flow.info.signalNumber}
-                    onblur={() => flow?.checkCommsChannelInUse('signal', flow.info.signalNumber ?? '')}
-                    placeholder={$_('register.signalNumberPlaceholder')}
-                    disabled={flow.state.submitting}
-                    required
-                  />
-                  <p class="hint">{$_('register.signalNumberHint')}</p>
-                  {#if flow.state.signalInUse}
-                    <p class="hint warning">{$_('register.signalInUseWarning')}</p>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </fieldset>
-
-          {#if serverInfo?.inviteCodeRequired}
-            <div class="field">
-              <label for="invite-code">{$_('register.inviteCode')} <span class="required">{$_('register.inviteCodeRequired')}</span></label>
-              <input
-                id="invite-code"
-                type="text"
-                bind:value={flow.info.inviteCode}
-                placeholder={$_('register.inviteCodePlaceholder')}
-                disabled={flow.state.submitting}
-                required
-              />
-            </div>
-          {/if}
-
-          <button type="submit" disabled={flow.state.submitting}>
-            {flow.state.submitting ? $_('common.creating') : $_('register.createButton')}
-          </button>
-        </form>
-
-        <div class="form-links">
-          <p class="link-text">
-            {$_('register.alreadyHaveAccount')} <a href={getFullUrl(routes.login)}>{$_('register.signIn')}</a>
-          </p>
-        </div>
+    <form class="register-form" onsubmit={handleInfoSubmit}>
+      <div class="field">
+        <label for="handle">{$_('register.handle')}</label>
+        <input
+          id="handle"
+          type="text"
+          bind:value={flow.info.handle}
+          placeholder={$_('register.handlePlaceholder')}
+          disabled={flow.state.submitting}
+          required
+        />
+        {#if flow.info.handle.includes('.')}
+          <p class="hint warning">{$_('register.handleDotWarning')}</p>
+        {:else if flow.state.checkingHandle}
+          <p class="hint">{$_('common.checking')}</p>
+        {:else if flow.state.handleAvailable === false}
+          <p class="hint warning">{$_('register.handleTaken')}</p>
+        {:else if flow.state.handleAvailable === true && fullHandle()}
+          <p class="hint success">{$_('register.handleHint', { values: { handle: fullHandle() } })}</p>
+        {:else if fullHandle()}
+          <p class="hint">{$_('register.handleHint', { values: { handle: fullHandle() } })}</p>
+        {/if}
       </div>
 
-      <aside class="info-panel">
-        <h3>{$_('register.identityHint')}</h3>
-        <p>{$_('register.infoIdentityDesc')}</p>
+      <div class="field">
+        <label for="password">{$_('register.password')}</label>
+        <input
+          id="password"
+          type="password"
+          bind:value={flow.info.password}
+          placeholder={$_('register.passwordPlaceholder')}
+          disabled={flow.state.submitting}
+          required
+          minlength="8"
+        />
+      </div>
 
-        <h3>{$_('register.contactMethodHint')}</h3>
-        <p>{$_('register.infoContactDesc')}</p>
+      <div class="field">
+        <label for="confirm-password">{$_('register.confirmPassword')}</label>
+        <input
+          id="confirm-password"
+          type="password"
+          bind:value={confirmPassword}
+          placeholder={$_('register.confirmPasswordPlaceholder')}
+          disabled={flow.state.submitting}
+          required
+        />
+      </div>
 
-        <h3>{$_('register.infoNextTitle')}</h3>
-        <p>{$_('register.infoNextDesc')}</p>
-      </aside>
-    </div>
+      <div class="field">
+        <label for="verification-channel">{$_('register.verificationMethod')}</label>
+        <select id="verification-channel" bind:value={flow.info.verificationChannel} disabled={flow.state.submitting}>
+          <option value="email">{$_('register.email')}</option>
+          {#if isChannelAvailable('discord')}
+            <option value="discord">{$_('register.discord')}</option>
+          {/if}
+          {#if isChannelAvailable('telegram')}
+            <option value="telegram">{$_('register.telegram')}</option>
+          {/if}
+          {#if isChannelAvailable('signal')}
+            <option value="signal">{$_('register.signal')}</option>
+          {/if}
+        </select>
+      </div>
+
+      {#if flow.info.verificationChannel === 'email'}
+        <div class="field">
+          <label for="email">{$_('register.emailAddress')}</label>
+          <input
+            id="email"
+            type="email"
+            bind:value={flow.info.email}
+            placeholder={$_('register.emailPlaceholder')}
+            disabled={flow.state.submitting}
+            required
+          />
+        </div>
+      {:else if flow.info.verificationChannel === 'discord'}
+        <div class="field">
+          <label for="discord-id">{$_('register.discordId')}</label>
+          <input
+            id="discord-id"
+            type="text"
+            bind:value={flow.info.discordId}
+            onblur={() => flow?.checkCommsChannelInUse('discord', flow.info.discordId ?? '')}
+            placeholder={$_('register.discordIdPlaceholder')}
+            disabled={flow.state.submitting}
+            required
+          />
+          <p class="hint">{$_('register.discordIdHint')}</p>
+          {#if flow.state.discordInUse}
+            <p class="hint warning">{$_('register.discordInUseWarning')}</p>
+          {/if}
+        </div>
+      {:else if flow.info.verificationChannel === 'telegram'}
+        <div class="field">
+          <label for="telegram-username">{$_('register.telegramUsername')}</label>
+          <input
+            id="telegram-username"
+            type="text"
+            bind:value={flow.info.telegramUsername}
+            onblur={() => flow?.checkCommsChannelInUse('telegram', flow.info.telegramUsername ?? '')}
+            placeholder={$_('register.telegramUsernamePlaceholder')}
+            disabled={flow.state.submitting}
+            required
+          />
+          {#if flow.state.telegramInUse}
+            <p class="hint warning">{$_('register.telegramInUseWarning')}</p>
+          {/if}
+        </div>
+      {:else if flow.info.verificationChannel === 'signal'}
+        <div class="field">
+          <label for="signal-number">{$_('register.signalNumber')}</label>
+          <input
+            id="signal-number"
+            type="tel"
+            bind:value={flow.info.signalNumber}
+            onblur={() => flow?.checkCommsChannelInUse('signal', flow.info.signalNumber ?? '')}
+            placeholder={$_('register.signalNumberPlaceholder')}
+            disabled={flow.state.submitting}
+            required
+          />
+          <p class="hint">{$_('register.signalNumberHint')}</p>
+          {#if flow.state.signalInUse}
+            <p class="hint warning">{$_('register.signalInUseWarning')}</p>
+          {/if}
+        </div>
+      {/if}
+
+      <fieldset class="identity-section">
+        <legend>{$_('register.identityType')}</legend>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="didType" value="plc" bind:group={flow.info.didType} disabled={flow.state.submitting} />
+            <span class="radio-content">
+              <strong>{$_('register.didPlc')}</strong>
+              <span class="radio-hint">{$_('register.didPlcHint')}</span>
+            </span>
+          </label>
+
+          <label class="radio-label" class:disabled={serverInfo?.selfHostedDidWebEnabled === false}>
+            <input type="radio" name="didType" value="web" bind:group={flow.info.didType} disabled={flow.state.submitting || serverInfo?.selfHostedDidWebEnabled === false} />
+            <span class="radio-content">
+              <strong>{$_('register.didWeb')}</strong>
+              {#if serverInfo?.selfHostedDidWebEnabled === false}
+                <span class="radio-hint disabled-hint">{$_('register.didWebDisabledHint')}</span>
+              {:else}
+                <span class="radio-hint">{$_('register.didWebHint')}</span>
+              {/if}
+            </span>
+          </label>
+
+          <label class="radio-label">
+            <input type="radio" name="didType" value="web-external" bind:group={flow.info.didType} disabled={flow.state.submitting} />
+            <span class="radio-content">
+              <strong>{$_('register.didWebBYOD')}</strong>
+              <span class="radio-hint">{$_('register.didWebBYODHint')}</span>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+
+      {#if flow.info.didType === 'web'}
+        <div class="warning-box">
+          <strong>{$_('register.didWebWarningTitle')}</strong>
+          <ul>
+            <li><strong>{$_('register.didWebWarning1')}</strong> {$_('register.didWebWarning1Detail', { values: { did: `did:web:yourhandle.${serverInfo?.availableUserDomains?.[0] || 'this-pds.com'}` } })}</li>
+            <li><strong>{$_('register.didWebWarning2')}</strong> {$_('register.didWebWarning2Detail')}</li>
+            {#if $_('register.didWebWarning3')}
+              <li><strong>{$_('register.didWebWarning3')}</strong> {$_('register.didWebWarning3Detail')}</li>
+            {/if}
+          </ul>
+        </div>
+      {/if}
+
+      {#if flow.info.didType === 'web-external'}
+        <div class="field">
+          <label for="external-did">{$_('register.externalDid')}</label>
+          <input
+            id="external-did"
+            type="text"
+            bind:value={flow.info.externalDid}
+            placeholder={$_('register.externalDidPlaceholder')}
+            disabled={flow.state.submitting}
+            required
+          />
+          <p class="hint">{$_('register.externalDidHint')}</p>
+        </div>
+      {/if}
+
+      {#if serverInfo?.inviteCodeRequired}
+        <div class="field">
+          <label for="invite-code">{$_('register.inviteCode')}</label>
+          <input
+            id="invite-code"
+            type="text"
+            bind:value={flow.info.inviteCode}
+            placeholder={$_('register.inviteCodePlaceholder')}
+            disabled={flow.state.submitting}
+            required
+          />
+        </div>
+      {/if}
+
+      <div class="form-actions">
+        <button type="button" class="secondary" onclick={handleCancel} disabled={flow.state.submitting}>
+          {$_('common.cancel')}
+        </button>
+        <button type="submit" class="primary" disabled={flow.state.submitting || flow.state.handleAvailable === false || flow.state.checkingHandle}>
+          {flow.state.submitting ? $_('common.loading') : $_('common.continue')}
+        </button>
+      </div>
+    </form>
 
   {:else if flow.state.step === 'key-choice'}
     <KeyChoiceStep {flow} />
@@ -543,18 +552,87 @@
 </div>
 
 <style>
-  .client-name {
+  .register-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    max-width: 500px;
+  }
+
+  .identity-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    margin: 0;
+    margin-top: var(--space-5);
+  }
+
+  .identity-section legend {
+    font-weight: var(--font-medium);
+    font-size: var(--text-sm);
+    padding: 0 var(--space-2);
+  }
+
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .radio-label {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    cursor: pointer;
+  }
+
+  .radio-label.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .radio-label input {
+    margin-top: 2px;
+  }
+
+  .radio-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .radio-hint {
+    font-size: var(--text-sm);
     color: var(--text-secondary);
+  }
+
+  .radio-hint.disabled-hint {
+    color: var(--text-muted);
+  }
+
+  .warning-box {
+    padding: var(--space-4);
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-md);
+  }
+
+  .warning-box ul {
+    margin: var(--space-2) 0 0 0;
+    padding-left: var(--space-5);
+  }
+
+  .warning-box li {
     margin-top: var(--space-2);
   }
 
-  form {
+  .form-actions {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
+    gap: var(--space-4);
+    margin-top: var(--space-5);
   }
 
-  button[type="submit"] {
-    margin-top: var(--space-3);
+  .form-actions .primary {
+    flex: 1;
   }
 </style>

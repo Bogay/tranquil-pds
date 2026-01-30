@@ -3277,9 +3277,15 @@ pub async fn register_complete(
         }
     };
 
-    let password_valid = password_hashes.iter().fold(false, |acc, hash| {
+    let mut password_valid = password_hashes.iter().fold(false, |acc, hash| {
         acc | bcrypt::verify(&form.app_password, hash).unwrap_or(false)
     });
+
+    if !password_valid
+        && let Ok(Some(account_hash)) = state.user_repo.get_password_hash_by_did(&did).await
+    {
+        password_valid = bcrypt::verify(&form.app_password, &account_hash).unwrap_or(false);
+    }
 
     if !password_valid {
         return (

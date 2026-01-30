@@ -143,10 +143,6 @@
         <button class="close-btn" onclick={handleClose} aria-label="Close">&times;</button>
       </div>
 
-      <p class="modal-description">
-        {$_('reauth.subtitle')}
-      </p>
-
       {#if error}
         <div class="error-message">{error}</div>
       {/if}
@@ -221,7 +217,6 @@
           </form>
         {:else if activeMethod === 'passkey'}
           <div class="passkey-auth">
-            <p>{$_('reauth.passkeyPrompt')}</p>
             <button onclick={handlePasskeyAuth} disabled={loading}>
               {loading ? $_('reauth.authenticating') : $_('reauth.usePasskey')}
             </button>

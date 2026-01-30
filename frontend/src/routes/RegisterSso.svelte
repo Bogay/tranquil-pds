@@ -94,12 +94,44 @@
       initiating = null
     }
   }
+
+  async function handleCancel() {
+    const requestUri = getRequestUriFromUrl()
+    if (!requestUri) {
+      window.history.back()
+      return
+    }
+
+    try {
+      const response = await fetch('/oauth/authorize/deny', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ request_uri: requestUri })
+      })
+
+      if (!response.ok) {
+        window.history.back()
+        return
+      }
+
+      const data = await response.json()
+      if (data.redirect_uri) {
+        window.location.href = data.redirect_uri
+      } else {
+        window.history.back()
+      }
+    } catch {
+      window.history.back()
+    }
+  }
 </script>
 
 <div class="page">
   <header class="page-header">
     <h1>{$_('register.title')}</h1>
-    <p class="subtitle">{$_('register.ssoSubtitle')}</p>
   </header>
 
   <div class="migrate-callout">
@@ -125,7 +157,6 @@
     </div>
   {:else}
     <div class="provider-list">
-      <p class="provider-hint">{$_('register.ssoHint')}</p>
       <div class="provider-grid">
         {#each providers as provider}
           <button
@@ -147,10 +178,10 @@
     </div>
   {/if}
 
-  <div class="form-links">
-    <p class="link-text">
-      {$_('register.alreadyHaveAccount')} <a href={getFullUrl(routes.login)}>{$_('register.signIn')}</a>
-    </p>
+  <div class="form-actions">
+    <button type="button" class="secondary" onclick={handleCancel} disabled={initiating !== null}>
+      {$_('common.cancel')}
+    </button>
   </div>
 </div>
 
@@ -162,16 +193,7 @@
   }
 
   .provider-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
     max-width: var(--width-md);
-  }
-
-  .provider-hint {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-    margin: 0 0 var(--space-4) 0;
   }
 
   .provider-grid {
@@ -215,5 +237,10 @@
 
   .provider-button .provider-name {
     flex: 1;
+  }
+
+  .form-actions {
+    margin-top: var(--space-5);
+    max-width: var(--width-md);
   }
 </style>

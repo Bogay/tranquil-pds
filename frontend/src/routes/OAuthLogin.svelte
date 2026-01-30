@@ -8,6 +8,9 @@
     type WebAuthnRequestOptionsResponse,
   } from '../lib/webauthn'
   import SsoIcon from '../components/SsoIcon.svelte'
+  import { getRandomHandle } from '../components/RandomHandle.svelte'
+
+  const handlePlaceholder = getRandomHandle()
 
   interface SsoProvider {
     provider: string
@@ -345,13 +348,9 @@
 <div class="page-sm">
   <header class="page-header">
     <h1>{$_('oauth.login.title')}</h1>
-    <p class="subtitle">
-      {#if clientName}
-        {$_('oauth.login.subtitle')} <strong>{clientName}</strong>
-      {:else}
-        {$_('oauth.login.subtitle')}
-      {/if}
-    </p>
+    {#if clientName}
+      <p class="subtitle">{$_('oauth.login.subtitle')} <strong>{clientName}</strong></p>
+    {/if}
   </header>
 
   {#if error}
@@ -365,7 +364,7 @@
         id="username"
         type="text"
         bind:value={username}
-        placeholder={$_('register.emailPlaceholder')}
+        placeholder={handlePlaceholder}
         disabled={submitting}
         required
         autocomplete="username"
@@ -426,7 +425,6 @@
               {/if}
             </span>
           </button>
-          <p class="method-hint">{$_('oauth.login.passkeyHint')}</p>
         </div>
 
         {#if hasPassword}
@@ -572,11 +570,6 @@
     letter-spacing: 0.05em;
   }
 
-  .method-hint {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-  }
 
   .method-divider {
     display: flex;
