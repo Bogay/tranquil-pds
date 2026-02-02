@@ -11,7 +11,7 @@ use tranquil_types::RequestId;
 
 use super::config::SsoConfig;
 use crate::api::error::ApiError;
-use crate::auth::extractor::extract_bearer_token_from_header;
+use crate::auth::extractor::extract_auth_token_from_header;
 use crate::auth::{generate_app_password, validate_bearer_token_cached};
 use crate::rate_limit::{
     AccountCreationLimit, RateLimited, SsoCallbackLimit, SsoInitiateLimit, SsoUnlinkLimit,
@@ -119,12 +119,12 @@ pub async fn sso_initiate(
             let auth_header = headers
                 .get(axum::http::header::AUTHORIZATION)
                 .and_then(|v| v.to_str().ok());
-            let token = extract_bearer_token_from_header(auth_header)
+            let extracted = extract_auth_token_from_header(auth_header)
                 .ok_or(ApiError::SsoNotAuthenticated)?;
             let auth_user = validate_bearer_token_cached(
                 state.user_repo.as_ref(),
                 state.cache.as_ref(),
-                &token,
+                &extracted.token,
             )
             .await
             .map_err(|_| ApiError::SsoNotAuthenticated)?;

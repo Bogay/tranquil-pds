@@ -1,23 +1,18 @@
 <script lang="ts">
-  import { getAuthState } from '../lib/auth.svelte'
-  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
-  import { api, ApiError } from '../lib/api'
-  import { _, locale } from '../lib/i18n'
-  import type { Session } from '../lib/types/api'
-  import { unsafeAsNsid, unsafeAsRkey } from '../lib/types/branded'
+  import { onMount } from 'svelte'
+  import { _ } from '../../lib/i18n'
+  import { locale } from 'svelte-i18n'
+  import { api, ApiError } from '../../lib/api'
+  import type { Session } from '../../lib/types/api'
+  import { unsafeAsNsid, unsafeAsRkey } from '../../lib/types/branded'
+  import LoadMoreSentinel from '../LoadMoreSentinel.svelte'
 
-  const auth = $derived(getAuthState())
-
-  function getSession(): Session | null {
-    return auth.kind === 'authenticated' ? auth.session : null
+  interface Props {
+    session: Session
   }
 
-  function isLoading(): boolean {
-    return auth.kind === 'loading'
-  }
+  let { session }: Props = $props()
 
-  const session = $derived(getSession())
-  const authLoading = $derived(isLoading())
   type View = 'collections' | 'records' | 'record' | 'create'
   let view = $state<View>('collections')
   let collections = $state<string[]>([])
@@ -29,6 +24,7 @@
   let loadingMore = $state(false)
   let error = $state<{ code?: string; message: string } | null>(null)
   let success = $state<string | null>(null)
+
   function setError(e: unknown) {
     if (e instanceof ApiError) {
       error = { code: e.error, message: e.message }
@@ -38,24 +34,19 @@
       error = { message: $_('repoExplorer.unknownError') }
     }
   }
+
   let newCollection = $state('')
   let newRkey = $state('')
   let recordJson = $state('')
   let jsonError = $state<string | null>(null)
   let saving = $state(false)
   let filter = $state('')
-  $effect(() => {
-    if (!authLoading && !session) {
-      navigate(routes.login)
-    }
+
+  onMount(async () => {
+    await loadCollections()
   })
-  $effect(() => {
-    if (session) {
-      loadCollections()
-    }
-  })
+
   async function loadCollections() {
-    if (!session) return
     loading = true
     error = null
     try {
@@ -67,8 +58,8 @@
       loading = false
     }
   }
+
   async function selectCollection(collection: string) {
-    if (!session) return
     selectedCollection = collection
     records = []
     recordsCursor = undefined
@@ -88,8 +79,9 @@
       loading = false
     }
   }
+
   async function loadMoreRecords() {
-    if (!session || !selectedCollection || !recordsCursor || loadingMore) return
+    if (!selectedCollection || !recordsCursor || loadingMore) return
     loadingMore = true
     try {
       const result = await api.listRecords(session.accessJwt, session.did, unsafeAsNsid(selectedCollection), {
@@ -108,17 +100,13 @@
     }
   }
 
-  $effect(() => {
-    if (view === 'records' && recordsCursor && !loadingMore && !loading) {
-      loadMoreRecords()
-    }
-  })
   async function selectRecord(record: { uri: string; cid: string; value: unknown; rkey: string }) {
     selectedRecord = record
     recordJson = JSON.stringify(record.value, null, 2)
     jsonError = null
     view = 'record'
   }
+
   function startCreate(collection?: string) {
     newCollection = collection || 'app.bsky.feed.post'
     newRkey = ''
@@ -156,6 +144,7 @@
     jsonError = null
     view = 'create'
   }
+
   function validateJson(): unknown | null {
     try {
       const parsed = JSON.parse(recordJson)
@@ -166,9 +155,9 @@
       return null
     }
   }
+
   async function handleCreate(e: Event) {
     e.preventDefault()
-    if (!session) return
     const record = validateJson()
     if (!record) return
     if (!newCollection.trim()) {
@@ -194,9 +183,10 @@
       saving = false
     }
   }
+
   async function handleUpdate(e: Event) {
     e.preventDefault()
-    if (!session || !selectedRecord || !selectedCollection) return
+    if (!selectedRecord || !selectedCollection) return
     const record = validateJson()
     if (!record) return
     saving = true
@@ -224,8 +214,9 @@
       saving = false
     }
   }
+
   async function handleDelete() {
-    if (!session || !selectedRecord || !selectedCollection) return
+    if (!selectedRecord || !selectedCollection) return
     if (!confirm($_('repoExplorer.deleteConfirm', { values: { rkey: selectedRecord.rkey } }))) return
     saving = true
     error = null
@@ -245,6 +236,7 @@
       saving = false
     }
   }
+
   function goBack() {
     if (view === 'record' || view === 'create') {
       if (selectedCollection) {
@@ -259,11 +251,13 @@
     error = null
     success = null
   }
+
   let filteredCollections = $derived(
     filter
       ? collections.filter(c => c.toLowerCase().includes(filter.toLowerCase()))
       : collections
   )
+
   let filteredRecords = $derived(
     filter
       ? records.filter(r =>
@@ -272,6 +266,7 @@
         )
       : records
   )
+
   function groupCollectionsByAuthority(cols: string[]): Map<string, string[]> {
     return cols.reduce((groups, col) => {
       const parts = col.split('.')
@@ -280,42 +275,35 @@
       return groups.set(authority, [...(groups.get(authority) ?? []), name])
     }, new Map<string, string[]>())
   }
+
   let groupedCollections = $derived(groupCollectionsByAuthority(filteredCollections))
 </script>
-<div class="page">
-  <header>
-    <div class="breadcrumb">
-      <a href="/app/dashboard" class="back">{$_('common.backToDashboard')}</a>
-      {#if view !== 'collections'}
-        <span class="sep">/</span>
-        <button class="breadcrumb-link" onclick={goBack}>
-          {view === 'records' || view === 'create' ? $_('repoExplorer.collections') : selectedCollection}
-        </button>
+
+<div class="repo-explorer">
+  <nav class="breadcrumb">
+    {#if view === 'collections'}
+      <span class="breadcrumb-current">{$_('repoExplorer.collections')}</span>
+    {:else}
+      <button type="button" class="breadcrumb-link" onclick={() => { selectedCollection = null; view = 'collections' }}>
+        {$_('repoExplorer.collections')}
+      </button>
+      <span class="breadcrumb-sep">/</span>
+      {#if view === 'records' && selectedCollection}
+        <span class="breadcrumb-current">{selectedCollection}</span>
+      {:else if (view === 'record' || view === 'create') && selectedCollection}
+        <button type="button" class="breadcrumb-link" onclick={() => view = 'records'}>{selectedCollection}</button>
+        <span class="breadcrumb-sep">/</span>
+        {#if view === 'record' && selectedRecord}
+          <span class="breadcrumb-current">{selectedRecord.rkey}</span>
+        {:else}
+          <span class="breadcrumb-current">{$_('repoExplorer.newRecord')}</span>
+        {/if}
+      {:else if view === 'create'}
+        <span class="breadcrumb-current">{$_('repoExplorer.newRecord')}</span>
       {/if}
-      {#if view === 'record' && selectedRecord}
-        <span class="sep">/</span>
-        <span class="current">{selectedRecord.rkey}</span>
-      {/if}
-      {#if view === 'create'}
-        <span class="sep">/</span>
-        <span class="current">{$_('repoExplorer.newRecord')}</span>
-      {/if}
-    </div>
-    <h1>
-      {#if view === 'collections'}
-        {$_('repoExplorer.title')}
-      {:else if view === 'records'}
-        {selectedCollection}
-      {:else if view === 'record'}
-        {$_('repoExplorer.recordDetails')}
-      {:else}
-        {$_('repoExplorer.createRecord')}
-      {/if}
-    </h1>
-    {#if session}
-      <p class="did">{session.did}</p>
     {/if}
-  </header>
+  </nav>
+
   {#if error}
     <div class="message error">
       {#if error.code}
@@ -324,15 +312,13 @@
       <span class="error-message">{error.message}</span>
     </div>
   {/if}
+
   {#if success}
     <div class="message success">{success}</div>
   {/if}
+
   {#if loading}
-    <div class="skeleton-list">
-      {#each Array(4) as _}
-        <div class="skeleton-row"></div>
-      {/each}
-    </div>
+    <div class="loading">{$_('common.loading')}</div>
   {:else if view === 'collections'}
     <div class="toolbar">
       <input
@@ -341,21 +327,22 @@
         bind:value={filter}
         class="filter-input"
       />
-      <button class="primary" onclick={() => startCreate()}>{$_('repoExplorer.createRecord')}</button>
+      <button type="button" class="sm" onclick={() => startCreate()}>{$_('repoExplorer.createRecord')}</button>
     </div>
+
     {#if collections.length === 0}
       <p class="empty">{$_('repoExplorer.noCollectionsYet')}</p>
     {:else}
       <div class="collections">
         {#each [...groupedCollections.entries()] as [authority, nsids]}
           <div class="collection-group">
-            <h3 class="authority">{authority}</h3>
+            <h4 class="authority">{authority}</h4>
             <ul class="nsid-list">
               {#each nsids as nsid}
                 <li>
-                  <button class="collection-link" onclick={() => selectCollection(`${authority}.${nsid}`)}>
+                  <button type="button" class="collection-link" onclick={() => selectCollection(`${authority}.${nsid}`)}>
                     <span class="nsid">{nsid}</span>
-                    <span class="arrow">&rarr;</span>
+                    <span class="arrow">→</span>
                   </button>
                 </li>
               {/each}
@@ -364,6 +351,7 @@
         {/each}
       </div>
     {/if}
+
   {:else if view === 'records'}
     <div class="toolbar">
       <input
@@ -372,15 +360,16 @@
         bind:value={filter}
         class="filter-input"
       />
-      <button class="primary" onclick={() => startCreate(selectedCollection!)}>{$_('repoExplorer.createRecord')}</button>
+      <button type="button" class="sm" onclick={() => startCreate(selectedCollection!)}>{$_('repoExplorer.createRecord')}</button>
     </div>
+
     {#if records.length === 0}
       <p class="empty">{$_('repoExplorer.noRecords')}</p>
     {:else}
       <ul class="record-list">
         {#each filteredRecords as record}
           <li>
-            <button class="record-item" onclick={() => selectRecord(record)}>
+            <button type="button" class="record-item" onclick={() => selectRecord(record)}>
               <div class="record-info">
                 <span class="rkey">{record.rkey}</span>
                 <span class="cid" title={record.cid}>{record.cid.slice(0, 12)}...</span>
@@ -390,20 +379,9 @@
           </li>
         {/each}
       </ul>
-      {#if loadingMore}
-        <div class="skeleton-records">
-          {#each [1, 2, 3] as _}
-            <div class="skeleton-record">
-              <div class="skeleton-record-header">
-                <div class="skeleton-line short"></div>
-                <div class="skeleton-line tiny"></div>
-              </div>
-              <div class="skeleton-preview"></div>
-            </div>
-          {/each}
-        </div>
-      {/if}
+      <LoadMoreSentinel hasMore={!!recordsCursor} loading={loadingMore} onLoadMore={loadMoreRecords} />
     {/if}
+
   {:else if view === 'record' && selectedRecord}
     <div class="record-detail">
       <div class="record-meta">
@@ -429,15 +407,16 @@
           {/if}
         </div>
         <div class="actions">
-          <button type="submit" class="primary" disabled={saving || !!jsonError}>
+          <button type="submit" class="sm" disabled={saving || !!jsonError}>
             {saving ? $_('common.saving') : $_('repoExplorer.updateRecord')}
           </button>
-          <button type="button" class="danger" onclick={handleDelete} disabled={saving}>
+          <button type="button" class="danger-outline sm" onclick={handleDelete} disabled={saving}>
             {$_('common.delete')}
           </button>
         </div>
       </form>
     </div>
+
   {:else if view === 'create'}
     <form class="create-form" onsubmit={handleCreate}>
       <div class="field">
@@ -476,25 +455,20 @@
         {/if}
       </div>
       <div class="actions">
-        <button type="submit" class="primary" disabled={saving || !!jsonError || !newCollection.trim()}>
+        <button type="submit" class="sm" disabled={saving || !!jsonError || !newCollection.trim()}>
           {saving ? $_('common.creating') : $_('repoExplorer.createRecord')}
         </button>
-        <button type="button" class="secondary" onclick={goBack}>
+        <button type="button" class="ghost sm" onclick={goBack}>
           {$_('common.cancel')}
         </button>
       </div>
     </form>
   {/if}
 </div>
-<style>
-  .page {
-    max-width: var(--width-xl);
-    margin: 0 auto;
-    padding: var(--space-7);
-  }
 
-  header {
-    margin-bottom: var(--space-6);
+<style>
+  .repo-explorer {
+    max-width: var(--width-xl);
   }
 
   .breadcrumb {
@@ -502,74 +476,39 @@
     align-items: center;
     gap: var(--space-2);
     font-size: var(--text-sm);
-    margin-bottom: var(--space-2);
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
   }
 
-  .back {
-    color: var(--text-secondary);
-    text-decoration: none;
-    padding: var(--space-1) var(--space-2);
-    margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
-    border-radius: var(--radius-sm);
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-
-  .back:hover {
-    color: var(--accent);
-    background: var(--accent-muted);
-  }
-
-  .back:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  .sep {
+  .breadcrumb-sep {
     color: var(--text-muted);
   }
 
   .breadcrumb-link {
-    background: none;
-    border: none;
-    padding: var(--space-1) var(--space-2);
-    margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
-    color: var(--accent);
+    all: unset;
+    color: var(--text-secondary);
     cursor: pointer;
     font-size: inherit;
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
-    transition: background var(--transition-fast);
+    transition: color var(--transition-normal), background var(--transition-normal);
   }
 
   .breadcrumb-link:hover {
-    background: var(--accent-muted);
-    text-decoration: underline;
+    color: var(--text-primary);
+    background: var(--bg-hover);
   }
 
-  .breadcrumb-link:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  .current {
-    color: var(--text-secondary);
-  }
-
-  h1 {
-    margin: 0;
-    font-size: var(--text-xl);
-  }
-
-  .did {
-    margin: var(--space-1) 0 0 0;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    word-break: break-all;
+  .breadcrumb-current {
+    color: var(--text-primary);
+    font-weight: var(--font-medium);
   }
 
   .message {
     padding: var(--space-4);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
     margin-bottom: var(--space-4);
   }
 
@@ -585,18 +524,22 @@
   .error-code {
     font-family: var(--font-mono);
     font-size: var(--text-sm);
-    opacity: 0.9;
   }
 
   .error-message {
     font-size: var(--text-sm);
-    line-height: 1.5;
   }
 
   .message.success {
     background: var(--success-bg);
     border: 1px solid var(--success-border);
     color: var(--success-text);
+  }
+
+  .loading {
+    color: var(--text-secondary);
+    padding: var(--space-6);
+    text-align: center;
   }
 
   .toolbar {
@@ -620,59 +563,13 @@
     border-color: var(--accent);
   }
 
-  button.primary {
-    padding: var(--space-2) var(--space-4);
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: var(--text-sm);
-  }
-
-  button.primary:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
-  button.primary:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  button.secondary {
-    padding: var(--space-2) var(--space-4);
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: var(--text-sm);
-  }
-
-  button.secondary:hover:not(:disabled) {
-    background: var(--bg-secondary);
-  }
-
-  button.danger {
-    padding: var(--space-2) var(--space-4);
-    background: transparent;
-    color: var(--error-text);
-    border: 1px solid var(--error-text);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: var(--text-sm);
-  }
-
-  button.danger:hover:not(:disabled) {
-    background: var(--error-bg);
-  }
 
   .empty {
     text-align: center;
     color: var(--text-secondary);
     padding: var(--space-8);
     background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
   }
 
   .collections {
@@ -683,7 +580,7 @@
 
   .collection-group {
     background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
     padding: var(--space-4);
   }
 
@@ -709,27 +606,18 @@
     align-items: center;
     width: 100%;
     padding: var(--space-3);
-    background: var(--bg-primary);
+    background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
     color: var(--text-primary);
-    transition: background var(--transition-fast), border-color var(--transition-fast);
+    transition: background var(--transition-normal), border-color var(--transition-normal);
   }
 
   .collection-link:hover {
-    background: var(--bg-secondary);
+    background: var(--bg-hover);
     border-color: var(--accent);
-  }
-
-  .collection-link:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  .collection-link:active {
-    background: var(--bg-tertiary);
   }
 
   .nsid {
@@ -758,27 +646,18 @@
     display: block;
     width: 100%;
     padding: var(--space-4);
-    background: var(--bg-primary);
+    background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     cursor: pointer;
     text-align: left;
     color: var(--text-primary);
-    transition: background var(--transition-fast), border-color var(--transition-fast);
+    transition: background var(--transition-normal), border-color var(--transition-normal);
   }
 
   .record-item:hover {
-    background: var(--bg-secondary);
+    background: var(--bg-hover);
     border-color: var(--accent);
-  }
-
-  .record-item:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  .record-item:active {
-    background: var(--bg-tertiary);
   }
 
   .record-info {
@@ -802,7 +681,7 @@
   .record-preview {
     margin: 0;
     padding: var(--space-2);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     border-radius: var(--radius-md);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
@@ -813,58 +692,16 @@
     overflow: hidden;
   }
 
-  .skeleton-records {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    margin-top: var(--space-2);
-  }
-
-  .skeleton-record {
-    padding: var(--space-4);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-  }
-
-  .skeleton-record-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: var(--space-2);
-  }
-
-  .skeleton-line {
-    height: 14px;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
-  }
-
-  .skeleton-line.short {
-    width: 120px;
-  }
-
-  .skeleton-line.tiny {
-    width: 80px;
-  }
-
-  .skeleton-preview {
-    height: 60px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
-  }
-
   .record-detail {
     display: flex;
     flex-direction: column;
-    gap: var(--space-6);
+    gap: var(--space-5);
   }
 
   .record-meta {
     background: var(--bg-secondary);
     padding: var(--space-4);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
   }
 
   .record-meta dl {
@@ -902,18 +739,6 @@
 
   .field input {
     width: 100%;
-    padding: var(--space-3);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    font-size: var(--text-base);
-    background: var(--bg-input);
-    color: var(--text-primary);
-    box-sizing: border-box;
-  }
-
-  .field input:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   .hint {
@@ -969,31 +794,25 @@
 
   .create-form {
     background: var(--bg-secondary);
-    padding: var(--space-6);
-    border-radius: var(--radius-xl);
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
   }
 
-  .page ::selection {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
+  @media (max-width: 600px) {
+    .toolbar {
+      flex-direction: column;
+    }
 
-  .page ::-moz-selection {
-    background: var(--accent);
-    color: var(--text-inverse);
-  }
+    .record-meta dl {
+      grid-template-columns: 1fr;
+    }
 
-  .skeleton-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
+    .actions {
+      flex-direction: column;
+    }
 
-  .skeleton-row {
-    height: 44px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius-md);
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
+    .actions button {
+      width: 100%;
+    }
   }
-
 </style>

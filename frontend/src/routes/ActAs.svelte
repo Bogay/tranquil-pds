@@ -75,7 +75,7 @@
       return
     }
 
-    const authUrl = `${window.location.origin}/delegation/auth-token`
+    const authUrl = `${window.location.origin}/oauth/delegation/auth-token`
     const body = JSON.stringify({
       request_uri: parData.request_uri,
       delegated_did: did

@@ -50,8 +50,10 @@
     onContinue,
   }: Props = $props()
 
+  const handleTooShort = $derived(handleInput.trim().length > 0 && handleInput.trim().length < 3)
+
   const canContinue = $derived(
-    handleInput.trim() &&
+    handleInput.trim().length >= 3 &&
     email &&
     (authMethod === 'passkey' || password) &&
     handleAvailable !== false
@@ -87,7 +89,9 @@
       {/if}
     </div>
 
-    {#if checkingHandle}
+    {#if handleTooShort}
+      <p class="hint error">{$_('migration.inbound.chooseHandle.handleTooShort')}</p>
+    {:else if checkingHandle}
       <p class="hint">{$_('migration.inbound.chooseHandle.checkingAvailability')}</p>
     {:else if handleAvailable === true}
       <p class="hint" style="color: var(--success-text)">{$_('migration.inbound.chooseHandle.handleAvailable')}</p>

@@ -281,12 +281,6 @@
     color: var(--text-primary);
   }
 
-  .modal-description {
-    padding: var(--space-4) var(--space-6) 0;
-    margin: 0;
-    color: var(--text-secondary);
-  }
-
   .error-message {
     margin: var(--space-4) var(--space-6) 0;
     padding: var(--space-3);
@@ -334,11 +328,6 @@
 
   .passkey-auth {
     text-align: center;
-  }
-
-  .passkey-auth p {
-    margin-bottom: var(--space-4);
-    color: var(--text-secondary);
   }
 
   .modal-content button:not(.tab) {

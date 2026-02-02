@@ -52,7 +52,7 @@ describe("Login", () => {
     it("shows create account link", async () => {
       render(Login);
       await waitFor(() => {
-        expect(screen.getByText(/don't have an account/i)).toBeInTheDocument();
+        expect(screen.getByText(/no account\?/i)).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /create/i })).toHaveAttribute(
           "href",
           "/app/register",

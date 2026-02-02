@@ -325,8 +325,10 @@ function _castDelegationController(raw: unknown): DelegationController {
   const c = raw as Record<string, unknown>;
   return {
     did: unsafeAsDid(c.did as string),
-    granted_scopes: unsafeAsScopeSet(c.granted_scopes as string),
-    added_at: unsafeAsISODate(c.added_at as string),
+    handle: unsafeAsHandle(c.handle as string),
+    grantedScopes: unsafeAsScopeSet((c.granted_scopes ?? c.grantedScopes) as string),
+    grantedAt: unsafeAsISODate((c.granted_at ?? c.grantedAt ?? c.added_at) as string),
+    isActive: (c.is_active ?? c.isActive ?? true) as boolean,
   };
 }
 
@@ -337,19 +339,28 @@ function _castDelegationControlledAccount(
   return {
     did: unsafeAsDid(a.did as string),
     handle: unsafeAsHandle(a.handle as string),
-    granted_scopes: unsafeAsScopeSet(a.granted_scopes as string),
+    grantedScopes: unsafeAsScopeSet((a.granted_scopes ?? a.grantedScopes) as string),
+    grantedAt: unsafeAsISODate((a.granted_at ?? a.grantedAt ?? a.added_at) as string),
   };
 }
 
 function _castDelegationAuditEntry(raw: unknown): DelegationAuditEntry {
   const e = raw as Record<string, unknown>;
+  const actorDid = (e.actor_did ?? e.actorDid) as string;
+  const targetDid = (e.target_did ?? e.targetDid ?? e.delegatedDid) as string | undefined;
+  const createdAt = (e.created_at ?? e.createdAt) as string;
+  const action = (e.action ?? e.actionType) as string;
+  const details = e.details ?? e.actionDetails;
+  const detailsStr = details
+    ? (typeof details === "string" ? details : JSON.stringify(details))
+    : undefined;
   return {
     id: e.id as string,
-    action: e.action as string,
-    actor_did: unsafeAsDid(e.actor_did as string),
-    target_did: e.target_did ? unsafeAsDid(e.target_did as string) : undefined,
-    details: e.details as string | undefined,
-    created_at: unsafeAsISODate(e.created_at as string),
+    action,
+    actor_did: unsafeAsDid(actorDid),
+    target_did: targetDid ? unsafeAsDid(targetDid) : undefined,
+    details: detailsStr,
+    created_at: unsafeAsISODate(createdAt),
   };
 }
 
@@ -1348,16 +1359,85 @@ export const api = {
     return res.json();
   },
 
-  listDelegationControllers(
+  async initiateSsoLink(
     token: AccessToken,
-  ): Promise<Result<{ controllers: DelegationController[] }, ApiError>> {
-    return xrpcResult("_delegation.listControllers", { token });
+    provider: string,
+    requestUri: string,
+  ): Promise<{ redirect_url: string }> {
+    const res = await authenticatedFetch("/oauth/sso/initiate", {
+      method: "POST",
+      token,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider,
+        request_uri: requestUri,
+        action: "link",
+      }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(
+        res.status,
+        errData.error,
+        errData.error_description ?? errData.message,
+        errData.reauthMethods,
+      );
+    }
+    return res.json();
   },
 
-  listDelegationControlledAccounts(
+  async unlinkSsoAccount(
+    token: AccessToken,
+    id: string,
+  ): Promise<{ success: boolean }> {
+    const res = await authenticatedFetch("/oauth/sso/unlink", {
+      method: "POST",
+      token,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({
+        error: "Unknown",
+        message: res.statusText,
+      }));
+      throw new ApiError(
+        res.status,
+        errData.error,
+        errData.error_description ?? errData.message,
+        errData.reauthMethods,
+      );
+    }
+    return res.json();
+  },
+
+  async listDelegationControllers(
+    token: AccessToken,
+  ): Promise<Result<{ controllers: DelegationController[] }, ApiError>> {
+    const result = await xrpcResult<{ controllers: unknown[] }>(
+      "_delegation.listControllers",
+      { token },
+    );
+    if (!result.ok) return result;
+    return ok({
+      controllers: (result.value.controllers ?? []).map(_castDelegationController),
+    });
+  },
+
+  async listDelegationControlledAccounts(
     token: AccessToken,
   ): Promise<Result<{ accounts: DelegationControlledAccount[] }, ApiError>> {
-    return xrpcResult("_delegation.listControlledAccounts", { token });
+    const result = await xrpcResult<{ accounts: unknown[] }>(
+      "_delegation.listControlledAccounts",
+      { token },
+    );
+    if (!result.ok) return result;
+    return ok({
+      accounts: (result.value.accounts ?? []).map(_castDelegationControlledAccount),
+    });
   },
 
   getDelegationScopePresets(): Promise<
@@ -1402,16 +1482,24 @@ export const api = {
     });
   },
 
-  getDelegationAuditLog(
+  async getDelegationAuditLog(
     token: AccessToken,
     limit: number,
     offset: number,
   ): Promise<
     Result<{ entries: DelegationAuditEntry[]; total: number }, ApiError>
   > {
-    return xrpcResult("_delegation.getAuditLog", {
-      token,
-      params: { limit: String(limit), offset: String(offset) },
+    const result = await xrpcResult<{ entries: unknown[]; total: number }>(
+      "_delegation.getAuditLog",
+      {
+        token,
+        params: { limit: String(limit), offset: String(offset) },
+      },
+    );
+    if (!result.ok) return result;
+    return ok({
+      entries: (result.value.entries ?? []).map(_castDelegationAuditEntry),
+      total: result.value.total ?? 0,
     });
   },
 

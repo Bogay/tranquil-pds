@@ -114,6 +114,7 @@ impl BackupRepository for PostgresBackupRepository {
             r#"
             INSERT INTO account_backups (user_id, storage_key, repo_root_cid, repo_rev, block_count, size_bytes)
             VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (storage_key) DO UPDATE SET created_at = NOW()
             RETURNING id
             "#,
             user_id,

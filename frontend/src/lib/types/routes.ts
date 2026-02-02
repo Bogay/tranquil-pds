@@ -5,7 +5,6 @@ export const routes = {
   security: "/security",
   sessions: "/sessions",
   appPasswords: "/app-passwords",
-  trustedDevices: "/trusted-devices",
   inviteCodes: "/invite-codes",
   comms: "/comms",
   repo: "/repo",

@@ -12,13 +12,6 @@
   import RecoverPasskey from './routes/RecoverPasskey.svelte'
   import RequestPasskeyRecovery from './routes/RequestPasskeyRecovery.svelte'
   import Dashboard from './routes/Dashboard.svelte'
-  import AppPasswords from './routes/AppPasswords.svelte'
-  import InviteCodes from './routes/InviteCodes.svelte'
-  import Settings from './routes/Settings.svelte'
-  import Sessions from './routes/Sessions.svelte'
-  import Comms from './routes/Comms.svelte'
-  import RepoExplorer from './routes/RepoExplorer.svelte'
-  import Admin from './routes/Admin.svelte'
   import OAuthConsent from './routes/OAuthConsent.svelte'
   import OAuthLogin from './routes/OAuthLogin.svelte'
   import OAuthAccounts from './routes/OAuthAccounts.svelte'
@@ -30,13 +23,8 @@
   import SsoRegisterComplete from './routes/SsoRegisterComplete.svelte'
   import Register from './routes/Register.svelte'
   import RegisterPassword from './routes/RegisterPassword.svelte'
-  import Security from './routes/Security.svelte'
-  import TrustedDevices from './routes/TrustedDevices.svelte'
-  import Controllers from './routes/Controllers.svelte'
-  import DelegationAudit from './routes/DelegationAudit.svelte'
   import ActAs from './routes/ActAs.svelte'
   import Migration from './routes/Migration.svelte'
-  import DidDocumentEditor from './routes/DidDocumentEditor.svelte'
   import { _ } from './lib/i18n'
   initI18n()
 
@@ -94,8 +82,27 @@
     }
   })
 
+  const dashboardRoutes = new Set([
+    '/dashboard',
+    '/settings',
+    '/security',
+    '/sessions',
+    '/app-passwords',
+    '/comms',
+    '/repo',
+    '/controllers',
+    '/delegation-audit',
+    '/invite-codes',
+    '/did-document',
+    '/admin',
+  ])
+
   function getComponent(path: string) {
-    switch (path) {
+    const pathWithoutQuery = path.split('?')[0]
+    if (dashboardRoutes.has(pathWithoutQuery)) {
+      return Dashboard
+    }
+    switch (pathWithoutQuery) {
       case '/login':
         return Login
       case '/verify':
@@ -106,22 +113,6 @@
         return RecoverPasskey
       case '/request-passkey-recovery':
         return RequestPasskeyRecovery
-      case '/dashboard':
-        return Dashboard
-      case '/app-passwords':
-        return AppPasswords
-      case '/invite-codes':
-        return InviteCodes
-      case '/settings':
-        return Settings
-      case '/sessions':
-        return Sessions
-      case '/comms':
-        return Comms
-      case '/repo':
-        return RepoExplorer
-      case '/admin':
-        return Admin
       case '/oauth/consent':
         return OAuthConsent
       case '/oauth/login':
@@ -147,20 +138,10 @@
         return RegisterSso
       case '/oauth/register-password':
         return RegisterPassword
-      case '/security':
-        return Security
-      case '/trusted-devices':
-        return TrustedDevices
-      case '/controllers':
-        return Controllers
-      case '/delegation-audit':
-        return DelegationAudit
       case '/act-as':
         return ActAs
       case '/migrate':
         return Migration
-      case '/did-document':
-        return DidDocumentEditor
       default:
         return Login
     }

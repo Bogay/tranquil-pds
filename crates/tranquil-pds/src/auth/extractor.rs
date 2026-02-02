@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use axum::{
-    extract::{FromRequestParts, OptionalFromRequestParts},
+    extract::{FromRequestParts, OptionalFromRequestParts, OriginalUri},
     http::{StatusCode, header::AUTHORIZATION, request::Parts},
     response::{IntoResponse, Response},
 };
@@ -295,7 +295,12 @@ async fn extract_auth_internal(
 
     let dpop_proof = crate::util::get_header_str(&parts.headers, "DPoP");
     let method = parts.method.as_str();
-    let uri = build_full_url(&parts.uri.to_string());
+    let original_uri = parts
+        .extensions
+        .get::<OriginalUri>()
+        .map(|u| u.0.path().to_string())
+        .unwrap_or_else(|| parts.uri.path().to_string());
+    let uri = build_full_url(&original_uri);
 
     match validate_bearer_token_for_service_auth(state.user_repo.as_ref(), &extracted.token).await {
         Ok(user) if !user.auth_source.is_oauth() => {

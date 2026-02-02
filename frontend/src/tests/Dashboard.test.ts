@@ -26,8 +26,8 @@ describe("Dashboard", () => {
     });
     it("shows loading state while checking auth", () => {
       const { container } = render(Dashboard);
-      expect(container.querySelector(".skeleton-section")).toBeInTheDocument();
-      expect(container.querySelectorAll(".skeleton-card").length)
+      expect(container.querySelector(".skeleton-header")).toBeInTheDocument();
+      expect(container.querySelectorAll(".skeleton-nav-item").length)
         .toBeGreaterThan(0);
     });
   });
@@ -35,18 +35,13 @@ describe("Dashboard", () => {
     beforeEach(() => {
       setupAuthenticatedUser();
     });
-    it("displays user account info and page structure", async () => {
+    it("displays user account info and sidebar structure", async () => {
       render(Dashboard);
       await waitFor(() => {
-        expect(screen.getByRole("heading", { name: /dashboard/i }))
-          .toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: /account overview/i }))
-          .toBeInTheDocument();
         expect(screen.getAllByText(/@testuser\.test\.tranquil\.dev/).length)
           .toBeGreaterThan(0);
         expect(screen.getByText(/did:web:test\.tranquil\.dev:u:testuser/))
           .toBeInTheDocument();
-        expect(screen.getByText("test@example.com")).toBeInTheDocument();
         expect(screen.getByText("Verified")).toBeInTheDocument();
         expect(screen.getByText("Verified")).toHaveClass("badge", "success");
       });
@@ -59,23 +54,21 @@ describe("Dashboard", () => {
         expect(screen.getByText("Unverified")).toHaveClass("badge", "warning");
       });
     });
-    it("displays all navigation cards", async () => {
+    it("displays sidebar navigation items", async () => {
       render(Dashboard);
       await waitFor(() => {
-        const navCards = [
-          { name: /app passwords/i, href: "/app/app-passwords" },
-          { name: /account settings/i, href: "/app/settings" },
-          { name: /communication preferences/i, href: "/app/comms" },
-          { name: /repository explorer/i, href: "/app/repo" },
+        const navItems = [
+          /general/i,
+          /security/i,
+          /sessions/i,
+          /app passwords/i,
         ];
-        for (const { name, href } of navCards) {
-          const card = screen.getByRole("link", { name });
-          expect(card).toBeInTheDocument();
-          expect(card).toHaveAttribute("href", href);
+        for (const name of navItems) {
+          expect(screen.getByRole("button", { name })).toBeInTheDocument();
         }
       });
     });
-    it("displays invite codes card when invites are required and user is admin", async () => {
+    it("displays invite codes nav when invites are required and user is admin", async () => {
       setupAuthenticatedUser({ isAdmin: true });
       mockEndpoint(
         "com.atproto.server.describeServer",
@@ -84,9 +77,8 @@ describe("Dashboard", () => {
       );
       render(Dashboard);
       await waitFor(() => {
-        const inviteCard = screen.getByRole("link", { name: /invite codes/i });
-        expect(inviteCard).toBeInTheDocument();
-        expect(inviteCard).toHaveAttribute("href", "/app/invite-codes");
+        expect(screen.getByRole("button", { name: /invite codes/i }))
+          .toBeInTheDocument();
       });
     });
   });

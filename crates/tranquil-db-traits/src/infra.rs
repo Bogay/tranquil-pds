@@ -54,6 +54,7 @@ impl From<InviteCodeState> for bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "comms_channel", rename_all = "snake_case")]
 pub enum CommsChannel {
     Email,

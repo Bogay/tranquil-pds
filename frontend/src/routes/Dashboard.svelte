@@ -5,14 +5,28 @@
     switchAccount,
     type SavedAccount,
   } from '../lib/auth.svelte'
-  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
+  import { navigate, routes, getCurrentPath } from '../lib/router.svelte'
   import { _ } from '../lib/i18n'
   import { api } from '../lib/api'
   import { isOk } from '../lib/types/result'
   import { unsafeAsDid, type Did } from '../lib/types/branded'
   import type { Session } from '../lib/types/api'
-  import { isMigrated, isDeactivated, getSessionEmail, isEmailVerified } from '../lib/types/api'
   import { onMount } from 'svelte'
+  import { getServerConfigState } from '../lib/serverConfig.svelte'
+
+  import SettingsContent from '../components/dashboard/SettingsContent.svelte'
+  import SecurityContent from '../components/dashboard/SecurityContent.svelte'
+  import SessionsContent from '../components/dashboard/SessionsContent.svelte'
+  import AppPasswordsContent from '../components/dashboard/AppPasswordsContent.svelte'
+  import CommsContent from '../components/dashboard/CommsContent.svelte'
+  import RepoContent from '../components/dashboard/RepoContent.svelte'
+  import ControllersContent from '../components/dashboard/ControllersContent.svelte'
+  import InviteCodesContent from '../components/dashboard/InviteCodesContent.svelte'
+  import DidDocumentContent from '../components/dashboard/DidDocumentContent.svelte'
+  import AdminContent from '../components/dashboard/AdminContent.svelte'
+  import DelegationAuditContent from '../components/dashboard/DelegationAuditContent.svelte'
+
+  type Section = 'settings' | 'security' | 'sessions' | 'app-passwords' | 'comms' | 'repo' | 'controllers' | 'delegation-audit' | 'invite-codes' | 'did-document' | 'admin'
 
   const auth = $derived(getAuthState())
   let dropdownOpen = $state(false)
@@ -34,10 +48,40 @@
   const session = $derived(getSession())
   const savedAccounts = $derived(getSavedAccounts())
   const loading = $derived(isLoading())
-  const isDidWeb = $derived(session?.did?.startsWith('did:web:') ?? false)
+  const isPdsHostedDidWeb = $derived.by(() => {
+    if (!session?.did?.startsWith('did:web:')) return false
+    const didParts = session.did.split(':')
+    if (didParts.length < 3) return false
+    const didDomain = didParts[2]
+    const hostname = globalThis.location?.hostname
+    if (!hostname) return false
+    return didDomain === hostname || didDomain.endsWith(`.${hostname}`)
+  })
   const otherAccounts = $derived(savedAccounts.filter(a => a.did !== session?.did))
+  let isMobile = $state(true)
+  const serverConfig = $derived(getServerConfigState())
+
+  const currentPath = $derived(getCurrentPath())
+  const currentSection = $derived.by<Section | null>(() => {
+    const path = currentPath.split('?')[0]
+    const sectionMap: Record<string, Section> = {
+      '/settings': 'settings',
+      '/security': 'security',
+      '/sessions': 'sessions',
+      '/app-passwords': 'app-passwords',
+      '/comms': 'comms',
+      '/repo': 'repo',
+      '/controllers': 'controllers',
+      '/delegation-audit': 'delegation-audit',
+      '/invite-codes': 'invite-codes',
+      '/did-document': 'did-document',
+      '/admin': 'admin',
+    }
+    return sectionMap[path] ?? null
+  })
 
   onMount(async () => {
+    isMobile = window.matchMedia('(max-width: 768px)').matches
     try {
       const serverInfo = await api.describeServer()
       inviteCodesEnabled = serverInfo.inviteCodeRequired
@@ -49,6 +93,12 @@
   $effect(() => {
     if (!loading && !session) {
       navigate(routes.login)
+    }
+  })
+
+  $effect(() => {
+    if (session && currentSection === null && !isMobile) {
+      navigate('/settings' as typeof routes.dashboard)
     }
   })
 
@@ -88,235 +138,258 @@
       }
     }
   })
+
+  const sectionRoutes: Record<Section, string> = {
+    'settings': '/settings',
+    'security': '/security',
+    'sessions': '/sessions',
+    'app-passwords': '/app-passwords',
+    'comms': '/comms',
+    'repo': '/repo',
+    'controllers': '/controllers',
+    'delegation-audit': '/delegation-audit',
+    'invite-codes': '/invite-codes',
+    'did-document': '/did-document',
+    'admin': '/admin',
+  }
+
+  function selectSection(section: Section) {
+    navigate(sectionRoutes[section] as typeof routes.dashboard)
+  }
+
+  function goBack() {
+    navigate(routes.dashboard)
+  }
+
+  interface NavItem {
+    id: Section
+    label: string
+    show: boolean
+    highlight?: 'admin' | 'migrated' | 'did-web'
+  }
+
+  const navItems = $derived<NavItem[]>([
+    { id: 'settings', label: $_('dashboard.navSettings'), show: session?.accountKind !== 'migrated' },
+    { id: 'security', label: $_('dashboard.navSecurity'), show: true },
+    { id: 'sessions', label: $_('dashboard.navSessions'), show: true },
+    { id: 'app-passwords', label: $_('dashboard.navAppPasswords'), show: session?.accountKind !== 'migrated' },
+    { id: 'comms', label: $_('dashboard.navComms'), show: session?.accountKind !== 'migrated' },
+    { id: 'repo', label: $_('dashboard.navRepo'), show: session?.accountKind !== 'migrated' },
+    { id: 'controllers', label: $_('dashboard.navDelegation'), show: session?.accountKind !== 'migrated' },
+    { id: 'delegation-audit', label: $_('dashboard.navDelegationAudit'), show: session?.accountKind !== 'migrated' },
+    { id: 'invite-codes', label: $_('dashboard.navInviteCodes'), show: inviteCodesEnabled && (session?.isAdmin ?? false) && session?.accountKind !== 'migrated' },
+    { id: 'did-document', label: $_('dashboard.navDidDocument'), show: isPdsHostedDidWeb || session?.accountKind === 'migrated', highlight: session?.accountKind === 'migrated' ? 'migrated' : 'did-web' },
+    { id: 'admin', label: $_('dashboard.navAdmin'), show: session?.isAdmin ?? false, highlight: 'admin' },
+  ])
+
+  const visibleNavItems = $derived(navItems.filter(item => item.show))
+
+  function getSectionTitle(section: Section): string {
+    const item = navItems.find(i => i.id === section)
+    return item?.label ?? ''
+  }
 </script>
 
 {#if session}
-  <div class="dashboard">
-    <header>
-      <h1>{$_('dashboard.title')}</h1>
-      <div class="account-dropdown">
-        <button class="account-trigger" onclick={toggleDropdown} disabled={switching}>
-          <span class="account-handle">@{session.handle}</span>
-          <span class="dropdown-arrow">{dropdownOpen ? '▲' : '▼'}</span>
-        </button>
-        {#if dropdownOpen}
-          <div class="dropdown-menu">
-            {#if otherAccounts.length > 0}
-              <div class="dropdown-section">
-                <span class="dropdown-label">{$_('dashboard.switchAccount')}</span>
-                {#each otherAccounts as account}
-                  <button type="button" class="dropdown-item" onclick={() => handleSwitchAccount(account.did)}>
-                    @{account.handle}
-                  </button>
-                {/each}
+  <div class="dashboard" class:section-open={currentSection !== null}>
+    <aside class="sidebar" class:hidden-mobile={currentSection !== null}>
+      <header class="sidebar-header">
+        <h1>{serverConfig.serverName || $_('dashboard.title')}</h1>
+        <p class="sidebar-subtitle">{$_('dashboard.accountManager')}</p>
+        <div class="account-section">
+          <div class="account-dropdown">
+            <button class="account-trigger" onclick={toggleDropdown} disabled={switching}>
+              <span class="account-handle">@{session.handle}</span>
+              <span class="dropdown-arrow">{dropdownOpen ? '▲' : '▼'}</span>
+            </button>
+            {#if dropdownOpen}
+              <div class="dropdown-menu">
+                {#if otherAccounts.length > 0}
+                  <div class="dropdown-section">
+                    <span class="dropdown-label">{$_('dashboard.switchAccount')}</span>
+                    {#each otherAccounts as account}
+                      <button type="button" class="dropdown-item" onclick={() => handleSwitchAccount(account.did)}>
+                        @{account.handle}
+                      </button>
+                    {/each}
+                  </div>
+                  <div class="dropdown-divider"></div>
+                {/if}
+                <button type="button" class="dropdown-item" onclick={() => { dropdownOpen = false; navigate(routes.login) }}>
+                  {$_('dashboard.addAnotherAccount')}
+                </button>
+                <div class="dropdown-divider"></div>
+                <button type="button" class="dropdown-item logout-item" onclick={handleLogout}>
+                  {$_('dashboard.signOut', { values: { handle: session.handle } })}
+                </button>
               </div>
-              <div class="dropdown-divider"></div>
             {/if}
-            <button type="button" class="dropdown-item" onclick={() => { dropdownOpen = false; navigate(routes.login) }}>
-              {$_('dashboard.addAnotherAccount')}
-            </button>
-            <div class="dropdown-divider"></div>
-            <button type="button" class="dropdown-item logout-item" onclick={handleLogout}>
-              {$_('dashboard.signOut', { values: { handle: session.handle } })}
-            </button>
           </div>
-        {/if}
-      </div>
-    </header>
+          <div class="account-details">
+            <span class="account-did">{session.did}</span>
+            <div class="account-status">
+              {#if session.isAdmin}
+                <span class="badge admin">{$_('dashboard.admin')}</span>
+              {/if}
+              {#if session.contactKind === 'channel'}
+                {#if session.preferredChannelVerified}
+                  <span class="badge success">{$_('dashboard.verified')}</span>
+                {:else}
+                  <span class="badge warning">{$_('dashboard.unverified')}</span>
+                {/if}
+              {:else if session.contactKind === 'email'}
+                {#if session.emailConfirmed}
+                  <span class="badge success">{$_('dashboard.verified')}</span>
+                {:else}
+                  <span class="badge warning">{$_('dashboard.unverified')}</span>
+                {/if}
+              {/if}
+            </div>
+          </div>
+        </div>
+      </header>
 
-    {#if session.accountKind === 'migrated'}
-      <div class="migrated-banner">
-        <strong>{$_('dashboard.migratedTitle')}</strong>
-        <p>{$_('dashboard.migratedMessage', { values: { pds: session.migratedToPds || 'another PDS' } })}</p>
-      </div>
-    {:else if session.accountKind === 'deactivated'}
-      <div class="deactivated-banner">
-        <strong>{$_('dashboard.deactivatedTitle')}</strong>
-        <p>{$_('dashboard.deactivatedMessage')}</p>
-      </div>
-    {/if}
-
-    <section class="account-overview">
-      <h2>{$_('dashboard.accountOverview')}</h2>
-      <dl>
-        <dt>{$_('dashboard.handle')}</dt>
-        <dd>
-          @{session.handle}
-          {#if session.isAdmin}
-            <span class="badge admin">{$_('dashboard.admin')}</span>
-          {/if}
-          {#if session.accountKind === 'migrated'}
-            <span class="badge migrated">{$_('dashboard.migrated')}</span>
-          {:else if session.accountKind === 'deactivated'}
-            <span class="badge deactivated">{$_('dashboard.deactivated')}</span>
-          {/if}
-        </dd>
-        <dt>{$_('dashboard.did')}</dt>
-        <dd class="mono">{session.did}</dd>
-        {#if session.contactKind === 'channel'}
-          <dt>{$_('dashboard.primaryContact')}</dt>
-          <dd>
-            {#if session.preferredChannel === 'email'}
-              {session.email || $_('register.email')}
-            {:else if session.preferredChannel === 'discord'}
-              {$_('register.discord')}
-            {:else if session.preferredChannel === 'telegram'}
-              {$_('register.telegram')}
-            {:else if session.preferredChannel === 'signal'}
-              {$_('register.signal')}
-            {:else}
-              {session.preferredChannel}
-            {/if}
-            {#if session.preferredChannelVerified}
-              <span class="badge success">{$_('dashboard.verified')}</span>
-            {:else}
-              <span class="badge warning">{$_('dashboard.unverified')}</span>
-            {/if}
-          </dd>
-        {:else if session.contactKind === 'email'}
-          <dt>{$_('register.email')}</dt>
-          <dd>
-            {session.email}
-            {#if session.emailConfirmed}
-              <span class="badge success">{$_('dashboard.verified')}</span>
-            {:else}
-              <span class="badge warning">{$_('dashboard.unverified')}</span>
-            {/if}
-          </dd>
-        {/if}
-      </dl>
-    </section>
-
-    <nav class="nav-grid">
       {#if session.accountKind === 'migrated'}
-        <a href={getFullUrl(routes.didDocument)} class="nav-card migrated-card">
-          <h3>{$_('dashboard.navDidDocument')}</h3>
-          <p>{$_('dashboard.navDidDocumentDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.sessions)} class="nav-card">
-          <h3>{$_('dashboard.navSessions')}</h3>
-          <p>{$_('dashboard.navSessionsDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.security)} class="nav-card">
-          <h3>{$_('dashboard.navSecurity')}</h3>
-          <p>{$_('dashboard.navSecurityDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.settings)} class="nav-card">
-          <h3>{$_('dashboard.navSettings')}</h3>
-          <p>{$_('dashboard.navSettingsDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.migrate)} class="nav-card">
-          <h3>{$_('dashboard.navMigrateAgain')}</h3>
-          <p>{$_('dashboard.navMigrateAgainDesc')}</p>
-        </a>
-      {:else}
-        <a href={getFullUrl(routes.appPasswords)} class="nav-card">
-          <h3>{$_('dashboard.navAppPasswords')}</h3>
-          <p>{$_('dashboard.navAppPasswordsDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.sessions)} class="nav-card">
-          <h3>{$_('dashboard.navSessions')}</h3>
-          <p>{$_('dashboard.navSessionsDesc')}</p>
-        </a>
-        {#if inviteCodesEnabled && session.isAdmin}
-          <a href={getFullUrl(routes.inviteCodes)} class="nav-card">
-            <h3>{$_('dashboard.navInviteCodes')}</h3>
-            <p>{$_('dashboard.navInviteCodesDesc')}</p>
-          </a>
-        {/if}
-        <a href={getFullUrl(routes.settings)} class="nav-card">
-          <h3>{$_('dashboard.navSettings')}</h3>
-          <p>{$_('dashboard.navSettingsDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.security)} class="nav-card">
-          <h3>{$_('dashboard.navSecurity')}</h3>
-          <p>{$_('dashboard.navSecurityDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.comms)} class="nav-card">
-          <h3>{$_('dashboard.navComms')}</h3>
-          <p>{$_('dashboard.navCommsDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.repo)} class="nav-card">
-          <h3>{$_('dashboard.navRepo')}</h3>
-          <p>{$_('dashboard.navRepoDesc')}</p>
-        </a>
-        <a href={getFullUrl(routes.controllers)} class="nav-card">
-          <h3>{$_('dashboard.navDelegation')}</h3>
-          <p>{$_('dashboard.navDelegationDesc')}</p>
-        </a>
-        {#if isDidWeb}
-          <a href={getFullUrl(routes.didDocument)} class="nav-card did-web-card">
-            <h3>{$_('dashboard.navDidDocument')}</h3>
-            <p>{$_('dashboard.navDidDocumentDescActive')}</p>
-          </a>
-        {/if}
-        <a href={getFullUrl(routes.migrate)} class="nav-card">
-          <h3>{$_('migration.navTitle')}</h3>
-          <p>{$_('migration.navDesc')}</p>
-        </a>
-        {#if session.isAdmin}
-          <a href={getFullUrl(routes.admin)} class="nav-card admin-card">
-            <h3>{$_('dashboard.navAdmin')}</h3>
-            <p>{$_('dashboard.navAdminDesc')}</p>
-          </a>
-        {/if}
+        <div class="status-banner migrated">
+          <strong>{$_('dashboard.migratedTitle')}</strong>
+          <p>{$_('dashboard.migratedMessage', { values: { pds: session.migratedToPds || 'another PDS' } })}</p>
+        </div>
+      {:else if session.accountKind === 'deactivated'}
+        <div class="status-banner deactivated">
+          <strong>{$_('dashboard.deactivatedTitle')}</strong>
+          <p>{$_('dashboard.deactivatedMessage')}</p>
+        </div>
       {/if}
-    </nav>
+
+      <nav class="nav-list">
+        {#each visibleNavItems as item}
+          <button
+            type="button"
+            class="nav-item"
+            class:active={currentSection === item.id}
+            class:highlight-admin={item.highlight === 'admin'}
+            class:highlight-migrated={item.highlight === 'migrated'}
+            class:highlight-did-web={item.highlight === 'did-web'}
+            onclick={() => selectSection(item.id)}
+          >
+            <span class="nav-label">{item.label}</span>
+            <span class="nav-chevron">›</span>
+          </button>
+        {/each}
+      </nav>
+    </aside>
+
+    <main class="content" class:hidden-mobile={currentSection === null}>
+      <header class="content-header">
+        <button type="button" class="back-button" onclick={goBack}>
+          <span class="back-arrow">‹</span>
+          <span class="back-text">{serverConfig.serverName || $_('dashboard.title')}</span>
+        </button>
+        <h2>{currentSection ? getSectionTitle(currentSection) : ''}</h2>
+      </header>
+
+      <div class="content-body">
+        {#if currentSection === 'settings'}
+          <SettingsContent {session} />
+        {:else if currentSection === 'security'}
+          <SecurityContent {session} />
+        {:else if currentSection === 'sessions'}
+          <SessionsContent {session} />
+        {:else if currentSection === 'app-passwords'}
+          <AppPasswordsContent {session} />
+        {:else if currentSection === 'comms'}
+          <CommsContent {session} />
+        {:else if currentSection === 'repo'}
+          <RepoContent {session} />
+        {:else if currentSection === 'controllers'}
+          <ControllersContent {session} />
+        {:else if currentSection === 'delegation-audit'}
+          <DelegationAuditContent {session} />
+        {:else if currentSection === 'invite-codes'}
+          <InviteCodesContent {session} />
+        {:else if currentSection === 'did-document'}
+          <DidDocumentContent {session} />
+        {:else if currentSection === 'admin'}
+          <AdminContent {session} />
+        {/if}
+      </div>
+    </main>
   </div>
 {:else if loading}
-  <div class="dashboard">
-    <div class="skeleton-section"></div>
-    <nav class="nav-grid">
-      {#each Array(6) as _}
-        <div class="skeleton-card"></div>
-      {/each}
-    </nav>
+  <div class="dashboard loading-state">
+    <aside class="sidebar">
+      <div class="skeleton-header"></div>
+      <nav class="nav-list">
+        {#each Array(8) as _}
+          <div class="skeleton-nav-item"></div>
+        {/each}
+      </nav>
+    </aside>
+    <main class="content">
+      <div class="skeleton-content"></div>
+    </main>
   </div>
 {/if}
 
 <style>
   .dashboard {
-    max-width: var(--width-xl);
-    margin: 0 auto;
-    padding: var(--space-7);
-  }
-
-  header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--space-7);
-    gap: var(--space-4);
+    height: 100vh;
+    background: var(--bg-primary);
+    overflow: hidden;
   }
 
-  @media (max-width: 500px) {
-    header {
-      flex-direction: column-reverse;
-      align-items: flex-start;
-    }
+  .sidebar {
+    width: 320px;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
   }
 
-  header h1 {
+  .sidebar-header {
+    padding: var(--space-6);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .sidebar-header h1 {
     margin: 0;
-    min-width: 0;
+    font-size: var(--text-2xl);
+  }
+
+  .sidebar-subtitle {
+    margin: var(--space-1) 0 var(--space-4) 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
+
+  .account-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
   }
 
   .account-dropdown {
     position: relative;
-    max-width: 100%;
+    width: 100%;
   }
 
   .account-trigger {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-5);
-    background: transparent;
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     cursor: pointer;
     color: var(--text-primary);
-    max-width: 100%;
+    text-align: left;
   }
 
   .account-trigger .account-handle {
@@ -327,7 +400,8 @@
   }
 
   .account-trigger:hover:not(:disabled) {
-    background: var(--bg-secondary);
+    border-color: var(--accent);
+    background: var(--bg-tertiary);
   }
 
   .account-trigger:disabled {
@@ -338,20 +412,66 @@
   .dropdown-arrow {
     font-size: 0.625rem;
     color: var(--text-secondary);
+    flex-shrink: 0;
   }
 
   .dropdown-menu {
     position: absolute;
     top: 100%;
+    left: 0;
     right: 0;
     margin-top: var(--space-2);
-    min-width: 200px;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-lg);
     z-index: 100;
     overflow: hidden;
+  }
+
+  .account-details {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: 0 var(--space-1);
+  }
+
+  .account-details .account-did {
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .account-status {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+  }
+
+  .badge.admin {
+    background: var(--accent);
+    color: var(--text-inverse);
+  }
+
+  .badge.success {
+    background: var(--success-bg);
+    color: var(--success-text);
+  }
+
+  .badge.warning {
+    background: var(--warning-bg);
+    color: var(--warning-text);
   }
 
   .dropdown-section {
@@ -370,7 +490,7 @@
   .dropdown-item {
     display: block;
     width: 100%;
-    padding: var(--space-4) var(--space-5);
+    padding: var(--space-3) var(--space-5);
     background: transparent;
     border: none;
     text-align: left;
@@ -390,197 +510,242 @@
   .dropdown-divider {
     height: 1px;
     background: var(--border-color);
-    margin: 0;
   }
 
-  section {
-    background: var(--bg-secondary);
-    padding: var(--space-6);
-    border-radius: var(--radius-xl);
-    margin-bottom: var(--space-7);
-    overflow: hidden;
-    min-width: 0;
+  .status-banner {
+    margin: var(--space-4);
+    padding: var(--space-4);
+    border-radius: var(--radius-lg);
   }
 
-  section h2 {
-    margin: 0 0 var(--space-4) 0;
-    font-size: var(--text-xl);
-  }
-
-  dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--space-3) var(--space-5);
-    margin: 0;
-  }
-
-  dt {
-    font-weight: var(--font-medium);
-    color: var(--text-secondary);
-    max-width: 6rem;
-  }
-
-  dd {
-    margin: 0;
-    min-width: 0;
-  }
-
-  .mono {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    word-break: break-all;
-  }
-
-  .badge {
-    display: inline-block;
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-md);
-    font-size: var(--text-xs);
-    margin-left: var(--space-3);
-  }
-
-  .badge.success {
-    background: var(--success-bg);
-    color: var(--success-text);
-  }
-
-  .badge.warning {
+  .status-banner.deactivated {
     background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+  }
+
+  .status-banner.deactivated strong {
     color: var(--warning-text);
   }
 
-  .badge.admin {
+  .status-banner.deactivated p {
+    margin: var(--space-2) 0 0 0;
+    color: var(--warning-text);
+    font-size: var(--text-sm);
+  }
+
+  .status-banner.migrated {
+    background: var(--info-bg, #e0f2fe);
+    border: 1px solid var(--info-border, #7dd3fc);
+  }
+
+  .status-banner.migrated strong {
+    color: var(--info-text, #0369a1);
+  }
+
+  .status-banner.migrated p {
+    margin: var(--space-2) 0 0 0;
+    color: var(--info-text, #0369a1);
+    font-size: var(--text-sm);
+  }
+
+  .nav-list {
+    flex: 1;
+    padding: var(--space-2);
+    overflow-y: auto;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: var(--space-4);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: var(--text-base);
+    text-align: left;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .nav-item:hover:not(.active) {
+    background: var(--bg-tertiary);
+    color: var(--accent);
+  }
+
+  .nav-item:hover:not(.active) .nav-chevron {
+    color: var(--accent);
+  }
+
+  .nav-item.active {
     background: var(--accent);
     color: var(--text-inverse);
   }
 
-  .badge.deactivated {
-    background: var(--warning-bg);
-    color: var(--warning-text);
-    border: 1px solid var(--warning-border);
+  .nav-item.active .nav-chevron {
+    color: var(--text-inverse);
   }
 
-  .badge.migrated {
-    background: var(--info-bg, #e0f2fe);
-    color: var(--info-text, #0369a1);
-    border: 1px solid var(--info-border, #7dd3fc);
-  }
-
-  .nav-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--space-4);
-  }
-
-  .nav-card {
-    display: block;
-    padding: var(--space-6);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    text-decoration: none;
-    color: inherit;
-    transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
-  }
-
-  .nav-card:hover {
-    border-color: var(--accent);
-    box-shadow: 0 2px 8px var(--accent-muted);
-  }
-
-  .nav-card h3 {
-    margin: 0 0 var(--space-3) 0;
+  .nav-item.highlight-admin {
     color: var(--accent);
   }
 
-  .nav-card p {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
+  .nav-item.highlight-admin.active {
+    background: var(--accent);
+    color: var(--text-inverse);
   }
 
-  .nav-card.admin-card {
-    border-color: var(--accent);
-    background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-muted) 100%);
+  .nav-item.highlight-migrated {
+    color: var(--info-text, #0369a1);
   }
 
-  .nav-card.admin-card:hover {
-    box-shadow: 0 2px 12px var(--accent-muted);
+  .nav-item.highlight-migrated.active {
+    background: var(--info-text, #0369a1);
+    color: var(--text-inverse);
   }
 
-  .skeleton-section {
-    height: 140px;
+  .nav-item.highlight-did-web {
+    color: var(--accent);
+  }
+
+  .nav-item.highlight-did-web.active {
+    background: var(--accent);
+    color: var(--text-inverse);
+  }
+
+  .nav-chevron {
+    display: none;
+  }
+
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-primary);
+  }
+
+  .content-header {
+    display: none;
+    padding: var(--space-4) var(--space-6);
+    border-bottom: 1px solid var(--border-color);
     background: var(--bg-secondary);
-    border-radius: var(--radius-xl);
-    margin-bottom: var(--space-7);
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  .skeleton-card {
+  .content-header h2 {
+    margin: 0;
+    font-size: var(--text-lg);
+  }
+
+  .back-button {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--accent);
+    font-size: var(--text-base);
+    cursor: pointer;
+    margin-bottom: var(--space-2);
+  }
+
+  .back-arrow {
+    font-size: var(--text-xl);
+    font-weight: 300;
+  }
+
+  .content-body {
+    flex: 1;
+    padding: var(--space-6);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .content-body > :global(*) {
+    width: 100%;
+  }
+
+  .loading-state .sidebar {
+    opacity: 0.7;
+  }
+
+  .skeleton-header {
     height: 100px;
     background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
+    margin: var(--space-6);
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  .deactivated-banner {
-    background: var(--warning-bg);
-    border: 1px solid var(--warning-border);
+  .skeleton-nav-item {
+    height: 48px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-lg);
+    margin: var(--space-2) var(--space-2);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+
+  .skeleton-content {
+    height: 300px;
+    background: var(--bg-secondary);
     border-radius: var(--radius-xl);
-    padding: var(--space-5) var(--space-6);
-    margin-bottom: var(--space-7);
+    margin: var(--space-6);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
 
-  .deactivated-banner strong {
-    color: var(--warning-text);
-    font-size: var(--text-base);
+  @media (max-width: 768px) {
+    .dashboard {
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .sidebar {
+      width: 100%;
+      height: auto;
+      flex: 1;
+      border-right: none;
+      border-bottom: 1px solid var(--border-color);
+      overflow-y: auto;
+    }
+
+    .sidebar.hidden-mobile {
+      display: none;
+    }
+
+    .content {
+      display: flex;
+      flex: 1;
+      height: auto;
+    }
+
+    .content.hidden-mobile {
+      display: none;
+    }
+
+    .content-header {
+      display: block;
+    }
   }
 
-  .deactivated-banner p {
-    margin: var(--space-3) 0 0 0;
-    color: var(--warning-text);
-    font-size: var(--text-sm);
-  }
+  @media (min-width: 769px) {
+    .back-button {
+      display: none;
+    }
 
-  .migrated-banner {
-    background: var(--info-bg, #e0f2fe);
-    border: 1px solid var(--info-border, #7dd3fc);
-    border-radius: var(--radius-xl);
-    padding: var(--space-5) var(--space-6);
-    margin-bottom: var(--space-7);
-  }
+    .content-header {
+      display: block;
+      padding: var(--space-6);
+    }
 
-  .migrated-banner strong {
-    color: var(--info-text, #0369a1);
-    font-size: var(--text-base);
-  }
-
-  .migrated-banner p {
-    margin: var(--space-3) 0 0 0;
-    color: var(--info-text, #0369a1);
-    font-size: var(--text-sm);
-  }
-
-  .nav-card.migrated-card {
-    border-color: var(--info-border, #7dd3fc);
-    background: linear-gradient(135deg, var(--bg-card) 0%, var(--info-bg, #e0f2fe) 100%);
-  }
-
-  .nav-card.migrated-card:hover {
-    box-shadow: 0 2px 12px var(--info-bg, #e0f2fe);
-  }
-
-  .nav-card.migrated-card h3 {
-    color: var(--info-text, #0369a1);
-  }
-
-  .nav-card.did-web-card {
-    border-color: var(--accent);
-    background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-muted) 100%);
-  }
-
-  .nav-card.did-web-card:hover {
-    box-shadow: 0 2px 12px var(--accent-muted);
+    .content-header h2 {
+      font-size: var(--text-xl);
+    }
   }
 </style>

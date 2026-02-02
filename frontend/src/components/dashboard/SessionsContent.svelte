@@ -1,45 +1,35 @@
 <script lang="ts">
-  import { getAuthState } from '../lib/auth.svelte'
-  import { navigate, routes, getFullUrl } from '../lib/router.svelte'
-  import { api, ApiError } from '../lib/api'
-  import { _ } from '../lib/i18n'
-  import { formatDateTime } from '../lib/date'
-  import type { Session } from '../lib/types/api'
-  import { toast } from '../lib/toast.svelte'
+  import { onMount } from 'svelte'
+  import { _ } from '../../lib/i18n'
+  import { api, ApiError } from '../../lib/api'
+  import { toast } from '../../lib/toast.svelte'
+  import { formatDateTime } from '../../lib/date'
+  import { navigate, routes } from '../../lib/router.svelte'
+  import type { Session } from '../../lib/types/api'
 
-  const auth = $derived(getAuthState())
-
-  function getSession(): Session | null {
-    return auth.kind === 'authenticated' ? auth.session : null
+  interface Props {
+    session: Session
   }
 
-  function isLoading(): boolean {
-    return auth.kind === 'loading'
-  }
+  let { session }: Props = $props()
 
-  const session = $derived(getSession())
-  const authLoading = $derived(isLoading())
-  let loading = $state(true)
-  let sessions = $state<Array<{
+  interface SessionInfo {
     id: string
     sessionType: string
     clientName: string | null
     createdAt: string
     expiresAt: string
     isCurrent: boolean
-  }>>([])
-  $effect(() => {
-    if (!authLoading && !session) {
-      navigate(routes.login)
-    }
+  }
+
+  let sessions = $state<SessionInfo[]>([])
+  let loading = $state(true)
+
+  onMount(async () => {
+    await loadSessions()
   })
-  $effect(() => {
-    if (session) {
-      loadSessions()
-    }
-  })
+
   async function loadSessions() {
-    if (!session) return
     loading = true
     try {
       const result = await api.listSessions(session.accessJwt)
@@ -50,8 +40,8 @@
       loading = false
     }
   }
+
   async function revokeSession(sessionId: string, isCurrent: boolean) {
-    if (!session) return
     const msg = isCurrent
       ? $_('sessions.revokeCurrentConfirm')
       : $_('sessions.revokeConfirm')
@@ -68,8 +58,8 @@
       toast.error(e instanceof ApiError ? e.message : $_('sessions.failedToRevoke'))
     }
   }
+
   async function revokeAllSessions() {
-    if (!session) return
     const otherSessions = sessions.filter(s => !s.isCurrent)
     if (otherSessions.length === 0) {
       toast.warning($_('sessions.noOtherSessions'))
@@ -84,9 +74,7 @@
       toast.error(e instanceof ApiError ? e.message : $_('sessions.failedToRevokeAll'))
     }
   }
-  function formatDate(dateStr: string): string {
-    return formatDateTime(dateStr)
-  }
+
   function timeAgo(dateStr: string): string {
     const date = new Date(dateStr)
     const now = new Date()
@@ -99,106 +87,74 @@
     if (minutes > 0) return $_('sessions.minutesAgo', { values: { count: minutes } })
     return $_('sessions.justNow')
   }
+
+  function formatDate(dateStr: string): string {
+    return formatDateTime(dateStr)
+  }
 </script>
-<div class="page">
-  <header>
-    <a href={getFullUrl(routes.dashboard)} class="back">{$_('common.backToDashboard')}</a>
-    <h1>{$_('sessions.title')}</h1>
-  </header>
+
+<div class="sessions">
   {#if loading}
-    <div class="sessions-list">
-      {#each Array(3) as _}
-        <div class="skeleton-card"></div>
-      {/each}
-    </div>
+    <div class="loading">{$_('common.loading')}</div>
+  {:else if sessions.length === 0}
+    <p class="empty">{$_('sessions.noSessions')}</p>
   {:else}
-    {#if sessions.length === 0}
-      <p class="empty">{$_('sessions.noSessions')}</p>
-    {:else}
-      <div class="sessions-list">
-        {#each sessions as session}
-          <div class="session-card" class:current={session.isCurrent}>
-            <div class="session-info">
-              <div class="session-header">
-                {#if session.isCurrent}
-                  <span class="badge current">{$_('sessions.current')}</span>
-                {/if}
-                <span class="badge type" class:oauth={session.sessionType === 'oauth'}>
-                  {session.sessionType === 'oauth' ? $_('sessions.oauth') : $_('sessions.session')}
-                </span>
-                {#if session.clientName}
-                  <span class="client-name">{session.clientName}</span>
-                {/if}
-              </div>
-              <div class="session-details">
-                <div class="detail">
-                  <span class="label">{$_('sessions.created')}</span>
-                  <span class="value">{timeAgo(session.createdAt)}</span>
-                </div>
-                <div class="detail">
-                  <span class="label">{$_('sessions.expires')}</span>
-                  <span class="value">{formatDate(session.expiresAt)}</span>
-                </div>
-              </div>
+    <div class="sessions-list">
+      {#each sessions as s}
+        <div class="session-card" class:current={s.isCurrent}>
+          <div class="session-info">
+            <div class="session-header">
+              {#if s.isCurrent}
+                <span class="badge current">{$_('sessions.current')}</span>
+              {/if}
+              <span class="badge type" class:oauth={s.sessionType === 'oauth'}>
+                {s.sessionType === 'oauth' ? $_('sessions.oauth') : $_('sessions.session')}
+              </span>
+              {#if s.clientName}
+                <span class="client-name">{s.clientName}</span>
+              {/if}
             </div>
-            <div class="session-actions">
-              <button
-                class="revoke-btn"
-                class:danger={!session.isCurrent}
-                onclick={() => revokeSession(session.id, session.isCurrent)}
-              >
-                {session.isCurrent ? $_('sessions.signOut') : $_('sessions.revoke')}
-              </button>
+            <div class="session-details">
+              <div class="detail">
+                <span class="label">{$_('sessions.created')}</span>
+                <span class="value">{timeAgo(s.createdAt)}</span>
+              </div>
+              <div class="detail">
+                <span class="label">{$_('sessions.expires')}</span>
+                <span class="value">{formatDate(s.expiresAt)}</span>
+              </div>
             </div>
           </div>
-        {/each}
-      </div>
-      <div class="actions-bar">
-        <button class="refresh-btn" onclick={loadSessions}>{$_('common.refresh')}</button>
-        {#if sessions.filter(s => !s.isCurrent).length > 0}
-          <button class="revoke-all-btn" onclick={revokeAllSessions}>{$_('sessions.revokeAll')}</button>
-        {/if}
-      </div>
-    {/if}
+          <button
+            type="button"
+            class="revoke-btn"
+            class:danger={!s.isCurrent}
+            onclick={() => revokeSession(s.id, s.isCurrent)}
+          >
+            {s.isCurrent ? $_('sessions.signOut') : $_('sessions.revoke')}
+          </button>
+        </div>
+      {/each}
+    </div>
+    <div class="actions-bar">
+      <button type="button" class="refresh-btn" onclick={loadSessions}>{$_('common.refresh')}</button>
+      {#if sessions.filter(s => !s.isCurrent).length > 0}
+        <button type="button" class="revoke-all-btn" onclick={revokeAllSessions}>{$_('sessions.revokeAll')}</button>
+      {/if}
+    </div>
   {/if}
 </div>
+
 <style>
-  .page {
+  .sessions {
     max-width: var(--width-lg);
-    margin: 0 auto;
-    padding: var(--space-7);
   }
 
-  header {
-    margin-bottom: var(--space-7);
-  }
-
-  .back {
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: var(--text-sm);
-  }
-
-  .back:hover {
-    color: var(--accent);
-  }
-
-  h1 {
-    margin: var(--space-2) 0 0 0;
-  }
-
+  .loading,
   .empty {
-    text-align: center;
     color: var(--text-secondary);
-    padding: var(--space-7);
-  }
-
-  .skeleton-card {
-    height: 80px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    animation: skeleton-pulse 1.5s ease-in-out infinite;
+    padding: var(--space-6);
+    text-align: center;
   }
 
   .sessions-list {
@@ -215,11 +171,17 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--space-4);
   }
 
   .session-card.current {
     border-color: var(--accent);
     background: var(--bg-card);
+  }
+
+  .session-info {
+    flex: 1;
+    min-width: 0;
   }
 
   .session-header {
@@ -280,6 +242,7 @@
   }
 
   .revoke-btn {
+    flex-shrink: 0;
     padding: var(--space-2) var(--space-4);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
@@ -334,5 +297,16 @@
 
   .revoke-all-btn:hover {
     background: var(--error-bg);
+  }
+
+  @media (max-width: 500px) {
+    .session-card {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .revoke-btn {
+      width: 100%;
+    }
   }
 </style>
