@@ -1,5 +1,7 @@
 use crate::api::error::{ApiError, DbResultExt};
+use crate::comms::comms_repo;
 use crate::types::Did;
+use crate::util::pds_hostname;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -161,6 +163,20 @@ async fn handle_channel_update(
 
     info!(did = %did, channel = %channel, "Channel verified successfully");
 
+    let recipient = resolve_verified_recipient(state, user_id, channel, identifier).await;
+    if let Err(e) = comms_repo::enqueue_channel_verified(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        user_id,
+        channel,
+        &recipient,
+        pds_hostname(),
+    )
+    .await
+    {
+        warn!(error = %e, "Failed to enqueue channel verified notification");
+    }
+
     Ok(Json(VerifyTokenOutput {
         success: true,
         did: did.to_string().into(),
@@ -169,11 +185,30 @@ async fn handle_channel_update(
     }))
 }
 
+async fn resolve_verified_recipient(
+    state: &AppState,
+    user_id: uuid::Uuid,
+    channel: &str,
+    identifier: &str,
+) -> String {
+    match channel {
+        "telegram" => state
+            .user_repo
+            .get_telegram_chat_id(user_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| identifier.to_string()),
+        _ => identifier.to_string(),
+    }
+}
+
 async fn handle_signup_verification(
     state: &AppState,
     did: &str,
     channel: &str,
-    _identifier: &str,
+    identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
     let did_typed: Did = did
         .parse()
@@ -231,6 +266,20 @@ async fn handle_signup_verification(
     };
 
     info!(did = %did, channel = %channel, "Signup verified successfully");
+
+    let recipient = resolve_verified_recipient(state, user.id, channel, identifier).await;
+    if let Err(e) = comms_repo::enqueue_channel_verified(
+        state.user_repo.as_ref(),
+        state.infra_repo.as_ref(),
+        user.id,
+        channel,
+        &recipient,
+        pds_hostname(),
+    )
+    .await
+    {
+        warn!(error = %e, "Failed to enqueue channel verified notification");
+    }
 
     Ok(Json(VerifyTokenOutput {
         success: true,

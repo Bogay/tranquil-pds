@@ -78,7 +78,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(telegram_sender) = TelegramSender::from_env() {
+        let secret_token = match std::env::var("TELEGRAM_WEBHOOK_SECRET") {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(
+                    "TELEGRAM_BOT_TOKEN is set but TELEGRAM_WEBHOOK_SECRET is missing. Both are required for secure Telegram integration.".into()
+                );
+            }
+        };
         info!("Telegram comms enabled");
+        match telegram_sender.resolve_bot_username().await {
+            Ok(username) => {
+                info!(bot_username = %username, "Resolved Telegram bot username");
+                tranquil_pds::util::set_telegram_bot_username(username);
+                let hostname =
+                    std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string());
+                let webhook_url = format!("https://{}/webhook/telegram", hostname);
+                match telegram_sender
+                    .set_webhook(&webhook_url, Some(&secret_token))
+                    .await
+                {
+                    Ok(()) => info!(url = %webhook_url, "Telegram webhook registered"),
+                    Err(e) => warn!("Failed to register Telegram webhook: {}", e),
+                }
+            }
+            Err(e) => {
+                warn!("Failed to resolve Telegram bot username: {}", e);
+            }
+        }
         comms_service = comms_service.register_sender(telegram_sender);
     }
 

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET telegram_chat_id = $2, telegram_verified = TRUE, updated_at = NOW()\n                WHERE id = (\n                    SELECT id FROM users\n                    WHERE LOWER(telegram_username) = LOWER($1) AND telegram_username IS NOT NULL AND deactivated_at IS NULL\n                    LIMIT 1\n                ) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9d17e25776c67f96022010840c1d04bdd542b5bcc511b1778bab0159a4566e9c"
+}

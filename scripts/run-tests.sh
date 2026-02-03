@@ -18,4 +18,5 @@ sqlx migrate run --source "$PROJECT_DIR/migrations"
 echo ""
 echo "Running tests..."
 echo ""
+ulimit -n 65536
 cargo nextest run "$@"

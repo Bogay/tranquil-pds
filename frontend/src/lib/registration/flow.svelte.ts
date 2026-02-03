@@ -421,7 +421,10 @@ export function createRegistrationFlow(
 
     checkingVerification = true;
     try {
-      const result = await api.checkEmailVerified(state.account.did);
+      const result = await api.checkChannelVerified(
+        state.account.did,
+        state.info.verificationChannel,
+      );
       if (!result.verified) return false;
 
       if (state.info.didType === "web-external") {

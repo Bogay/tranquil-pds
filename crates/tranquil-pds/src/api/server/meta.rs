@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use crate::util::pds_hostname;
+use crate::util::{pds_hostname, telegram_bot_username};
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 
@@ -52,7 +52,7 @@ pub async fn describe_server() -> impl IntoResponse {
     if let Some(email) = contact_email {
         contact.insert("email".to_string(), json!(email));
     }
-    Json(json!({
+    let mut response = json!({
         "availableUserDomains": domains,
         "inviteCodeRequired": invite_code_required,
         "did": format!("did:web:{}", pds_hostname),
@@ -61,7 +61,11 @@ pub async fn describe_server() -> impl IntoResponse {
         "version": env!("CARGO_PKG_VERSION"),
         "availableCommsChannels": get_available_comms_channels(),
         "selfHostedDidWebEnabled": is_self_hosted_did_web_enabled()
-    }))
+    });
+    if let Some(bot_username) = telegram_bot_username() {
+        response["telegramBotUsername"] = json!(bot_username);
+    }
+    Json(response)
 }
 pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     match state.infra_repo.health_check().await {

@@ -439,7 +439,9 @@
     "noMessages": "No messages found.",
     "discordInUseWarning": "This Discord ID is already associated with another account.",
     "telegramInUseWarning": "This Telegram username is already associated with another account.",
-    "signalInUseWarning": "This Signal number is already associated with another account."
+    "signalInUseWarning": "This Signal number is already associated with another account.",
+    "telegramStartBot": "Or send /start {handle} to @{botUsername} manually",
+    "telegramOpenLink": "Open Telegram to verify"
   },
   "repoExplorer": {
     "collections": "Collections",

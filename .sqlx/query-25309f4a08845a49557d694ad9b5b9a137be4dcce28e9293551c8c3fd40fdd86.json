@@ -44,7 +44,8 @@
                 "channel_verification",
                 "passkey_recovery",
                 "legacy_login_alert",
-                "migration_verification"
+                "migration_verification",
+                "channel_verified"
               ]
             }
           }

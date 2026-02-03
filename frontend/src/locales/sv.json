@@ -436,6 +436,8 @@
     "discordInUseWarning": "Detta Discord-ID är redan kopplat till ett annat konto.",
     "telegramInUseWarning": "Detta Telegram-användarnamn är redan kopplat till ett annat konto.",
     "signalInUseWarning": "Detta Signal-nummer är redan kopplat till ett annat konto.",
+    "telegramStartBot": "Eller skicka /start {handle} till @{botUsername} manuellt",
+    "telegramOpenLink": "Öppna Telegram för att verifiera",
     "failedToLoad": "Kunde inte ladda inställningar",
     "failedToSave": "Kunde inte spara inställningar",
     "failedToVerify": "Verifiering misslyckades",

@@ -17,6 +17,7 @@
   let saving = $state(false)
   let preferredChannel = $state('email')
   let availableCommsChannels = $state<string[]>(['email'])
+  let telegramBotUsername = $state<string | undefined>(undefined)
   let email = $state('')
   let discordId = $state('')
   let discordVerified = $state(false)
@@ -24,6 +25,9 @@
   let telegramVerified = $state(false)
   let signalNumber = $state('')
   let signalVerified = $state(false)
+  let savedDiscordId = $state('')
+  let savedTelegramUsername = $state('')
+  let savedSignalNumber = $state('')
   let verifyingChannel = $state<string | null>(null)
   let verificationCode = $state('')
   let historyLoading = $state(true)
@@ -59,7 +63,11 @@
       telegramVerified = prefs.telegramVerified
       signalNumber = prefs.signalNumber ?? ''
       signalVerified = prefs.signalVerified
+      savedDiscordId = discordId
+      savedTelegramUsername = telegramUsername
+      savedSignalNumber = signalNumber
       availableCommsChannels = serverInfo.availableCommsChannels ?? ['email']
+      telegramBotUsername = serverInfo.telegramBotUsername
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('comms.failedToLoad'))
     } finally {
@@ -71,15 +79,24 @@
     e.preventDefault()
     saving = true
     try {
-      await api.updateNotificationPrefs(session.accessJwt, {
+      const result = await api.updateNotificationPrefs(session.accessJwt, {
         preferredChannel,
-        discordId: discordId || undefined,
-        telegramUsername: telegramUsername || undefined,
-        signalNumber: signalNumber || undefined,
+        discordId: discordId !== savedDiscordId ? discordId : undefined,
+        telegramUsername: telegramUsername !== savedTelegramUsername ? telegramUsername : undefined,
+        signalNumber: signalNumber !== savedSignalNumber ? signalNumber : undefined,
       })
       await refreshSession()
       toast.success($_('comms.preferencesSaved'))
-      await loadPrefs()
+      savedDiscordId = discordId
+      savedTelegramUsername = telegramUsername
+      savedSignalNumber = signalNumber
+      const channelToVerify = result.verificationRequired?.find(
+        (ch: string) => ch === 'discord' || ch === 'telegram' || ch === 'signal'
+      )
+      if (channelToVerify) {
+        verifyingChannel = channelToVerify
+        verificationCode = ''
+      }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('comms.failedToSave'))
     } finally {
@@ -218,7 +235,9 @@
           <div class="config-item">
             <div class="config-header">
               <label for="email">{$_('register.email')}</label>
-              <span class="status verified">{$_('comms.primary')}</span>
+              <span class="status verified">
+                {preferredChannel === 'email' ? $_('comms.primary') : $_('comms.verified')}
+              </span>
             </div>
             <input id="email" type="email" value={email} disabled class="readonly" />
           </div>
@@ -229,7 +248,7 @@
                 <label for="discord">{$_('register.discordId')}</label>
                 {#if discordId}
                   <span class="status" class:verified={discordVerified} class:unverified={!discordVerified}>
-                    {discordVerified ? $_('comms.verified') : $_('comms.notVerified')}
+                    {preferredChannel === 'discord' && discordVerified ? $_('comms.primary') : discordVerified ? $_('comms.verified') : $_('comms.notVerified')}
                   </span>
                 {/if}
               </div>
@@ -242,7 +261,7 @@
                   placeholder={$_('register.discordIdPlaceholder')}
                   disabled={saving}
                 />
-                {#if discordId && !discordVerified}
+                {#if discordId && discordId === savedDiscordId && !discordVerified}
                   <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'discord'}>{$_('comms.verifyButton')}</button>
                 {/if}
               </div>
@@ -251,7 +270,7 @@
               {/if}
               {#if verifyingChannel === 'discord'}
                 <div class="verify-form">
-                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
+                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="128" />
                   <button type="button" onclick={() => handleVerify('discord')}>{$_('comms.submit')}</button>
                   <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
                 </div>
@@ -265,7 +284,7 @@
                 <label for="telegram">{$_('register.telegramUsername')}</label>
                 {#if telegramUsername}
                   <span class="status" class:verified={telegramVerified} class:unverified={!telegramVerified}>
-                    {telegramVerified ? $_('comms.verified') : $_('comms.notVerified')}
+                    {preferredChannel === 'telegram' && telegramVerified ? $_('comms.primary') : telegramVerified ? $_('comms.verified') : $_('comms.notVerified')}
                   </span>
                 {/if}
               </div>
@@ -278,18 +297,15 @@
                   placeholder={$_('register.telegramUsernamePlaceholder')}
                   disabled={saving}
                 />
-                {#if telegramUsername && !telegramVerified}
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'telegram'}>{$_('comms.verifyButton')}</button>
-                {/if}
               </div>
               {#if telegramInUse}
                 <p class="hint warning">{$_('comms.telegramInUseWarning')}</p>
               {/if}
-              {#if verifyingChannel === 'telegram'}
-                <div class="verify-form">
-                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
-                  <button type="button" onclick={() => handleVerify('telegram')}>{$_('comms.submit')}</button>
-                  <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
+              {#if telegramUsername && telegramUsername === savedTelegramUsername && !telegramVerified && telegramBotUsername}
+                {@const encodedHandle = session.handle.replaceAll('.', '_')}
+                <div class="telegram-verify-prompt">
+                  <a href="https://t.me/{telegramBotUsername}?start={encodedHandle}" target="_blank" rel="noopener">{$_('comms.telegramOpenLink')}</a>
+                  <span class="manual-hint">{$_('comms.telegramStartBot', { values: { botUsername: telegramBotUsername, handle: session.handle } })}</span>
                 </div>
               {/if}
             </div>
@@ -301,7 +317,7 @@
                 <label for="signal">{$_('register.signalNumber')}</label>
                 {#if signalNumber}
                   <span class="status" class:verified={signalVerified} class:unverified={!signalVerified}>
-                    {signalVerified ? $_('comms.verified') : $_('comms.notVerified')}
+                    {preferredChannel === 'signal' && signalVerified ? $_('comms.primary') : signalVerified ? $_('comms.verified') : $_('comms.notVerified')}
                   </span>
                 {/if}
               </div>
@@ -314,7 +330,7 @@
                   placeholder={$_('register.signalNumberPlaceholder')}
                   disabled={saving}
                 />
-                {#if signalNumber && !signalVerified}
+                {#if signalNumber && signalNumber === savedSignalNumber && !signalVerified}
                   <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>{$_('comms.verifyButton')}</button>
                 {/if}
               </div>
@@ -323,7 +339,7 @@
               {/if}
               {#if verifyingChannel === 'signal'}
                 <div class="verify-form">
-                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="6" />
+                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="128" />
                   <button type="button" onclick={() => handleVerify('signal')}>{$_('comms.submit')}</button>
                   <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
                 </div>
@@ -505,6 +521,23 @@
     color: var(--warning-text);
   }
 
+  .telegram-verify-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--accent-bg, var(--bg-card));
+    border: 1px solid var(--accent, var(--border-color));
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+  }
+
+  .manual-hint {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+  }
+
   .verify-btn {
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);
@@ -517,7 +550,8 @@
   }
 
   .verify-form input {
-    width: 120px;
+    flex: 1;
+    min-width: 0;
   }
 
   .verify-form button {

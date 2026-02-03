@@ -349,6 +349,14 @@ pub fn is_valid_email(email: &str) -> bool {
     })
 }
 
+pub fn is_valid_telegram_username(username: &str) -> bool {
+    let clean = username.strip_prefix('@').unwrap_or(username);
+    (5..=32).contains(&clean.len())
+        && clean
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

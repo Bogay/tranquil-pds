@@ -4,6 +4,87 @@ use serde_json::{Value, json};
 
 pub use crate::common::*;
 
+#[allow(dead_code)]
+pub async fn paginate_records(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    did: &str,
+    collection: &str,
+    limit: usize,
+) -> Vec<Value> {
+    paginate_records_inner(client, base, jwt, did, collection, limit, None, Vec::new()).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn paginate_records_inner(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    did: &str,
+    collection: &str,
+    limit: usize,
+    cursor: Option<String>,
+    mut acc: Vec<Value>,
+) -> Vec<Value> {
+    let limit_str = limit.to_string();
+    let mut query: Vec<(&str, &str)> = vec![
+        ("repo", did),
+        ("collection", collection),
+        ("limit", &limit_str),
+    ];
+    if let Some(ref c) = cursor {
+        query.push(("cursor", c.as_str()));
+    }
+
+    let res = client
+        .get(format!("{}/xrpc/com.atproto.repo.listRecords", base))
+        .bearer_auth(jwt)
+        .query(&query)
+        .send()
+        .await;
+
+    let Ok(response) = res else { return acc };
+    let Ok(body) = response.json::<Value>().await else {
+        return acc;
+    };
+
+    let Some(records) = body["records"].as_array() else {
+        return acc;
+    };
+    acc.extend(records.iter().cloned());
+
+    match body["cursor"].as_str() {
+        Some(next) => {
+            Box::pin(paginate_records_inner(
+                client,
+                base,
+                jwt,
+                did,
+                collection,
+                limit,
+                Some(next.to_string()),
+                acc,
+            ))
+            .await
+        }
+        None => acc,
+    }
+}
+
+#[allow(dead_code)]
+pub async fn count_records(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    did: &str,
+    collection: &str,
+) -> usize {
+    paginate_records(client, base, jwt, did, collection, 100)
+        .await
+        .len()
+}
+
 fn unique_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..12].to_string()
 }
@@ -245,4 +326,151 @@ pub async fn set_account_deactivated(did: &str, deactivated: bool) {
     .execute(pool)
     .await
     .expect("Failed to update deactivated_at");
+}
+
+#[allow(dead_code)]
+pub fn make_cid(data: &[u8]) -> cid::Cid {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(data);
+    let multihash = multihash::Multihash::wrap(0x12, &hash).unwrap();
+    cid::Cid::new_v1(0x71, multihash)
+}
+
+#[allow(dead_code)]
+pub fn write_varint(buf: &mut Vec<u8>, value: u64) {
+    buf.extend(encode_varint_bytes(value));
+}
+
+fn encode_varint_bytes(value: u64) -> Vec<u8> {
+    match value < 0x80 {
+        true => vec![value as u8],
+        false => {
+            let mut rest = encode_varint_bytes(value >> 7);
+            rest.insert(0, ((value & 0x7F) as u8) | 0x80);
+            rest
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn encode_car_block(cid: &cid::Cid, data: &[u8]) -> Vec<u8> {
+    let cid_bytes = cid.to_bytes();
+    let mut result = Vec::new();
+    write_varint(&mut result, (cid_bytes.len() + data.len()) as u64);
+    result.extend_from_slice(&cid_bytes);
+    result.extend_from_slice(data);
+    result
+}
+
+#[allow(dead_code)]
+pub fn create_test_record() -> (Vec<u8>, cid::Cid) {
+    use ipld_core::ipld::Ipld;
+    use std::collections::BTreeMap;
+    let record = Ipld::Map(BTreeMap::from([
+        (
+            "$type".to_string(),
+            Ipld::String("app.bsky.feed.post".to_string()),
+        ),
+        (
+            "text".to_string(),
+            Ipld::String("Test post for verification".to_string()),
+        ),
+        (
+            "createdAt".to_string(),
+            Ipld::String("2024-01-01T00:00:00Z".to_string()),
+        ),
+    ]));
+    let bytes = serde_ipld_dagcbor::to_vec(&record).unwrap();
+    let cid = make_cid(&bytes);
+    (bytes, cid)
+}
+
+#[allow(dead_code)]
+pub fn create_mst_node(entries: Vec<(String, cid::Cid)>) -> (Vec<u8>, cid::Cid) {
+    use ipld_core::ipld::Ipld;
+    use std::collections::BTreeMap;
+    let ipld_entries: Vec<Ipld> = entries
+        .into_iter()
+        .map(|(key, value_cid)| {
+            Ipld::Map(BTreeMap::from([
+                ("k".to_string(), Ipld::Bytes(key.into_bytes())),
+                ("v".to_string(), Ipld::Link(value_cid)),
+                ("p".to_string(), Ipld::Integer(0)),
+            ]))
+        })
+        .collect();
+    let node = Ipld::Map(BTreeMap::from([(
+        "e".to_string(),
+        Ipld::List(ipld_entries),
+    )]));
+    let bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
+    let cid = make_cid(&bytes);
+    (bytes, cid)
+}
+
+#[allow(dead_code)]
+pub fn create_car_signed_commit(
+    did: &str,
+    data_cid: &cid::Cid,
+    signing_key: &k256::ecdsa::SigningKey,
+) -> (Vec<u8>, cid::Cid) {
+    use jacquard_common::types::{integer::LimitedU32, string::Tid};
+    use jacquard_repo::commit::Commit;
+    let rev = Tid::now(LimitedU32::MIN);
+    let did = jacquard_common::types::string::Did::new(did).expect("valid DID");
+    let unsigned = Commit::new_unsigned(did, *data_cid, rev, None);
+    let signed = unsigned.sign(signing_key).expect("signing failed");
+    let signed_bytes = signed.to_cbor().expect("serialization failed");
+    let cid = make_cid(&signed_bytes);
+    (signed_bytes, cid)
+}
+
+#[allow(dead_code)]
+pub fn build_car_with_signature(
+    did: &str,
+    signing_key: &k256::ecdsa::SigningKey,
+) -> (Vec<u8>, cid::Cid) {
+    let (record_bytes, record_cid) = create_test_record();
+    let (mst_bytes, mst_cid) =
+        create_mst_node(vec![("app.bsky.feed.post/test123".to_string(), record_cid)]);
+    let (commit_bytes, commit_cid) = create_car_signed_commit(did, &mst_cid, signing_key);
+    let header = iroh_car::CarHeader::new_v1(vec![commit_cid]);
+    let header_bytes = header.encode().unwrap();
+    let mut car = Vec::new();
+    write_varint(&mut car, header_bytes.len() as u64);
+    car.extend_from_slice(&header_bytes);
+    car.extend(encode_car_block(&commit_cid, &commit_bytes));
+    car.extend(encode_car_block(&mst_cid, &mst_bytes));
+    car.extend(encode_car_block(&record_cid, &record_bytes));
+    (car, commit_cid)
+}
+
+#[allow(dead_code)]
+pub fn get_multikey_from_signing_key(signing_key: &k256::ecdsa::SigningKey) -> String {
+    let public_key = signing_key.verifying_key();
+    let compressed = public_key.to_sec1_bytes();
+    let buf: Vec<u8> = encode_varint_bytes(0xE7)
+        .into_iter()
+        .chain(compressed.iter().copied())
+        .collect();
+    multibase::encode(multibase::Base::Base58Btc, buf)
+}
+
+#[allow(dead_code)]
+pub async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
+    let db_url = get_db_connection_string().await;
+    let pool = sqlx::PgPool::connect(&db_url).await.ok()?;
+    let row = sqlx::query!(
+        r#"
+        SELECT k.key_bytes, k.encryption_version
+        FROM user_keys k
+        JOIN users u ON k.user_id = u.id
+        WHERE u.did = $1
+        "#,
+        did
+    )
+    .fetch_optional(&pool)
+    .await
+    .ok()??;
+    tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
 }

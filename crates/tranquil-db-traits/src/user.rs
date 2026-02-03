@@ -196,6 +196,12 @@ pub trait UserRepository: Send + Sync {
         identifier: &str,
     ) -> Result<Option<bool>, DbError>;
 
+    async fn check_channel_verified_by_did(
+        &self,
+        did: &Did,
+        channel: CommsChannel,
+    ) -> Result<Option<bool>, DbError>;
+
     async fn admin_update_email(&self, did: &Did, email: &str) -> Result<u64, DbError>;
 
     async fn admin_update_handle(&self, did: &Did, handle: &Handle) -> Result<u64, DbError>;
@@ -221,6 +227,21 @@ pub trait UserRepository: Send + Sync {
     async fn clear_telegram(&self, user_id: Uuid) -> Result<(), DbError>;
 
     async fn clear_signal(&self, user_id: Uuid) -> Result<(), DbError>;
+
+    async fn set_unverified_telegram(
+        &self,
+        user_id: Uuid,
+        telegram_username: &str,
+    ) -> Result<(), DbError>;
+
+    async fn store_telegram_chat_id(
+        &self,
+        telegram_username: &str,
+        chat_id: i64,
+        handle: Option<&str>,
+    ) -> Result<Option<Uuid>, DbError>;
+
+    async fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, DbError>;
 
     async fn get_verification_info(
         &self,
@@ -575,6 +596,9 @@ pub struct UserCommsPrefs {
     pub handle: Handle,
     pub preferred_channel: CommsChannel,
     pub preferred_locale: Option<String>,
+    pub telegram_chat_id: Option<i64>,
+    pub discord_id: Option<String>,
+    pub signal_number: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -635,6 +659,7 @@ pub struct NotificationPrefs {
     pub discord_verified: bool,
     pub telegram_username: Option<String>,
     pub telegram_verified: bool,
+    pub telegram_chat_id: Option<i64>,
     pub signal_number: Option<String>,
     pub signal_verified: bool,
 }

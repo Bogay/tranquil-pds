@@ -436,6 +436,8 @@
     "discordInUseWarning": "Tämä Discord-tunnus on jo yhdistetty toiseen tiliin.",
     "telegramInUseWarning": "Tämä Telegram-käyttäjänimi on jo yhdistetty toiseen tiliin.",
     "signalInUseWarning": "Tämä Signal-numero on jo yhdistetty toiseen tiliin.",
+    "telegramStartBot": "Tai lähetä /start {handle} käyttäjälle @{botUsername} manuaalisesti",
+    "telegramOpenLink": "Avaa Telegram vahvistaaksesi",
     "failedToLoad": "Asetusten lataus epäonnistui",
     "failedToSave": "Asetusten tallennus epäonnistui",
     "failedToVerify": "Vahvistus epäonnistui",

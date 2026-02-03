@@ -32,6 +32,7 @@
   let successChannel = $state<string | null>(null)
   let tokenFromUrl = $state(false)
   let oauthRequestUri = $state<string | null>(null)
+  let telegramBotUsername = $state<string | undefined>(undefined)
 
   const auth = $derived(getAuthState())
 
@@ -40,6 +41,7 @@
   }
 
   const session = $derived(getSession())
+  const isTelegram = $derived(pendingVerification?.channel === 'telegram')
 
   function parseQueryParams(): Record<string, string> {
     return Object.fromEntries(new URLSearchParams(window.location.search))
@@ -99,6 +101,14 @@
           channel: params.channel,
         }))
       }
+
+      if (pendingVerification?.channel === 'telegram') {
+        try {
+          const serverInfo = await api.describeServer()
+          telegramBotUsername = serverInfo.telegramBotUsername
+        } catch {
+        }
+      }
     }
   })
 
@@ -111,13 +121,13 @@
 
   let pollingVerification = false
   $effect(() => {
-    if (mode === 'signup' && pendingVerification && !verificationCode.trim()) {
+    if (mode === 'signup' && pendingVerification && (isTelegram || !verificationCode.trim())) {
       const currentPending = pendingVerification
       const interval = setInterval(async () => {
-        if (pollingVerification || verificationCode.trim()) return
+        if (pollingVerification || (!isTelegram && verificationCode.trim())) return
         pollingVerification = true
         try {
-          const result = await api.checkEmailVerified(currentPending.did)
+          const result = await api.checkChannelVerified(currentPending.did, currentPending.channel)
           if (result.verified) {
             clearInterval(interval)
             clearPendingVerification()
@@ -435,31 +445,44 @@
       <div class="message success">{resendMessage}</div>
     {/if}
 
-    <form onsubmit={(e) => { e.preventDefault(); handleSignupVerification(e); }}>
-      <div class="field">
-        <label for="verification-code">{$_('verify.codeLabel')}</label>
-        <input
-          id="verification-code"
-          type="text"
-          bind:value={verificationCode}
-          placeholder={$_('verify.codePlaceholder')}
-          disabled={submitting}
-          required
-          autocomplete="off"
-          class="token-input"
-        />
-        <p class="field-help">{$_('verify.codeHelp')}</p>
+    {#if isTelegram && telegramBotUsername}
+      {@const encodedHandle = pendingVerification.handle.replaceAll('.', '_')}
+      <div class="telegram-hint">
+        <p>
+          <a href="https://t.me/{telegramBotUsername}?start={encodedHandle}" target="_blank" rel="noopener">{$_('comms.telegramOpenLink')}</a>
+        </p>
+        <p class="manual-text">
+          {$_('comms.telegramStartBot', { values: { botUsername: telegramBotUsername, handle: pendingVerification.handle } })}
+        </p>
+        <p class="waiting-text">{$_('verify.pleaseWait')}</p>
       </div>
+    {:else}
+      <form onsubmit={(e) => { e.preventDefault(); handleSignupVerification(e); }}>
+        <div class="field">
+          <label for="verification-code">{$_('verify.codeLabel')}</label>
+          <input
+            id="verification-code"
+            type="text"
+            bind:value={verificationCode}
+            placeholder={$_('verify.codePlaceholder')}
+            disabled={submitting}
+            required
+            autocomplete="off"
+            class="token-input"
+          />
+          <p class="field-help">{$_('verify.codeHelp')}</p>
+        </div>
 
-      <div class="form-actions">
-        <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
-          {resendingCode ? $_('common.sending') : $_('common.resendCode')}
-        </button>
-        <button type="submit" disabled={submitting || !verificationCode.trim()}>
-          {submitting ? $_('common.verifying') : $_('common.verify')}
-        </button>
-      </div>
-    </form>
+        <div class="form-actions">
+          <button type="button" class="secondary" onclick={handleResendCode} disabled={resendingCode}>
+            {resendingCode ? $_('common.sending') : $_('common.resendCode')}
+          </button>
+          <button type="submit" disabled={submitting || !verificationCode.trim()}>
+            {submitting ? $_('common.verifying') : $_('common.verify')}
+          </button>
+        </div>
+      </form>
+    {/if}
 
     <p class="link-text">
       <a href="/app/register" onclick={() => clearPendingVerification()}>{$_('verify.startOver')}</a>
@@ -585,5 +608,27 @@
   .success-container .btn {
     flex: none;
     padding: var(--space-4) var(--space-8);
+  }
+
+  .telegram-hint {
+    padding: var(--space-4);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+  }
+
+  .telegram-hint p {
+    margin: 0;
+  }
+
+  .telegram-hint .manual-text {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin-top: var(--space-1);
+  }
+
+  .telegram-hint .waiting-text {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin-top: var(--space-2);
   }
 </style>

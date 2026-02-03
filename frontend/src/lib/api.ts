@@ -80,6 +80,7 @@ import type {
   TotpStatus,
   UpdateLegacyLoginResponse,
   UpdateLocaleResponse,
+  UpdateNotificationPrefsResponse,
   UploadBlobResponse,
   VerificationChannel,
   VerifyMigrationEmailResponse,
@@ -479,6 +480,16 @@ export const api = {
     });
   },
 
+  checkChannelVerified(
+    did: string,
+    channel: string,
+  ): Promise<{ verified: boolean }> {
+    return xrpc("_checkChannelVerified", {
+      method: "POST",
+      body: { did, channel },
+    });
+  },
+
   checkEmailInUse(email: string): Promise<{ inUse: boolean }> {
     return xrpc("_account.checkEmailInUse", {
       method: "POST",
@@ -648,7 +659,7 @@ export const api = {
     discordId?: string;
     telegramUsername?: string;
     signalNumber?: string;
-  }): Promise<SuccessResponse> {
+  }): Promise<UpdateNotificationPrefsResponse> {
     return xrpc("_account.updateNotificationPrefs", {
       method: "POST",
       token,
@@ -1847,7 +1858,7 @@ export const typedApi = {
       telegramUsername?: string;
       signalNumber?: string;
     },
-  ): Promise<Result<SuccessResponse, ApiError>> {
+  ): Promise<Result<UpdateNotificationPrefsResponse, ApiError>> {
     return xrpcResult("_account.updateNotificationPrefs", {
       method: "POST",
       token,

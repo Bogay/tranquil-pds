@@ -12,6 +12,7 @@ pub mod proxy_client;
 pub mod repo;
 pub mod responses;
 pub mod server;
+pub mod telegram_webhook;
 pub mod temp;
 pub mod validation;
 pub mod verification;

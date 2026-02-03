@@ -436,6 +436,8 @@
     "discordInUseWarning": "この Discord ID は既に別のアカウントに関連付けられています。",
     "telegramInUseWarning": "この Telegram ユーザー名は既に別のアカウントに関連付けられています。",
     "signalInUseWarning": "この Signal 番号は既に別のアカウントに関連付けられています。",
+    "telegramStartBot": "または @{botUsername} に /start {handle} を手動で送信",
+    "telegramOpenLink": "Telegram で確認する",
     "failedToLoad": "設定の読み込みに失敗しました",
     "failedToSave": "設定の保存に失敗しました",
     "failedToVerify": "確認に失敗しました",

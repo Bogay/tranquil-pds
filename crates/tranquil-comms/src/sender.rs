@@ -67,6 +67,12 @@ pub fn mime_encode_header(value: &str) -> String {
     }
 }
 
+pub fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 pub fn is_valid_phone_number(number: &str) -> bool {
     if number.len() < 2 || number.len() > 20 {
         return false;
@@ -244,6 +250,60 @@ impl TelegramSender {
         let bot_token = std::env::var("TELEGRAM_BOT_TOKEN").ok()?;
         Some(Self::new(bot_token))
     }
+
+    pub async fn set_webhook(
+        &self,
+        webhook_url: &str,
+        secret_token: Option<&str>,
+    ) -> Result<(), SendError> {
+        let url = format!("https://api.telegram.org/bot{}/setWebhook", self.bot_token);
+        let mut payload = json!({ "url": webhook_url });
+        if let Some(secret) = secret_token {
+            payload["secret_token"] = json!(secret);
+        }
+        let response = self
+            .http_client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| SendError::ExternalService(format!("setWebhook request failed: {}", e)))?;
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SendError::ExternalService(format!(
+                "setWebhook returned error: {}",
+                body
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn resolve_bot_username(&self) -> Result<String, SendError> {
+        let url = format!("https://api.telegram.org/bot{}/getMe", self.bot_token);
+        let response = self.http_client.get(&url).send().await.map_err(|e| {
+            SendError::ExternalService(format!("Telegram getMe request failed: {}", e))
+        })?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SendError::ExternalService(format!(
+                "Telegram getMe returned error: {}",
+                body
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            SendError::ExternalService(format!("Failed to parse getMe response: {}", e))
+        })?;
+
+        data.get("result")
+            .and_then(|r| r.get("username"))
+            .and_then(|u| u.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                SendError::ExternalService("getMe response missing username".to_string())
+            })
+    }
 }
 
 #[async_trait]
@@ -254,13 +314,14 @@ impl CommsSender for TelegramSender {
 
     async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
         let chat_id = &notification.recipient;
-        let subject = notification.subject.as_deref().unwrap_or("Notification");
-        let text = format!("*{}*\n\n{}", subject, notification.body);
+        let subject = escape_html(notification.subject.as_deref().unwrap_or("Notification"));
+        let body = escape_html(&notification.body);
+        let text = format!("<b>{}</b>\n\n{}", subject, body);
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
         let payload = json!({
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": "Markdown"
+            "parse_mode": "HTML"
         });
         let mut last_error = None;
         for attempt in 0..MAX_RETRIES {

@@ -78,6 +78,7 @@ pub enum CommsType {
     LegacyLoginAlert,
     MigrationVerification,
     ChannelVerification,
+    ChannelVerified,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]

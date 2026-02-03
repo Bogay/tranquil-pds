@@ -311,7 +311,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_comms_prefs(&self, user_id: Uuid) -> Result<Option<UserCommsPrefs>, DbError> {
         let row = sqlx::query!(
-            r#"SELECT email, handle, preferred_comms_channel as "preferred_channel!: CommsChannel", preferred_locale
+            r#"SELECT email, handle, preferred_comms_channel as "preferred_channel!: CommsChannel", preferred_locale, telegram_chat_id, discord_id, signal_number
                FROM users WHERE id = $1"#,
             user_id
         )
@@ -323,6 +323,9 @@ impl UserRepository for PostgresUserRepository {
             handle: Handle::from(r.handle),
             preferred_channel: r.preferred_channel,
             preferred_locale: r.preferred_locale,
+            telegram_chat_id: r.telegram_chat_id,
+            discord_id: r.discord_id,
+            signal_number: r.signal_number,
         }))
     }
 
@@ -561,6 +564,33 @@ impl UserRepository for PostgresUserRepository {
         Ok(row)
     }
 
+    async fn check_channel_verified_by_did(
+        &self,
+        did: &Did,
+        channel: CommsChannel,
+    ) -> Result<Option<bool>, DbError> {
+        let row = sqlx::query!(
+            r#"SELECT
+                email_verified,
+                discord_verified,
+                telegram_verified,
+                signal_verified
+            FROM users
+            WHERE did = $1"#,
+            did.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+
+        Ok(row.map(|r| match channel {
+            CommsChannel::Email => r.email_verified,
+            CommsChannel::Discord => r.discord_verified,
+            CommsChannel::Telegram => r.telegram_verified,
+            CommsChannel::Signal => r.signal_verified,
+        }))
+    }
+
     async fn admin_update_email(&self, did: &Did, email: &str) -> Result<u64, DbError> {
         let result = sqlx::query!(
             "UPDATE users SET email = $1 WHERE did = $2",
@@ -609,6 +639,7 @@ impl UserRepository for PostgresUserRepository {
                 discord_verified,
                 telegram_username,
                 telegram_verified,
+                telegram_chat_id,
                 signal_number,
                 signal_verified
             FROM users WHERE did = $1"#,
@@ -624,6 +655,7 @@ impl UserRepository for PostgresUserRepository {
             discord_verified: r.discord_verified,
             telegram_username: r.telegram_username,
             telegram_verified: r.telegram_verified,
+            telegram_chat_id: r.telegram_chat_id,
             signal_number: r.signal_number,
             signal_verified: r.signal_verified,
         }))
@@ -676,7 +708,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn clear_telegram(&self, user_id: Uuid) -> Result<(), DbError> {
         sqlx::query!(
-            "UPDATE users SET telegram_username = NULL, telegram_verified = FALSE, updated_at = NOW() WHERE id = $1",
+            "UPDATE users SET telegram_username = NULL, telegram_verified = FALSE, telegram_chat_id = NULL, updated_at = NOW() WHERE id = $1",
             user_id
         )
         .execute(&self.pool)
@@ -3135,5 +3167,67 @@ impl UserRepository for PostgresUserRepository {
         Ok(tranquil_db_traits::RecoverPasskeyAccountResult {
             passkeys_deleted: deleted.rows_affected(),
         })
+    }
+
+    async fn set_unverified_telegram(
+        &self,
+        user_id: Uuid,
+        telegram_username: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"UPDATE users SET
+                telegram_username = $1,
+                telegram_verified = CASE WHEN LOWER(telegram_username) = LOWER($1) THEN telegram_verified ELSE FALSE END,
+                telegram_chat_id = CASE WHEN LOWER(telegram_username) = LOWER($1) THEN telegram_chat_id ELSE NULL END,
+                updated_at = NOW()
+            WHERE id = $2"#,
+            telegram_username,
+            user_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn store_telegram_chat_id(
+        &self,
+        telegram_username: &str,
+        chat_id: i64,
+        handle: Option<&str>,
+    ) -> Result<Option<Uuid>, DbError> {
+        let result = match handle {
+            Some(h) => sqlx::query_scalar!(
+                "UPDATE users SET telegram_chat_id = $2, telegram_verified = TRUE, updated_at = NOW() WHERE LOWER(telegram_username) = LOWER($1) AND telegram_username IS NOT NULL AND handle = $3 RETURNING id",
+                telegram_username,
+                chat_id,
+                h
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+            None => sqlx::query_scalar!(
+                r#"UPDATE users SET telegram_chat_id = $2, telegram_verified = TRUE, updated_at = NOW()
+                WHERE id = (
+                    SELECT id FROM users
+                    WHERE LOWER(telegram_username) = LOWER($1) AND telegram_username IS NOT NULL AND deactivated_at IS NULL
+                    LIMIT 1
+                ) RETURNING id"#,
+                telegram_username,
+                chat_id
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+        };
+        Ok(result)
+    }
+
+    async fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, DbError> {
+        let row = sqlx::query_scalar!("SELECT telegram_chat_id FROM users WHERE id = $1", user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?;
+        Ok(row.flatten())
     }
 }

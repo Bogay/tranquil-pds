@@ -1,65 +1,12 @@
 mod common;
-use cid::Cid;
+mod helpers;
 use common::*;
-use ipld_core::ipld::Ipld;
-use jacquard_common::types::{integer::LimitedU32, string::Tid};
-use jacquard_repo::commit::Commit;
+use helpers::*;
 use k256::ecdsa::SigningKey;
 use reqwest::StatusCode;
 use serde_json::json;
-use sha2::{Digest, Sha256};
-use sqlx::PgPool;
-use std::collections::BTreeMap;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-fn make_cid(data: &[u8]) -> Cid {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let hash = hasher.finalize();
-    let multihash = multihash::Multihash::wrap(0x12, &hash).unwrap();
-    Cid::new_v1(0x71, multihash)
-}
-
-fn write_varint(buf: &mut Vec<u8>, mut value: u64) {
-    loop {
-        let mut byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        buf.push(byte);
-        if value == 0 {
-            break;
-        }
-    }
-}
-
-fn encode_car_block(cid: &Cid, data: &[u8]) -> Vec<u8> {
-    let cid_bytes = cid.to_bytes();
-    let mut result = Vec::new();
-    write_varint(&mut result, (cid_bytes.len() + data.len()) as u64);
-    result.extend_from_slice(&cid_bytes);
-    result.extend_from_slice(data);
-    result
-}
-
-fn get_multikey_from_signing_key(signing_key: &SigningKey) -> String {
-    let public_key = signing_key.verifying_key();
-    let compressed = public_key.to_sec1_bytes();
-    fn encode_uvarint(mut x: u64) -> Vec<u8> {
-        let mut out = Vec::new();
-        while x >= 0x80 {
-            out.push(((x as u8) & 0x7F) | 0x80);
-            x >>= 7;
-        }
-        out.push(x as u8);
-        out
-    }
-    let mut buf = encode_uvarint(0xE7);
-    buf.extend_from_slice(&compressed);
-    multibase::encode(multibase::Base::Base58Btc, buf)
-}
 
 fn create_did_document(
     did: &str,
@@ -89,70 +36,6 @@ fn create_did_document(
     })
 }
 
-fn create_signed_commit(did: &str, data_cid: &Cid, signing_key: &SigningKey) -> (Vec<u8>, Cid) {
-    let rev = Tid::now(LimitedU32::MIN);
-    let did = jacquard_common::types::string::Did::new(did).expect("valid DID");
-    let unsigned = Commit::new_unsigned(did, *data_cid, rev, None);
-    let signed = unsigned.sign(signing_key).expect("signing failed");
-    let signed_bytes = signed.to_cbor().expect("serialization failed");
-    let cid = make_cid(&signed_bytes);
-    (signed_bytes, cid)
-}
-
-fn create_mst_node(entries: Vec<(String, Cid)>) -> (Vec<u8>, Cid) {
-    let ipld_entries: Vec<Ipld> = entries
-        .into_iter()
-        .map(|(key, value_cid)| {
-            Ipld::Map(BTreeMap::from([
-                ("k".to_string(), Ipld::Bytes(key.into_bytes())),
-                ("v".to_string(), Ipld::Link(value_cid)),
-                ("p".to_string(), Ipld::Integer(0)),
-            ]))
-        })
-        .collect();
-    let node = Ipld::Map(BTreeMap::from([(
-        "e".to_string(),
-        Ipld::List(ipld_entries),
-    )]));
-    let bytes = serde_ipld_dagcbor::to_vec(&node).unwrap();
-    let cid = make_cid(&bytes);
-    (bytes, cid)
-}
-
-fn create_record() -> (Vec<u8>, Cid) {
-    let record = Ipld::Map(BTreeMap::from([
-        (
-            "$type".to_string(),
-            Ipld::String("app.bsky.feed.post".to_string()),
-        ),
-        (
-            "text".to_string(),
-            Ipld::String("Test post for verification".to_string()),
-        ),
-        (
-            "createdAt".to_string(),
-            Ipld::String("2024-01-01T00:00:00Z".to_string()),
-        ),
-    ]));
-    let bytes = serde_ipld_dagcbor::to_vec(&record).unwrap();
-    let cid = make_cid(&bytes);
-    (bytes, cid)
-}
-fn build_car_with_signature(did: &str, signing_key: &SigningKey) -> (Vec<u8>, Cid) {
-    let (record_bytes, record_cid) = create_record();
-    let (mst_bytes, mst_cid) =
-        create_mst_node(vec![("app.bsky.feed.post/test123".to_string(), record_cid)]);
-    let (commit_bytes, commit_cid) = create_signed_commit(did, &mst_cid, signing_key);
-    let header = iroh_car::CarHeader::new_v1(vec![commit_cid]);
-    let header_bytes = header.encode().unwrap();
-    let mut car = Vec::new();
-    write_varint(&mut car, header_bytes.len() as u64);
-    car.extend_from_slice(&header_bytes);
-    car.extend(encode_car_block(&commit_cid, &commit_bytes));
-    car.extend(encode_car_block(&mst_cid, &mst_bytes));
-    car.extend(encode_car_block(&record_cid, &record_bytes));
-    (car, commit_cid)
-}
 async fn setup_mock_plc_directory(did: &str, did_doc: serde_json::Value) -> MockServer {
     let mock_server = MockServer::start().await;
     let did_encoded = urlencoding::encode(did);
@@ -164,23 +47,7 @@ async fn setup_mock_plc_directory(did: &str, did_doc: serde_json::Value) -> Mock
         .await;
     mock_server
 }
-async fn get_user_signing_key(did: &str) -> Option<Vec<u8>> {
-    let db_url = get_db_connection_string().await;
-    let pool = PgPool::connect(&db_url).await.ok()?;
-    let row = sqlx::query!(
-        r#"
-        SELECT k.key_bytes, k.encryption_version
-        FROM user_keys k
-        JOIN users u ON k.user_id = u.id
-        WHERE u.did = $1
-        "#,
-        did
-    )
-    .fetch_optional(&pool)
-    .await
-    .ok()??;
-    tranquil_pds::config::decrypt_key(&row.key_bytes, row.encryption_version).ok()
-}
+
 #[tokio::test]
 #[ignore = "requires exclusive env var access; run with: cargo test test_import_with_valid_signature_and_mock_plc -- --ignored --test-threads=1"]
 async fn test_import_with_valid_signature_and_mock_plc() {

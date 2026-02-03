@@ -420,6 +420,45 @@ pub async fn check_email_verified(
 }
 
 #[derive(Deserialize)]
+pub struct CheckChannelVerifiedInput {
+    pub did: String,
+    pub channel: String,
+}
+
+pub async fn check_channel_verified(
+    State(state): State<AppState>,
+    _rate_limit: RateLimited<VerificationCheckLimit>,
+    Json(input): Json<CheckChannelVerifiedInput>,
+) -> Response {
+    let channel = match input.channel.to_lowercase().as_str() {
+        "email" => CommsChannel::Email,
+        "discord" => CommsChannel::Discord,
+        "telegram" => CommsChannel::Telegram,
+        "signal" => CommsChannel::Signal,
+        _ => {
+            return ApiError::InvalidRequest("invalid channel".into()).into_response();
+        }
+    };
+
+    let did = match crate::Did::new(input.did) {
+        Ok(d) => d,
+        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
+    };
+    match state
+        .user_repo
+        .check_channel_verified_by_did(&did, channel)
+        .await
+    {
+        Ok(Some(verified)) => VerifiedResponse::response(verified).into_response(),
+        Ok(None) => ApiError::AccountNotFound.into_response(),
+        Err(e) => {
+            error!("DB error checking channel verified: {:?}", e);
+            ApiError::InternalError(None).into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
 pub struct AuthorizeEmailUpdateQuery {
     pub token: String,
 }

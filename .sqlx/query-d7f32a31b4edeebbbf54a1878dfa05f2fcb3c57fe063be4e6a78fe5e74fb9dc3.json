@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET\n                telegram_username = $1,\n                telegram_verified = CASE WHEN LOWER(telegram_username) = LOWER($1) THEN telegram_verified ELSE FALSE END,\n                telegram_chat_id = CASE WHEN LOWER(telegram_username) = LOWER($1) THEN telegram_chat_id ELSE NULL END,\n                updated_at = NOW()\n            WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d7f32a31b4edeebbbf54a1878dfa05f2fcb3c57fe063be4e6a78fe5e74fb9dc3"
+}

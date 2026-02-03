@@ -31,6 +31,8 @@ pub struct NotificationStrings {
     pub legacy_login_body: &'static str,
     pub migration_verification_subject: &'static str,
     pub migration_verification_body: &'static str,
+    pub channel_verified_subject: &'static str,
+    pub channel_verified_body: &'static str,
 }
 
 pub fn get_strings(locale: &str) -> &'static NotificationStrings {
@@ -66,6 +68,8 @@ static STRINGS_EN: NotificationStrings = NotificationStrings {
     legacy_login_body: "Hello @{handle},\n\nA login to your account was detected using a legacy app (like Bluesky) that doesn't support TOTP verification.\n\nDetails:\n- Time: {timestamp}\n- IP Address: {ip}\n\nYour TOTP protection was bypassed for this login. The session has limited permissions for sensitive operations.\n\nIf this wasn't you, please:\n1. Change your password immediately\n2. Review your active sessions\n3. Consider disabling legacy app logins in your security settings\n\nStay safe,\n{hostname}",
     migration_verification_subject: "Verify your email - {hostname}",
     migration_verification_body: "Welcome to {hostname}!\n\nYour account has been migrated successfully. To complete the setup, please verify your email address.\n\nYour verification code is:\n{code}\n\nCopy the code above and enter it at:\n{verify_page}\n\nThis code will expire in 48 hours.\n\nOr if you like to live dangerously:\n{verify_link}\n\nIf you did not migrate your account, please ignore this email.",
+    channel_verified_subject: "Channel verified - {hostname}",
+    channel_verified_body: "Hello {handle},\n\n{channel} has been verified as a notification channel for your account on {hostname}.",
 };
 
 static STRINGS_ZH: NotificationStrings = NotificationStrings {
@@ -90,6 +94,8 @@ static STRINGS_ZH: NotificationStrings = NotificationStrings {
     legacy_login_body: "您好 @{handle}，\n\n检测到使用不支持 TOTP 验证的传统应用（如 Bluesky）登录您的账户。\n\n详细信息：\n- 时间：{timestamp}\n- IP 地址：{ip}\n\n此次登录绕过了 TOTP 保护。该会话对敏感操作的权限有限。\n\n如果这不是您的操作，请：\n1. 立即更改密码\n2. 检查您的活跃会话\n3. 考虑在安全设置中禁用传统应用登录\n\n请注意安全，\n{hostname}",
     migration_verification_subject: "验证您的邮箱 - {hostname}",
     migration_verification_body: "欢迎来到 {hostname}！\n\n您的账户已成功迁移。要完成设置，请验证您的邮箱地址。\n\n您的验证码是：\n{code}\n\n复制上述验证码并在此输入：\n{verify_page}\n\n此验证码将在 48 小时后过期。\n\n或者直接点击链接：\n{verify_link}\n\n如果您没有迁移账户，请忽略此邮件。",
+    channel_verified_subject: "通知渠道已验证 - {hostname}",
+    channel_verified_body: "您好 {handle}，\n\n{channel} 已被验证为您在 {hostname} 上的通知渠道。",
 };
 
 static STRINGS_JA: NotificationStrings = NotificationStrings {
@@ -114,6 +120,8 @@ static STRINGS_JA: NotificationStrings = NotificationStrings {
     legacy_login_body: "@{handle} 様\n\nTOTP 認証に対応していないレガシーアプリ（Bluesky など）からのログインが検出されました。\n\n詳細：\n- 時刻：{timestamp}\n- IP アドレス：{ip}\n\nこのログインでは TOTP 保護がバイパスされました。このセッションは機密操作に対する権限が制限されています。\n\n心当たりがない場合は：\n1. 直ちにパスワードを変更してください\n2. アクティブなセッションを確認してください\n3. セキュリティ設定でレガシーアプリのログインを無効にすることを検討してください\n\nご注意ください。\n{hostname}",
     migration_verification_subject: "メールアドレスの認証 - {hostname}",
     migration_verification_body: "{hostname} へようこそ！\n\nアカウントの移行が完了しました。設定を完了するには、メールアドレスを認証してください。\n\n認証コードは：\n{code}\n\n上記のコードをコピーして、こちらで入力してください：\n{verify_page}\n\nこのコードは48時間後に期限切れとなります。\n\n自己責任でワンクリック認証：\n{verify_link}\n\nアカウントを移行していない場合は、このメールを無視してください。",
+    channel_verified_subject: "通知チャンネル認証完了 - {hostname}",
+    channel_verified_body: "{handle} 様\n\n{channel} が {hostname} の通知チャンネルとして認証されました。",
 };
 
 static STRINGS_KO: NotificationStrings = NotificationStrings {
@@ -138,6 +146,8 @@ static STRINGS_KO: NotificationStrings = NotificationStrings {
     legacy_login_body: "안녕하세요 @{handle}님,\n\nTOTP 인증을 지원하지 않는 레거시 앱(예: Bluesky)을 사용한 로그인이 감지되었습니다.\n\n세부 정보:\n- 시간: {timestamp}\n- IP 주소: {ip}\n\n이 로그인에서 TOTP 보호가 우회되었습니다. 이 세션은 민감한 작업에 대한 권한이 제한됩니다.\n\n본인이 아닌 경우:\n1. 즉시 비밀번호를 변경하세요\n2. 활성 세션을 검토하세요\n3. 보안 설정에서 레거시 앱 로그인 비활성화를 고려하세요\n\n{hostname} 드림",
     migration_verification_subject: "이메일 인증 - {hostname}",
     migration_verification_body: "{hostname}에 오신 것을 환영합니다!\n\n계정 마이그레이션이 완료되었습니다. 설정을 완료하려면 이메일 주소를 인증하세요.\n\n인증 코드는:\n{code}\n\n위 코드를 복사하여 여기에 입력하세요:\n{verify_page}\n\n이 코드는 48시간 후에 만료됩니다.\n\n위험을 감수하고 원클릭 인증:\n{verify_link}\n\n계정을 마이그레이션하지 않았다면 이 이메일을 무시하세요.",
+    channel_verified_subject: "알림 채널 인증 완료 - {hostname}",
+    channel_verified_body: "안녕하세요 {handle}님,\n\n{channel}이(가) {hostname}의 알림 채널로 인증되었습니다.",
 };
 
 static STRINGS_SV: NotificationStrings = NotificationStrings {
@@ -162,6 +172,8 @@ static STRINGS_SV: NotificationStrings = NotificationStrings {
     legacy_login_body: "Hej @{handle},\n\nEn inloggning till ditt konto upptäcktes med en äldre app (som Bluesky) som inte stöder TOTP-verifiering.\n\nDetaljer:\n- Tid: {timestamp}\n- IP-adress: {ip}\n\nDitt TOTP-skydd kringgicks för denna inloggning. Sessionen har begränsade behörigheter för känsliga operationer.\n\nOm detta inte var du:\n1. Ändra ditt lösenord omedelbart\n2. Granska dina aktiva sessioner\n3. Överväg att inaktivera äldre appinloggningar i dina säkerhetsinställningar\n\nVar försiktig,\n{hostname}",
     migration_verification_subject: "Verifiera din e-post - {hostname}",
     migration_verification_body: "Välkommen till {hostname}!\n\nDitt konto har migrerats framgångsrikt. För att slutföra installationen, verifiera din e-postadress.\n\nDin verifieringskod är:\n{code}\n\nKopiera koden ovan och ange den på:\n{verify_page}\n\nDenna kod upphör om 48 timmar.\n\nEller om du gillar att leva farligt:\n{verify_link}\n\nOm du inte migrerade ditt konto kan du ignorera detta meddelande.",
+    channel_verified_subject: "Aviseringskanal verifierad - {hostname}",
+    channel_verified_body: "Hej {handle},\n\n{channel} har verifierats som aviseringskanal för ditt konto på {hostname}.",
 };
 
 static STRINGS_FI: NotificationStrings = NotificationStrings {
@@ -186,6 +198,8 @@ static STRINGS_FI: NotificationStrings = NotificationStrings {
     legacy_login_body: "Hei @{handle},\n\nTilillesi havaittiin kirjautuminen vanhalla sovelluksella (kuten Bluesky), joka ei tue TOTP-vahvistusta.\n\nTiedot:\n- Aika: {timestamp}\n- IP-osoite: {ip}\n\nTOTP-suojauksesi ohitettiin tässä kirjautumisessa. Istunnolla on rajoitetut oikeudet arkaluontoisiin toimintoihin.\n\nJos tämä et ollut sinä:\n1. Vaihda salasanasi välittömästi\n2. Tarkista aktiiviset istuntosi\n3. Harkitse vanhojen sovellusten kirjautumisen poistamista käytöstä turvallisuusasetuksissa\n\nOle varovainen,\n{hostname}",
     migration_verification_subject: "Vahvista sähköpostisi - {hostname}",
     migration_verification_body: "Tervetuloa palveluun {hostname}!\n\nTilisi on siirretty onnistuneesti. Viimeistele asennus vahvistamalla sähköpostiosoitteesi.\n\nVahvistuskoodisi on:\n{code}\n\nKopioi koodi yllä ja syötä se osoitteessa:\n{verify_page}\n\nTämä koodi vanhenee 48 tunnissa.\n\nTai jos pidät vaarallisesta elämästä:\n{verify_link}\n\nJos et siirtänyt tiliäsi, voit jättää tämän viestin huomiotta.",
+    channel_verified_subject: "Ilmoituskanava vahvistettu - {hostname}",
+    channel_verified_body: "Hei {handle},\n\n{channel} on vahvistettu ilmoituskanavaksi tilillesi palvelussa {hostname}.",
 };
 
 pub fn format_message(template: &str, vars: &[(&str, &str)]) -> String {

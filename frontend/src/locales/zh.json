@@ -436,6 +436,8 @@
     "discordInUseWarning": "此 Discord ID 已与另一个账户关联。",
     "telegramInUseWarning": "此 Telegram 用户名已与另一个账户关联。",
     "signalInUseWarning": "此 Signal 号码已与另一个账户关联。",
+    "telegramStartBot": "或手动向 @{botUsername} 发送 /start {handle}",
+    "telegramOpenLink": "打开 Telegram 验证",
     "failedToLoad": "加载偏好设置失败",
     "failedToSave": "保存偏好设置失败",
     "failedToVerify": "验证失败",

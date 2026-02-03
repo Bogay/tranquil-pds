@@ -282,6 +282,10 @@ pub fn app(state: AppState) -> Router {
             post(api::server::check_email_verified),
         )
         .route(
+            "/_checkChannelVerified",
+            post(api::server::check_channel_verified),
+        )
+        .route(
             "/com.atproto.server.confirmEmail",
             post(api::server::confirm_email),
         )
@@ -639,6 +643,10 @@ pub fn app(state: AppState) -> Router {
         .route("/robots.txt", get(api::server::robots_txt))
         .route("/logo", get(api::server::get_logo))
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))
+        .route(
+            "/webhook/telegram",
+            post(api::telegram_webhook::handle_telegram_webhook),
+        )
         .layer(DefaultBodyLimit::max(util::get_max_blob_size()))
         .layer(middleware::from_fn(metrics::metrics_middleware))
         .layer(

@@ -119,8 +119,8 @@ pub async fn sso_initiate(
             let auth_header = headers
                 .get(axum::http::header::AUTHORIZATION)
                 .and_then(|v| v.to_str().ok());
-            let extracted = extract_auth_token_from_header(auth_header)
-                .ok_or(ApiError::SsoNotAuthenticated)?;
+            let extracted =
+                extract_auth_token_from_header(auth_header).ok_or(ApiError::SsoNotAuthenticated)?;
             let auth_user = validate_bearer_token_cached(
                 state.user_repo.as_ref(),
                 state.cache.as_ref(),
@@ -899,7 +899,15 @@ pub async fn complete_registration(
             _ => return Err(ApiError::MissingDiscordId),
         },
         "telegram" => match &input.telegram_username {
-            Some(username) if !username.trim().is_empty() => username.trim().to_string(),
+            Some(username) if !username.trim().is_empty() => {
+                let clean = username.trim().trim_start_matches('@');
+                if !crate::api::validation::is_valid_telegram_username(clean) {
+                    return Err(ApiError::InvalidRequest(
+                        "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
+                    ));
+                }
+                clean.to_string()
+            }
             _ => return Err(ApiError::MissingTelegramUsername),
         },
         "signal" => match &input.signal_number {
@@ -1104,7 +1112,7 @@ pub async fn complete_registration(
         telegram_username: input
             .telegram_username
             .clone()
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().trim_start_matches('@').to_string())
             .filter(|s| !s.is_empty()),
         signal_number: input
             .signal_number

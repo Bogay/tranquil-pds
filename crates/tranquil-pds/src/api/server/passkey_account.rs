@@ -172,7 +172,15 @@ pub async fn create_passkey_account(
             _ => return ApiError::MissingDiscordId.into_response(),
         },
         "telegram" => match &input.telegram_username {
-            Some(username) if !username.trim().is_empty() => username.trim().to_string(),
+            Some(username) if !username.trim().is_empty() => {
+                let clean = username.trim().trim_start_matches('@');
+                if !crate::api::validation::is_valid_telegram_username(clean) {
+                    return ApiError::InvalidRequest(
+                        "Invalid Telegram username. Must be 5-32 characters, alphanumeric or underscore".into(),
+                    ).into_response();
+                }
+                clean.to_string()
+            }
             _ => return ApiError::MissingTelegramUsername.into_response(),
         },
         "signal" => match &input.signal_number {
@@ -410,7 +418,7 @@ pub async fn create_passkey_account(
         telegram_username: input
             .telegram_username
             .as_deref()
-            .map(|s| s.trim())
+            .map(|s| s.trim().trim_start_matches('@'))
             .filter(|s| !s.is_empty())
             .map(String::from),
         signal_number: input

@@ -10,7 +10,7 @@ use tranquil_comms::{
     CommsChannel, CommsSender, CommsStatus, CommsType, NewComms, SendError, format_message,
     get_strings,
 };
-use tranquil_db_traits::{InfraRepository, QueuedComms, UserRepository};
+use tranquil_db_traits::{InfraRepository, QueuedComms, UserCommsPrefs, UserRepository};
 use uuid::Uuid;
 
 pub struct CommsService {
@@ -75,6 +75,7 @@ impl CommsService {
                 tranquil_db_traits::CommsType::MigrationVerification
             }
             CommsType::ChannelVerification => tranquil_db_traits::CommsType::ChannelVerification,
+            CommsType::ChannelVerified => tranquil_db_traits::CommsType::ChannelVerified,
         };
         let id = self
             .infra_repo
@@ -170,6 +171,7 @@ impl CommsService {
                 tranquil_db_traits::CommsType::ChannelVerification => {
                     CommsType::ChannelVerification
                 }
+                tranquil_db_traits::CommsType::ChannelVerified => CommsType::ChannelVerified,
             },
             status: match item.status {
                 tranquil_db_traits::CommsStatus::Pending => CommsStatus::Pending,
@@ -247,6 +249,49 @@ pub fn channel_display_name(channel: CommsChannel) -> &'static str {
     }
 }
 
+struct ResolvedRecipient {
+    channel: tranquil_db_traits::CommsChannel,
+    recipient: String,
+}
+
+fn resolve_recipient(
+    prefs: &UserCommsPrefs,
+    channel: tranquil_db_traits::CommsChannel,
+) -> ResolvedRecipient {
+    let email_fallback = || ResolvedRecipient {
+        channel: tranquil_db_traits::CommsChannel::Email,
+        recipient: prefs.email.clone().unwrap_or_default(),
+    };
+    match channel {
+        tranquil_db_traits::CommsChannel::Email => email_fallback(),
+        tranquil_db_traits::CommsChannel::Telegram => prefs
+            .telegram_chat_id
+            .map(|id| ResolvedRecipient {
+                channel,
+                recipient: id.to_string(),
+            })
+            .unwrap_or_else(email_fallback),
+        tranquil_db_traits::CommsChannel::Discord => prefs
+            .discord_id
+            .as_ref()
+            .filter(|id| !id.is_empty())
+            .map(|id| ResolvedRecipient {
+                channel,
+                recipient: id.clone(),
+            })
+            .unwrap_or_else(email_fallback),
+        tranquil_db_traits::CommsChannel::Signal => prefs
+            .signal_number
+            .as_ref()
+            .filter(|n| !n.is_empty())
+            .map(|n| ResolvedRecipient {
+                channel,
+                recipient: n.clone(),
+            })
+            .unwrap_or_else(email_fallback),
+    }
+}
+
 fn channel_from_str(s: &str) -> tranquil_db_traits::CommsChannel {
     match s {
         "discord" => tranquil_db_traits::CommsChannel::Discord,
@@ -276,13 +321,13 @@ pub mod repo {
             &[("hostname", hostname), ("handle", &prefs.handle)],
         );
         let subject = format_message(strings.welcome_subject, &[("hostname", hostname)]);
-        let channel = prefs.preferred_channel;
+        let resolved = resolve_recipient(&prefs, prefs.preferred_channel);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                channel,
+                resolved.channel,
                 CommsType::Welcome,
-                &prefs.email.unwrap_or_default(),
+                &resolved.recipient,
                 Some(&subject),
                 &body,
                 None,
@@ -307,13 +352,13 @@ pub mod repo {
             &[("handle", &prefs.handle), ("code", code)],
         );
         let subject = format_message(strings.password_reset_subject, &[("hostname", hostname)]);
-        let channel = prefs.preferred_channel;
+        let resolved = resolve_recipient(&prefs, prefs.preferred_channel);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                channel,
+                resolved.channel,
                 CommsType::PasswordReset,
-                &prefs.email.unwrap_or_default(),
+                &resolved.recipient,
                 Some(&subject),
                 &body,
                 None,
@@ -471,13 +516,13 @@ pub mod repo {
             &[("handle", &prefs.handle), ("code", code)],
         );
         let subject = format_message(strings.account_deletion_subject, &[("hostname", hostname)]);
-        let channel = prefs.preferred_channel;
+        let resolved = resolve_recipient(&prefs, prefs.preferred_channel);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                channel,
+                resolved.channel,
                 CommsType::AccountDeletion,
-                &prefs.email.unwrap_or_default(),
+                &resolved.recipient,
                 Some(&subject),
                 &body,
                 None,
@@ -502,13 +547,13 @@ pub mod repo {
             &[("handle", &prefs.handle), ("token", token)],
         );
         let subject = format_message(strings.plc_operation_subject, &[("hostname", hostname)]);
-        let channel = prefs.preferred_channel;
+        let resolved = resolve_recipient(&prefs, prefs.preferred_channel);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                channel,
+                resolved.channel,
                 CommsType::PlcOperation,
-                &prefs.email.unwrap_or_default(),
+                &resolved.recipient,
                 Some(&subject),
                 &body,
                 None,
@@ -533,13 +578,13 @@ pub mod repo {
             &[("handle", &prefs.handle), ("url", recovery_url)],
         );
         let subject = format_message(strings.passkey_recovery_subject, &[("hostname", hostname)]);
-        let channel = prefs.preferred_channel;
+        let resolved = resolve_recipient(&prefs, prefs.preferred_channel);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                channel,
+                resolved.channel,
                 CommsType::PasskeyRecovery,
-                &prefs.email.unwrap_or_default(),
+                &resolved.recipient,
                 Some(&subject),
                 &body,
                 None,
@@ -663,13 +708,13 @@ pub mod repo {
             &[("handle", &prefs.handle), ("code", code)],
         );
         let subject = format_message(strings.two_factor_code_subject, &[("hostname", hostname)]);
-        let channel = prefs.preferred_channel;
+        let resolved = resolve_recipient(&prefs, prefs.preferred_channel);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                channel,
+                resolved.channel,
                 CommsType::TwoFactorCode,
-                &prefs.email.unwrap_or_default(),
+                &resolved.recipient,
                 Some(&subject),
                 &body,
                 None,
@@ -703,12 +748,56 @@ pub mod repo {
             ],
         );
         let subject = format_message(strings.legacy_login_subject, &[("hostname", hostname)]);
+        let resolved = resolve_recipient(&prefs, channel);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                channel,
+                resolved.channel,
                 CommsType::LegacyLoginAlert,
-                &prefs.email.unwrap_or_default(),
+                &resolved.recipient,
+                Some(&subject),
+                &body,
+                None,
+            )
+            .await
+    }
+
+    pub async fn enqueue_channel_verified(
+        user_repo: &dyn UserRepository,
+        infra_repo: &dyn InfraRepository,
+        user_id: Uuid,
+        channel_name: &str,
+        recipient: &str,
+        hostname: &str,
+    ) -> Result<Uuid, DbError> {
+        let prefs = user_repo
+            .get_comms_prefs(user_id)
+            .await?
+            .ok_or(DbError::NotFound)?;
+        let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
+        let display_name = match channel_name {
+            "email" => "Email",
+            "discord" => "Discord",
+            "telegram" => "Telegram",
+            "signal" => "Signal",
+            other => other,
+        };
+        let body = format_message(
+            strings.channel_verified_body,
+            &[
+                ("handle", &prefs.handle),
+                ("channel", display_name),
+                ("hostname", hostname),
+            ],
+        );
+        let subject = format_message(strings.channel_verified_subject, &[("hostname", hostname)]);
+        let comms_channel = channel_from_str(channel_name);
+        infra_repo
+            .enqueue_comms(
+                Some(user_id),
+                comms_channel,
+                CommsType::ChannelVerified,
+                recipient,
                 Some(&subject),
                 &body,
                 None,

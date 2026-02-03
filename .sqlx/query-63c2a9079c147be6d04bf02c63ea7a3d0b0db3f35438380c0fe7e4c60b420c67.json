@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                email,\n                preferred_comms_channel as \"preferred_channel!: CommsChannel\",\n                discord_id,\n                discord_verified,\n                telegram_username,\n                telegram_verified,\n                signal_number,\n                signal_verified\n            FROM users WHERE did = $1",
+  "query": "SELECT email, handle, preferred_comms_channel as \"preferred_channel!: CommsChannel\", preferred_locale, telegram_chat_id, discord_id, signal_number\n               FROM users WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -10,6 +10,11 @@
       },
       {
         "ordinal": 1,
+        "name": "handle",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
         "name": "preferred_channel!: CommsChannel",
         "type_info": {
           "Custom": {
@@ -26,51 +31,40 @@
         }
       },
       {
-        "ordinal": 2,
-        "name": "discord_id",
-        "type_info": "Text"
-      },
-      {
         "ordinal": 3,
-        "name": "discord_verified",
-        "type_info": "Bool"
+        "name": "preferred_locale",
+        "type_info": "Varchar"
       },
       {
         "ordinal": 4,
-        "name": "telegram_username",
-        "type_info": "Text"
+        "name": "telegram_chat_id",
+        "type_info": "Int8"
       },
       {
         "ordinal": 5,
-        "name": "telegram_verified",
-        "type_info": "Bool"
+        "name": "discord_id",
+        "type_info": "Text"
       },
       {
         "ordinal": 6,
         "name": "signal_number",
         "type_info": "Text"
-      },
-      {
-        "ordinal": 7,
-        "name": "signal_verified",
-        "type_info": "Bool"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       true,
       false,
-      true,
       false,
       true,
-      false,
       true,
-      false
+      true,
+      true
     ]
   },
-  "hash": "247470d26a90617e7dc9b5b3a2146ee3f54448e3c24943f7005e3a8e28820d43"
+  "hash": "63c2a9079c147be6d04bf02c63ea7a3d0b0db3f35438380c0fe7e4c60b420c67"
 }

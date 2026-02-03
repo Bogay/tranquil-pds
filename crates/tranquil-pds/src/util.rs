@@ -14,6 +14,7 @@ const DEFAULT_MAX_BLOB_SIZE: usize = 10 * 1024 * 1024 * 1024;
 static MAX_BLOB_SIZE: OnceLock<usize> = OnceLock::new();
 static PDS_HOSTNAME: OnceLock<String> = OnceLock::new();
 static PDS_HOSTNAME_WITHOUT_PORT: OnceLock<String> = OnceLock::new();
+static TELEGRAM_BOT_USERNAME: OnceLock<String> = OnceLock::new();
 
 pub fn get_max_blob_size() -> usize {
     *MAX_BLOB_SIZE.get_or_init(|| {
@@ -102,6 +103,14 @@ pub fn pds_hostname_without_port() -> &'static str {
         let hostname = pds_hostname();
         hostname.split(':').next().unwrap_or(hostname).to_string()
     })
+}
+
+pub fn set_telegram_bot_username(username: String) {
+    TELEGRAM_BOT_USERNAME.set(username).ok();
+}
+
+pub fn telegram_bot_username() -> Option<&'static str> {
+    TELEGRAM_BOT_USERNAME.get().map(|s| s.as_str())
 }
 
 pub fn pds_public_url() -> String {

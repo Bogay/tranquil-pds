@@ -232,6 +232,12 @@ export interface ServerDescription {
   version?: string;
   availableCommsChannels?: VerificationChannel[];
   selfHostedDidWebEnabled?: boolean;
+  telegramBotUsername?: string;
+}
+
+export interface UpdateNotificationPrefsResponse {
+  success: boolean;
+  verificationRequired: string[];
 }
 
 export interface RepoInfo {

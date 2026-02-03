@@ -99,13 +99,12 @@
           inviteCodeRequired: data.inviteCodeRequired ?? false,
           selfHostedDidWebEnabled: data.selfHostedDidWebEnabled ?? false,
         }
-        if (data.commsChannels) {
-          commsChannels = {
-            email: data.commsChannels.email ?? true,
-            discord: data.commsChannels.discord ?? false,
-            telegram: data.commsChannels.telegram ?? false,
-            signal: data.commsChannels.signal ?? false,
-          }
+        const available: string[] = data.availableCommsChannels ?? ['email']
+        commsChannels = {
+          email: available.includes('email'),
+          discord: available.includes('discord'),
+          telegram: available.includes('telegram'),
+          signal: available.includes('signal'),
         }
       }
     } catch {

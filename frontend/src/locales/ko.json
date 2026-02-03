@@ -436,6 +436,8 @@
     "discordInUseWarning": "이 Discord ID는 이미 다른 계정과 연결되어 있습니다.",
     "telegramInUseWarning": "이 Telegram 사용자 이름은 이미 다른 계정과 연결되어 있습니다.",
     "signalInUseWarning": "이 Signal 번호는 이미 다른 계정과 연결되어 있습니다.",
+    "telegramStartBot": "또는 @{botUsername}에게 /start {handle}을 직접 보내세요",
+    "telegramOpenLink": "Telegram에서 인증하기",
     "failedToLoad": "설정 로딩 실패",
     "failedToSave": "설정 저장 실패",
     "failedToVerify": "인증 실패",
