@@ -190,6 +190,7 @@ pub async fn import_repo(
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_BLOCKS);
+    let _write_lock = state.repo_write_locks.lock(user_id).await;
     match apply_import(&state.repo_repo, user_id, root, blocks.clone(), max_blocks).await {
         Ok(import_result) => {
             info!(

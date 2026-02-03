@@ -326,6 +326,9 @@ pub async fn apply_writes(
         .ok()
         .flatten()
         .ok_or_else(|| ApiError::InternalError(Some("User not found".into())))?;
+
+    let _write_lock = state.repo_write_locks.lock(user_id).await;
+
     let root_cid_str = state
         .repo_repo
         .get_repo_root_cid_by_user_id(user_id)

@@ -1,5 +1,7 @@
 use crate::api::error::ApiError;
-use crate::api::repo::record::utils::{CommitParams, RecordOp, commit_and_log};
+use crate::api::repo::record::utils::{
+    CommitParams, RecordOp, commit_and_log, get_current_root_cid,
+};
 use crate::api::repo::record::write::{CommitInfo, prepare_repo_write};
 use crate::auth::{Active, Auth, VerifyScope};
 use crate::cid_types::CommitCid;
@@ -56,8 +58,10 @@ pub async fn delete_record(
 
     let did = repo_auth.did;
     let user_id = repo_auth.user_id;
-    let current_root_cid = repo_auth.current_root_cid;
     let controller_did = repo_auth.controller_did;
+
+    let _write_lock = state.repo_write_locks.lock(user_id).await;
+    let current_root_cid = get_current_root_cid(&state, user_id).await?;
 
     if let Some(swap_commit) = &input.swap_commit
         && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
@@ -238,6 +242,8 @@ pub async fn delete_record_internal(
     collection: &Nsid,
     rkey: &Rkey,
 ) -> Result<(), String> {
+    let _write_lock = state.repo_write_locks.lock(user_id).await;
+
     let root_cid_str = state
         .repo_repo
         .get_repo_root_cid_by_user_id(user_id)

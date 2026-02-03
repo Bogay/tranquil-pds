@@ -5,6 +5,7 @@ use crate::circuit_breaker::CircuitBreakers;
 use crate::config::AuthConfig;
 use crate::rate_limit::RateLimiters;
 use crate::repo::PostgresBlockStore;
+use crate::repo_write_lock::RepoWriteLocks;
 use crate::sso::{SsoConfig, SsoManager};
 use crate::storage::{BackupStorage, BlobStorage, create_backup_storage, create_blob_storage};
 use crate::sync::firehose::SequencedEvent;
@@ -38,6 +39,7 @@ pub struct AppState {
     pub backup_storage: Option<Arc<dyn BackupStorage>>,
     pub firehose_tx: broadcast::Sender<SequencedEvent>,
     pub rate_limiters: Arc<RateLimiters>,
+    pub repo_write_locks: Arc<RepoWriteLocks>,
     pub circuit_breakers: Arc<CircuitBreakers>,
     pub cache: Arc<dyn Cache>,
     pub distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
@@ -181,6 +183,7 @@ impl AppState {
 
         let (firehose_tx, _) = broadcast::channel(firehose_buffer_size);
         let rate_limiters = Arc::new(RateLimiters::new());
+        let repo_write_locks = Arc::new(RepoWriteLocks::new());
         let circuit_breakers = Arc::new(CircuitBreakers::new());
         let (cache, distributed_rate_limiter) = create_cache().await;
         let did_resolver = Arc::new(DidResolver::new());
@@ -209,6 +212,7 @@ impl AppState {
             backup_storage,
             firehose_tx,
             rate_limiters,
+            repo_write_locks,
             circuit_breakers,
             cache,
             distributed_rate_limiter,

@@ -1,3 +1,5 @@
+use crate::api::error::ApiError;
+use crate::cid_types::CommitCid;
 use crate::state::AppState;
 use crate::types::{Did, Handle, Nsid, Rkey};
 use bytes::Bytes;
@@ -8,8 +10,23 @@ use jacquard_repo::storage::BlockStore;
 use k256::ecdsa::SigningKey;
 use serde_json::{Value, json};
 use std::str::FromStr;
+use tracing::error;
 use tranquil_db_traits::SequenceNumber;
 use uuid::Uuid;
+
+pub async fn get_current_root_cid(state: &AppState, user_id: Uuid) -> Result<CommitCid, ApiError> {
+    let root_cid_str = state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .map_err(|e| {
+            error!("DB error fetching repo root: {}", e);
+            ApiError::InternalError(None)
+        })?
+        .ok_or_else(|| ApiError::InternalError(Some("Repo root not found".into())))?;
+    CommitCid::from_str(&root_cid_str)
+        .map_err(|_| ApiError::InternalError(Some("Invalid repo root CID".into())))
+}
 
 pub fn extract_blob_cids(record: &Value) -> Vec<String> {
     let mut blobs = Vec::new();
@@ -328,6 +345,9 @@ pub async fn create_record_internal(
         .await
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "User not found".to_string())?;
+
+    let _write_lock = state.repo_write_locks.lock(user_id).await;
+
     let root_cid_link = state
         .repo_repo
         .get_repo_root_cid_by_user_id(user_id)

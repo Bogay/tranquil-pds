@@ -3,6 +3,7 @@ use super::validation_mode::{ValidationMode, deserialize_validation_mode};
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{
     CommitParams, RecordOp, commit_and_log, extract_backlinks, extract_blob_cids,
+    get_current_root_cid,
 };
 use crate::auth::{
     Active, Auth, RepoScopeAction, ScopeVerified, VerifyScope, require_not_migrated,
@@ -31,7 +32,6 @@ use uuid::Uuid;
 pub struct RepoWriteAuth {
     pub did: Did,
     pub user_id: Uuid,
-    pub current_root_cid: CommitCid,
     pub is_oauth: bool,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
@@ -62,24 +62,10 @@ pub async fn prepare_repo_write<A: RepoScopeAction>(
             ApiError::InternalError(None).into_response()
         })?
         .ok_or_else(|| ApiError::InternalError(Some("User not found".into())).into_response())?;
-    let root_cid_str = state
-        .repo_repo
-        .get_repo_root_cid_by_user_id(user_id)
-        .await
-        .map_err(|e| {
-            error!("DB error fetching repo root: {}", e);
-            ApiError::InternalError(None).into_response()
-        })?
-        .ok_or_else(|| {
-            ApiError::InternalError(Some("Repo root not found".into())).into_response()
-        })?;
-    let current_root_cid = CommitCid::from_str(&root_cid_str).map_err(|_| {
-        ApiError::InternalError(Some("Invalid repo root CID".into())).into_response()
-    })?;
+
     Ok(RepoWriteAuth {
         did: principal_did.into_did(),
         user_id,
-        current_root_cid,
         is_oauth: user.is_oauth(),
         scope: user.scope.clone(),
         controller_did: scope_proof.controller_did().map(|c| c.into_did()),
@@ -130,8 +116,10 @@ pub async fn create_record(
 
     let did = repo_auth.did;
     let user_id = repo_auth.user_id;
-    let current_root_cid = repo_auth.current_root_cid;
     let controller_did = repo_auth.controller_did;
+
+    let _write_lock = state.repo_write_locks.lock(user_id).await;
+    let current_root_cid = get_current_root_cid(&state, user_id).await?;
 
     if let Some(swap_commit) = &input.swap_commit
         && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
@@ -433,8 +421,10 @@ pub async fn put_record(
 
     let did = repo_auth.did;
     let user_id = repo_auth.user_id;
-    let current_root_cid = repo_auth.current_root_cid;
     let controller_did = repo_auth.controller_did;
+
+    let _write_lock = state.repo_write_locks.lock(user_id).await;
+    let current_root_cid = get_current_root_cid(&state, user_id).await?;
 
     if let Some(swap_commit) = &input.swap_commit
         && CommitCid::from_str(swap_commit).ok().as_ref() != Some(&current_root_cid)
