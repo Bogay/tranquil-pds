@@ -7,16 +7,19 @@
     # for now we important that PR as well purely for its fetchDenoDeps
     nixpkgs-fetch-deno.url = "github:aMOPel/nixpkgs/feat/fetchDenoDeps";
   };
-  
-  outputs = { self, nixpkgs, ... } @ inputs : let
-    forAllSystems =
-      function:
+
+  outputs = {
+    self,
+    nixpkgs,
+    ...
+  } @ inputs: let
+    forAllSystems = function:
       nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed (
         system: (function system nixpkgs.legacyPackages.${system})
       );
   in {
     packages = forAllSystems (system: pkgs: {
-      tranquil-pds = pkgs.callPackage ./default.nix { };
+      tranquil-pds = pkgs.callPackage ./default.nix {};
       tranquil-frontend = pkgs.callPackage ./frontend.nix {
         inherit (inputs.nixpkgs-fetch-deno.legacyPackages.${system}) fetchDenoDeps;
       };
@@ -24,7 +27,19 @@
     });
 
     devShells = forAllSystems (system: pkgs: {
-      default = pkgs.callPackage ./shell.nix { };
+      default = pkgs.callPackage ./shell.nix {};
     });
+
+    nixosModules.default = import ./module.nix;
+
+    checks.x86_64-linux.integration = import ./test.nix {
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      inherit self;
+    };
+
+    checks.aarch64-linux.integration = import ./test.nix {
+      pkgs = nixpkgs.legacyPackages.aarch64-linux;
+      inherit self;
+    };
   };
 }
