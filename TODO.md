@@ -74,11 +74,6 @@ example plugins
 
 ### Misc
 
-migration handle preservation
-- [ ] allow users to keep their existing handle during migration (eg. lewis.moe instead of forcing lewis.newpds.com)
-- [ ] UI option to preserve external handle vs create new pds-subdomain handle
-- [ ] handle the DNS verification flow for external handles during migration
-
 cross-pds delegation
 when a client (eg. tangled.org) tries to log into a delegated account:
 - [ ] client starts oauth flow to delegated account's pds
@@ -162,4 +157,4 @@ App password scopes: Granular permissions for app passwords using the same scope
 
 Account Delegation: Delegated accounts controlled by other accounts instead of passwords. OAuth delegation flow (authenticate as controller), scope-based permissions (owner/admin/editor/viewer presets), scope intersection (tokens limited to granted permissions), `act` claim for delegation tracking, creating delegated account flow, controller management UI, "act as" account switcher, comprehensive audit logging with actor/controller tracking, delegation-aware OAuth consent with permission limitation notices.
 
-Migration: OAuth-based inbound migration wizard with PLC token flow, offline restore from CAR file + rotation key for disaster recovery, scheduled automatic backups, standalone repo/blob export, did:web DID document editor for self-service identity management.
+Migration: OAuth-based inbound migration wizard with PLC token flow, offline restore from CAR file + rotation key for disaster recovery, scheduled automatic backups, standalone repo/blob export, did:web DID document editor for self-service identity management, handle preservation (keep existing external handle via DNS/HTTP verification or create new PDS-subdomain handle).

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  AtprotoClient,
   base64UrlDecode,
   base64UrlEncode,
   buildOAuthAuthorizationUrl,
@@ -515,6 +516,92 @@ describe("migration/atproto-client", () => {
 
       expect(prepared.user?.name).toBe("test@example.com");
       expect(prepared.user?.displayName).toBe("Test User");
+    });
+  });
+
+  describe("AtprotoClient.verifyHandleOwnership", () => {
+    function createMockJsonResponse(data: unknown, status = 200) {
+      return new Response(JSON.stringify(data), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    it("sends POST with handle and did", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        createMockJsonResponse({ verified: true, method: "dns" }),
+      );
+
+      const client = new AtprotoClient("https://pds.example.com");
+      await client.verifyHandleOwnership("alice.custom.com", "did:plc:abc123");
+
+      expect(fetch).toHaveBeenCalledWith(
+        "https://pds.example.com/xrpc/_identity.verifyHandleOwnership",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      );
+    });
+
+    it("returns verified result with method", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        createMockJsonResponse({ verified: true, method: "dns" }),
+      );
+
+      const client = new AtprotoClient("https://pds.example.com");
+      const result = await client.verifyHandleOwnership(
+        "alice.custom.com",
+        "did:plc:abc123",
+      );
+
+      expect(result.verified).toBe(true);
+      expect(result.method).toBe("dns");
+    });
+
+    it("returns unverified result with error", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        createMockJsonResponse({
+          verified: false,
+          error: "Handle resolution failed",
+        }),
+      );
+
+      const client = new AtprotoClient("https://pds.example.com");
+      const result = await client.verifyHandleOwnership(
+        "nonexistent.example.com",
+        "did:plc:abc123",
+      );
+
+      expect(result.verified).toBe(false);
+      expect(result.error).toBe("Handle resolution failed");
+    });
+
+    it("throws on server error responses", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        createMockJsonResponse(
+          { error: "InvalidHandle", message: "Invalid handle format" },
+          400,
+        ),
+      );
+
+      const client = new AtprotoClient("https://pds.example.com");
+      await expect(
+        client.verifyHandleOwnership("@#$!", "did:plc:abc123"),
+      ).rejects.toThrow("Invalid handle format");
+    });
+
+    it("strips trailing slash from base URL", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        createMockJsonResponse({ verified: true, method: "http" }),
+      );
+
+      const client = new AtprotoClient("https://pds.example.com/");
+      await client.verifyHandleOwnership("alice.example.com", "did:plc:abc");
+
+      expect(fetch).toHaveBeenCalledWith(
+        "https://pds.example.com/xrpc/_identity.verifyHandleOwnership",
+        expect.anything(),
+      );
     });
   });
 });

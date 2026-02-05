@@ -71,6 +71,7 @@ pub enum RateLimitKind {
     SsoCallback,
     SsoUnlink,
     OAuthRegisterComplete,
+    HandleVerification,
 }
 
 impl RateLimitKind {
@@ -95,6 +96,7 @@ impl RateLimitKind {
             Self::SsoCallback => "sso_callback",
             Self::SsoUnlink => "sso_unlink",
             Self::OAuthRegisterComplete => "oauth_register_complete",
+            Self::HandleVerification => "handle_verification",
         }
     }
 
@@ -119,6 +121,7 @@ impl RateLimitKind {
             Self::SsoCallback => (30, 60_000),
             Self::SsoUnlink => (10, 60_000),
             Self::OAuthRegisterComplete => (5, 300_000),
+            Self::HandleVerification => (10, 60_000),
         }
     }
 }
@@ -271,6 +274,7 @@ impl AppState {
             RateLimitKind::SsoCallback => &self.rate_limiters.sso_callback,
             RateLimitKind::SsoUnlink => &self.rate_limiters.sso_unlink,
             RateLimitKind::OAuthRegisterComplete => &self.rate_limiters.oauth_register_complete,
+            RateLimitKind::HandleVerification => &self.rate_limiters.handle_verification,
         };
 
         let ok = limiter.check_key(&client_ip.to_string()).is_ok();

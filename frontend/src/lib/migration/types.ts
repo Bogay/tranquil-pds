@@ -48,6 +48,8 @@ export interface MigrationProgress {
   currentOperation: string;
 }
 
+export type HandlePreservation = "new" | "existing";
+
 export interface InboundMigrationState {
   direction: "inbound";
   step: InboundStep;
@@ -74,6 +76,8 @@ export interface InboundMigrationState {
   generatedAppPasswordName: string | null;
   needsReauth?: boolean;
   resumeToStep?: InboundStep;
+  handlePreservation: HandlePreservation;
+  existingHandleVerified: boolean;
 }
 
 export interface OfflineInboundMigrationState {
@@ -101,6 +105,8 @@ export interface OfflineInboundMigrationState {
   progress: MigrationProgress;
   error: string | null;
   plcUpdatedTemporarily: boolean;
+  handlePreservation: HandlePreservation;
+  existingHandleVerified: boolean;
 }
 
 export type MigrationState = InboundMigrationState;

@@ -108,7 +108,10 @@ pub async fn handle_discord_webhook(
         1 => Json(json!({"type": 1})).into_response(),
         2 => handle_command(state, interaction).await,
         other => {
-            debug!(interaction_type = other, "Received unknown Discord interaction type");
+            debug!(
+                interaction_type = other,
+                "Received unknown Discord interaction type"
+            );
             StatusCode::OK.into_response()
         }
     }
@@ -148,14 +151,14 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
 
     let handle = parse_start_handle(interaction.data.as_ref().and_then(|d| d.options.as_deref()));
 
-    if let Some(ref h) = handle {
-        if Handle::new(h).is_err() {
-            return Json(json!({
-                "type": 4,
-                "data": {"content": "Invalid handle format. Handle should look like: alice.example.com", "flags": 64}
-            }))
-            .into_response();
-        }
+    if let Some(ref h) = handle
+        && Handle::new(h).is_err()
+    {
+        return Json(json!({
+            "type": 4,
+            "data": {"content": "Invalid handle format. Handle should look like: alice.example.com", "flags": 64}
+        }))
+        .into_response();
     }
 
     debug!(

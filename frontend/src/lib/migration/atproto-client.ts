@@ -615,6 +615,16 @@ export class AtprotoClient {
     });
   }
 
+  async verifyHandleOwnership(
+    handle: string,
+    did: string,
+  ): Promise<{ verified: boolean; method?: string; error?: string }> {
+    return this.xrpc("_identity.verifyHandleOwnership", {
+      httpMethod: "POST",
+      body: { handle, did },
+    });
+  }
+
   async resendMigrationVerification(): Promise<void> {
     await this.xrpc("com.atproto.server.resendMigrationVerification", {
       httpMethod: "POST",

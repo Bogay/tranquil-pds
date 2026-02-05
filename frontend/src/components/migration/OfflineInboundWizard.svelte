@@ -412,6 +412,12 @@
       migratingFromLabel={$_('migration.offline.chooseHandle.migratingDid')}
       migratingFromValue={flow.state.userDid}
       {loading}
+      sourceHandle=""
+      sourceDid={flow.state.userDid}
+      handlePreservation="new"
+      existingHandleVerified={false}
+      verifyingExistingHandle={false}
+      existingHandleError={null}
       onHandleChange={(h) => handleInput = h}
       onDomainChange={(d) => selectedDomain = d}
       onCheckHandle={checkHandle}

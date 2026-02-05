@@ -337,6 +337,10 @@ pub fn app(state: AppState) -> Router {
             "/com.atproto.identity.submitPlcOperation",
             post(api::identity::submit_plc_operation),
         )
+        .route(
+            "/_identity.verifyHandleOwnership",
+            post(api::identity::verify_handle_ownership),
+        )
         .route("/com.atproto.repo.importRepo", post(api::repo::import_repo))
         .route(
             "/com.atproto.admin.deleteAccount",

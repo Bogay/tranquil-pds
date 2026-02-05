@@ -300,7 +300,7 @@ pub fn format_token_for_display(token: &str) -> String {
 }
 
 pub fn normalize_token_input(input: &str) -> String {
-    input.trim().to_string()
+    input.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 #[cfg(test)]

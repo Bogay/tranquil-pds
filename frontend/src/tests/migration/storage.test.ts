@@ -86,6 +86,8 @@ function createInboundState(
     localAccessToken: null,
     generatedAppPassword: null,
     generatedAppPasswordName: null,
+    handlePreservation: "new",
+    existingHandleVerified: false,
     ...overrides,
   };
 }
@@ -201,6 +203,24 @@ describe("migration/storage", () => {
 
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
       expect(stored.passkeySetupToken).toBe("setup-token-123");
+    });
+
+    it("does not persist handlePreservation to storage (transient state)", () => {
+      const state = createInboundState({ handlePreservation: "existing" });
+
+      saveMigrationState(state);
+
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+      expect(stored.handlePreservation).toBeUndefined();
+    });
+
+    it("does not persist existingHandleVerified to storage (transient state)", () => {
+      const state = createInboundState({ existingHandleVerified: true });
+
+      saveMigrationState(state);
+
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+      expect(stored.existingHandleVerified).toBeUndefined();
     });
 
     it("saves error information", () => {

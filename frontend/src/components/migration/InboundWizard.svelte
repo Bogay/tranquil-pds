@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { InboundMigrationFlow } from '../../lib/migration'
-  import type { AuthMethod, ServerDescription } from '../../lib/migration/types'
+  import type { AuthMethod, HandlePreservation, ServerDescription } from '../../lib/migration/types'
   import { getErrorMessage } from '../../lib/migration/types'
   import { base64UrlEncode, prepareWebAuthnCreationOptions } from '../../lib/migration/atproto-client'
   import { _ } from '../../lib/i18n'
@@ -43,6 +43,8 @@
   let checkingHandle = $state(false)
   let selectedAuthMethod = $state<AuthMethod>('password')
   let passkeyName = $state('')
+  let verifyingExistingHandle = $state(false)
+  let existingHandleError = $state<string | null>(null)
 
   const isResuming = $derived(flow.state.needsReauth === true)
   const isDidWeb = $derived(flow.state.sourceDid.startsWith("did:web:"))
@@ -54,6 +56,9 @@
     if (flow.state.step === 'choose-handle') {
       handleInput = ''
       handleAvailable = null
+      existingHandleError = null
+      flow.updateField('handlePreservation', 'new')
+      flow.updateField('existingHandleVerified', false)
     }
     if (flow.state.step === 'source-handle' && resumeInfo) {
       handleInput = resumeInfo.sourceHandle
@@ -109,6 +114,30 @@
       handleAvailable = true
     } finally {
       checkingHandle = false
+    }
+  }
+
+  function handlePreservationChange(preservation: HandlePreservation) {
+    flow.updateField('handlePreservation', preservation)
+    existingHandleError = null
+    if (preservation === 'existing') {
+      flow.updateField('existingHandleVerified', false)
+    }
+  }
+
+  async function verifyExistingHandle() {
+    verifyingExistingHandle = true
+    existingHandleError = null
+
+    try {
+      const result = await flow.verifyExistingHandle()
+      if (!result.verified && result.error) {
+        existingHandleError = result.error
+      }
+    } catch (err) {
+      existingHandleError = getErrorMessage(err)
+    } finally {
+      verifyingExistingHandle = false
     }
   }
 
@@ -265,11 +294,16 @@
   }
 
   function proceedToReviewWithAuth() {
-    const fullHandle = handleInput.includes('.')
-      ? handleInput
-      : `${handleInput}.${selectedDomain}`
+    let targetHandle: string
+    if (flow.state.handlePreservation === 'existing' && flow.state.existingHandleVerified) {
+      targetHandle = flow.state.sourceHandle
+    } else {
+      targetHandle = handleInput.includes('.')
+        ? handleInput
+        : `${handleInput}.${selectedDomain}`
+    }
 
-    flow.updateField('targetHandle', fullHandle)
+    flow.updateField('targetHandle', targetHandle)
     flow.updateField('authMethod', selectedAuthMethod)
     flow.setStep('review')
   }
@@ -420,6 +454,12 @@
       migratingFromLabel={$_('migration.inbound.chooseHandle.migratingFrom')}
       migratingFromValue={flow.state.sourceHandle}
       {loading}
+      sourceHandle={flow.state.sourceHandle}
+      sourceDid={flow.state.sourceDid}
+      handlePreservation={flow.state.handlePreservation}
+      existingHandleVerified={flow.state.existingHandleVerified}
+      {verifyingExistingHandle}
+      {existingHandleError}
       onHandleChange={(h) => handleInput = h}
       onDomainChange={(d) => selectedDomain = d}
       onCheckHandle={checkHandle}
@@ -427,6 +467,8 @@
       onPasswordChange={(p) => flow.updateField('targetPassword', p)}
       onAuthMethodChange={(m) => selectedAuthMethod = m}
       onInviteCodeChange={(c) => flow.updateField('inviteCode', c)}
+      onHandlePreservationChange={handlePreservationChange}
+      onVerifyExistingHandle={verifyExistingHandle}
       onBack={() => flow.setStep('source-handle')}
       onContinue={proceedToReviewWithAuth}
     />
