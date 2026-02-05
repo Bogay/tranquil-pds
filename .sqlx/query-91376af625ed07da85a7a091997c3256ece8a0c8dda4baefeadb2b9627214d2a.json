@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET\n                discord_username = $1,\n                discord_verified = CASE WHEN LOWER(discord_username) = LOWER($1) THEN discord_verified ELSE FALSE END,\n                discord_id = CASE WHEN LOWER(discord_username) = LOWER($1) THEN discord_id ELSE NULL END,\n                updated_at = NOW()\n            WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "91376af625ed07da85a7a091997c3256ece8a0c8dda4baefeadb2b9627214d2a"
+}

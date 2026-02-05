@@ -133,13 +133,13 @@
         if (!info.email.trim()) return $_('register.validation.emailRequired')
         break
       case 'discord':
-        if (!info.discordId?.trim()) return $_('register.validation.discordIdRequired')
+        if (!info.discordUsername?.trim()) return $_('register.validation.discordUsernameRequired')
         break
       case 'telegram':
         if (!info.telegramUsername?.trim()) return $_('register.validation.telegramRequired')
         break
       case 'signal':
-        if (!info.signalNumber?.trim()) return $_('register.validation.signalRequired')
+        if (!info.signalUsername?.trim()) return $_('register.validation.signalRequired')
         break
     }
     return null
@@ -381,17 +381,16 @@
         </div>
       {:else if flow.info.verificationChannel === 'discord'}
         <div class="field">
-          <label for="discord-id">{$_('register.discordId')}</label>
+          <label for="discord-username">{$_('register.discordUsername')}</label>
           <input
-            id="discord-id"
+            id="discord-username"
             type="text"
-            bind:value={flow.info.discordId}
-            onblur={() => flow?.checkCommsChannelInUse('discord', flow.info.discordId ?? '')}
-            placeholder={$_('register.discordIdPlaceholder')}
+            bind:value={flow.info.discordUsername}
+            onblur={() => flow?.checkCommsChannelInUse('discord', flow.info.discordUsername ?? '')}
+            placeholder={$_('register.discordUsernamePlaceholder')}
             disabled={flow.state.submitting}
             required
           />
-          <p class="hint">{$_('register.discordIdHint')}</p>
           {#if flow.state.discordInUse}
             <p class="hint warning">{$_('register.discordInUseWarning')}</p>
           {/if}
@@ -414,17 +413,17 @@
         </div>
       {:else if flow.info.verificationChannel === 'signal'}
         <div class="field">
-          <label for="signal-number">{$_('register.signalNumber')}</label>
+          <label for="signal-number">{$_('register.signalUsername')}</label>
           <input
             id="signal-number"
             type="tel"
-            bind:value={flow.info.signalNumber}
-            onblur={() => flow?.checkCommsChannelInUse('signal', flow.info.signalNumber ?? '')}
-            placeholder={$_('register.signalNumberPlaceholder')}
+            bind:value={flow.info.signalUsername}
+            onblur={() => flow?.checkCommsChannelInUse('signal', flow.info.signalUsername ?? '')}
+            placeholder={$_('register.signalUsernamePlaceholder')}
             disabled={flow.state.submitting}
             required
           />
-          <p class="hint">{$_('register.signalNumberHint')}</p>
+          <p class="hint">{$_('register.signalUsernameHint')}</p>
           {#if flow.state.signalInUse}
             <p class="hint warning">{$_('register.signalInUseWarning')}</p>
           {/if}

@@ -18,16 +18,18 @@
   let preferredChannel = $state('email')
   let availableCommsChannels = $state<string[]>(['email'])
   let telegramBotUsername = $state<string | undefined>(undefined)
+  let discordBotUsername = $state<string | undefined>(undefined)
+  let discordAppId = $state<string | undefined>(undefined)
   let email = $state('')
-  let discordId = $state('')
+  let discordUsername = $state('')
   let discordVerified = $state(false)
   let telegramUsername = $state('')
   let telegramVerified = $state(false)
-  let signalNumber = $state('')
+  let signalUsername = $state('')
   let signalVerified = $state(false)
-  let savedDiscordId = $state('')
+  let savedDiscordUsername = $state('')
   let savedTelegramUsername = $state('')
-  let savedSignalNumber = $state('')
+  let savedSignalUsername = $state('')
   let verifyingChannel = $state<string | null>(null)
   let verificationCode = $state('')
   let historyLoading = $state(true)
@@ -57,17 +59,19 @@
       ])
       preferredChannel = prefs.preferredChannel
       email = prefs.email
-      discordId = prefs.discordId ?? ''
+      discordUsername = prefs.discordUsername ?? ''
       discordVerified = prefs.discordVerified
       telegramUsername = prefs.telegramUsername ?? ''
       telegramVerified = prefs.telegramVerified
-      signalNumber = prefs.signalNumber ?? ''
+      signalUsername = prefs.signalUsername ?? ''
       signalVerified = prefs.signalVerified
-      savedDiscordId = discordId
+      savedDiscordUsername = discordUsername
       savedTelegramUsername = telegramUsername
-      savedSignalNumber = signalNumber
+      savedSignalUsername = signalUsername
       availableCommsChannels = serverInfo.availableCommsChannels ?? ['email']
       telegramBotUsername = serverInfo.telegramBotUsername
+      discordBotUsername = serverInfo.discordBotUsername
+      discordAppId = serverInfo.discordAppId
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : $_('comms.failedToLoad'))
     } finally {
@@ -81,15 +85,15 @@
     try {
       const result = await api.updateNotificationPrefs(session.accessJwt, {
         preferredChannel,
-        discordId: discordId !== savedDiscordId ? discordId : undefined,
+        discordUsername: discordUsername !== savedDiscordUsername ? discordUsername : undefined,
         telegramUsername: telegramUsername !== savedTelegramUsername ? telegramUsername : undefined,
-        signalNumber: signalNumber !== savedSignalNumber ? signalNumber : undefined,
+        signalUsername: signalUsername !== savedSignalUsername ? signalUsername : undefined,
       })
       await refreshSession()
       toast.success($_('comms.preferencesSaved'))
-      savedDiscordId = discordId
+      savedDiscordUsername = discordUsername
       savedTelegramUsername = telegramUsername
-      savedSignalNumber = signalNumber
+      savedSignalUsername = signalUsername
       const channelToVerify = result.verificationRequired?.find(
         (ch: string) => ch === 'discord' || ch === 'telegram' || ch === 'signal'
       )
@@ -108,9 +112,9 @@
     if (!verificationCode) return
 
     const identifierMap: Record<string, string> = {
-      discord: discordId,
+      discord: discordUsername,
       telegram: telegramUsername,
-      signal: signalNumber
+      signal: signalUsername
     }
     const identifier = identifierMap[channel]
     if (!identifier) return
@@ -190,9 +194,9 @@
     if (!isChannelAvailableOnServer(channelId)) return false
     if (channelId === 'email') return true
     const hasIdentifier: Record<string, boolean> = {
-      discord: !!discordId,
+      discord: !!discordUsername,
       telegram: !!telegramUsername,
-      signal: !!signalNumber
+      signal: !!signalUsername
     }
     return hasIdentifier[channelId] ?? false
   }
@@ -245,8 +249,8 @@
           {#if isChannelAvailableOnServer('discord')}
             <div class="config-item">
               <div class="config-header">
-                <label for="discord">{$_('register.discordId')}</label>
-                {#if discordId}
+                <label for="discord">{$_('register.discordUsername')}</label>
+                {#if discordUsername}
                   <span class="status" class:verified={discordVerified} class:unverified={!discordVerified}>
                     {preferredChannel === 'discord' && discordVerified ? $_('comms.primary') : discordVerified ? $_('comms.verified') : $_('comms.notVerified')}
                   </span>
@@ -256,23 +260,22 @@
                 <input
                   id="discord"
                   type="text"
-                  bind:value={discordId}
-                  onblur={() => checkChannelInUse('discord', discordId)}
-                  placeholder={$_('register.discordIdPlaceholder')}
+                  bind:value={discordUsername}
+                  onblur={() => checkChannelInUse('discord', discordUsername)}
+                  placeholder={$_('register.discordUsernamePlaceholder')}
                   disabled={saving}
                 />
-                {#if discordId && discordId === savedDiscordId && !discordVerified}
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'discord'}>{$_('comms.verifyButton')}</button>
-                {/if}
               </div>
               {#if discordInUse}
                 <p class="hint warning">{$_('comms.discordInUseWarning')}</p>
               {/if}
-              {#if verifyingChannel === 'discord'}
-                <div class="verify-form">
-                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="128" />
-                  <button type="button" onclick={() => handleVerify('discord')}>{$_('comms.submit')}</button>
-                  <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
+              {#if discordUsername && discordUsername === savedDiscordUsername && !discordVerified && discordBotUsername}
+                {@const encodedHandle = session.handle.replaceAll('.', '_')}
+                <div class="discord-verify-prompt">
+                  {#if discordAppId}
+                    <a href="https://discord.com/users/{discordAppId}" target="_blank" rel="noopener">{$_('comms.discordOpenLink')}</a>
+                  {/if}
+                  <span class="manual-hint">{$_('comms.discordStartBot', { values: { botUsername: discordBotUsername, handle: session.handle } })}</span>
                 </div>
               {/if}
             </div>
@@ -314,8 +317,8 @@
           {#if isChannelAvailableOnServer('signal')}
             <div class="config-item">
               <div class="config-header">
-                <label for="signal">{$_('register.signalNumber')}</label>
-                {#if signalNumber}
+                <label for="signal">{$_('register.signalUsername')}</label>
+                {#if signalUsername}
                   <span class="status" class:verified={signalVerified} class:unverified={!signalVerified}>
                     {preferredChannel === 'signal' && signalVerified ? $_('comms.primary') : signalVerified ? $_('comms.verified') : $_('comms.notVerified')}
                   </span>
@@ -324,13 +327,13 @@
               <div class="config-input">
                 <input
                   id="signal"
-                  type="tel"
-                  bind:value={signalNumber}
-                  onblur={() => checkChannelInUse('signal', signalNumber)}
-                  placeholder={$_('register.signalNumberPlaceholder')}
+                  type="text"
+                  bind:value={signalUsername}
+                  onblur={() => checkChannelInUse('signal', signalUsername)}
+                  placeholder={$_('register.signalUsernamePlaceholder')}
                   disabled={saving}
                 />
-                {#if signalNumber && signalNumber === savedSignalNumber && !signalVerified}
+                {#if signalUsername && signalUsername === savedSignalUsername && !signalVerified}
                   <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>{$_('comms.verifyButton')}</button>
                 {/if}
               </div>
@@ -522,6 +525,18 @@
   }
 
   .telegram-verify-prompt {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--accent-bg, var(--bg-card));
+    border: 1px solid var(--accent, var(--border-color));
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+  }
+
+  .discord-verify-prompt {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);

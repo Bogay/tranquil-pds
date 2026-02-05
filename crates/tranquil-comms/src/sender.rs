@@ -6,6 +6,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::time::timeout;
 
 use super::types::{CommsChannel, QueuedComms};
 
@@ -85,6 +86,25 @@ pub fn is_valid_phone_number(number: &str) -> bool {
     !remaining.is_empty() && remaining.chars().all(|c| c.is_ascii_digit())
 }
 
+pub fn is_valid_signal_username(username: &str) -> bool {
+    if username.len() < 6 || username.len() > 35 {
+        return false;
+    }
+    let Some((base, discriminator)) = username.rsplit_once('.') else {
+        return false;
+    };
+    if base.len() < 3 || base.len() > 32 {
+        return false;
+    }
+    if !base.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return false;
+    }
+    if !base.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+    discriminator.len() == 2 && discriminator.chars().all(|c| c.is_ascii_digit())
+}
+
 pub struct EmailSender {
     from_address: String,
     from_name: String,
@@ -154,22 +174,208 @@ impl CommsSender for EmailSender {
     }
 }
 
+const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
+
+#[derive(Clone)]
 pub struct DiscordSender {
-    webhook_url: String,
+    bot_token: String,
     http_client: Client,
 }
 
 impl DiscordSender {
-    pub fn new(webhook_url: String) -> Self {
+    pub fn new(bot_token: String) -> Self {
         Self {
-            webhook_url,
+            bot_token,
             http_client: create_http_client(),
         }
     }
 
     pub fn from_env() -> Option<Self> {
-        let webhook_url = std::env::var("DISCORD_WEBHOOK_URL").ok()?;
-        Some(Self::new(webhook_url))
+        let bot_token = std::env::var("DISCORD_BOT_TOKEN").ok()?;
+        Some(Self::new(bot_token))
+    }
+
+    fn auth_header(&self) -> String {
+        format!("Bot {}", self.bot_token)
+    }
+
+    pub async fn resolve_application_info(&self) -> Result<(String, String), SendError> {
+        let url = format!("{}/applications/@me", DISCORD_API_BASE);
+        let response = self
+            .http_client
+            .get(&url)
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| {
+                SendError::ExternalService(format!(
+                    "Discord application info request failed: {}",
+                    e
+                ))
+            })?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SendError::ExternalService(format!(
+                "Discord application info returned error: {}",
+                body
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            SendError::ExternalService(format!("Failed to parse Discord application info: {}", e))
+        })?;
+
+        let app_id = data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| SendError::ExternalService("Application info missing id".to_string()))?;
+
+        let verify_key = data
+            .get("verify_key")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                SendError::ExternalService("Application info missing verify_key".to_string())
+            })?;
+
+        Ok((app_id, verify_key))
+    }
+
+    pub async fn register_slash_command(&self, app_id: &str) -> Result<(), SendError> {
+        let url = format!("{}/applications/{}/commands", DISCORD_API_BASE, app_id);
+        let payload = serde_json::json!({
+            "name": "start",
+            "description": "Verify your PDS account",
+            "type": 1,
+            "options": [{
+                "name": "handle",
+                "description": "Your PDS handle (e.g. alice.example.com)",
+                "type": 3,
+                "required": false
+            }]
+        });
+        let response = self
+            .http_client
+            .post(&url)
+            .header("Authorization", self.auth_header())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                SendError::ExternalService(format!("Register command request failed: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SendError::ExternalService(format!(
+                "Register command returned error: {}",
+                body
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn set_interactions_endpoint(
+        &self,
+        app_id: &str,
+        url: &str,
+    ) -> Result<(), SendError> {
+        let patch_url = format!("{}/applications/{}", DISCORD_API_BASE, app_id);
+        let payload = serde_json::json!({
+            "interactions_endpoint_url": url
+        });
+        let response = self
+            .http_client
+            .patch(&patch_url)
+            .header("Authorization", self.auth_header())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                SendError::ExternalService(format!("Set interactions endpoint failed: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SendError::ExternalService(format!(
+                "Set interactions endpoint returned error: {}",
+                body
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn resolve_bot_username(&self) -> Result<String, SendError> {
+        let url = format!("{}/users/@me", DISCORD_API_BASE);
+        let response = self
+            .http_client
+            .get(&url)
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| {
+                SendError::ExternalService(format!("Discord getMe request failed: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(SendError::ExternalService(format!(
+                "Discord getMe returned error: {}",
+                body
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            SendError::ExternalService(format!("Failed to parse Discord getMe response: {}", e))
+        })?;
+
+        data.get("username")
+            .and_then(|u| u.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                SendError::ExternalService("Discord getMe response missing username".to_string())
+            })
+    }
+
+    async fn open_dm_channel(&self, user_id: &str) -> Result<String, SendError> {
+        let url = format!("{}/users/@me/channels", DISCORD_API_BASE);
+        let payload = json!({ "recipient_id": user_id });
+
+        let response = self
+            .http_client
+            .post(&url)
+            .header("Authorization", self.auth_header())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                SendError::ExternalService(format!("Discord DM channel request failed: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(SendError::ExternalService(format!(
+                "Discord DM channel creation returned {}: {}",
+                status, body
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await.map_err(|e| {
+            SendError::ExternalService(format!(
+                "Failed to parse Discord DM channel response: {}",
+                e
+            ))
+        })?;
+
+        data.get("id")
+            .and_then(|id| id.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                SendError::ExternalService("Discord DM channel response missing id".to_string())
+            })
     }
 }
 
@@ -180,17 +386,19 @@ impl CommsSender for DiscordSender {
     }
 
     async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
+        let channel_id = self.open_dm_channel(&notification.recipient).await?;
+
         let subject = notification.subject.as_deref().unwrap_or("Notification");
         let content = format!("**{}**\n\n{}", subject, notification.body);
-        let payload = json!({
-            "content": content,
-            "username": "Tranquil PDS"
-        });
+        let payload = json!({ "content": content });
+        let url = format!("{}/channels/{}/messages", DISCORD_API_BASE, channel_id);
+
         let mut last_error = None;
         for attempt in 0..MAX_RETRIES {
             let result = self
                 .http_client
-                .post(&self.webhook_url)
+                .post(&url)
+                .header("Authorization", self.auth_header())
                 .json(&payload)
                 .send()
                 .await;
@@ -201,13 +409,13 @@ impl CommsSender for DiscordSender {
                     }
                     let status = response.status();
                     if is_retryable_status(status) && attempt < MAX_RETRIES - 1 {
-                        last_error = Some(format!("Discord webhook returned {}", status));
+                        last_error = Some(format!("Discord API returned {}", status));
                         retry_delay(attempt).await;
                         continue;
                     }
                     let body = response.text().await.unwrap_or_default();
                     return Err(SendError::ExternalService(format!(
-                        "Discord webhook returned {}: {}",
+                        "Discord API returned {}: {}",
                         status, body
                     )));
                 }
@@ -386,6 +594,19 @@ impl SignalSender {
     }
 }
 
+const SIGNAL_TIMEOUT_SECS: u64 = 30;
+
+fn is_retryable_signal_error(stderr: &str) -> bool {
+    let lower = stderr.to_lowercase();
+    lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("connection refused")
+        || lower.contains("network")
+        || lower.contains("temporarily")
+        || lower.contains("try again")
+        || lower.contains("rate limit")
+}
+
 #[async_trait]
 impl CommsSender for SignalSender {
     fn channel(&self) -> CommsChannel {
@@ -394,30 +615,63 @@ impl CommsSender for SignalSender {
 
     async fn send(&self, notification: &QueuedComms) -> Result<(), SendError> {
         let recipient = &notification.recipient;
-        if !is_valid_phone_number(recipient) {
+        if !is_valid_signal_username(recipient) {
             return Err(SendError::InvalidRecipient(format!(
-                "Invalid phone number format: {}",
+                "Invalid Signal username format: {}",
                 recipient
             )));
         }
         let subject = notification.subject.as_deref().unwrap_or("Notification");
         let message = format!("{}\n\n{}", subject, notification.body);
-        let output = Command::new(&self.signal_cli_path)
-            .arg("-u")
-            .arg(&self.sender_number)
-            .arg("send")
-            .arg("-m")
-            .arg(&message)
-            .arg(recipient)
-            .output()
-            .await?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SendError::ExternalService(format!(
-                "signal-cli failed: {}",
-                stderr
-            )));
+
+        let mut last_error = None;
+        for attempt in 0..MAX_RETRIES {
+            let cmd_future = Command::new(&self.signal_cli_path)
+                .arg("-u")
+                .arg(&self.sender_number)
+                .arg("send")
+                .arg("--username")
+                .arg(recipient)
+                .arg("-m")
+                .arg(&message)
+                .output();
+
+            let result = timeout(Duration::from_secs(SIGNAL_TIMEOUT_SECS), cmd_future).await;
+
+            match result {
+                Ok(Ok(output)) if output.status.success() => return Ok(()),
+                Ok(Ok(output)) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if is_retryable_signal_error(&stderr) && attempt < MAX_RETRIES - 1 {
+                        last_error = Some(format!("signal-cli failed: {}", stderr));
+                        retry_delay(attempt).await;
+                        continue;
+                    }
+                    return Err(SendError::ExternalService(format!(
+                        "signal-cli failed: {}",
+                        stderr
+                    )));
+                }
+                Ok(Err(e)) => {
+                    if attempt < MAX_RETRIES - 1 {
+                        last_error = Some(format!("signal-cli spawn failed: {}", e));
+                        retry_delay(attempt).await;
+                        continue;
+                    }
+                    return Err(SendError::ProcessSpawn(e));
+                }
+                Err(_) => {
+                    if attempt < MAX_RETRIES - 1 {
+                        last_error = Some("signal-cli timed out".to_string());
+                        retry_delay(attempt).await;
+                        continue;
+                    }
+                    return Err(SendError::Timeout);
+                }
+            }
         }
-        Ok(())
+        Err(SendError::MaxRetriesExceeded(
+            last_error.unwrap_or_else(|| "Unknown error".to_string()),
+        ))
     }
 }

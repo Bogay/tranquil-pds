@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET signal_username = $1, signal_verified = TRUE, updated_at = NOW() WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b863a9d1feb2f6c76c7c1c9bd09730fa0ca9f5c722357f90f36e3b47e825f824"
+}

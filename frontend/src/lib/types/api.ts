@@ -185,9 +185,9 @@ export interface CreateAccountParams {
   did?: string;
   signingKey?: string;
   verificationChannel?: VerificationChannel;
-  discordId?: string;
+  discordUsername?: string;
   telegramUsername?: string;
-  signalNumber?: string;
+  signalUsername?: string;
 }
 
 export interface CreateAccountResult {
@@ -254,11 +254,11 @@ export interface ListReposResponse {
 export interface NotificationPrefs {
   preferredChannel: VerificationChannel;
   email: EmailAddress;
-  discordId: string | null;
+  discordUsername: string | null;
   discordVerified: boolean;
   telegramUsername: string | null;
   telegramVerified: boolean;
-  signalNumber: string | null;
+  signalUsername: string | null;
   signalVerified: boolean;
 }
 

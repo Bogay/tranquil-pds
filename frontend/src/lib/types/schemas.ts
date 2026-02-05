@@ -173,11 +173,11 @@ export const reauthResponseSchema = z.object({
 export const notificationPrefsSchema = z.object({
   preferredChannel: verificationChannel,
   email: email,
-  discordId: z.string().nullable(),
+  discordUsername: z.string().nullable(),
   discordVerified: z.boolean(),
   telegramUsername: z.string().nullable(),
   telegramVerified: z.boolean(),
-  signalNumber: z.string().nullable(),
+  signalUsername: z.string().nullable(),
   signalVerified: z.boolean(),
 });
 

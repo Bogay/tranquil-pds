@@ -351,10 +351,17 @@ pub fn is_valid_email(email: &str) -> bool {
 
 pub fn is_valid_telegram_username(username: &str) -> bool {
     let clean = username.strip_prefix('@').unwrap_or(username);
-    (5..=32).contains(&clean.len())
-        && clean
+    (5..=32).contains(&clean.len()) && clean.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+pub fn is_valid_discord_username(username: &str) -> bool {
+    (2..=32).contains(&username.len())
+        && username
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.')
+        && !username.starts_with('.')
+        && !username.ends_with('.')
+        && !username.contains("..")
 }
 
 #[cfg(test)]
@@ -533,5 +540,30 @@ mod tests {
     #[test]
     fn test_trimmed_whitespace() {
         assert!(is_valid_email("  user@example.com  "));
+    }
+
+    #[test]
+    fn test_valid_discord_usernames() {
+        assert!(is_valid_discord_username("ab"));
+        assert!(is_valid_discord_username("alice"));
+        assert!(is_valid_discord_username("user_name"));
+        assert!(is_valid_discord_username("user.name"));
+        assert!(is_valid_discord_username("user123"));
+        assert!(is_valid_discord_username("a_b.c_d"));
+        assert!(is_valid_discord_username("12345678901234567890123456789012"));
+    }
+
+    #[test]
+    fn test_invalid_discord_usernames() {
+        assert!(!is_valid_discord_username(""));
+        assert!(!is_valid_discord_username("a"));
+        assert!(!is_valid_discord_username("Alice"));
+        assert!(!is_valid_discord_username("ALICE"));
+        assert!(!is_valid_discord_username("user-name"));
+        assert!(!is_valid_discord_username(".username"));
+        assert!(!is_valid_discord_username("username."));
+        assert!(!is_valid_discord_username("user..name"));
+        assert!(!is_valid_discord_username("user name"));
+        assert!(!is_valid_discord_username("123456789012345678901234567890123"));
     }
 }

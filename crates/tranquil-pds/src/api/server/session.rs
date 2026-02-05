@@ -634,14 +634,14 @@ pub async fn confirm_signup(
     let (channel_str, identifier) = match row.channel {
         tranquil_db_traits::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
         tranquil_db_traits::CommsChannel::Discord => {
-            ("discord", row.discord_id.clone().unwrap_or_default())
+            ("discord", row.discord_username.clone().unwrap_or_default())
         }
         tranquil_db_traits::CommsChannel::Telegram => (
             "telegram",
             row.telegram_username.clone().unwrap_or_default(),
         ),
         tranquil_db_traits::CommsChannel::Signal => {
-            ("signal", row.signal_number.clone().unwrap_or_default())
+            ("signal", row.signal_username.clone().unwrap_or_default())
         }
     };
 
@@ -786,14 +786,14 @@ pub async fn resend_verification(
     let (channel_str, recipient) = match row.channel {
         tranquil_db_traits::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
         tranquil_db_traits::CommsChannel::Discord => {
-            ("discord", row.discord_id.clone().unwrap_or_default())
+            ("discord", row.discord_username.clone().unwrap_or_default())
         }
         tranquil_db_traits::CommsChannel::Telegram => (
             "telegram",
             row.telegram_username.clone().unwrap_or_default(),
         ),
         tranquil_db_traits::CommsChannel::Signal => {
-            ("signal", row.signal_number.clone().unwrap_or_default())
+            ("signal", row.signal_username.clone().unwrap_or_default())
         }
     };
 
@@ -804,6 +804,7 @@ pub async fn resend_verification(
 
     let hostname = pds_hostname();
     if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+        state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         row.id,
         channel_str,

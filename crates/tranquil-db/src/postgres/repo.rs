@@ -1131,6 +1131,7 @@ impl RepoRepository for PostgresRepoRepository {
         user_id: Uuid,
         blocks: &[ImportBlock],
         records: &[ImportRecord],
+        expected_root_cid: Option<&CidLink>,
     ) -> Result<(), ImportRepoError> {
         let mut tx = self
             .pool
@@ -1153,8 +1154,15 @@ impl RepoRepository for PostgresRepoRepository {
             ImportRepoError::Database(e.to_string())
         })?;
 
-        if repo.is_none() {
-            return Err(ImportRepoError::RepoNotFound);
+        let repo = match repo {
+            Some(r) => r,
+            None => return Err(ImportRepoError::RepoNotFound),
+        };
+
+        if let Some(expected) = expected_root_cid {
+            if repo.repo_root_cid.as_str() != expected.as_str() {
+                return Err(ImportRepoError::ConcurrentModification);
+            }
         }
 
         let block_chunks: Vec<Vec<&ImportBlock>> = blocks

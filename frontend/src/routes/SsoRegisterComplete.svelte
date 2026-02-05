@@ -40,9 +40,9 @@
   let providerEmailOriginal = $state<string | null>(null)
   let inviteCode = $state('')
   let verificationChannel = $state('email')
-  let discordId = $state('')
+  let discordUsername = $state('')
   let telegramUsername = $state('')
-  let signalNumber = $state('')
+  let signalUsername = $state('')
 
   let handleAvailable = $state<boolean | null>(null)
   let checkingHandle = $state(false)
@@ -204,11 +204,11 @@
       case 'email':
         return !!email.trim()
       case 'discord':
-        return !!discordId.trim()
+        return !!discordUsername.trim()
       case 'telegram':
         return !!telegramUsername.trim()
       case 'signal':
-        return !!signalNumber.trim()
+        return !!signalUsername.trim()
       default:
         return false
     }
@@ -281,9 +281,9 @@
           email: email || null,
           invite_code: inviteCode || null,
           verification_channel: verificationChannel,
-          discord_id: discordId || null,
+          discord_username: discordUsername || null,
           telegram_username: telegramUsername || null,
-          signal_number: signalNumber || null,
+          signal_username: signalUsername || null,
           did_type: didType,
           did: didType === 'web-external' ? externalDid.trim() : null,
         }),
@@ -452,16 +452,15 @@
                 </div>
               {:else if verificationChannel === 'discord'}
                 <div class="field">
-                  <label for="discord-id">{$_('register.discordId')}</label>
+                  <label for="discord-username">{$_('register.discordUsername')}</label>
                   <input
-                    id="discord-id"
+                    id="discord-username"
                     type="text"
-                    bind:value={discordId}
-                    placeholder={$_('register.discordIdPlaceholder')}
+                    bind:value={discordUsername}
+                    placeholder={$_('register.discordUsernamePlaceholder')}
                     disabled={submitting}
                     required
                   />
-                  <p class="hint">{$_('register.discordIdHint')}</p>
                 </div>
               {:else if verificationChannel === 'telegram'}
                 <div class="field">
@@ -477,16 +476,16 @@
                 </div>
               {:else if verificationChannel === 'signal'}
                 <div class="field">
-                  <label for="signal-number">{$_('register.signalNumber')}</label>
+                  <label for="signal-number">{$_('register.signalUsername')}</label>
                   <input
                     id="signal-number"
                     type="tel"
-                    bind:value={signalNumber}
-                    placeholder={$_('register.signalNumberPlaceholder')}
+                    bind:value={signalUsername}
+                    placeholder={$_('register.signalUsernamePlaceholder')}
                     disabled={submitting}
                     required
                   />
-                  <p class="hint">{$_('register.signalNumberHint')}</p>
+                  <p class="hint">{$_('register.signalUsernameHint')}</p>
                 </div>
               {/if}
             </div>

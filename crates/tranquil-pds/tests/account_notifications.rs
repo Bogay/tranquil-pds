@@ -1,7 +1,6 @@
 mod common;
 use common::{base_url, client, create_account_and_login, get_test_db_pool};
 use serde_json::{Value, json};
-use sqlx::Row;
 
 #[tokio::test]
 async fn test_get_notification_history() {
@@ -51,10 +50,10 @@ async fn test_get_notification_history() {
 async fn test_verify_channel_discord() {
     let client = client();
     let base = base_url().await;
-    let (token, did) = create_account_and_login(&client).await;
+    let (token, _did) = create_account_and_login(&client).await;
 
     let prefs = json!({
-        "discordId": "123456789"
+        "discordUsername": "testuser123"
     });
     let resp = client
         .post(format!("{}/xrpc/_account.updateNotificationPrefs", base))
@@ -72,42 +71,6 @@ async fn test_verify_channel_discord() {
             .contains(&json!("discord"))
     );
 
-    let pool = get_test_db_pool().await;
-    let user_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM users WHERE did = $1")
-        .bind(&did)
-        .fetch_one(pool)
-        .await
-        .expect("User not found");
-
-    let row = sqlx::query(
-        "SELECT body, metadata FROM comms_queue WHERE user_id = $1 AND comms_type = 'channel_verification' ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .expect("Verification code not found");
-
-    let metadata: Option<serde_json::Value> = row.get("metadata");
-    let code = metadata
-        .as_ref()
-        .and_then(|m| m.get("code"))
-        .and_then(|c| c.as_str())
-        .expect("No code in metadata");
-
-    let input = json!({
-        "channel": "discord",
-        "identifier": "123456789",
-        "code": code
-    });
-    let resp = client
-        .post(format!("{}/xrpc/_account.confirmChannelVerification", base))
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&input)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-
     let resp = client
         .get(format!("{}/xrpc/_account.getNotificationPrefs", base))
         .header("Authorization", format!("Bearer {}", token))
@@ -115,8 +78,8 @@ async fn test_verify_channel_discord() {
         .await
         .unwrap();
     let body: Value = resp.json().await.unwrap();
-    assert_eq!(body["discordVerified"], true);
-    assert_eq!(body["discordId"], "123456789");
+    assert_eq!(body["discordVerified"], false);
+    assert_eq!(body["discordUsername"], "testuser123");
 }
 
 #[tokio::test]

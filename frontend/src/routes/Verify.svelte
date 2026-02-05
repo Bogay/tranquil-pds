@@ -33,6 +33,8 @@
   let tokenFromUrl = $state(false)
   let oauthRequestUri = $state<string | null>(null)
   let telegramBotUsername = $state<string | undefined>(undefined)
+  let discordBotUsername = $state<string | undefined>(undefined)
+  let discordAppId = $state<string | undefined>(undefined)
 
   const auth = $derived(getAuthState())
 
@@ -42,6 +44,8 @@
 
   const session = $derived(getSession())
   const isTelegram = $derived(pendingVerification?.channel === 'telegram')
+  const isDiscord = $derived(pendingVerification?.channel === 'discord')
+  const isBotVerified = $derived(isTelegram || isDiscord)
 
   function parseQueryParams(): Record<string, string> {
     return Object.fromEntries(new URLSearchParams(window.location.search))
@@ -102,10 +106,12 @@
         }))
       }
 
-      if (pendingVerification?.channel === 'telegram') {
+      if (pendingVerification?.channel === 'telegram' || pendingVerification?.channel === 'discord') {
         try {
           const serverInfo = await api.describeServer()
           telegramBotUsername = serverInfo.telegramBotUsername
+          discordBotUsername = serverInfo.discordBotUsername
+          discordAppId = serverInfo.discordAppId
         } catch {
         }
       }
@@ -121,10 +127,10 @@
 
   let pollingVerification = false
   $effect(() => {
-    if (mode === 'signup' && pendingVerification && (isTelegram || !verificationCode.trim())) {
+    if (mode === 'signup' && pendingVerification && (isBotVerified || !verificationCode.trim())) {
       const currentPending = pendingVerification
       const interval = setInterval(async () => {
-        if (pollingVerification || (!isTelegram && verificationCode.trim())) return
+        if (pollingVerification || (!isBotVerified && verificationCode.trim())) return
         pollingVerification = true
         try {
           const result = await api.checkChannelVerified(currentPending.did, currentPending.channel)
@@ -447,12 +453,22 @@
 
     {#if isTelegram && telegramBotUsername}
       {@const encodedHandle = pendingVerification.handle.replaceAll('.', '_')}
-      <div class="telegram-hint">
+      <div class="bot-hint">
         <p>
           <a href="https://t.me/{telegramBotUsername}?start={encodedHandle}" target="_blank" rel="noopener">{$_('comms.telegramOpenLink')}</a>
         </p>
         <p class="manual-text">
           {$_('comms.telegramStartBot', { values: { botUsername: telegramBotUsername, handle: pendingVerification.handle } })}
+        </p>
+        <p class="waiting-text">{$_('verify.pleaseWait')}</p>
+      </div>
+    {:else if isDiscord && discordAppId}
+      <div class="bot-hint">
+        <p>
+          <a href="https://discord.com/users/{discordAppId}" target="_blank" rel="noopener">{$_('comms.discordOpenLink')}</a>
+        </p>
+        <p class="manual-text">
+          {$_('comms.discordStartBot', { values: { botUsername: discordBotUsername ?? 'the bot', handle: pendingVerification.handle } })}
         </p>
         <p class="waiting-text">{$_('verify.pleaseWait')}</p>
       </div>
@@ -610,23 +626,23 @@
     padding: var(--space-4) var(--space-8);
   }
 
-  .telegram-hint {
+  .bot-hint {
     padding: var(--space-4);
     background: var(--bg-secondary);
     border-radius: var(--radius-md);
   }
 
-  .telegram-hint p {
+  .bot-hint p {
     margin: 0;
   }
 
-  .telegram-hint .manual-text {
+  .bot-hint .manual-text {
     font-size: var(--text-sm);
     color: var(--text-secondary);
     margin-top: var(--space-1);
   }
 
-  .telegram-hint .waiting-text {
+  .bot-hint .waiting-text {
     font-size: var(--text-sm);
     color: var(--text-secondary);
     margin-top: var(--space-2);

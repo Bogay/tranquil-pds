@@ -14,6 +14,9 @@ const DEFAULT_MAX_BLOB_SIZE: usize = 10 * 1024 * 1024 * 1024;
 static MAX_BLOB_SIZE: OnceLock<usize> = OnceLock::new();
 static PDS_HOSTNAME: OnceLock<String> = OnceLock::new();
 static PDS_HOSTNAME_WITHOUT_PORT: OnceLock<String> = OnceLock::new();
+static DISCORD_BOT_USERNAME: OnceLock<String> = OnceLock::new();
+static DISCORD_PUBLIC_KEY: OnceLock<ed25519_dalek::VerifyingKey> = OnceLock::new();
+static DISCORD_APP_ID: OnceLock<String> = OnceLock::new();
 static TELEGRAM_BOT_USERNAME: OnceLock<String> = OnceLock::new();
 
 pub fn get_max_blob_size() -> usize {
@@ -103,6 +106,30 @@ pub fn pds_hostname_without_port() -> &'static str {
         let hostname = pds_hostname();
         hostname.split(':').next().unwrap_or(hostname).to_string()
     })
+}
+
+pub fn set_discord_bot_username(username: String) {
+    DISCORD_BOT_USERNAME.set(username).ok();
+}
+
+pub fn discord_bot_username() -> Option<&'static str> {
+    DISCORD_BOT_USERNAME.get().map(|s| s.as_str())
+}
+
+pub fn set_discord_public_key(key: ed25519_dalek::VerifyingKey) {
+    DISCORD_PUBLIC_KEY.set(key).ok();
+}
+
+pub fn discord_public_key() -> Option<&'static ed25519_dalek::VerifyingKey> {
+    DISCORD_PUBLIC_KEY.get()
+}
+
+pub fn set_discord_app_id(app_id: String) {
+    DISCORD_APP_ID.set(app_id).ok();
+}
+
+pub fn discord_app_id() -> Option<&'static str> {
+    DISCORD_APP_ID.get().map(|s| s.as_str())
 }
 
 pub fn set_telegram_bot_username(username: String) {

@@ -367,6 +367,7 @@ pub async fn update_email(
         crate::auth::verification_token::format_token_for_display(&verification_token);
     let hostname = pds_hostname();
     if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+        state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         user_id,
         "email",

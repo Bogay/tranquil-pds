@@ -20,6 +20,12 @@ pub enum DbError {
     #[error("Serialization error: {0}")]
     Serialization(String),
 
+    #[error("Ambiguous: {0}")]
+    Ambiguous(String),
+
+    #[error("Resource busy, try again")]
+    LockContention,
+
     #[error("Other database error: {0}")]
     Other(String),
 }

@@ -311,7 +311,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn get_comms_prefs(&self, user_id: Uuid) -> Result<Option<UserCommsPrefs>, DbError> {
         let row = sqlx::query!(
-            r#"SELECT email, handle, preferred_comms_channel as "preferred_channel!: CommsChannel", preferred_locale, telegram_chat_id, discord_id, signal_number
+            r#"SELECT email, handle, preferred_comms_channel as "preferred_channel!: CommsChannel", preferred_locale, telegram_chat_id, discord_id, signal_username
                FROM users WHERE id = $1"#,
             user_id
         )
@@ -325,7 +325,7 @@ impl UserRepository for PostgresUserRepository {
             preferred_locale: r.preferred_locale,
             telegram_chat_id: r.telegram_chat_id,
             discord_id: r.discord_id,
-            signal_number: r.signal_number,
+            signal_username: r.signal_username,
         }))
     }
 
@@ -636,11 +636,12 @@ impl UserRepository for PostgresUserRepository {
                 email,
                 preferred_comms_channel as "preferred_channel!: CommsChannel",
                 discord_id,
+                discord_username,
                 discord_verified,
                 telegram_username,
                 telegram_verified,
                 telegram_chat_id,
-                signal_number,
+                signal_username,
                 signal_verified
             FROM users WHERE did = $1"#,
             did.as_str()
@@ -652,11 +653,12 @@ impl UserRepository for PostgresUserRepository {
             email: r.email.unwrap_or_default(),
             preferred_channel: r.preferred_channel,
             discord_id: r.discord_id,
+            discord_username: r.discord_username,
             discord_verified: r.discord_verified,
             telegram_username: r.telegram_username,
             telegram_verified: r.telegram_verified,
             telegram_chat_id: r.telegram_chat_id,
-            signal_number: r.signal_number,
+            signal_username: r.signal_username,
             signal_verified: r.signal_verified,
         }))
     }
@@ -697,7 +699,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn clear_discord(&self, user_id: Uuid) -> Result<(), DbError> {
         sqlx::query!(
-            "UPDATE users SET discord_id = NULL, discord_verified = FALSE, updated_at = NOW() WHERE id = $1",
+            "UPDATE users SET discord_id = NULL, discord_username = NULL, discord_verified = FALSE, updated_at = NOW() WHERE id = $1",
             user_id
         )
         .execute(&self.pool)
@@ -719,7 +721,7 @@ impl UserRepository for PostgresUserRepository {
 
     async fn clear_signal(&self, user_id: Uuid) -> Result<(), DbError> {
         sqlx::query!(
-            "UPDATE users SET signal_number = NULL, signal_verified = FALSE, updated_at = NOW() WHERE id = $1",
+            "UPDATE users SET signal_username = NULL, signal_verified = FALSE, updated_at = NOW() WHERE id = $1",
             user_id
         )
         .execute(&self.pool)
@@ -796,11 +798,11 @@ impl UserRepository for PostgresUserRepository {
     async fn verify_signal_channel(
         &self,
         user_id: Uuid,
-        signal_number: &str,
+        signal_username: &str,
     ) -> Result<(), DbError> {
         sqlx::query!(
-            "UPDATE users SET signal_number = $1, signal_verified = TRUE, updated_at = NOW() WHERE id = $2",
-            signal_number,
+            "UPDATE users SET signal_username = $1, signal_verified = TRUE, updated_at = NOW() WHERE id = $2",
+            signal_username,
             user_id
         )
         .execute(&self.pool)
@@ -1548,7 +1550,7 @@ impl UserRepository for PostgresUserRepository {
             r#"SELECT
                 u.id, u.did, u.handle, u.email,
                 u.preferred_comms_channel as "channel: CommsChannel",
-                u.discord_id, u.telegram_username, u.signal_number,
+                u.discord_username, u.telegram_username, u.signal_username,
                 k.key_bytes, k.encryption_version
             FROM users u
             JOIN user_keys k ON u.id = k.user_id
@@ -1565,9 +1567,9 @@ impl UserRepository for PostgresUserRepository {
                 handle: Handle::from(row.handle),
                 email: row.email,
                 channel: row.channel,
-                discord_id: row.discord_id,
+                discord_username: row.discord_username,
                 telegram_username: row.telegram_username,
-                signal_number: row.signal_number,
+                signal_username: row.signal_username,
                 key_bytes: row.key_bytes,
                 encryption_version: row.encryption_version,
             })
@@ -1582,7 +1584,7 @@ impl UserRepository for PostgresUserRepository {
             r#"SELECT
                 id, handle, email,
                 preferred_comms_channel as "channel: CommsChannel",
-                discord_id, telegram_username, signal_number,
+                discord_username, telegram_username, signal_username,
                 email_verified, discord_verified, telegram_verified, signal_verified
             FROM users
             WHERE did = $1"#,
@@ -1597,9 +1599,9 @@ impl UserRepository for PostgresUserRepository {
                 handle: Handle::from(row.handle),
                 email: row.email,
                 channel: row.channel,
-                discord_id: row.discord_id,
+                discord_username: row.discord_username,
                 telegram_username: row.telegram_username,
-                signal_number: row.signal_number,
+                signal_username: row.signal_username,
                 channel_verification: ChannelVerificationStatus::new(
                     row.email_verified,
                     row.discord_verified,
@@ -1662,13 +1664,13 @@ impl UserRepository for PostgresUserRepository {
                 "SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1) AND deactivated_at IS NULL"
             }
             CommsChannel::Discord => {
-                "SELECT COUNT(*) FROM users WHERE discord_id = $1 AND deactivated_at IS NULL"
+                "SELECT COUNT(*) FROM users WHERE LOWER(discord_username) = LOWER($1) AND deactivated_at IS NULL"
             }
             CommsChannel::Telegram => {
                 "SELECT COUNT(*) FROM users WHERE LOWER(telegram_username) = LOWER($1) AND deactivated_at IS NULL"
             }
             CommsChannel::Signal => {
-                "SELECT COUNT(*) FROM users WHERE signal_number = $1 AND deactivated_at IS NULL"
+                "SELECT COUNT(*) FROM users WHERE signal_username = $1 AND deactivated_at IS NULL"
             }
         };
         sqlx::query_scalar(query)
@@ -2385,7 +2387,7 @@ impl UserRepository for PostgresUserRepository {
             r#"INSERT INTO users (
                 handle, email, did, password_hash,
                 preferred_comms_channel,
-                discord_id, telegram_username, signal_number,
+                discord_username, telegram_username, signal_username,
                 is_admin, deactivated_at, email_verified
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE) RETURNING id"#,
         )
@@ -2394,9 +2396,9 @@ impl UserRepository for PostgresUserRepository {
         .bind(input.did.as_str())
         .bind(&input.password_hash)
         .bind(input.preferred_comms_channel)
-        .bind(&input.discord_id)
+        .bind(&input.discord_username)
         .bind(&input.telegram_username)
-        .bind(&input.signal_number)
+        .bind(&input.signal_username)
         .bind(is_first_user)
         .bind(input.deactivated_at)
         .fetch_one(&mut *tx)
@@ -2652,7 +2654,7 @@ impl UserRepository for PostgresUserRepository {
             r#"INSERT INTO users (
                 handle, email, did, password_hash, password_required,
                 preferred_comms_channel,
-                discord_id, telegram_username, signal_number,
+                discord_username, telegram_username, signal_username,
                 recovery_token, recovery_token_expires_at,
                 is_admin, deactivated_at
             ) VALUES ($1, $2, $3, NULL, FALSE, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id"#,
@@ -2661,9 +2663,9 @@ impl UserRepository for PostgresUserRepository {
         .bind(&input.email)
         .bind(input.did.as_str())
         .bind(input.preferred_comms_channel)
-        .bind(&input.discord_id)
+        .bind(&input.discord_username)
         .bind(&input.telegram_username)
-        .bind(&input.signal_number)
+        .bind(&input.signal_username)
         .bind(&input.setup_token_hash)
         .bind(input.setup_expires_at)
         .bind(is_first_user)
@@ -2816,7 +2818,7 @@ impl UserRepository for PostgresUserRepository {
         let user_insert: Result<(uuid::Uuid,), _> = sqlx::query_as(
             r#"INSERT INTO users (
                 handle, email, did, password_hash, password_required,
-                preferred_comms_channel, discord_id, telegram_username, signal_number,
+                preferred_comms_channel, discord_username, telegram_username, signal_username,
                 is_admin
             ) VALUES ($1, $2, $3, NULL, FALSE, $4, $5, $6, $7, $8) RETURNING id"#,
         )
@@ -2824,9 +2826,9 @@ impl UserRepository for PostgresUserRepository {
         .bind(&input.email)
         .bind(input.did.as_str())
         .bind(input.preferred_comms_channel)
-        .bind(&input.discord_id)
+        .bind(&input.discord_username)
         .bind(&input.telegram_username)
-        .bind(&input.signal_number)
+        .bind(&input.signal_username)
         .bind(is_first_user)
         .fetch_one(&mut *tx)
         .await;
@@ -3188,6 +3190,109 @@ impl UserRepository for PostgresUserRepository {
         .await
         .map_err(map_sqlx_error)?;
         Ok(())
+    }
+
+    async fn set_unverified_signal(
+        &self,
+        user_id: Uuid,
+        signal_username: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"UPDATE users SET
+                signal_username = $1,
+                signal_verified = CASE WHEN LOWER(signal_username) = LOWER($1) THEN signal_verified ELSE FALSE END,
+                updated_at = NOW()
+            WHERE id = $2"#,
+            signal_username,
+            user_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn set_unverified_discord(
+        &self,
+        user_id: Uuid,
+        discord_username: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"UPDATE users SET
+                discord_username = $1,
+                discord_verified = CASE WHEN LOWER(discord_username) = LOWER($1) THEN discord_verified ELSE FALSE END,
+                discord_id = CASE WHEN LOWER(discord_username) = LOWER($1) THEN discord_id ELSE NULL END,
+                updated_at = NOW()
+            WHERE id = $2"#,
+            discord_username,
+            user_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn store_discord_user_id(
+        &self,
+        discord_username: &str,
+        discord_id: &str,
+        handle: Option<&str>,
+    ) -> Result<Option<Uuid>, DbError> {
+        let result = match handle {
+            Some(h) => sqlx::query_scalar!(
+                "UPDATE users SET discord_id = $2, discord_verified = TRUE, updated_at = NOW() WHERE LOWER(discord_username) = LOWER($1) AND discord_username IS NOT NULL AND handle = $3 RETURNING id",
+                discord_username,
+                discord_id,
+                h
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+            None => {
+                let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+                let matching: Vec<uuid::Uuid> = match sqlx::query_scalar!(
+                    "SELECT id FROM users WHERE LOWER(discord_username) = LOWER($1) AND discord_username IS NOT NULL AND deactivated_at IS NULL FOR UPDATE NOWAIT",
+                    discord_username
+                )
+                .fetch_all(&mut *tx)
+                .await
+                {
+                    Ok(ids) => ids,
+                    Err(sqlx::Error::Database(ref db_err))
+                        if db_err.code().as_deref() == Some("55P03") =>
+                    {
+                        return Err(DbError::LockContention);
+                    }
+                    Err(e) => return Err(map_sqlx_error(e)),
+                };
+
+                let result = match matching.len() {
+                    0 => None,
+                    1 => {
+                        sqlx::query_scalar!(
+                            "UPDATE users SET discord_id = $2, discord_verified = TRUE, updated_at = NOW() WHERE id = $1 RETURNING id",
+                            matching[0],
+                            discord_id
+                        )
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .map_err(map_sqlx_error)?
+                    }
+                    _ => {
+                        tx.rollback().await.ok();
+                        return Err(DbError::Ambiguous(
+                            "Multiple accounts use this Discord username. Type: /start your-handle.example.com".to_string(),
+                        ));
+                    }
+                };
+
+                tx.commit().await.map_err(map_sqlx_error)?;
+                result
+            }
+        };
+        Ok(result)
     }
 
     async fn store_telegram_chat_id(

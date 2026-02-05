@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                u.id, u.did, u.handle, u.email,\n                u.preferred_comms_channel as \"channel: CommsChannel\",\n                u.discord_id, u.telegram_username, u.signal_number,\n                k.key_bytes, k.encryption_version\n            FROM users u\n            JOIN user_keys k ON u.id = k.user_id\n            WHERE u.did = $1",
+  "query": "SELECT\n                u.id, u.did, u.handle, u.email,\n                u.preferred_comms_channel as \"channel: CommsChannel\",\n                u.discord_username, u.telegram_username, u.signal_username,\n                k.key_bytes, k.encryption_version\n            FROM users u\n            JOIN user_keys k ON u.id = k.user_id\n            WHERE u.did = $1",
   "describe": {
     "columns": [
       {
@@ -42,7 +42,7 @@
       },
       {
         "ordinal": 5,
-        "name": "discord_id",
+        "name": "discord_username",
         "type_info": "Text"
       },
       {
@@ -52,7 +52,7 @@
       },
       {
         "ordinal": 7,
-        "name": "signal_number",
+        "name": "signal_username",
         "type_info": "Text"
       },
       {
@@ -84,5 +84,5 @@
       true
     ]
   },
-  "hash": "671fb43192b9f37862f9eae2c5cec206ae1664ab5d595df4058c44abd257c910"
+  "hash": "c8657f67fdd3cc0fb40dfaabd5cde460d84ea1de18f620ee4ece2623ad153911"
 }

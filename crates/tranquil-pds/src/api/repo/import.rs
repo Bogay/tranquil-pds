@@ -55,6 +55,14 @@ pub async fn import_repo(
         return Err(ApiError::AccountTakedown);
     }
     let user_id = user.id;
+    let expected_root_cid = state
+        .repo_repo
+        .get_repo_root_cid_by_user_id(user_id)
+        .await
+        .map_err(|e| {
+            error!("DB error fetching repo root: {:?}", e);
+            ApiError::InternalError(None)
+        })?;
     let (root, blocks) = match parse_car(&body).await {
         Ok((r, b)) => (r, b),
         Err(ImportError::InvalidRootCount) => {
@@ -191,7 +199,16 @@ pub async fn import_repo(
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MAX_BLOCKS);
     let _write_lock = state.repo_write_locks.lock(user_id).await;
-    match apply_import(&state.repo_repo, user_id, root, blocks.clone(), max_blocks).await {
+    match apply_import(
+        &state.repo_repo,
+        user_id,
+        root,
+        blocks.clone(),
+        max_blocks,
+        expected_root_cid.as_ref(),
+    )
+    .await
+    {
         Ok(import_result) => {
             info!(
                 "Successfully imported {} records for user {}",

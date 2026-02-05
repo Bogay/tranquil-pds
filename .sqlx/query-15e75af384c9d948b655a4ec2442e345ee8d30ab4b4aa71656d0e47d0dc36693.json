@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM users WHERE LOWER(discord_username) = LOWER($1) AND discord_username IS NOT NULL AND deactivated_at IS NULL FOR UPDATE NOWAIT",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "15e75af384c9d948b655a4ec2442e345ee8d30ab4b4aa71656d0e47d0dc36693"
+}

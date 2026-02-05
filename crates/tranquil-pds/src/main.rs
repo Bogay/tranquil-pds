@@ -64,6 +64,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let mut comms_service = CommsService::new(state.infra_repo.clone());
+    let mut deferred_discord_endpoint: Option<(DiscordSender, String, String)> = None;
 
     if let Some(email_sender) = EmailSender::from_env() {
         info!("Email comms enabled");
@@ -74,6 +75,46 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(discord_sender) = DiscordSender::from_env() {
         info!("Discord comms enabled");
+        match discord_sender.resolve_bot_username().await {
+            Ok(username) => {
+                info!(bot_username = %username, "Resolved Discord bot username");
+                tranquil_pds::util::set_discord_bot_username(username);
+            }
+            Err(e) => {
+                warn!("Failed to resolve Discord bot username: {}", e);
+            }
+        }
+        match discord_sender.resolve_application_info().await {
+            Ok((app_id, verify_key)) => {
+                info!(app_id = %app_id, "Resolved Discord application info");
+                tranquil_pds::util::set_discord_app_id(app_id.clone());
+                match hex::decode(&verify_key)
+                    .ok()
+                    .and_then(|bytes| <[u8; 32]>::try_from(bytes.as_slice()).ok())
+                    .and_then(|bytes| ed25519_dalek::VerifyingKey::from_bytes(&bytes).ok())
+                {
+                    Some(public_key) => {
+                        tranquil_pds::util::set_discord_public_key(public_key);
+                        info!("Discord Ed25519 public key loaded");
+                        let hostname = std::env::var("PDS_HOSTNAME")
+                            .unwrap_or_else(|_| "localhost".to_string());
+                        let webhook_url = format!("https://{}/webhook/discord", hostname);
+                        match discord_sender.register_slash_command(&app_id).await {
+                            Ok(()) => info!("Discord /start slash command registered"),
+                            Err(e) => warn!("Failed to register Discord slash command: {}", e),
+                        }
+                        deferred_discord_endpoint =
+                            Some((discord_sender.clone(), app_id, webhook_url));
+                    }
+                    None => {
+                        warn!("Failed to parse Discord verify_key as Ed25519 public key");
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to resolve Discord application info: {}", e);
+            }
+        }
         comms_service = comms_service.register_sender(discord_sender);
     }
 
@@ -172,9 +213,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
 
-    let server_result = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown.clone().cancelled_owned())
-        .await;
+    let server_handle = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown.clone().cancelled_owned())
+            .await
+    });
+
+    if let Some((sender, app_id, webhook_url)) = deferred_discord_endpoint {
+        tokio::spawn(async move {
+            match sender
+                .set_interactions_endpoint(&app_id, &webhook_url)
+                .await
+            {
+                Ok(()) => info!(url = %webhook_url, "Discord interactions endpoint registered"),
+                Err(e) => warn!("Failed to set Discord interactions endpoint: {}", e),
+            }
+        });
+    }
+
+    let server_result = server_handle
+        .await
+        .map_err(|e| format!("Server task panicked: {}", e))?;
 
     comms_handle.await.ok();
 

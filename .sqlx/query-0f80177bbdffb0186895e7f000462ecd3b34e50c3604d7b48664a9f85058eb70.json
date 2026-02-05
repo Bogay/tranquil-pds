@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET discord_id = $2, discord_verified = TRUE, updated_at = NOW() WHERE LOWER(discord_username) = LOWER($1) AND discord_username IS NOT NULL AND handle = $3 RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0f80177bbdffb0186895e7f000462ecd3b34e50c3604d7b48664a9f85058eb70"
+}

@@ -1,11 +1,11 @@
 use crate::state::AppState;
-use crate::util::{pds_hostname, telegram_bot_username};
+use crate::util::{discord_app_id, discord_bot_username, pds_hostname, telegram_bot_username};
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 
 fn get_available_comms_channels() -> Vec<&'static str> {
     let mut channels = vec!["email"];
-    if std::env::var("DISCORD_WEBHOOK_URL").is_ok() {
+    if std::env::var("DISCORD_BOT_TOKEN").is_ok() {
         channels.push("discord");
     }
     if std::env::var("TELEGRAM_BOT_TOKEN").is_ok() {
@@ -62,6 +62,12 @@ pub async fn describe_server() -> impl IntoResponse {
         "availableCommsChannels": get_available_comms_channels(),
         "selfHostedDidWebEnabled": is_self_hosted_did_web_enabled()
     });
+    if let Some(bot_username) = discord_bot_username() {
+        response["discordBotUsername"] = json!(bot_username);
+    }
+    if let Some(app_id) = discord_app_id() {
+        response["discordAppId"] = json!(app_id);
+    }
     if let Some(bot_username) = telegram_bot_username() {
         response["telegramBotUsername"] = json!(bot_username);
     }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                id, handle, email,\n                preferred_comms_channel as \"channel: CommsChannel\",\n                discord_id, telegram_username, signal_number,\n                email_verified, discord_verified, telegram_verified, signal_verified\n            FROM users\n            WHERE did = $1",
+  "query": "SELECT\n                id, handle, email,\n                preferred_comms_channel as \"channel: CommsChannel\",\n                discord_username, telegram_username, signal_username,\n                email_verified, discord_verified, telegram_verified, signal_verified\n            FROM users\n            WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -37,7 +37,7 @@
       },
       {
         "ordinal": 4,
-        "name": "discord_id",
+        "name": "discord_username",
         "type_info": "Text"
       },
       {
@@ -47,7 +47,7 @@
       },
       {
         "ordinal": 6,
-        "name": "signal_number",
+        "name": "signal_username",
         "type_info": "Text"
       },
       {
@@ -90,5 +90,5 @@
       false
     ]
   },
-  "hash": "a01d6b316fc64250992bccb3b4b2cea9205d8828fac58c84ec929c8a0465588c"
+  "hash": "b542a4235ceb6285cad12eed162098a9a7775d81a7e3e9e8bd976f134d260b27"
 }

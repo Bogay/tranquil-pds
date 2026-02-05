@@ -281,7 +281,7 @@ fn resolve_recipient(
             })
             .unwrap_or_else(email_fallback),
         tranquil_db_traits::CommsChannel::Signal => prefs
-            .signal_number
+            .signal_username
             .as_ref()
             .filter(|n| !n.is_empty())
             .map(|n| ResolvedRecipient {
@@ -639,6 +639,7 @@ pub mod repo {
     }
 
     pub async fn enqueue_signup_verification(
+        user_repo: &dyn UserRepository,
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
         channel: &str,
@@ -647,21 +648,19 @@ pub mod repo {
         hostname: &str,
     ) -> Result<Uuid, DbError> {
         let comms_channel = channel_from_str(channel);
-        let strings = get_strings("en");
-        let (verify_page, verify_link) = match comms_channel {
-            tranquil_db_traits::CommsChannel::Email => {
-                let encoded_email = urlencoding::encode(recipient);
-                let encoded_token = urlencoding::encode(code);
-                (
-                    format!("https://{}/app/verify", hostname),
-                    format!(
-                        "https://{}/app/verify?token={}&identifier={}",
-                        hostname, encoded_token, encoded_email
-                    ),
-                )
-            }
-            _ => (String::new(), String::new()),
-        };
+        let prefs = user_repo.get_comms_prefs(user_id).await.ok().flatten();
+        let locale = prefs
+            .as_ref()
+            .and_then(|p| p.preferred_locale.as_deref())
+            .unwrap_or("en");
+        let strings = get_strings(locale);
+        let encoded_token = urlencoding::encode(code);
+        let encoded_recipient = urlencoding::encode(recipient);
+        let verify_page = format!("https://{}/app/verify", hostname);
+        let verify_link = format!(
+            "https://{}/app/verify?token={}&identifier={}",
+            hostname, encoded_token, encoded_recipient
+        );
         let body = format_message(
             strings.signup_verification_body,
             &[
@@ -671,20 +670,17 @@ pub mod repo {
                 ("verify_link", &verify_link),
             ],
         );
-        let subject = match comms_channel {
-            tranquil_db_traits::CommsChannel::Email => Some(format_message(
-                strings.signup_verification_subject,
-                &[("hostname", hostname)],
-            )),
-            _ => None,
-        };
+        let subject = format_message(
+            strings.signup_verification_subject,
+            &[("hostname", hostname)],
+        );
         infra_repo
             .enqueue_comms(
                 Some(user_id),
                 comms_channel,
                 CommsType::EmailVerification,
                 recipient,
-                subject.as_deref(),
+                Some(&subject),
                 &body,
                 None,
             )

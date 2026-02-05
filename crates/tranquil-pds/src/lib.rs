@@ -645,7 +645,13 @@ pub fn app(state: AppState) -> Router {
         .route("/u/{handle}/did.json", get(api::identity::user_did_doc))
         .route(
             "/webhook/telegram",
-            post(api::telegram_webhook::handle_telegram_webhook),
+            post(api::telegram_webhook::handle_telegram_webhook)
+                .layer(DefaultBodyLimit::max(64 * 1024)),
+        )
+        .route(
+            "/webhook/discord",
+            post(api::discord_webhook::handle_discord_webhook)
+                .layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .layer(DefaultBodyLimit::max(util::get_max_blob_size()))
         .layer(middleware::from_fn(metrics::metrics_middleware))

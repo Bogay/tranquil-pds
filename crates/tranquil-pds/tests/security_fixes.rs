@@ -1,5 +1,5 @@
 mod common;
-use tranquil_pds::comms::{SendError, is_valid_phone_number, sanitize_header_value};
+use tranquil_pds::comms::{SendError, is_valid_phone_number, is_valid_signal_username, sanitize_header_value};
 use tranquil_pds::image::{ImageError, ImageProcessor};
 
 #[test]
@@ -78,6 +78,38 @@ fn test_phone_number_validation() {
             malicious
         );
     }
+}
+
+#[test]
+fn test_signal_username_validation() {
+    assert!(is_valid_signal_username("alice.01"));
+    assert!(is_valid_signal_username("bob_smith.99"));
+    assert!(is_valid_signal_username("user123.42"));
+    assert!(is_valid_signal_username("lu1.01"));
+    assert!(is_valid_signal_username("abc.00"));
+    assert!(is_valid_signal_username("a_very_long_username_here.55"));
+
+    assert!(!is_valid_signal_username("alice"));
+    assert!(!is_valid_signal_username("alice.1"));
+    assert!(!is_valid_signal_username("alice.001"));
+    assert!(!is_valid_signal_username(".01"));
+    assert!(!is_valid_signal_username("ab.01"));
+    assert!(!is_valid_signal_username(""));
+    assert!(!is_valid_signal_username("1alice.01"));
+    assert!(!is_valid_signal_username("alice!.01"));
+    assert!(!is_valid_signal_username("alice .01"));
+
+    assert!(!is_valid_signal_username("a".repeat(33).as_str()));
+
+    ["alice.01; rm -rf /", "bob.01 && cat /etc/passwd", "user.01`id`", "test.01$(whoami)"]
+        .iter()
+        .for_each(|malicious| {
+            assert!(
+                !is_valid_signal_username(malicious),
+                "Command injection '{}' should be rejected",
+                malicious
+            );
+        });
 }
 
 #[test]

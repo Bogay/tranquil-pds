@@ -254,11 +254,11 @@ export const mockData = {
   notificationPrefs: (overrides?: Record<string, unknown>) => ({
     preferredChannel: "email",
     email: "test@example.com",
-    discordId: null,
+    discordUsername: null,
     discordVerified: false,
     telegramUsername: null,
     telegramVerified: false,
-    signalNumber: null,
+    signalUsername: null,
     signalVerified: false,
     ...overrides,
   }),

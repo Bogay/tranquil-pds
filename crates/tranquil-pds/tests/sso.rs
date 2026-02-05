@@ -1035,7 +1035,7 @@ async fn test_sso_complete_registration_multichannel_discord() {
             "token": token,
             "handle": handle_prefix,
             "verification_channel": "discord",
-            "discord_id": discord_id
+            "discord_username": discord_id
         }))
         .send()
         .await
@@ -1054,7 +1054,7 @@ async fn test_sso_complete_registration_multichannel_discord() {
 
     let did_str = body["did"].as_str().unwrap();
     let user = sqlx::query!(
-        r#"SELECT preferred_comms_channel as "preferred_comms_channel: String", discord_id FROM users WHERE did = $1"#,
+        r#"SELECT preferred_comms_channel as "preferred_comms_channel: String", discord_username FROM users WHERE did = $1"#,
         did_str,
     )
     .fetch_one(pool)
@@ -1062,7 +1062,7 @@ async fn test_sso_complete_registration_multichannel_discord() {
     .unwrap();
 
     assert_eq!(user.preferred_comms_channel, "discord");
-    assert_eq!(user.discord_id, Some(discord_id.to_string()));
+    assert_eq!(user.discord_username, Some(discord_id.to_string()));
 }
 
 #[tokio::test]

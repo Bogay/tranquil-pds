@@ -9,6 +9,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::debug;
 use tranquil_db::{ImportBlock, ImportRecord, ImportRepoError, RepoRepository};
+use tranquil_types::CidLink;
 use uuid::Uuid;
 
 #[derive(Error, Debug)]
@@ -323,6 +324,7 @@ pub async fn apply_import(
     root: Cid,
     blocks: HashMap<Cid, Bytes>,
     max_blocks: usize,
+    expected_root_cid: Option<&CidLink>,
 ) -> Result<ImportResult, ImportError> {
     if blocks.len() > max_blocks {
         return Err(ImportError::SizeLimitExceeded);
@@ -364,7 +366,7 @@ pub async fn apply_import(
         .collect();
 
     repo_repo
-        .import_repo_data(user_id, &import_blocks, &import_records)
+        .import_repo_data(user_id, &import_blocks, &import_records, expected_root_cid)
         .await?;
 
     debug!(

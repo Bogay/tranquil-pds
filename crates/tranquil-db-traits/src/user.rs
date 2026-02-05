@@ -228,6 +228,12 @@ pub trait UserRepository: Send + Sync {
 
     async fn clear_signal(&self, user_id: Uuid) -> Result<(), DbError>;
 
+    async fn set_unverified_signal(
+        &self,
+        user_id: Uuid,
+        signal_username: &str,
+    ) -> Result<(), DbError>;
+
     async fn set_unverified_telegram(
         &self,
         user_id: Uuid,
@@ -242,6 +248,19 @@ pub trait UserRepository: Send + Sync {
     ) -> Result<Option<Uuid>, DbError>;
 
     async fn get_telegram_chat_id(&self, user_id: Uuid) -> Result<Option<i64>, DbError>;
+
+    async fn set_unverified_discord(
+        &self,
+        user_id: Uuid,
+        discord_username: &str,
+    ) -> Result<(), DbError>;
+
+    async fn store_discord_user_id(
+        &self,
+        discord_username: &str,
+        discord_id: &str,
+        handle: Option<&str>,
+    ) -> Result<Option<Uuid>, DbError>;
 
     async fn get_verification_info(
         &self,
@@ -261,7 +280,7 @@ pub trait UserRepository: Send + Sync {
     async fn verify_signal_channel(
         &self,
         user_id: Uuid,
-        signal_number: &str,
+        signal_username: &str,
     ) -> Result<(), DbError>;
 
     async fn set_email_verified_flag(&self, user_id: Uuid) -> Result<(), DbError>;
@@ -598,7 +617,7 @@ pub struct UserCommsPrefs {
     pub preferred_locale: Option<String>,
     pub telegram_chat_id: Option<i64>,
     pub discord_id: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -656,11 +675,12 @@ pub struct NotificationPrefs {
     pub email: String,
     pub preferred_channel: CommsChannel,
     pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub discord_verified: bool,
     pub telegram_username: Option<String>,
     pub telegram_verified: bool,
     pub telegram_chat_id: Option<i64>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub signal_verified: bool,
 }
 
@@ -829,9 +849,9 @@ pub struct UserConfirmSignup {
     pub handle: Handle,
     pub email: Option<String>,
     pub channel: CommsChannel,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub key_bytes: Vec<u8>,
     pub encryption_version: Option<i32>,
 }
@@ -842,9 +862,9 @@ pub struct UserResendVerification {
     pub handle: Handle,
     pub email: Option<String>,
     pub channel: CommsChannel,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub channel_verification: ChannelVerificationStatus,
 }
 
@@ -932,9 +952,9 @@ pub struct CreatePasswordAccountInput {
     pub did: Did,
     pub password_hash: String,
     pub preferred_comms_channel: CommsChannel,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub deactivated_at: Option<DateTime<Utc>>,
     pub encrypted_key_bytes: Vec<u8>,
     pub encryption_version: i32,
@@ -982,9 +1002,9 @@ pub struct CreatePasskeyAccountInput {
     pub email: String,
     pub did: Did,
     pub preferred_comms_channel: CommsChannel,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub setup_token_hash: String,
     pub setup_expires_at: DateTime<Utc>,
     pub deactivated_at: Option<DateTime<Utc>>,
@@ -1004,9 +1024,9 @@ pub struct CreateSsoAccountInput {
     pub email: Option<String>,
     pub did: Did,
     pub preferred_comms_channel: CommsChannel,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub encrypted_key_bytes: Vec<u8>,
     pub encryption_version: i32,
     pub commit_cid: String,

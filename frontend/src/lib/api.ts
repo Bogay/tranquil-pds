@@ -404,9 +404,9 @@ export const api = {
         did: params.did,
         signingKey: params.signingKey,
         verificationChannel: params.verificationChannel,
-        discordId: params.discordId,
+        discordUsername: params.discordUsername,
         telegramUsername: params.telegramUsername,
-        signalNumber: params.signalNumber,
+        signalUsername: params.signalUsername,
       }),
     });
     const data = await response.json();
@@ -656,9 +656,9 @@ export const api = {
 
   updateNotificationPrefs(token: AccessToken, prefs: {
     preferredChannel?: string;
-    discordId?: string;
+    discordUsername?: string;
     telegramUsername?: string;
-    signalNumber?: string;
+    signalUsername?: string;
   }): Promise<UpdateNotificationPrefsResponse> {
     return xrpc("_account.updateNotificationPrefs", {
       method: "POST",
@@ -1133,9 +1133,9 @@ export const api = {
     did?: Did;
     signingKey?: string;
     verificationChannel?: VerificationChannel;
-    discordId?: string;
+    discordUsername?: string;
     telegramUsername?: string;
-    signalNumber?: string;
+    signalUsername?: string;
   }, byodToken?: string): Promise<PasskeyAccountCreateResponse> {
     const url = `${API_BASE}/_account.createPasskeyAccount`;
     const headers: Record<string, string> = {
@@ -1854,9 +1854,9 @@ export const typedApi = {
     token: AccessToken,
     prefs: {
       preferredChannel?: string;
-      discordId?: string;
+      discordUsername?: string;
       telegramUsername?: string;
-      signalNumber?: string;
+      signalUsername?: string;
     },
   ): Promise<Result<UpdateNotificationPrefsResponse, ApiError>> {
     return xrpcResult("_account.updateNotificationPrefs", {

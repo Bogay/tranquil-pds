@@ -56,9 +56,9 @@ export function createRegistrationFlow(
       didType: "plc",
       externalDid: "",
       verificationChannel: "email",
-      discordId: "",
+      discordUsername: "",
       telegramUsername: "",
-      signalNumber: "",
+      signalUsername: "",
     },
     externalDidWeb: {
       keyMode: "reserved",
@@ -252,9 +252,9 @@ export function createRegistrationFlow(
           ? state.externalDidWeb.reservedSigningKey
           : undefined,
         verificationChannel: state.info.verificationChannel,
-        discordId: state.info.discordId?.trim() || undefined,
+        discordUsername: state.info.discordUsername?.trim() || undefined,
         telegramUsername: state.info.telegramUsername?.trim() || undefined,
-        signalNumber: state.info.signalNumber?.trim() || undefined,
+        signalUsername: state.info.signalUsername?.trim() || undefined,
       }, byodToken);
 
       state.account = {
@@ -305,9 +305,9 @@ export function createRegistrationFlow(
           ? state.externalDidWeb.reservedSigningKey
           : undefined,
         verificationChannel: state.info.verificationChannel,
-        discordId: state.info.discordId?.trim() || undefined,
+        discordUsername: state.info.discordUsername?.trim() || undefined,
         telegramUsername: state.info.telegramUsername?.trim() || undefined,
-        signalNumber: state.info.signalNumber?.trim() || undefined,
+        signalUsername: state.info.signalUsername?.trim() || undefined,
       }, byodToken);
 
       state.account = {

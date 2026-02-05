@@ -488,6 +488,7 @@ pub trait RepoRepository: Send + Sync {
         user_id: Uuid,
         blocks: &[ImportBlock],
         records: &[ImportRecord],
+        expected_root_cid: Option<&CidLink>,
     ) -> Result<(), ImportRepoError>;
 
     async fn apply_commit(

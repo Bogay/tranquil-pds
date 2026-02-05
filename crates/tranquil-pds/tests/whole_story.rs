@@ -1948,7 +1948,14 @@ async fn test_concurrent_import_and_writes() {
                 .expect("Import request failed");
             let status = res.status();
             let body: Value = res.json().await.unwrap_or_default();
-            assert_eq!(status, StatusCode::OK, "Import should succeed: {:?}", body);
+            let is_concurrent_modification = status == StatusCode::BAD_REQUEST
+                && body.get("error").and_then(|e| e.as_str()) == Some("InvalidSwap");
+            assert!(
+                status == StatusCode::OK || is_concurrent_modification,
+                "Import should succeed or fail with InvalidSwap due to concurrent writes: {:?}",
+                body
+            );
+            status == StatusCode::OK
         }
     };
 
@@ -1987,7 +1994,7 @@ async fn test_concurrent_import_and_writes() {
         })
         .collect();
 
-    tokio::join!(import_future, join_all(write_futures));
+    let (import_succeeded, _) = tokio::join!(import_future, join_all(write_futures));
 
     let final_posts = client
         .get(format!("{}/xrpc/com.atproto.repo.listRecords", base))
@@ -2003,11 +2010,17 @@ async fn test_concurrent_import_and_writes() {
     let final_body: Value = final_posts.json().await.unwrap();
     let record_count = final_body["records"].as_array().unwrap().len();
 
-    let min_expected = write_count;
+    let min_expected = if import_succeeded {
+        write_count + 1
+    } else {
+        write_count
+    };
     assert!(
         record_count >= min_expected,
-        "Expected at least {} records (from writes), got {} (import may also contribute records)",
+        "Expected at least {} records (writes={}, import_succeeded={}), got {}",
         min_expected,
+        write_count,
+        import_succeeded,
         record_count
     );
 }

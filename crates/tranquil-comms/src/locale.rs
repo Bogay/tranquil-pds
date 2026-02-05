@@ -33,6 +33,8 @@ pub struct NotificationStrings {
     pub migration_verification_body: &'static str,
     pub channel_verified_subject: &'static str,
     pub channel_verified_body: &'static str,
+    pub channel_verification_subject: &'static str,
+    pub channel_verification_body: &'static str,
 }
 
 pub fn get_strings(locale: &str) -> &'static NotificationStrings {
@@ -70,6 +72,8 @@ static STRINGS_EN: NotificationStrings = NotificationStrings {
     migration_verification_body: "Welcome to {hostname}!\n\nYour account has been migrated successfully. To complete the setup, please verify your email address.\n\nYour verification code is:\n{code}\n\nCopy the code above and enter it at:\n{verify_page}\n\nThis code will expire in 48 hours.\n\nOr if you like to live dangerously:\n{verify_link}\n\nIf you did not migrate your account, please ignore this email.",
     channel_verified_subject: "Channel verified - {hostname}",
     channel_verified_body: "Hello {handle},\n\n{channel} has been verified as a notification channel for your account on {hostname}.",
+    channel_verification_subject: "Verify your channel - {hostname}",
+    channel_verification_body: "Your verification code is:\n{code}\n\nOr verify directly:\n{verify_link}",
 };
 
 static STRINGS_ZH: NotificationStrings = NotificationStrings {
@@ -96,6 +100,8 @@ static STRINGS_ZH: NotificationStrings = NotificationStrings {
     migration_verification_body: "欢迎来到 {hostname}！\n\n您的账户已成功迁移。要完成设置，请验证您的邮箱地址。\n\n您的验证码是：\n{code}\n\n复制上述验证码并在此输入：\n{verify_page}\n\n此验证码将在 48 小时后过期。\n\n或者直接点击链接：\n{verify_link}\n\n如果您没有迁移账户，请忽略此邮件。",
     channel_verified_subject: "通知渠道已验证 - {hostname}",
     channel_verified_body: "您好 {handle}，\n\n{channel} 已被验证为您在 {hostname} 上的通知渠道。",
+    channel_verification_subject: "验证您的渠道 - {hostname}",
+    channel_verification_body: "您的验证码是：\n{code}\n\n或直接验证：\n{verify_link}",
 };
 
 static STRINGS_JA: NotificationStrings = NotificationStrings {
@@ -122,6 +128,8 @@ static STRINGS_JA: NotificationStrings = NotificationStrings {
     migration_verification_body: "{hostname} へようこそ！\n\nアカウントの移行が完了しました。設定を完了するには、メールアドレスを認証してください。\n\n認証コードは：\n{code}\n\n上記のコードをコピーして、こちらで入力してください：\n{verify_page}\n\nこのコードは48時間後に期限切れとなります。\n\n自己責任でワンクリック認証：\n{verify_link}\n\nアカウントを移行していない場合は、このメールを無視してください。",
     channel_verified_subject: "通知チャンネル認証完了 - {hostname}",
     channel_verified_body: "{handle} 様\n\n{channel} が {hostname} の通知チャンネルとして認証されました。",
+    channel_verification_subject: "チャンネルを認証 - {hostname}",
+    channel_verification_body: "認証コードは：\n{code}\n\n直接認証：\n{verify_link}",
 };
 
 static STRINGS_KO: NotificationStrings = NotificationStrings {
@@ -148,6 +156,8 @@ static STRINGS_KO: NotificationStrings = NotificationStrings {
     migration_verification_body: "{hostname}에 오신 것을 환영합니다!\n\n계정 마이그레이션이 완료되었습니다. 설정을 완료하려면 이메일 주소를 인증하세요.\n\n인증 코드는:\n{code}\n\n위 코드를 복사하여 여기에 입력하세요:\n{verify_page}\n\n이 코드는 48시간 후에 만료됩니다.\n\n위험을 감수하고 원클릭 인증:\n{verify_link}\n\n계정을 마이그레이션하지 않았다면 이 이메일을 무시하세요.",
     channel_verified_subject: "알림 채널 인증 완료 - {hostname}",
     channel_verified_body: "안녕하세요 {handle}님,\n\n{channel}이(가) {hostname}의 알림 채널로 인증되었습니다.",
+    channel_verification_subject: "채널 인증 - {hostname}",
+    channel_verification_body: "인증 코드:\n{code}\n\n직접 인증:\n{verify_link}",
 };
 
 static STRINGS_SV: NotificationStrings = NotificationStrings {
@@ -174,6 +184,8 @@ static STRINGS_SV: NotificationStrings = NotificationStrings {
     migration_verification_body: "Välkommen till {hostname}!\n\nDitt konto har migrerats framgångsrikt. För att slutföra installationen, verifiera din e-postadress.\n\nDin verifieringskod är:\n{code}\n\nKopiera koden ovan och ange den på:\n{verify_page}\n\nDenna kod upphör om 48 timmar.\n\nEller om du gillar att leva farligt:\n{verify_link}\n\nOm du inte migrerade ditt konto kan du ignorera detta meddelande.",
     channel_verified_subject: "Aviseringskanal verifierad - {hostname}",
     channel_verified_body: "Hej {handle},\n\n{channel} har verifierats som aviseringskanal för ditt konto på {hostname}.",
+    channel_verification_subject: "Verifiera din kanal - {hostname}",
+    channel_verification_body: "Din verifieringskod är:\n{code}\n\nEller verifiera direkt:\n{verify_link}",
 };
 
 static STRINGS_FI: NotificationStrings = NotificationStrings {
@@ -200,6 +212,8 @@ static STRINGS_FI: NotificationStrings = NotificationStrings {
     migration_verification_body: "Tervetuloa palveluun {hostname}!\n\nTilisi on siirretty onnistuneesti. Viimeistele asennus vahvistamalla sähköpostiosoitteesi.\n\nVahvistuskoodisi on:\n{code}\n\nKopioi koodi yllä ja syötä se osoitteessa:\n{verify_page}\n\nTämä koodi vanhenee 48 tunnissa.\n\nTai jos pidät vaarallisesta elämästä:\n{verify_link}\n\nJos et siirtänyt tiliäsi, voit jättää tämän viestin huomiotta.",
     channel_verified_subject: "Ilmoituskanava vahvistettu - {hostname}",
     channel_verified_body: "Hei {handle},\n\n{channel} on vahvistettu ilmoituskanavaksi tilillesi palvelussa {hostname}.",
+    channel_verification_subject: "Vahvista kanavasi - {hostname}",
+    channel_verification_body: "Vahvistuskoodisi on:\n{code}\n\nTai vahvista suoraan:\n{verify_link}",
 };
 
 pub fn format_message(template: &str, vars: &[(&str, &str)]) -> String {

@@ -17,11 +17,11 @@ use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
 pub struct NotificationPrefsResponse {
     pub preferred_channel: CommsChannel,
     pub email: String,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub discord_verified: bool,
     pub telegram_username: Option<String>,
     pub telegram_verified: bool,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub signal_verified: bool,
 }
 
@@ -38,11 +38,11 @@ pub async fn get_notification_prefs(
     Ok(Json(NotificationPrefsResponse {
         preferred_channel: prefs.preferred_channel,
         email: prefs.email,
-        discord_id: prefs.discord_id,
+        discord_username: prefs.discord_username,
         discord_verified: prefs.discord_verified,
         telegram_username: prefs.telegram_username,
         telegram_verified: prefs.telegram_verified,
-        signal_number: prefs.signal_number,
+        signal_username: prefs.signal_username,
         signal_verified: prefs.signal_verified,
     })
     .into_response())
@@ -120,9 +120,9 @@ pub async fn get_notification_history(
 pub struct UpdateNotificationPrefsInput {
     pub preferred_channel: Option<String>,
     pub email: Option<String>,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -172,9 +172,24 @@ pub async fn request_channel_verification(
             "https://{}/app/verify?token={}&identifier={}",
             hostname, encoded_token, encoded_identifier
         );
-        let body = format!(
-            "Your verification code is: {}\n\nOr verify directly:\n{}",
-            formatted_token, verify_link
+        let prefs = state
+            .user_repo
+            .get_comms_prefs(user_id)
+            .await
+            .ok()
+            .flatten();
+        let locale = prefs
+            .as_ref()
+            .and_then(|p| p.preferred_locale.as_deref())
+            .unwrap_or("en");
+        let strings = crate::comms::get_strings(locale);
+        let body = crate::comms::format_message(
+            strings.channel_verification_body,
+            &[("code", &formatted_token), ("verify_link", &verify_link)],
+        );
+        let subject = crate::comms::format_message(
+            strings.channel_verification_subject,
+            &[("hostname", hostname)],
         );
         let recipient = match comms_channel {
             tranquil_db_traits::CommsChannel::Telegram => state
@@ -194,7 +209,7 @@ pub async fn request_channel_verification(
                 comms_channel,
                 tranquil_db_traits::CommsType::ChannelVerification,
                 &recipient,
-                Some("Verify your channel"),
+                Some(&subject),
                 &body,
                 Some(json!({"code": formatted_token})),
             )
@@ -291,8 +306,9 @@ pub async fn update_notification_prefs(
         }
     }
 
-    if let Some(ref discord_id) = input.discord_id {
-        if discord_id.is_empty() {
+    if let Some(ref discord_username) = input.discord_username {
+        let discord_clean = discord_username.trim().to_lowercase();
+        if discord_clean.is_empty() {
             if effective_channel == CommsChannel::Discord {
                 return Err(ApiError::InvalidRequest(
                     "Cannot remove Discord while it is the preferred notification channel".into(),
@@ -303,13 +319,20 @@ pub async fn update_notification_prefs(
                 .clear_discord(user_id)
                 .await
                 .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            info!(did = %auth.did, "Cleared Discord ID");
+            info!(did = %auth.did, "Cleared Discord");
+        } else if !crate::api::validation::is_valid_discord_username(&discord_clean) {
+            return Err(ApiError::InvalidRequest(
+                "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)"
+                    .into(),
+            ));
         } else {
-            request_channel_verification(&state, user_id, &auth.did, "discord", discord_id, None)
+            state
+                .user_repo
+                .set_unverified_discord(user_id, &discord_clean)
                 .await
-                .map_err(|e| ApiError::InternalError(Some(e)))?;
+                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
             verification_required.push("discord".to_string());
-            info!(did = %auth.did, "Requested Discord verification");
+            info!(did = %auth.did, discord_username = %discord_clean, "Stored unverified Discord username");
         }
     }
 
@@ -343,8 +366,9 @@ pub async fn update_notification_prefs(
         }
     }
 
-    if let Some(ref signal) = input.signal_number {
-        if signal.is_empty() {
+    if let Some(ref signal) = input.signal_username {
+        let signal_clean = signal.trim().trim_start_matches('@').to_lowercase();
+        if signal_clean.is_empty() {
             if effective_channel == CommsChannel::Signal {
                 return Err(ApiError::InvalidRequest(
                     "Cannot remove Signal while it is the preferred notification channel".into(),
@@ -355,13 +379,23 @@ pub async fn update_notification_prefs(
                 .clear_signal(user_id)
                 .await
                 .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            info!(did = %auth.did, "Cleared Signal number");
+            info!(did = %auth.did, "Cleared Signal username");
+        } else if !crate::comms::is_valid_signal_username(&signal_clean) {
+            return Err(ApiError::InvalidRequest(
+                "Invalid Signal username. Must be 3-32 characters followed by .XX (e.g. username.01)"
+                    .into(),
+            ));
         } else {
-            request_channel_verification(&state, user_id, &auth.did, "signal", signal, None)
+            state
+                .user_repo
+                .set_unverified_signal(user_id, &signal_clean)
+                .await
+                .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
+            request_channel_verification(&state, user_id, &auth.did, "signal", &signal_clean, None)
                 .await
                 .map_err(|e| ApiError::InternalError(Some(e)))?;
             verification_required.push("signal".to_string());
-            info!(did = %auth.did, "Requested Signal verification");
+            info!(did = %auth.did, signal_username = %signal_clean, "Stored unverified Signal username");
         }
     }
 

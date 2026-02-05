@@ -14,25 +14,31 @@
   let resending = $state(false)
   let resendMessage = $state<string | null>(null)
   let telegramBotUsername = $state<string | undefined>(undefined)
+  let discordBotUsername = $state<string | undefined>(undefined)
+  let discordAppId = $state<string | undefined>(undefined)
 
   let pollingInterval: ReturnType<typeof setInterval> | null = null
 
   const isTelegram = $derived(flow.info.verificationChannel === 'telegram')
+  const isDiscord = $derived(flow.info.verificationChannel === 'discord')
+  const isBotVerified = $derived(isTelegram || isDiscord)
 
   onMount(async () => {
-    if (isTelegram) {
+    if (isTelegram || isDiscord) {
       try {
         const serverInfo = await api.describeServer()
         telegramBotUsername = serverInfo.telegramBotUsername
+        discordBotUsername = serverInfo.discordBotUsername
+        discordAppId = serverInfo.discordAppId
       } catch {
       }
     }
   })
 
   $effect(() => {
-    if (flow.state.step === 'verify' && flow.account && (isTelegram || !verificationCode.trim())) {
+    if (flow.state.step === 'verify' && flow.account && (isBotVerified || !verificationCode.trim())) {
       pollingInterval = setInterval(async () => {
-        if (!isTelegram && verificationCode.trim()) return
+        if (!isBotVerified && verificationCode.trim()) return
         const advanced = await flow.checkAndAdvanceIfVerified()
         if (advanced && pollingInterval) {
           clearInterval(pollingInterval)
@@ -103,6 +109,13 @@
     <p class="info-text">
       <a href="https://t.me/{telegramBotUsername}?start={encodedHandle}" target="_blank" rel="noopener">Open Telegram to verify</a>,
       or send <code>/start {handle}</code> to <code>@{telegramBotUsername}</code> manually.
+    </p>
+    <p class="info-text waiting">Waiting for verification...</p>
+  {:else if isDiscord && discordAppId}
+    {@const handle = flow.account?.handle ?? `${flow.info.handle.trim()}.${flow.state.pdsHostname}`}
+    <p class="info-text">
+      <a href="https://discord.com/users/{discordAppId}" target="_blank" rel="noopener">Open Discord to verify</a>,
+      or send <code>/start {handle}</code> to <strong>{discordBotUsername ?? 'the bot'}</strong> manually.
     </p>
     <p class="info-text waiting">Waiting for verification...</p>
   {:else}

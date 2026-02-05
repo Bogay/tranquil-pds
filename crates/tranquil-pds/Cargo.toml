@@ -32,7 +32,9 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 cid = { workspace = true }
 dotenvy = { workspace = true }
+ed25519-dalek = { workspace = true }
 futures = { workspace = true }
+hex = { workspace = true }
 futures-util = { workspace = true }
 governor = { workspace = true }
 hickory-resolver = { workspace = true }

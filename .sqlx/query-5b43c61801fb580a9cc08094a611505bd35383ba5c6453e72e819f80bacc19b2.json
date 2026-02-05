@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                email,\n                preferred_comms_channel as \"preferred_channel!: CommsChannel\",\n                discord_id,\n                discord_verified,\n                telegram_username,\n                telegram_verified,\n                telegram_chat_id,\n                signal_number,\n                signal_verified\n            FROM users WHERE did = $1",
+  "query": "SELECT\n                email,\n                preferred_comms_channel as \"preferred_channel!: CommsChannel\",\n                discord_id,\n                discord_username,\n                discord_verified,\n                telegram_username,\n                telegram_verified,\n                telegram_chat_id,\n                signal_username,\n                signal_verified\n            FROM users WHERE did = $1",
   "describe": {
     "columns": [
       {
@@ -32,31 +32,36 @@
       },
       {
         "ordinal": 3,
+        "name": "discord_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "discord_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "telegram_username",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "telegram_verified",
         "type_info": "Bool"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "telegram_chat_id",
         "type_info": "Int8"
       },
       {
-        "ordinal": 7,
-        "name": "signal_number",
+        "ordinal": 8,
+        "name": "signal_username",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "signal_verified",
         "type_info": "Bool"
       }
@@ -70,6 +75,7 @@
       true,
       false,
       true,
+      true,
       false,
       true,
       false,
@@ -78,5 +84,5 @@
       false
     ]
   },
-  "hash": "c48c9af71d8dab70ea2f11df30d2cc4976732a47430bd471f5aa47afc16e5740"
+  "hash": "5b43c61801fb580a9cc08094a611505bd35383ba5c6453e72e819f80bacc19b2"
 }

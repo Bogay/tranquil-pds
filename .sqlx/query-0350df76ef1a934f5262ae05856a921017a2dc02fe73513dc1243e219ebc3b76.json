@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET\n                signal_username = $1,\n                signal_verified = CASE WHEN LOWER(signal_username) = LOWER($1) THEN signal_verified ELSE FALSE END,\n                updated_at = NOW()\n            WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0350df76ef1a934f5262ae05856a921017a2dc02fe73513dc1243e219ebc3b76"
+}

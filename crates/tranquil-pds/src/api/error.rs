@@ -409,7 +409,7 @@ impl ApiError {
                 Some("Telegram username is required when using Telegram verification".to_string())
             }
             Self::MissingSignalNumber => {
-                Some("Signal phone number is required when using Signal verification".to_string())
+                Some("Signal username is required when using Signal verification".to_string())
             }
             Self::InvalidVerificationChannel => Some("Invalid verification channel".to_string()),
             Self::SelfHostedDidWebDisabled => {

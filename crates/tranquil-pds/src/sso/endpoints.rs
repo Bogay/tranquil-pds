@@ -817,9 +817,9 @@ pub struct CompleteRegistrationInput {
     pub email: Option<String>,
     pub invite_code: Option<String>,
     pub verification_channel: Option<String>,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
     pub did_type: Option<String>,
     pub did: Option<String>,
 }
@@ -894,8 +894,16 @@ pub async fn complete_registration(
                 _ => return Err(ApiError::MissingEmail),
             }
         }
-        "discord" => match &input.discord_id {
-            Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+        "discord" => match &input.discord_username {
+            Some(username) if !username.trim().is_empty() => {
+                let clean = username.trim().to_lowercase();
+                if !crate::api::validation::is_valid_discord_username(&clean) {
+                    return Err(ApiError::InvalidRequest(
+                        "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)".into(),
+                    ));
+                }
+                clean
+            }
             _ => return Err(ApiError::MissingDiscordId),
         },
         "telegram" => match &input.telegram_username {
@@ -910,8 +918,10 @@ pub async fn complete_registration(
             }
             _ => return Err(ApiError::MissingTelegramUsername),
         },
-        "signal" => match &input.signal_number {
-            Some(number) if !number.trim().is_empty() => number.trim().to_string(),
+        "signal" => match &input.signal_username {
+            Some(username) if !username.trim().is_empty() => {
+                username.trim().trim_start_matches('@').to_lowercase()
+            }
             _ => return Err(ApiError::MissingSignalNumber),
         },
         _ => return Err(ApiError::InvalidVerificationChannel),
@@ -1104,20 +1114,20 @@ pub async fn complete_registration(
         email: email.clone(),
         did: did_typed.clone(),
         preferred_comms_channel,
-        discord_id: input
-            .discord_id
+        discord_username: input
+            .discord_username
             .clone()
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty()),
         telegram_username: input
             .telegram_username
             .clone()
             .map(|s| s.trim().trim_start_matches('@').to_string())
             .filter(|s| !s.is_empty()),
-        signal_number: input
-            .signal_number
+        signal_username: input
+            .signal_username
             .clone()
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().trim_start_matches('@').to_lowercase())
             .filter(|s| !s.is_empty()),
         encrypted_key_bytes: encrypted_key_bytes.clone(),
         encryption_version: crate::config::ENCRYPTION_VERSION,
@@ -1354,6 +1364,7 @@ pub async fn complete_registration(
         let formatted_token =
             crate::auth::verification_token::format_token_for_display(&verification_token);
         if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+            state.user_repo.as_ref(),
             state.infra_repo.as_ref(),
             uid,
             verification_channel,

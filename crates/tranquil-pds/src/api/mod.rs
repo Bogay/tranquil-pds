@@ -3,6 +3,7 @@ pub mod admin;
 pub mod age_assurance;
 pub mod backup;
 pub mod delegation;
+pub mod discord_webhook;
 pub mod error;
 pub mod identity;
 pub mod moderation;

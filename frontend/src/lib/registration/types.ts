@@ -28,9 +28,9 @@ export interface RegistrationInfo {
   didType: DidType;
   externalDid?: string;
   verificationChannel: VerificationChannel;
-  discordId?: string;
+  discordUsername?: string;
   telegramUsername?: string;
-  signalNumber?: string;
+  signalUsername?: string;
 }
 
 export interface ExternalDidWebState {

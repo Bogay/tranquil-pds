@@ -35,9 +35,9 @@ pub struct CreateAccountInput {
     pub did_type: Option<String>,
     pub signing_key: Option<String>,
     pub verification_channel: Option<String>,
-    pub discord_id: Option<String>,
+    pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
-    pub signal_number: Option<String>,
+    pub signal_username: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -203,8 +203,16 @@ pub async fn create_account(
                 Some(email) if !email.trim().is_empty() => email.trim().to_string(),
                 _ => return ApiError::MissingEmail.into_response(),
             },
-            "discord" => match &input.discord_id {
-                Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+            "discord" => match &input.discord_username {
+                Some(username) if !username.trim().is_empty() => {
+                    let clean = username.trim().to_lowercase();
+                    if !crate::api::validation::is_valid_discord_username(&clean) {
+                        return ApiError::InvalidRequest(
+                            "Invalid Discord username. Must be 2-32 lowercase characters (letters, numbers, underscores, periods)".into(),
+                        ).into_response();
+                    }
+                    clean
+                }
                 _ => return ApiError::MissingDiscordId.into_response(),
             },
             "telegram" => match &input.telegram_username {
@@ -219,8 +227,10 @@ pub async fn create_account(
                 }
                 _ => return ApiError::MissingTelegramUsername.into_response(),
             },
-            "signal" => match &input.signal_number {
-                Some(number) if !number.trim().is_empty() => number.trim().to_string(),
+            "signal" => match &input.signal_username {
+                Some(username) if !username.trim().is_empty() => {
+                    username.trim().trim_start_matches('@').to_lowercase()
+                }
                 _ => return ApiError::MissingSignalNumber.into_response(),
             },
             _ => return ApiError::InvalidVerificationChannel.into_response(),
@@ -633,24 +643,23 @@ pub async fn create_account(
         did: unsafe { Did::new_unchecked(&did) },
         password_hash,
         preferred_comms_channel,
-        discord_id: input
-            .discord_id
+        discord_username: input
+            .discord_username
             .as_deref()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(String::from),
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty()),
         telegram_username: input
             .telegram_username
             .as_deref()
             .map(|s| s.trim().trim_start_matches('@'))
             .filter(|s| !s.is_empty())
             .map(String::from),
-        signal_number: input
-            .signal_number
+        signal_username: input
+            .signal_username
             .as_deref()
-            .map(|s| s.trim())
+            .map(|s| s.trim().trim_start_matches('@'))
             .filter(|s| !s.is_empty())
-            .map(String::from),
+            .map(|s| s.to_lowercase()),
         deactivated_at,
         encrypted_key_bytes,
         encryption_version: crate::config::ENCRYPTION_VERSION,
@@ -750,6 +759,7 @@ pub async fn create_account(
             let formatted_token =
                 crate::auth::verification_token::format_token_for_display(&verification_token);
             if let Err(e) = crate::comms::comms_repo::enqueue_signup_verification(
+                state.user_repo.as_ref(),
                 state.infra_repo.as_ref(),
                 user_id,
                 verification_channel,
