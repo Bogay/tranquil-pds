@@ -333,18 +333,14 @@
                   placeholder={$_('register.signalUsernamePlaceholder')}
                   disabled={saving}
                 />
-                {#if signalUsername && signalUsername === savedSignalUsername && !signalVerified}
-                  <button type="button" class="verify-btn" onclick={() => verifyingChannel = 'signal'}>{$_('comms.verifyButton')}</button>
-                {/if}
               </div>
               {#if signalInUse}
                 <p class="hint warning">{$_('comms.signalInUseWarning')}</p>
               {/if}
-              {#if verifyingChannel === 'signal'}
+              {#if signalUsername && signalUsername === savedSignalUsername && !signalVerified}
                 <div class="verify-form">
-                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="128" />
+                  <input type="text" bind:value={verificationCode} placeholder={$_('comms.verifyCodePlaceholder')} maxlength="512" />
                   <button type="button" onclick={() => handleVerify('signal')}>{$_('comms.submit')}</button>
-                  <button type="button" class="cancel" onclick={() => { verifyingChannel = null; verificationCode = '' }}>{$_('common.cancel')}</button>
                 </div>
               {/if}
             </div>
@@ -553,31 +549,16 @@
     color: var(--text-secondary);
   }
 
-  .verify-btn {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-  }
 
   .verify-form {
     display: flex;
+    flex-direction: column;
     gap: var(--space-2);
-    align-items: center;
-  }
-
-  .verify-form input {
-    flex: 1;
-    min-width: 0;
   }
 
   .verify-form button {
     padding: var(--space-2) var(--space-3);
     font-size: var(--text-sm);
-  }
-
-  .verify-form button.cancel {
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
   }
 
   .actions {

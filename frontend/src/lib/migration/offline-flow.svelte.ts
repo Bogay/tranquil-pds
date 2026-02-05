@@ -169,6 +169,8 @@ export function createOfflineInboundMigrationFlow() {
     progress: createInitialProgress(),
     error: null,
     plcUpdatedTemporarily: false,
+    handlePreservation: "new",
+    existingHandleVerified: false,
   });
 
   let localServerInfo: ServerDescription | null = null;
@@ -671,6 +673,8 @@ export function createOfflineInboundMigrationFlow() {
       progress: createInitialProgress(),
       error: null,
       plcUpdatedTemporarily: false,
+      handlePreservation: "new",
+      existingHandleVerified: false,
     };
     localServerInfo = null;
   }

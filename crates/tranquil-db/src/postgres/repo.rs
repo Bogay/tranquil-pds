@@ -1159,10 +1159,10 @@ impl RepoRepository for PostgresRepoRepository {
             None => return Err(ImportRepoError::RepoNotFound),
         };
 
-        if let Some(expected) = expected_root_cid {
-            if repo.repo_root_cid.as_str() != expected.as_str() {
-                return Err(ImportRepoError::ConcurrentModification);
-            }
+        if let Some(expected) = expected_root_cid
+            && repo.repo_root_cid.as_str() != expected.as_str()
+        {
+            return Err(ImportRepoError::ConcurrentModification);
         }
 
         let block_chunks: Vec<Vec<&ImportBlock>> = blocks

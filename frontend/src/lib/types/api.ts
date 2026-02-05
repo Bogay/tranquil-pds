@@ -233,6 +233,8 @@ export interface ServerDescription {
   availableCommsChannels?: VerificationChannel[];
   selfHostedDidWebEnabled?: boolean;
   telegramBotUsername?: string;
+  discordBotUsername?: string;
+  discordAppId?: string;
 }
 
 export interface UpdateNotificationPrefsResponse {

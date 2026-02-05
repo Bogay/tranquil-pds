@@ -327,8 +327,12 @@ function _castDelegationController(raw: unknown): DelegationController {
   return {
     did: unsafeAsDid(c.did as string),
     handle: unsafeAsHandle(c.handle as string),
-    grantedScopes: unsafeAsScopeSet((c.granted_scopes ?? c.grantedScopes) as string),
-    grantedAt: unsafeAsISODate((c.granted_at ?? c.grantedAt ?? c.added_at) as string),
+    grantedScopes: unsafeAsScopeSet(
+      (c.granted_scopes ?? c.grantedScopes) as string,
+    ),
+    grantedAt: unsafeAsISODate(
+      (c.granted_at ?? c.grantedAt ?? c.added_at) as string,
+    ),
     isActive: (c.is_active ?? c.isActive ?? true) as boolean,
   };
 }
@@ -340,15 +344,21 @@ function _castDelegationControlledAccount(
   return {
     did: unsafeAsDid(a.did as string),
     handle: unsafeAsHandle(a.handle as string),
-    grantedScopes: unsafeAsScopeSet((a.granted_scopes ?? a.grantedScopes) as string),
-    grantedAt: unsafeAsISODate((a.granted_at ?? a.grantedAt ?? a.added_at) as string),
+    grantedScopes: unsafeAsScopeSet(
+      (a.granted_scopes ?? a.grantedScopes) as string,
+    ),
+    grantedAt: unsafeAsISODate(
+      (a.granted_at ?? a.grantedAt ?? a.added_at) as string,
+    ),
   };
 }
 
 function _castDelegationAuditEntry(raw: unknown): DelegationAuditEntry {
   const e = raw as Record<string, unknown>;
   const actorDid = (e.actor_did ?? e.actorDid) as string;
-  const targetDid = (e.target_did ?? e.targetDid ?? e.delegatedDid) as string | undefined;
+  const targetDid = (e.target_did ?? e.targetDid ?? e.delegatedDid) as
+    | string
+    | undefined;
   const createdAt = (e.created_at ?? e.createdAt) as string;
   const action = (e.action ?? e.actionType) as string;
   const details = e.details ?? e.actionDetails;
@@ -1434,7 +1444,9 @@ export const api = {
     );
     if (!result.ok) return result;
     return ok({
-      controllers: (result.value.controllers ?? []).map(_castDelegationController),
+      controllers: (result.value.controllers ?? []).map(
+        _castDelegationController,
+      ),
     });
   },
 
@@ -1447,7 +1459,9 @@ export const api = {
     );
     if (!result.ok) return result;
     return ok({
-      accounts: (result.value.accounts ?? []).map(_castDelegationControlledAccount),
+      accounts: (result.value.accounts ?? []).map(
+        _castDelegationControlledAccount,
+      ),
     });
   },
 

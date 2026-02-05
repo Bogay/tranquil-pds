@@ -531,3 +531,99 @@ async fn test_update_handle_too_long() {
     assert_eq!(body["error"], "InvalidHandle");
     assert!(body["message"].as_str().unwrap().contains("long"));
 }
+
+#[tokio::test]
+async fn test_verify_handle_ownership_invalid_did() {
+    let client = client();
+    let res = client
+        .post(format!(
+            "{}/xrpc/_identity.verifyHandleOwnership",
+            base_url().await
+        ))
+        .json(&json!({
+            "handle": "some.handle.test",
+            "did": "not-a-did"
+        }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_verify_handle_ownership_invalid_handle() {
+    let client = client();
+    let res = client
+        .post(format!(
+            "{}/xrpc/_identity.verifyHandleOwnership",
+            base_url().await
+        ))
+        .json(&json!({
+            "handle": "@#$!",
+            "did": "did:plc:abc123"
+        }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["error"], "InvalidHandle");
+}
+
+#[tokio::test]
+async fn test_verify_handle_ownership_missing_fields() {
+    let client = client();
+    let res = client
+        .post(format!(
+            "{}/xrpc/_identity.verifyHandleOwnership",
+            base_url().await
+        ))
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_verify_handle_ownership_unresolvable() {
+    let client = client();
+    let res = client
+        .post(format!(
+            "{}/xrpc/_identity.verifyHandleOwnership",
+            base_url().await
+        ))
+        .json(&json!({
+            "handle": "nonexistent.example.com",
+            "did": "did:plc:abc123def456"
+        }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["verified"], false);
+    assert!(body["error"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn test_verify_handle_ownership_wrong_did() {
+    let client = client();
+    let res = client
+        .post(format!(
+            "{}/xrpc/_identity.verifyHandleOwnership",
+            base_url().await
+        ))
+        .json(&json!({
+            "handle": "nonexistent.example.com",
+            "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaa"
+        }))
+        .send()
+        .await
+        .expect("Failed to send request");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(body["verified"], false);
+    assert!(body["error"].as_str().is_some());
+    assert!(body["method"].is_null());
+}

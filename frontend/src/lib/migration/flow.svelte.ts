@@ -80,6 +80,8 @@ export function createInboundMigrationFlow() {
     localAccessToken: null,
     generatedAppPassword: null,
     generatedAppPasswordName: null,
+    handlePreservation: "new",
+    existingHandleVerified: false,
   });
 
   let sourceClient: AtprotoClient | null = null;
@@ -118,11 +120,12 @@ export function createInboundMigrationFlow() {
   }
 
   async function resolveSourcePds(handle: string): Promise<void> {
+    const normalized = handle.startsWith("@") ? handle.slice(1) : handle;
     try {
-      const { did, pdsUrl } = await resolvePdsUrl(handle);
+      const { did, pdsUrl } = await resolvePdsUrl(normalized);
       state.sourcePdsUrl = pdsUrl;
       state.sourceDid = did;
-      state.sourceHandle = handle;
+      state.sourceHandle = normalized;
       sourceClient = new AtprotoClient(pdsUrl);
     } catch (e) {
       throw new Error(`Could not resolve handle: ${(e as Error).message}`);
@@ -132,8 +135,9 @@ export function createInboundMigrationFlow() {
   async function initiateOAuthLogin(handle: string): Promise<void> {
     migrationLog("initiateOAuthLogin START", { handle });
 
-    if (!state.sourcePdsUrl) {
-      await resolveSourcePds(handle);
+    const normalizedHandle = handle.startsWith("@") ? handle.slice(1) : handle;
+    if (!state.sourcePdsUrl || state.sourceHandle !== normalizedHandle) {
+      await resolveSourcePds(normalizedHandle);
     }
 
     const metadata = await getOAuthServerMetadata(state.sourcePdsUrl);
@@ -320,6 +324,25 @@ export function createInboundMigrationFlow() {
     } catch {
       return true;
     }
+  }
+
+  async function verifyExistingHandle(): Promise<{
+    verified: boolean;
+    method?: string;
+    error?: string;
+  }> {
+    if (!localClient) {
+      localClient = createLocalClient();
+    }
+    const result = await localClient.verifyHandleOwnership(
+      state.sourceHandle,
+      state.sourceDid,
+    );
+    if (result.verified) {
+      state.existingHandleVerified = true;
+      state.targetHandle = state.sourceHandle;
+    }
+    return result;
   }
 
   async function authenticateToLocal(
@@ -921,6 +944,8 @@ export function createInboundMigrationFlow() {
       localAccessToken: null,
       generatedAppPassword: null,
       generatedAppPasswordName: null,
+      handlePreservation: "new",
+      existingHandleVerified: false,
     };
     sourceClient = null;
     passkeySetup = null;
@@ -1005,6 +1030,7 @@ export function createInboundMigrationFlow() {
     handleOAuthCallback,
     authenticateToLocal,
     checkHandleAvailability,
+    verifyExistingHandle,
     startMigration,
     submitEmailVerifyToken,
     resendEmailVerification,

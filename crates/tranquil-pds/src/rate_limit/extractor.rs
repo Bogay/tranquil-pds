@@ -110,6 +110,11 @@ impl RateLimitPolicy for OAuthRegisterCompleteLimit {
     const KIND: RateLimitKind = RateLimitKind::OAuthRegisterComplete;
 }
 
+pub struct HandleVerificationLimit;
+impl RateLimitPolicy for HandleVerificationLimit {
+    const KIND: RateLimitKind = RateLimitKind::HandleVerification;
+}
+
 pub trait RateLimitRejection: IntoResponse + Send + 'static {
     fn new() -> Self;
 }

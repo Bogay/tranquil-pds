@@ -550,7 +550,9 @@ mod tests {
         assert!(is_valid_discord_username("user.name"));
         assert!(is_valid_discord_username("user123"));
         assert!(is_valid_discord_username("a_b.c_d"));
-        assert!(is_valid_discord_username("12345678901234567890123456789012"));
+        assert!(is_valid_discord_username(
+            "12345678901234567890123456789012"
+        ));
     }
 
     #[test]
@@ -564,6 +566,8 @@ mod tests {
         assert!(!is_valid_discord_username("username."));
         assert!(!is_valid_discord_username("user..name"));
         assert!(!is_valid_discord_username("user name"));
-        assert!(!is_valid_discord_username("123456789012345678901234567890123"));
+        assert!(!is_valid_discord_username(
+            "123456789012345678901234567890123"
+        ));
     }
 }
