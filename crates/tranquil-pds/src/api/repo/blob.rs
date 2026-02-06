@@ -30,14 +30,14 @@ fn detect_mime_type(data: &[u8], client_hint: &str) -> String {
             );
         }
         detected
-    } else if client_hint == "*/*" || client_hint.is_empty() {
-        warn!(
-            "Could not detect MIME type and client sent invalid hint: '{}'",
-            client_hint
-        );
-        "application/octet-stream".to_string()
     } else {
-        client_hint.to_string()
+        match client_hint {
+            "" | "*/*" => "application/octet-stream".to_string(),
+            hint if hint.starts_with("text/html") || hint.starts_with("application/xhtml") => {
+                "application/octet-stream".to_string()
+            }
+            hint => hint.to_string(),
+        }
     }
 }
 
@@ -85,8 +85,7 @@ pub async fn upload_blob(
         .user_repo
         .get_id_by_did(&did)
         .await
-        .ok()
-        .flatten()
+        .log_db_err("fetching user id for blob upload")?
         .ok_or(ApiError::InternalError(None))?;
 
     let temp_key = format!("temp/{}", uuid::Uuid::new_v4());
@@ -136,7 +135,10 @@ pub async fn upload_blob(
     };
     let cid = Cid::new_v1(0x55, multihash);
     let cid_str = cid.to_string();
-    let cid_link: CidLink = unsafe { CidLink::new_unchecked(&cid_str) };
+    let cid_link: CidLink = CidLink::new(&cid_str).map_err(|e| {
+        error!("Failed to construct CidLink from computed CID: {:?}", e);
+        ApiError::InternalError(Some("Failed to construct CID".into()))
+    })?;
     let storage_key = cid_str.clone();
 
     info!(
@@ -144,13 +146,12 @@ pub async fn upload_blob(
         size, cid_str
     );
 
-    let was_inserted = match state
+    match state
         .blob_repo
         .insert_blob(&cid_link, &mime_type, size as i64, user_id, &storage_key)
         .await
     {
-        Ok(Some(_)) => true,
-        Ok(None) => false,
+        Ok(_) => {}
         Err(e) => {
             let _ = state.blob_store.delete(&temp_key).await;
             error!("Failed to insert blob record: {:?}", e);
@@ -158,8 +159,11 @@ pub async fn upload_blob(
         }
     };
 
-    if was_inserted && let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
+    if let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
         let _ = state.blob_store.delete(&temp_key).await;
+        if let Err(db_err) = state.blob_repo.delete_blob_by_cid(&cid_link).await {
+            error!("Failed to clean up orphaned blob record after copy failure: {:?}", db_err);
+        }
         error!("Failed to copy blob to final location: {:?}", e);
         return Err(ApiError::InternalError(Some("Failed to store blob".into())));
     }
@@ -167,7 +171,7 @@ pub async fn upload_blob(
     let _ = state.blob_store.delete(&temp_key).await;
 
     if let Some(ref controller) = controller_did {
-        let _ = state
+        if let Err(e) = state
             .delegation_repo
             .log_delegation_action(
                 &did,
@@ -182,7 +186,10 @@ pub async fn upload_blob(
                 None,
                 None,
             )
-            .await;
+            .await
+        {
+            warn!("Failed to log delegation action for blob upload: {:?}", e);
+        }
     }
 
     Ok(Json(json!({

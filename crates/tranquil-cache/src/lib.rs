@@ -42,8 +42,8 @@ impl Cache for ValkeyCache {
         redis::cmd("SET")
             .arg(key)
             .arg(value)
-            .arg("EX")
-            .arg(ttl.as_secs() as i64)
+            .arg("PX")
+            .arg(ttl.as_millis().min(i64::MAX as u128) as i64)
             .query_async::<()>(&mut conn)
             .await
             .map_err(|e| CacheError::Connection(e.to_string()))
@@ -114,25 +114,35 @@ impl DistributedRateLimiter for RedisRateLimiter {
         let mut conn = self.conn.clone();
         let full_key = format!("rl:{}", key);
         let window_secs = window_ms.div_ceil(1000).max(1) as i64;
-        let count: Result<i64, _> = redis::cmd("INCR")
-            .arg(&full_key)
-            .query_async(&mut conn)
-            .await;
-        let count = match count {
-            Ok(c) => c,
+        let result: Result<i64, _> = redis::Script::new(
+            r"local c = redis.call('INCR', KEYS[1])
+if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+if redis.call('TTL', KEYS[1]) == -1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return c"
+        )
+        .key(&full_key)
+        .arg(window_secs)
+        .invoke_async(&mut conn)
+        .await;
+        match result {
+            Ok(count) => count <= limit as i64,
             Err(e) => {
-                tracing::warn!("Redis rate limit INCR failed: {}. Allowing request.", e);
-                return true;
+                tracing::warn!(error = %e, "redis rate limit script failed, allowing request");
+                true
             }
-        };
-        if count == 1 {
-            let _: Result<bool, redis::RedisError> = redis::cmd("EXPIRE")
-                .arg(&full_key)
-                .arg(window_secs)
-                .query_async(&mut conn)
-                .await;
         }
-        count <= limit as i64
+    }
+
+    async fn peek_rate_limit_count(&self, key: &str, _window_ms: u64) -> u64 {
+        let mut conn = self.conn.clone();
+        let full_key = format!("rl:{}", key);
+        redis::cmd("GET")
+            .arg(&full_key)
+            .query_async::<Option<u64>>(&mut conn)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0)
     }
 }
 
@@ -145,21 +155,41 @@ impl DistributedRateLimiter for NoOpRateLimiter {
     }
 }
 
-pub async fn create_cache() -> (Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>) {
-    match std::env::var("VALKEY_URL") {
-        Ok(url) => match ValkeyCache::new(&url).await {
+pub async fn create_cache(
+    shutdown: tokio_util::sync::CancellationToken,
+) -> (Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>) {
+    if let Ok(url) = std::env::var("VALKEY_URL") {
+        match ValkeyCache::new(&url).await {
             Ok(cache) => {
-                tracing::info!("Connected to Valkey cache at {}", url);
+                tracing::info!("using valkey cache at {url}");
                 let rate_limiter = Arc::new(RedisRateLimiter::new(cache.connection()));
-                (Arc::new(cache), rate_limiter)
+                return (Arc::new(cache), rate_limiter);
             }
             Err(e) => {
-                tracing::warn!("Failed to connect to Valkey: {}. Running without cache.", e);
-                (Arc::new(NoOpCache), Arc::new(NoOpRateLimiter))
+                tracing::warn!("failed to connect to valkey: {e}. falling back to ripple.");
             }
-        },
-        Err(_) => {
-            tracing::info!("VALKEY_URL not set. Running without cache.");
+        }
+    }
+
+    match tranquil_ripple::RippleConfig::from_env() {
+        Ok(config) => {
+            let peer_count = config.seed_peers.len();
+            match tranquil_ripple::RippleEngine::start(config, shutdown).await {
+                Ok((cache, rate_limiter, _bound_addr)) => {
+                    match peer_count {
+                        0 => tracing::info!("ripple cache started (single-node)"),
+                        n => tracing::info!("ripple cache started ({n} seed peers)"),
+                    }
+                    (cache, rate_limiter)
+                }
+                Err(e) => {
+                    tracing::error!("ripple engine failed to start: {e}. running without cache.");
+                    (Arc::new(NoOpCache), Arc::new(NoOpRateLimiter))
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("ripple config error: {e}. running without cache.");
             (Arc::new(NoOpCache), Arc::new(NoOpRateLimiter))
         }
     }

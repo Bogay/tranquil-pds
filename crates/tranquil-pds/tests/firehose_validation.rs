@@ -800,7 +800,12 @@ async fn test_firehose_outdated_cursor_info() {
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let outdated_cursor = 1i64;
+    let pool = get_test_db_pool().await;
+    let max_seq: i64 = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(seq), 0) FROM repo_seq")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let outdated_cursor = (max_seq - 100).max(1);
     let url = format!(
         "ws://127.0.0.1:{}/xrpc/com.atproto.sync.subscribeRepos?cursor={}",
         app_port(),

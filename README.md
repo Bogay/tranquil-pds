@@ -14,7 +14,7 @@ Another excellent PDS is [Cocoon](https://tangled.org/hailey.at/cocoon), written
 
 It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), SSO login and signup, did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), account delegation (letting others manage an account with configurable permission levels), automatic backups (configurable retention and frequency, one-click restore), and a built-in web UI for account management, OAuth consent, repo browsing, and admin.
 
-The PDS itself is a single small binary with no node/npm runtime. It requires postgres and stores blobs on the local filesystem. Valkey is optional (enables distributed rate limiting for multi-node setups).
+The PDS itself is a single small binary with no node/npm runtime. It requires postgres. Blobs are stored on the local filesystem by default (S3 optional). Valkey is optional (supported as an alternative to the built-in cache).
 
 ## Quick Start
 

@@ -486,7 +486,8 @@ async fn test_blob_lifecycle_upload_use_remove() {
     let base = base_url().await;
     let (did, jwt) = setup_new_user("blob-lifecycle").await;
 
-    let blob1_data = b"First blob for testing lifecycle";
+    let blob1_data = format!("First blob for testing lifecycle {}", uuid::Uuid::new_v4());
+    let blob1_data = blob1_data.as_bytes();
     let upload1_res = client
         .post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base))
         .header(header::CONTENT_TYPE, "text/plain")
@@ -500,7 +501,8 @@ async fn test_blob_lifecycle_upload_use_remove() {
     let blob1 = upload1_body["blob"].clone();
     let blob1_cid = blob1["ref"]["$link"].as_str().unwrap();
 
-    let blob2_data = b"Second blob for testing lifecycle";
+    let blob2_data = format!("Second blob for testing lifecycle {}", uuid::Uuid::new_v4());
+    let blob2_data = blob2_data.as_bytes();
     let upload2_res = client
         .post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base))
         .header(header::CONTENT_TYPE, "text/plain")
@@ -1278,7 +1280,7 @@ async fn test_scale_100_posts_with_pagination() {
     let (did, jwt) = setup_new_user("scale-posts").await;
 
     let post_count = 1000;
-    let post_futures: Vec<_> = (0..post_count)
+    futures::stream::iter(0..post_count)
         .map(|i| {
             let client = client.clone();
             let base = base.to_string();
@@ -1311,9 +1313,9 @@ async fn test_scale_100_posts_with_pagination() {
                 );
             }
         })
-        .collect();
-
-    join_all(post_futures).await;
+        .buffer_unordered(50)
+        .collect::<Vec<()>>()
+        .await;
 
     let count_res = client
         .get(format!("{}/xrpc/com.atproto.repo.listRecords", base))
@@ -1349,9 +1351,7 @@ async fn test_scale_100_posts_with_pagination() {
         "All posts should have unique URIs"
     );
 
-    let delete_futures: Vec<_> = all_uris
-        .iter()
-        .take(500)
+    futures::stream::iter(all_uris.iter().take(500))
         .map(|uri| {
             let client = client.clone();
             let base = base.to_string();
@@ -1373,9 +1373,9 @@ async fn test_scale_100_posts_with_pagination() {
                 assert_eq!(res.status(), StatusCode::OK);
             }
         })
-        .collect();
-
-    join_all(delete_futures).await;
+        .buffer_unordered(50)
+        .collect::<Vec<()>>()
+        .await;
 
     let final_count = count_records(&client, base, &jwt, &did, "app.bsky.feed.post").await;
     assert_eq!(
@@ -1396,54 +1396,51 @@ async fn test_scale_many_users_social_graph() {
 
     let users: Vec<(String, String)> = join_all(user_futures).await;
 
-    let follow_futures: Vec<_> = users
+    let follow_pairs: Vec<(String, String, String)> = users
         .iter()
         .enumerate()
         .flat_map(|(i, (follower_did, follower_jwt))| {
-            let client = client.clone();
-            let base = base.to_string();
-            users.iter().enumerate().filter(move |(j, _)| *j != i).map({
-                let client = client.clone();
-                let base = base.clone();
-                let follower_did = follower_did.clone();
-                let follower_jwt = follower_jwt.clone();
-                move |(_, (followee_did, _))| {
-                    let client = client.clone();
-                    let base = base.clone();
-                    let follower_did = follower_did.clone();
-                    let follower_jwt = follower_jwt.clone();
-                    let followee_did = followee_did.clone();
-                    async move {
-                        let rkey = format!(
-                            "follow_{}",
-                            &uuid::Uuid::new_v4().simple().to_string()[..12]
-                        );
-                        let res = client
-                            .post(format!("{}/xrpc/com.atproto.repo.putRecord", base))
-                            .bearer_auth(&follower_jwt)
-                            .json(&json!({
-                                "repo": follower_did,
-                                "collection": "app.bsky.graph.follow",
-                                "rkey": rkey,
-                                "record": {
-                                    "$type": "app.bsky.graph.follow",
-                                    "subject": followee_did,
-                                    "createdAt": Utc::now().to_rfc3339()
-                                }
-                            }))
-                            .send()
-                            .await
-                            .expect("Follow failed");
-                        let status = res.status();
-                        let body: Value = res.json().await.unwrap_or_default();
-                        assert_eq!(status, StatusCode::OK, "Follow failed: {:?}", body);
-                    }
-                }
-            })
+            users.iter().enumerate()
+                .filter(move |(j, _)| *j != i)
+                .map(|(_, (followee_did, _))| {
+                    (follower_did.clone(), follower_jwt.clone(), followee_did.clone())
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
-
-    join_all(follow_futures).await;
+    futures::stream::iter(follow_pairs)
+        .map(|(follower_did, follower_jwt, followee_did)| {
+            let client = client.clone();
+            let base = base.to_string();
+            async move {
+                let rkey = format!(
+                    "follow_{}",
+                    &uuid::Uuid::new_v4().simple().to_string()[..12]
+                );
+                let res = client
+                    .post(format!("{}/xrpc/com.atproto.repo.putRecord", base))
+                    .bearer_auth(&follower_jwt)
+                    .json(&json!({
+                        "repo": follower_did,
+                        "collection": "app.bsky.graph.follow",
+                        "rkey": rkey,
+                        "record": {
+                            "$type": "app.bsky.graph.follow",
+                            "subject": followee_did,
+                            "createdAt": Utc::now().to_rfc3339()
+                        }
+                    }))
+                    .send()
+                    .await
+                    .expect("Follow failed");
+                let status = res.status();
+                let body: Value = res.json().await.unwrap_or_default();
+                assert_eq!(status, StatusCode::OK, "Follow failed: {:?}", body);
+            }
+        })
+        .buffer_unordered(50)
+        .collect::<Vec<()>>()
+        .await;
 
     let expected_follows_per_user = user_count - 1;
     let verify_futures: Vec<_> = users
@@ -1529,13 +1526,13 @@ async fn test_scale_many_blobs_in_repo() {
     let (did, jwt) = setup_new_user("scale-blobs").await;
 
     let blob_count = 300;
-    let blob_futures: Vec<_> = (0..blob_count)
+    let blobs: Vec<Value> = futures::stream::iter(0..blob_count)
         .map(|i| {
             let client = client.clone();
             let base = base.to_string();
             let jwt = jwt.clone();
             async move {
-                let blob_data = format!("Blob data number {} with some padding to make it realistic size for testing purposes", i);
+                let blob_data = format!("Blob data number {} {} with some padding to make it realistic size for testing purposes", i, uuid::Uuid::new_v4());
                 let res = client
                     .post(format!("{}/xrpc/com.atproto.repo.uploadBlob", base))
                     .header(header::CONTENT_TYPE, "text/plain")
@@ -1549,13 +1546,16 @@ async fn test_scale_many_blobs_in_repo() {
                 body["blob"].clone()
             }
         })
-        .collect();
+        .buffer_unordered(50)
+        .collect::<Vec<Value>>()
+        .await;
 
-    let blobs: Vec<Value> = join_all(blob_futures).await;
-
-    let post_futures: Vec<_> = blobs
+    let blob_chunks: Vec<(usize, Vec<Value>)> = blobs
         .chunks(3)
         .enumerate()
+        .map(|(i, chunk)| (i, chunk.to_vec()))
+        .collect();
+    futures::stream::iter(blob_chunks)
         .map(|(i, blob_chunk)| {
             let client = client.clone();
             let base = base.to_string();
@@ -1596,9 +1596,9 @@ async fn test_scale_many_blobs_in_repo() {
                 assert_eq!(status, StatusCode::OK, "Post with blobs failed: {:?}", body);
             }
         })
-        .collect();
-
-    join_all(post_futures).await;
+        .buffer_unordered(50)
+        .collect::<Vec<()>>()
+        .await;
 
     let list_blobs_res = client
         .get(format!("{}/xrpc/com.atproto.sync.listBlobs", base))

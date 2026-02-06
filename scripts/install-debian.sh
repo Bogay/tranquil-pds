@@ -194,16 +194,6 @@ sudo -u postgres psql -c "CREATE DATABASE pds OWNER tranquil_pds;" 2>/dev/null |
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 log_success "postgres configured"
 
-log_info "Installing valkey..."
-apt install -y valkey 2>/dev/null || {
-    log_warn "valkey not in repos, installing redis..."
-    apt install -y redis-server
-    systemctl enable redis-server
-    systemctl start redis-server
-}
-systemctl enable valkey-server 2>/dev/null || true
-systemctl start valkey-server 2>/dev/null || true
-
 log_info "Creating blob storage directories..."
 mkdir -p /var/lib/tranquil/blobs /var/lib/tranquil/backups
 log_success "Blob storage directories created"
@@ -313,7 +303,6 @@ DATABASE_MAX_CONNECTIONS=100
 DATABASE_MIN_CONNECTIONS=10
 BLOB_STORAGE_PATH=/var/lib/tranquil/blobs
 BACKUP_STORAGE_PATH=/var/lib/tranquil/backups
-VALKEY_URL=redis://localhost:6379
 JWT_SECRET=${JWT_SECRET}
 DPOP_SECRET=${DPOP_SECRET}
 MASTER_KEY=${MASTER_KEY}

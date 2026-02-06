@@ -5,19 +5,38 @@ dir = "target/nextest"
 retries = 0
 fail-fast = true
 test-threads = "num-cpus"
+slow-timeout = { period = "30s", terminate-after = 4 }
 
 [profile.ci]
 retries = 2
 fail-fast = false
 test-threads = "num-cpus"
+slow-timeout = { period = "30s", terminate-after = 4 }
 
 [test-groups]
 serial-env-tests = { max-threads = 1 }
+heavy-load-tests = { max-threads = 4 }
 
 [[profile.default.overrides]]
 filter = "test(/import_with_verification/) | test(/plc_migration/)"
 test-group = "serial-env-tests"
 
+[[profile.default.overrides]]
+filter = "binary(ripple_cluster)"
+test-group = "serial-env-tests"
+
+[[profile.default.overrides]]
+filter = "binary(whole_story)"
+test-group = "heavy-load-tests"
+
 [[profile.ci.overrides]]
 filter = "test(/import_with_verification/) | test(/plc_migration/)"
 test-group = "serial-env-tests"
+
+[[profile.ci.overrides]]
+filter = "binary(ripple_cluster)"
+test-group = "serial-env-tests"
+
+[[profile.ci.overrides]]
+filter = "binary(whole_story)"
+test-group = "heavy-load-tests"

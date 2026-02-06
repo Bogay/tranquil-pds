@@ -160,24 +160,37 @@ async fn test_list_repos_shows_status_field() {
 
     set_account_takedown(&did, Some("test-takedown-ref")).await;
 
-    let res = client
-        .get(format!(
+    let mut cursor: Option<String> = None;
+    let mut takendown_repo: Option<Value> = None;
+    loop {
+        let mut url = format!(
             "{}/xrpc/com.atproto.sync.listRepos?limit=1000",
             base_url().await
-        ))
-        .send()
-        .await
-        .expect("Failed to send request");
-
-    assert_eq!(res.status(), StatusCode::OK);
-    let body: Value = res.json().await.expect("Response was not valid JSON");
-    let repos = body["repos"].as_array().unwrap();
-
-    let takendown_repo = repos.iter().find(|r| r["did"] == did);
+        );
+        if let Some(ref c) = cursor {
+            url.push_str(&format!("&cursor={}", c));
+        }
+        let res = client
+            .get(&url)
+            .send()
+            .await
+            .expect("Failed to send request");
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: Value = res.json().await.expect("Response was not valid JSON");
+        let repos = body["repos"].as_array().unwrap();
+        if let Some(found) = repos.iter().find(|r| r["did"] == did) {
+            takendown_repo = Some(found.clone());
+            break;
+        }
+        match body["cursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
     assert!(takendown_repo.is_some(), "Takendown repo should be in list");
     let repo = takendown_repo.unwrap();
-    assert_eq!(repo["active"], false);
-    assert_eq!(repo["status"], "takendown");
+    assert_eq!(repo["active"], false, "repo should be inactive: {:?}", repo);
+    assert_eq!(repo["status"], "takendown", "repo status should be takendown: {:?}", repo);
 }
 
 #[tokio::test]

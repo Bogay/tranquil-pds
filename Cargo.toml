@@ -6,6 +6,7 @@ members = [
     "crates/tranquil-crypto",
     "crates/tranquil-storage",
     "crates/tranquil-cache",
+    "crates/tranquil-ripple",
     "crates/tranquil-repo",
     "crates/tranquil-scopes",
     "crates/tranquil-auth",
@@ -17,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 
@@ -34,9 +35,11 @@ tranquil-oauth = { path = "crates/tranquil-oauth" }
 tranquil-comms = { path = "crates/tranquil-comms" }
 tranquil-db-traits = { path = "crates/tranquil-db-traits" }
 tranquil-db = { path = "crates/tranquil-db" }
+tranquil-ripple = { path = "crates/tranquil-ripple" }
 
 aes-gcm = "0.10"
 backon = "1"
+bincode = { version = "2", features = ["serde"] }
 anyhow = "1.0"
 async-trait = "0.1"
 aws-config = "1.8"
@@ -51,6 +54,7 @@ chrono = { version = "0.4", features = ["serde"] }
 cid = "0.11"
 dotenvy = "0.15"
 ed25519-dalek = { version = "2.1", features = ["pkcs8"] }
+foca = { version = "1", features = ["bincode-codec", "tracing"] }
 futures = "0.3"
 futures-util = "0.3"
 governor = "0.10"
@@ -70,6 +74,7 @@ k256 = { version = "0.13", features = ["ecdsa", "pem", "pkcs8"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 multibase = "0.9"
+parking_lot = "0.12"
 multihash = "0.19"
 p256 = { version = "0.13", features = ["ecdsa"] }
 p384 = { version = "0.13", features = ["ecdsa"] }

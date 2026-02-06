@@ -32,7 +32,7 @@ start_infra() {
         echo "Stale infra file found, cleaning up..."
         rm -f "$INFRA_FILE"
     fi
-    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" "${CONTAINER_PREFIX}-valkey" 2>/dev/null || true
+    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" 2>/dev/null || true
     echo "Starting PostgreSQL..."
     $CONTAINER_CMD run -d \
         --name "${CONTAINER_PREFIX}-postgres" \
@@ -43,25 +43,7 @@ start_infra() {
         --label tranquil_pds_test=true \
         postgres:18-alpine \
         -c max_connections=500 >/dev/null
-    echo "Starting MinIO..."
-    $CONTAINER_CMD run -d \
-        --name "${CONTAINER_PREFIX}-minio" \
-        -e MINIO_ROOT_USER=minioadmin \
-        -e MINIO_ROOT_PASSWORD=minioadmin \
-        -p 9000 \
-        --label tranquil_pds_test=true \
-        cgr.dev/chainguard/minio:latest server /data >/dev/null
-    echo "Starting Valkey..."
-    $CONTAINER_CMD run -d \
-        --name "${CONTAINER_PREFIX}-valkey" \
-        -P \
-        --label tranquil_pds_test=true \
-        valkey/valkey:9-alpine >/dev/null
     echo "Waiting for services to be ready..."
-    sleep 2
-    PG_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-postgres" 5432 | head -1 | cut -d: -f2)
-    MINIO_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-minio" 9000 | head -1 | cut -d: -f2)
-    VALKEY_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-valkey" 6379 | head -1 | cut -d: -f2)
     for i in {1..30}; do
         if $CONTAINER_CMD exec "${CONTAINER_PREFIX}-postgres" pg_isready -U postgres >/dev/null 2>&1; then
             break
@@ -69,37 +51,10 @@ start_infra() {
         echo "Waiting for PostgreSQL... ($i/30)"
         sleep 1
     done
-    for i in {1..30}; do
-        if curl -s "http://127.0.0.1:${MINIO_PORT}/minio/health/live" >/dev/null 2>&1; then
-            break
-        fi
-        echo "Waiting for MinIO... ($i/30)"
-        sleep 1
-    done
-    for i in {1..30}; do
-        if $CONTAINER_CMD exec "${CONTAINER_PREFIX}-valkey" valkey-cli ping 2>/dev/null | grep -q PONG; then
-            break
-        fi
-        echo "Waiting for Valkey... ($i/30)"
-        sleep 1
-    done
-    echo "Creating MinIO buckets..."
-    $CONTAINER_CMD run --rm --network host \
-        -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
-        cgr.dev/chainguard/minio-client:latest-dev mb minio/test-bucket --ignore-existing >/dev/null 2>&1 || true
-    $CONTAINER_CMD run --rm --network host \
-        -e MC_HOST_minio="http://minioadmin:minioadmin@127.0.0.1:${MINIO_PORT}" \
-        cgr.dev/chainguard/minio-client:latest-dev mb minio/test-backups --ignore-existing >/dev/null 2>&1 || true
+    PG_PORT=$($CONTAINER_CMD port "${CONTAINER_PREFIX}-postgres" 5432 | head -1 | cut -d: -f2)
     cat > "$INFRA_FILE" << EOF
 export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
 export TEST_DB_PORT="${PG_PORT}"
-export S3_ENDPOINT="http://127.0.0.1:${MINIO_PORT}"
-export S3_BUCKET="test-bucket"
-export BACKUP_S3_BUCKET="test-backups"
-export AWS_ACCESS_KEY_ID="minioadmin"
-export AWS_SECRET_ACCESS_KEY="minioadmin"
-export AWS_REGION="us-east-1"
-export VALKEY_URL="redis://127.0.0.1:${VALKEY_PORT}"
 export TRANQUIL_PDS_TEST_INFRA_READY="1"
 export TRANQUIL_PDS_ALLOW_INSECURE_SECRETS="1"
 export SKIP_IMPORT_VERIFICATION="true"
@@ -113,8 +68,9 @@ EOF
 }
 stop_infra() {
     echo "Stopping test infrastructure..."
-    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" "${CONTAINER_PREFIX}-minio" "${CONTAINER_PREFIX}-valkey" 2>/dev/null || true
+    $CONTAINER_CMD rm -f "${CONTAINER_PREFIX}-postgres" 2>/dev/null || true
     rm -f "$INFRA_FILE"
+    rm -rf "${TMPDIR:-/tmp}"/tranquil-pds-test-* 2>/dev/null || true
     echo "Infrastructure stopped."
 }
 status_infra() {
@@ -124,7 +80,6 @@ status_infra() {
         echo "Config file: $INFRA_FILE"
         source "$INFRA_FILE"
         echo "Database URL: $DATABASE_URL"
-        echo "S3 Endpoint: $S3_ENDPOINT"
     else
         echo "Config file: NOT FOUND"
     fi
@@ -158,7 +113,7 @@ case "${1:-}" in
         echo "Usage: $0 {start|stop|restart|status|env}"
         echo ""
         echo "Commands:"
-        echo "  start   - Start test infrastructure (Postgres, MinIO, Valkey)"
+        echo "  start   - Start test infrastructure (Postgres)"
         echo "  stop    - Stop and remove test containers"
         echo "  restart - Stop then start infrastructure"
         echo "  status  - Show infrastructure status"

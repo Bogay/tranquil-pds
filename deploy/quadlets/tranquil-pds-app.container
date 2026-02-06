@@ -1,6 +1,6 @@
 [Unit]
 Description=Tranquil PDS AT Protocol PDS
-After=tranquil-pds-db.service tranquil-pds-minio.service tranquil-pds-valkey.service
+After=tranquil-pds-db.service
 [Container]
 ContainerName=tranquil-pds-app
 Image=localhost/tranquil-pds:latest
@@ -8,10 +8,8 @@ Pod=tranquil-pds.pod
 EnvironmentFile=/srv/tranquil-pds/config/tranquil-pds.env
 Environment=SERVER_HOST=0.0.0.0
 Environment=SERVER_PORT=3000
-Environment=S3_ENDPOINT=http://localhost:9000
-Environment=AWS_REGION=us-east-1
-Environment=S3_BUCKET=pds-blobs
-Environment=VALKEY_URL=redis://localhost:6379
+Volume=/srv/tranquil-pds/blobs:/var/lib/tranquil/blobs:Z
+Volume=/srv/tranquil-pds/backups:/var/lib/tranquil/backups:Z
 HealthCmd=wget -q --spider http://localhost:3000/xrpc/_health
 HealthInterval=30s
 HealthTimeout=10s

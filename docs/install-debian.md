@@ -46,14 +46,6 @@ mkdir -p /var/lib/tranquil/blobs /var/lib/tranquil/backups
 
 We'll set ownership after creating the service user.
 
-## Install valkey
-
-```bash
-apt install -y valkey
-systemctl enable valkey-server
-systemctl start valkey-server
-```
-
 ## Install deno (for frontend build)
 
 ```bash

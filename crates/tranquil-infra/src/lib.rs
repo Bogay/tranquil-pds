@@ -81,4 +81,7 @@ pub trait Cache: Send + Sync {
 #[async_trait]
 pub trait DistributedRateLimiter: Send + Sync {
     async fn check_rate_limit(&self, key: &str, limit: u32, window_ms: u64) -> bool;
+    async fn peek_rate_limit_count(&self, _key: &str, _window_ms: u64) -> u64 {
+        0
+    }
 }

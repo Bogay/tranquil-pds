@@ -25,6 +25,7 @@ async fn test_upload_blob_no_auth() {
 async fn test_upload_blob_success() {
     let client = client();
     let (token, _) = create_account_and_login(&client).await;
+    let blob_data = format!("blob-{}", uuid::Uuid::new_v4());
     let res = client
         .post(format!(
             "{}/xrpc/com.atproto.repo.uploadBlob",
@@ -32,12 +33,13 @@ async fn test_upload_blob_success() {
         ))
         .header(header::CONTENT_TYPE, "text/plain")
         .bearer_auth(token)
-        .body("This is our blob data")
+        .body(blob_data)
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::OK);
+    let status = res.status();
     let body: Value = res.json().await.expect("Response was not valid JSON");
+    assert_eq!(status, StatusCode::OK, "uploadBlob failed: {body}");
     assert!(body["blob"]["ref"]["$link"].as_str().is_some());
 }
 

@@ -43,7 +43,7 @@ For production setups with proper service management, continue to either the Deb
 
 ## Standalone Containers (No Compose)
 
-If you already have postgres and valkey running on the host (eg., from the [Debian install guide](install-debian.md)), you can run just the app containers.
+If you already have postgres running on the host (eg. from the [Debian install guide](install-debian.md)), you can run just the app containers.
 
 Build the images:
 ```sh
@@ -51,7 +51,7 @@ podman build -t tranquil-pds:latest .
 podman build -t tranquil-pds-frontend:latest ./frontend
 ```
 
-Run the backend with host networking (so it can access postgres/valkey on localhost) and mount the blob storage:
+Run the backend with host networking (so it can access postgres on localhost) and mount the blob storage:
 ```sh
 podman run -d --name tranquil-pds \
   --network=host \
@@ -106,7 +106,7 @@ apt install -y podman
 
 ```bash
 mkdir -p /etc/containers/systemd
-mkdir -p /srv/tranquil-pds/{postgres,valkey,blobs,backups,certs,acme,config}
+mkdir -p /srv/tranquil-pds/{postgres,blobs,backups,certs,acme,config}
 ```
 
 ## Create Environment File
@@ -127,9 +127,14 @@ For quadlets, also add `DATABASE_URL` with the full connection string (systemd d
 
 Copy the quadlet files from the repository:
 ```bash
-cp /opt/tranquil-pds/deploy/quadlets/*.pod /etc/containers/systemd/
-cp /opt/tranquil-pds/deploy/quadlets/*.container /etc/containers/systemd/
+cp /opt/tranquil-pds/deploy/quadlets/tranquil-pds.pod /etc/containers/systemd/
+cp /opt/tranquil-pds/deploy/quadlets/tranquil-pds-db.container /etc/containers/systemd/
+cp /opt/tranquil-pds/deploy/quadlets/tranquil-pds-app.container /etc/containers/systemd/
+cp /opt/tranquil-pds/deploy/quadlets/tranquil-pds-frontend.container /etc/containers/systemd/
+cp /opt/tranquil-pds/deploy/quadlets/tranquil-pds-nginx.container /etc/containers/systemd/
 ```
+
+Optional quadlets for valkey and minio are also available in `deploy/quadlets/` if you need them.
 
 Note: Systemd doesn't support shell-style variable expansion in `Environment=` lines. The quadlet files expect DATABASE_URL to be set in the environment file.
 
@@ -160,7 +165,7 @@ echo "$DB_PASSWORD" | podman secret create tranquil-pds-db-password -
 
 ```bash
 systemctl daemon-reload
-systemctl start tranquil-pds-db tranquil-pds-valkey
+systemctl start tranquil-pds-db
 sleep 10
 ```
 
@@ -172,7 +177,7 @@ DATABASE_URL="postgres://tranquil_pds:your-db-password@localhost:5432/pds" sqlx 
 
 ## Obtain Wildcard SSL Certificate
 
-User handles are served as subdomains (eg., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
+User handles are served as subdomains (eg. `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
 
 Create temporary self-signed cert to start services:
 ```bash
@@ -195,7 +200,7 @@ podman run --rm -it \
 
 Follow the prompts to add TXT records to your DNS. Note: manual mode doesn't auto-renew.
 
-For automated renewal, use a DNS provider plugin (eg., cloudflare, route53).
+For automated renewal, use a DNS provider plugin (eg. cloudflare, route53).
 
 Link certificates and restart:
 ```bash
@@ -207,7 +212,7 @@ systemctl restart tranquil-pds-nginx
 ## Enable All Services
 
 ```bash
-systemctl enable tranquil-pds-db tranquil-pds-valkey tranquil-pds-app tranquil-pds-frontend tranquil-pds-nginx
+systemctl enable tranquil-pds-db tranquil-pds-app tranquil-pds-frontend tranquil-pds-nginx
 ```
 
 ## Configure Firewall
@@ -252,7 +257,7 @@ rc-service podman start
 
 ```sh
 mkdir -p /srv/tranquil-pds/{data,config}
-mkdir -p /srv/tranquil-pds/data/{postgres,valkey,blobs,backups,certs,acme}
+mkdir -p /srv/tranquil-pds/data/{postgres,blobs,backups,certs,acme}
 ```
 
 ## Clone Repository and Build Images
@@ -346,7 +351,7 @@ DATABASE_URL="postgres://tranquil_pds:$DB_PASSWORD@$DB_IP:5432/pds" sqlx migrate
 
 ## Obtain Wildcard SSL Certificate
 
-User handles are served as subdomains (eg., `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
+User handles are served as subdomains (eg. `alice.pds.example.com`), so you need a wildcard certificate. Wildcard certs require DNS-01 validation.
 
 Create temporary self-signed cert to start services:
 ```sh

@@ -13,6 +13,7 @@ use crate::util::pds_hostname;
 use sqlx::PgPool;
 use std::error::Error;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tranquil_db::{
@@ -20,6 +21,16 @@ use tranquil_db::{
     OAuthRepository, PostgresRepositories, RepoEventNotifier, RepoRepository, SessionRepository,
     SsoRepository, UserRepository,
 };
+
+static RATE_LIMITING_DISABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn init_rate_limit_override() {
+    let disabled = std::env::var("DISABLE_RATE_LIMITING").is_ok();
+    RATE_LIMITING_DISABLED.store(disabled, Ordering::Relaxed);
+    if disabled {
+        tracing::warn!("rate limiting is DISABLED via DISABLE_RATE_LIMITING env var");
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -173,6 +184,7 @@ impl AppState {
 
     pub async fn from_db(db: PgPool, shutdown: CancellationToken) -> Self {
         AuthConfig::init();
+        init_rate_limit_override();
 
         let repos = Arc::new(PostgresRepositories::new(db.clone()));
         let block_store = PostgresBlockStore::new(db);
@@ -188,7 +200,7 @@ impl AppState {
         let rate_limiters = Arc::new(RateLimiters::new());
         let repo_write_locks = Arc::new(RepoWriteLocks::new());
         let circuit_breakers = Arc::new(CircuitBreakers::new());
-        let (cache, distributed_rate_limiter) = create_cache().await;
+        let (cache, distributed_rate_limiter) = create_cache(shutdown.clone()).await;
         let did_resolver = Arc::new(DidResolver::new());
         let sso_config = SsoConfig::init();
         let sso_manager = SsoManager::from_config(sso_config);
@@ -231,28 +243,27 @@ impl AppState {
         self
     }
 
+    pub fn with_cache(
+        mut self,
+        cache: Arc<dyn Cache>,
+        distributed_rate_limiter: Arc<dyn DistributedRateLimiter>,
+    ) -> Self {
+        self.cache = cache;
+        self.distributed_rate_limiter = distributed_rate_limiter;
+        self
+    }
+
     pub fn with_circuit_breakers(mut self, circuit_breakers: CircuitBreakers) -> Self {
         self.circuit_breakers = Arc::new(circuit_breakers);
         self
     }
 
     pub async fn check_rate_limit(&self, kind: RateLimitKind, client_ip: &str) -> bool {
-        if std::env::var("DISABLE_RATE_LIMITING").is_ok() {
+        if RATE_LIMITING_DISABLED.load(Ordering::Relaxed) {
             return true;
         }
 
-        let key = format!("{}:{}", kind.key_prefix(), client_ip);
         let limiter_name = kind.key_prefix();
-        let (limit, window_ms) = kind.limit_and_window_ms();
-
-        if !self
-            .distributed_rate_limiter
-            .check_rate_limit(&key, limit, window_ms)
-            .await
-        {
-            crate::metrics::record_rate_limit_rejection(limiter_name);
-            return false;
-        }
 
         let limiter = match kind {
             RateLimitKind::Login => &self.rate_limiters.login,
@@ -277,10 +288,23 @@ impl AppState {
             RateLimitKind::HandleVerification => &self.rate_limiters.handle_verification,
         };
 
-        let ok = limiter.check_key(&client_ip.to_string()).is_ok();
-        if !ok {
+        if limiter.check_key(&client_ip.to_string()).is_err() {
             crate::metrics::record_rate_limit_rejection(limiter_name);
+            return false;
         }
-        ok
+
+        let key = format!("{}:{}", kind.key_prefix(), client_ip);
+        let (limit, window_ms) = kind.limit_and_window_ms();
+
+        if !self
+            .distributed_rate_limiter
+            .check_rate_limit(&key, limit, window_ms)
+            .await
+        {
+            crate::metrics::record_rate_limit_rejection(limiter_name);
+            return false;
+        }
+
+        true
     }
 }

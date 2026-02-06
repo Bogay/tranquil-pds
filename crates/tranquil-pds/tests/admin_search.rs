@@ -12,7 +12,7 @@ async fn test_search_accounts_as_admin() {
     let (user_did, _) = setup_new_user("search-target").await;
     let mut found = false;
     let mut cursor: Option<String> = None;
-    for _ in 0..10 {
+    for _ in 0..100 {
         let url = match &cursor {
             Some(c) => format!(
                 "{}/xrpc/com.atproto.admin.searchAccounts?limit=100&cursor={}",
