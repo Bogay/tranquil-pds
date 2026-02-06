@@ -16,7 +16,14 @@ echo "Running database migrations..."
 sqlx database create 2>/dev/null || true
 sqlx migrate run --source "$PROJECT_DIR/migrations"
 echo ""
+ulimit -n 65536
+
+echo "Building test binaries..."
+cargo test --no-run 2>&1 | tail -1
+
 echo "Running tests..."
 echo ""
-ulimit -n 65536
 cargo nextest run "$@"
+
+echo ""
+echo "All tests passed."

@@ -9,12 +9,14 @@ use reqwest::{Client, StatusCode, header};
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 #[allow(unused_imports)]
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
+use tranquil_pds::cache::{Cache, DistributedRateLimiter};
 use tranquil_pds::state::AppState;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
@@ -25,6 +27,22 @@ static MOCK_APPVIEW: OnceLock<MockServer> = OnceLock::new();
 static MOCK_PLC: OnceLock<MockServer> = OnceLock::new();
 static TEST_DB_POOL: OnceLock<sqlx::PgPool> = OnceLock::new();
 static TEST_TEMP_DIR: OnceLock<PathBuf> = OnceLock::new();
+static CLUSTER: OnceLock<Vec<ServerInstance>> = OnceLock::new();
+
+#[allow(dead_code)]
+pub struct ServerConfig {
+    pub pool: sqlx::PgPool,
+    pub cache: Option<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>)>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct ServerInstance {
+    pub url: String,
+    pub port: u16,
+    pub cache: Option<Arc<dyn Cache>>,
+    pub distributed_rate_limiter: Option<Arc<dyn DistributedRateLimiter>>,
+}
 
 #[cfg(all(not(feature = "external-infra"), feature = "s3-storage"))]
 use testcontainers::GenericImage;
@@ -139,45 +157,10 @@ async fn setup_with_external_infra() -> String {
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
     let plc_url = setup_mock_plc_directory().await;
     unsafe {
-        if std::env::var("S3_ENDPOINT").is_ok() {
-            let s3_endpoint = std::env::var("S3_ENDPOINT").unwrap();
-            std::env::set_var("BLOB_STORAGE_BACKEND", "s3");
-            std::env::set_var("BACKUP_STORAGE_BACKEND", "s3");
-            std::env::set_var("BACKUP_S3_BUCKET", "test-backups");
-            std::env::set_var(
-                "S3_BUCKET",
-                std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()),
-            );
-            std::env::set_var(
-                "AWS_ACCESS_KEY_ID",
-                std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()),
-            );
-            std::env::set_var(
-                "AWS_SECRET_ACCESS_KEY",
-                std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
-            );
-            std::env::set_var(
-                "AWS_REGION",
-                std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
-            );
-            std::env::set_var("S3_ENDPOINT", &s3_endpoint);
-        } else if std::env::var("BLOB_STORAGE_PATH").is_ok() {
-            std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
-            std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
-        } else {
-            panic!("Either S3_ENDPOINT or BLOB_STORAGE_PATH must be set for external-infra");
-        }
-        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
-        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+        configure_external_storage_env();
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
     }
-    let mock_server = MockServer::start().await;
-    setup_mock_appview(&mock_server).await;
-    let mock_uri = mock_server.uri();
-    let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
-    let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
-    setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
-    MOCK_APPVIEW.set(mock_server).ok();
+    register_mock_appview().await;
     spawn_app(database_url).await
 }
 
@@ -199,13 +182,7 @@ async fn setup_with_testcontainers() -> String {
         std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
         std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
     }
-    let mock_server = MockServer::start().await;
-    setup_mock_appview(&mock_server).await;
-    let mock_uri = mock_server.uri();
-    let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
-    let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
-    setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
-    MOCK_APPVIEW.set(mock_server).ok();
+    register_mock_appview().await;
     let container = Postgres::default()
         .with_tag("18-alpine")
         .with_label("tranquil_pds_test", "true")
@@ -275,13 +252,7 @@ async fn setup_with_testcontainers() -> String {
         .bucket("test-backups")
         .send()
         .await;
-    let mock_server = MockServer::start().await;
-    setup_mock_appview(&mock_server).await;
-    let mock_uri = mock_server.uri();
-    let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
-    let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
-    setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
-    MOCK_APPVIEW.set(mock_server).ok();
+    register_mock_appview().await;
     S3_CONTAINER.set(s3_container).ok();
     let container = Postgres::default()
         .with_tag("18-alpine")
@@ -323,6 +294,60 @@ async fn setup_mock_did_document(mock_server: &MockServer, did: &str, service_en
 }
 
 async fn setup_mock_appview(_mock_server: &MockServer) {}
+
+async fn register_mock_appview() {
+    let mock_server = MockServer::start().await;
+    setup_mock_appview(&mock_server).await;
+    let mock_uri = mock_server.uri();
+    let mock_host = mock_uri.strip_prefix("http://").unwrap_or(&mock_uri);
+    let mock_did = format!("did:web:{}", mock_host.replace(':', "%3A"));
+    setup_mock_did_document(&mock_server, &mock_did, &mock_uri).await;
+    MOCK_APPVIEW.set(mock_server).ok();
+}
+
+unsafe fn configure_external_storage_env() {
+    unsafe {
+        if std::env::var("S3_ENDPOINT").is_ok() {
+            let s3_endpoint = std::env::var("S3_ENDPOINT").unwrap();
+            std::env::set_var("BLOB_STORAGE_BACKEND", "s3");
+            std::env::set_var("BACKUP_STORAGE_BACKEND", "s3");
+            std::env::set_var("BACKUP_S3_BUCKET", "test-backups");
+            std::env::set_var(
+                "S3_BUCKET",
+                std::env::var("S3_BUCKET").unwrap_or_else(|_| "test-bucket".to_string()),
+            );
+            std::env::set_var(
+                "AWS_ACCESS_KEY_ID",
+                std::env::var("AWS_ACCESS_KEY_ID").unwrap_or_else(|_| "minioadmin".to_string()),
+            );
+            std::env::set_var(
+                "AWS_SECRET_ACCESS_KEY",
+                std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+            );
+            std::env::set_var(
+                "AWS_REGION",
+                std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+            );
+            std::env::set_var("S3_ENDPOINT", &s3_endpoint);
+        } else {
+            let process_dir = std::env::temp_dir().join(format!(
+                "tranquil-pds-test-{}",
+                std::process::id()
+            ));
+            let blob_path = process_dir.join("blobs");
+            let backup_path = process_dir.join("backups");
+            std::fs::create_dir_all(&blob_path).expect("Failed to create blob directory");
+            std::fs::create_dir_all(&backup_path).expect("Failed to create backup directory");
+            TEST_TEMP_DIR.set(process_dir).ok();
+            std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
+            std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
+            std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
+            std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
+        }
+        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+    }
+}
 
 type PlcOperationStore = Arc<RwLock<HashMap<String, Value>>>;
 
@@ -515,8 +540,44 @@ async fn setup_mock_plc_directory() -> String {
     plc_url
 }
 
-async fn spawn_app(database_url: String) -> String {
+async fn spawn_server(config: ServerConfig) -> ServerInstance {
     use tranquil_pds::rate_limit::RateLimiters;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    unsafe {
+        std::env::set_var("PDS_HOSTNAME", format!("pds.test:{}", addr.port()));
+    }
+    let rate_limiters = RateLimiters::new()
+        .with_login_limit(10000)
+        .with_account_creation_limit(10000)
+        .with_password_reset_limit(10000)
+        .with_email_update_limit(10000)
+        .with_oauth_authorize_limit(10000)
+        .with_oauth_token_limit(10000);
+    let cache_refs = config.cache.as_ref().map(|(c, r)| (c.clone(), r.clone()));
+    let mut state = AppState::from_db(config.pool, CancellationToken::new())
+        .await
+        .with_rate_limiters(rate_limiters);
+    if let Some((cache, distributed_rate_limiter)) = config.cache {
+        state = state.with_cache(cache, distributed_rate_limiter);
+    }
+    tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
+    let app = tranquil_pds::app(state);
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let (cache, distributed_rate_limiter) = cache_refs
+        .map(|(c, r)| (Some(c), Some(r)))
+        .unwrap_or((None, None));
+    ServerInstance {
+        url: format!("http://localhost:{}", addr.port()),
+        port: addr.port(),
+        cache,
+        distributed_rate_limiter,
+    }
+}
+
+async fn spawn_app(database_url: String) -> String {
     let pool = PgPoolOptions::new()
         .max_connections(10)
         .acquire_timeout(std::time::Duration::from_secs(30))
@@ -528,34 +589,171 @@ async fn spawn_app(database_url: String) -> String {
         .await
         .expect("Failed to run migrations");
     let test_pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(2)
         .acquire_timeout(std::time::Duration::from_secs(30))
         .connect(&database_url)
         .await
         .expect("Failed to create test pool");
     TEST_DB_POOL.set(test_pool).ok();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    APP_PORT.set(addr.port()).ok();
-    unsafe {
-        std::env::set_var("PDS_HOSTNAME", format!("pds.test:{}", addr.port()));
-    }
-    let rate_limiters = RateLimiters::new()
-        .with_login_limit(10000)
-        .with_account_creation_limit(10000)
-        .with_password_reset_limit(10000)
-        .with_email_update_limit(10000)
-        .with_oauth_authorize_limit(10000)
-        .with_oauth_token_limit(10000);
-    let state = AppState::from_db(pool, CancellationToken::new())
+    let instance = spawn_server(ServerConfig { pool, cache: None }).await;
+    APP_PORT.set(instance.port).ok();
+    instance.url
+}
+
+#[allow(dead_code)]
+pub async fn spawn_cluster(database_url: String, node_count: usize) -> Vec<ServerInstance> {
+    use tranquil_ripple::{RippleConfig, RippleEngine};
+
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&database_url)
         .await
-        .with_rate_limiters(rate_limiters);
-    tranquil_pds::sync::listener::start_sequencer_listener(state.clone()).await;
-    let app = tranquil_pds::app(state);
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    format!("http://localhost:{}", addr.port())
+        .expect("Failed to connect to Postgres for cluster");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations for cluster");
+    let test_pool = PgPoolOptions::new()
+        .max_connections(2)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&database_url)
+        .await
+        .expect("Failed to create test pool for cluster");
+    TEST_DB_POOL.set(test_pool).ok();
+
+    let shutdown = CancellationToken::new();
+
+    let mut ripple_nodes: Vec<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>)> =
+        Vec::with_capacity(node_count);
+    let mut bound_addrs: Vec<SocketAddr> = Vec::with_capacity(node_count);
+
+    for i in 0..node_count {
+        let config = RippleConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            seed_peers: bound_addrs.clone(),
+            machine_id: i as u64 + 1,
+            gossip_interval_ms: 100,
+            cache_max_bytes: 64 * 1024 * 1024,
+        };
+        let (cache, rate_limiter, addr) = RippleEngine::start(config, shutdown.clone())
+            .await
+            .expect("failed to start ripple node");
+        bound_addrs.push(addr);
+        ripple_nodes.push((cache, rate_limiter));
+    }
+
+    let mut instances: Vec<ServerInstance> = Vec::with_capacity(node_count);
+    for (cache, rate_limiter) in ripple_nodes {
+        let server_config = ServerConfig {
+            pool: pool.clone(),
+            cache: Some((cache, rate_limiter)),
+        };
+        let instance = spawn_server(server_config).await;
+        instances.push(instance);
+    }
+
+    let first = &instances[0];
+    APP_PORT.set(first.port).ok();
+
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    instances
+}
+
+#[allow(dead_code)]
+pub async fn cluster() -> &'static [ServerInstance] {
+    CLUSTER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            unsafe {
+                std::env::set_var("TRANQUIL_PDS_ALLOW_INSECURE_SECRETS", "1");
+            }
+            if std::env::var("DOCKER_HOST").is_err()
+                && let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR")
+            {
+                let podman_sock = std::path::Path::new(&runtime_dir).join("podman/podman.sock");
+                if podman_sock.exists() {
+                    unsafe {
+                        std::env::set_var(
+                            "DOCKER_HOST",
+                            format!("unix://{}", podman_sock.display()),
+                        );
+                    }
+                }
+            }
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async move {
+                unsafe {
+                    std::env::remove_var("DISABLE_RATE_LIMITING");
+                }
+                let database_url = if has_external_infra() {
+                    setup_cluster_external_infra().await
+                } else {
+                    setup_cluster_testcontainers().await
+                };
+                let nodes = spawn_cluster(database_url, 3).await;
+                tx.send(nodes).unwrap();
+                std::future::pending::<()>().await;
+            });
+        });
+        rx.recv().expect("Failed to start test cluster")
+    })
+}
+
+async fn setup_cluster_external_infra() -> String {
+    let database_url =
+        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set when using external infra");
+    let plc_url = setup_mock_plc_directory().await;
+    unsafe {
+        configure_external_storage_env();
+        std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
+    }
+    register_mock_appview().await;
+    database_url
+}
+
+#[cfg(not(feature = "external-infra"))]
+async fn setup_cluster_testcontainers() -> String {
+    let temp_dir = std::env::temp_dir().join(format!("tranquil-pds-cluster-{}", uuid::Uuid::new_v4()));
+    let blob_path = temp_dir.join("blobs");
+    let backup_path = temp_dir.join("backups");
+    std::fs::create_dir_all(&blob_path).expect("Failed to create blob temp directory");
+    std::fs::create_dir_all(&backup_path).expect("Failed to create backup temp directory");
+    TEST_TEMP_DIR.set(temp_dir).ok();
+    let plc_url = setup_mock_plc_directory().await;
+    unsafe {
+        std::env::set_var("BLOB_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BLOB_STORAGE_PATH", blob_path.to_str().unwrap());
+        std::env::set_var("BACKUP_STORAGE_BACKEND", "filesystem");
+        std::env::set_var("BACKUP_STORAGE_PATH", backup_path.to_str().unwrap());
+        std::env::set_var("MAX_IMPORT_SIZE", "100000000");
+        std::env::set_var("SKIP_IMPORT_VERIFICATION", "true");
+        std::env::set_var("PLC_DIRECTORY_URL", &plc_url);
+    }
+    register_mock_appview().await;
+    let container = Postgres::default()
+        .with_tag("18-alpine")
+        .with_label("tranquil_pds_test", "true")
+        .start()
+        .await
+        .expect("Failed to start Postgres for cluster");
+    let connection_string = format!(
+        "postgres://postgres:postgres@127.0.0.1:{}",
+        container
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("Failed to get port")
+    );
+    DB_CONTAINER.set(container).ok();
+    connection_string
+}
+
+#[cfg(feature = "external-infra")]
+async fn setup_cluster_testcontainers() -> String {
+    panic!(
+        "Testcontainers disabled with external-infra feature. Set DATABASE_URL and BLOB_STORAGE_PATH (or S3_ENDPOINT)."
+    );
 }
 
 #[allow(dead_code)]

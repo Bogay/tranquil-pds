@@ -10,12 +10,11 @@ services:
     - ./.env
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/pds
-      S3_ENDPOINT: http://objsto:9000
-      VALKEY_URL: redis://cache:6379
+    volumes:
+      - blob_data:/var/lib/tranquil/blobs
+      - backup_data:/var/lib/tranquil/backups
     depends_on:
       - db
-      - objsto
-      - cache
 
   frontend:
     build:
@@ -38,25 +37,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
 
-  objsto:
-    image: cgr.dev/chainguard/minio:latest
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-
-  cache:
-    image: valkey/valkey:9-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - valkey_data:/data
-
   prometheus:
     image: prom/prometheus:v3.8.0
     ports:
@@ -72,6 +52,6 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
-  valkey_data:
+  blob_data:
+  backup_data:
   prometheus_data:

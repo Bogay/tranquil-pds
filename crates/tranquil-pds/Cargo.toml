@@ -89,4 +89,5 @@ ciborium = { workspace = true }
 ctor = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
+tranquil-ripple = { workspace = true }
 wiremock = { workspace = true }

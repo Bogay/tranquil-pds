@@ -10,22 +10,17 @@ services:
       SERVER_PORT: "3000"
       PDS_HOSTNAME: "${PDS_HOSTNAME:?PDS_HOSTNAME is required}"
       DATABASE_URL: "postgres://tranquil_pds:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/pds"
-      S3_ENDPOINT: "http://minio:9000"
-      AWS_REGION: "us-east-1"
-      S3_BUCKET: "pds-blobs"
-      AWS_ACCESS_KEY_ID: "${MINIO_ROOT_USER:-minioadmin}"
-      AWS_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
-      VALKEY_URL: "redis://valkey:6379"
+      BLOB_STORAGE_PATH: "/var/lib/tranquil/blobs"
+      BACKUP_STORAGE_PATH: "/var/lib/tranquil/backups"
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}"
       DPOP_SECRET: "${DPOP_SECRET:?DPOP_SECRET is required (min 32 chars)}"
       MASTER_KEY: "${MASTER_KEY:?MASTER_KEY is required (min 32 chars)}"
       CRAWLERS: "${CRAWLERS:-https://bsky.network}"
+    volumes:
+      - blob_data:/var/lib/tranquil/blobs
+      - backup_data:/var/lib/tranquil/backups
     depends_on:
       db:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      valkey:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/xrpc/_health"]
@@ -81,60 +76,6 @@ services:
         reservations:
           memory: 128M
 
-  minio:
-    image: cgr.dev/chainguard/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
-    volumes:
-      - minio_data:/data
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 128M
-
-  minio-init:
-    image: cgr.dev/chainguard/minio-client:latest-dev
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      for i in 1 2 3 4 5 6 7 8 9 10; do
-        mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} && break;
-        echo 'Waiting for minio...'; sleep 2;
-      done;
-      mc mb --ignore-existing local/pds-blobs;
-      mc mb --ignore-existing local/pds-backups;
-      mc anonymous set none local/pds-blobs;
-      exit 0;
-      "
-    environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}"
-
-  valkey:
-    image: valkey/valkey:9-alpine
-    restart: unless-stopped
-    command: valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - valkey_data:/data
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    deploy:
-      resources:
-        limits:
-          memory: 300M
-        reservations:
-          memory: 64M
-
   nginx:
     image: nginx:1.29-alpine
     restart: unless-stopped
@@ -180,7 +121,7 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
-  valkey_data:
+  blob_data:
+  backup_data:
   prometheus_data:
   acme_challenge:
