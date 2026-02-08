@@ -1,11 +1,11 @@
 use crate::cache::RippleCache;
 use crate::config::RippleConfig;
-use crate::crdt::CrdtStore;
+use crate::crdt::ShardedCrdtStore;
 use crate::eviction::MemoryBudget;
 use crate::gossip::{GossipEngine, PeerId};
+use crate::metrics;
 use crate::rate_limiter::RippleRateLimiter;
 use crate::transport::Transport;
-use parking_lot::RwLock;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -18,7 +18,7 @@ impl RippleEngine {
         config: RippleConfig,
         shutdown: CancellationToken,
     ) -> Result<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>, SocketAddr), RippleStartError> {
-        let store = Arc::new(RwLock::new(CrdtStore::new(config.machine_id)));
+        let store = Arc::new(ShardedCrdtStore::new(config.machine_id));
 
         let (transport, incoming_rx) = Transport::bind(config.bind_addr, config.machine_id, shutdown.clone())
             .await
@@ -27,10 +27,18 @@ impl RippleEngine {
         let transport = Arc::new(transport);
 
         let bound_addr = transport.local_addr();
+        let generation = u32::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                % u64::from(u32::MAX),
+        )
+        .unwrap_or(0);
         let local_id = PeerId {
             addr: bound_addr,
             machine_id: config.machine_id,
-            generation: 0,
+            generation,
         };
 
         let gossip = GossipEngine::new(transport, store.clone(), local_id);
@@ -51,7 +59,7 @@ impl RippleEngine {
                 tokio::select! {
                     _ = eviction_shutdown.cancelled() => break,
                     _ = interval.tick() => {
-                        budget.enforce(&mut store_for_eviction.write());
+                        budget.enforce(&store_for_eviction);
                     }
                 }
             }
@@ -73,6 +81,8 @@ impl RippleEngine {
         let cache: Arc<dyn Cache> = Arc::new(RippleCache::new(store.clone()));
         let rate_limiter: Arc<dyn DistributedRateLimiter> =
             Arc::new(RippleRateLimiter::new(store));
+
+        metrics::describe_metrics();
 
         tracing::info!(
             bind = %bound_addr,

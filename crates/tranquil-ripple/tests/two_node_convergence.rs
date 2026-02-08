@@ -608,3 +608,163 @@ async fn two_node_rate_limit_split_increment() {
 
     shutdown.cancel();
 }
+
+#[tokio::test]
+async fn two_node_partition_recovery() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::DEBUG)
+        .with_test_writer()
+        .try_init()
+        .ok();
+
+    let shutdown = CancellationToken::new();
+
+    let config_a = RippleConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        seed_peers: vec![],
+        machine_id: 100,
+        gossip_interval_ms: 100,
+        cache_max_bytes: 64 * 1024 * 1024,
+    };
+    let (cache_a, _rl_a, addr_a) = RippleEngine::start(config_a, shutdown.clone())
+        .await
+        .expect("node A failed to start");
+
+    futures::future::join_all((0..50).map(|i| {
+        let cache = cache_a.clone();
+        async move {
+            cache
+                .set(
+                    &format!("pre-{i}"),
+                    &format!("val-{i}"),
+                    Duration::from_secs(300),
+                )
+                .await
+                .expect("set on A failed");
+        }
+    }))
+    .await;
+
+    let config_b = RippleConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        seed_peers: vec![addr_a],
+        machine_id: 200,
+        gossip_interval_ms: 100,
+        cache_max_bytes: 64 * 1024 * 1024,
+    };
+    let (cache_b, _rl_b, _addr_b) = RippleEngine::start(config_b, shutdown.clone())
+        .await
+        .expect("node B failed to start");
+
+    let b = cache_b.clone();
+    poll_until(15_000, 200, move || {
+        let b = b.clone();
+        async move {
+            futures::future::join_all((0..50).map(|i| {
+                let b = b.clone();
+                async move { b.get(&format!("pre-{i}")).await.is_some() }
+            }))
+            .await
+            .into_iter()
+            .all(|present| present)
+        }
+    })
+    .await;
+
+    futures::future::join_all((0..50).map(|i| {
+        let cache = cache_b.clone();
+        async move {
+            cache
+                .set(
+                    &format!("post-{i}"),
+                    &format!("bval-{i}"),
+                    Duration::from_secs(300),
+                )
+                .await
+                .expect("set on B failed");
+        }
+    }))
+    .await;
+
+    let a = cache_a.clone();
+    poll_until(15_000, 200, move || {
+        let a = a.clone();
+        async move {
+            futures::future::join_all((0..50).map(|i| {
+                let a = a.clone();
+                async move { a.get(&format!("post-{i}")).await.is_some() }
+            }))
+            .await
+            .into_iter()
+            .all(|present| present)
+        }
+    })
+    .await;
+
+    shutdown.cancel();
+}
+
+#[tokio::test]
+async fn two_node_stress_concurrent_load() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing_subscriber::filter::LevelFilter::INFO)
+        .with_test_writer()
+        .try_init()
+        .ok();
+
+    let shutdown = CancellationToken::new();
+    let ((cache_a, rl_a), (cache_b, rl_b)) = spawn_pair(shutdown.clone()).await;
+
+    let tasks: Vec<tokio::task::JoinHandle<()>> = (0u32..8).map(|task_id| {
+        let cache = match task_id < 4 {
+            true => cache_a.clone(),
+            false => cache_b.clone(),
+        };
+        let rl = match task_id < 4 {
+            true => rl_a.clone(),
+            false => rl_b.clone(),
+        };
+        tokio::spawn(async move {
+            let value = vec![0xABu8; 1024];
+            futures::future::join_all((0u32..500).map(|op| {
+                let cache = cache.clone();
+                let rl = rl.clone();
+                let value = value.clone();
+                async move {
+                    let key_idx = op % 100;
+                    let key = format!("stress-{task_id}-{key_idx}");
+                    match op % 4 {
+                        0 | 1 => {
+                            cache
+                                .set_bytes(&key, &value, Duration::from_secs(120))
+                                .await
+                                .expect("set_bytes failed");
+                        }
+                        2 => {
+                            let _ = cache.get(&key).await;
+                        }
+                        _ => {
+                            let _ = rl.check_rate_limit(&key, 1000, 60_000).await;
+                        }
+                    }
+                }
+            }))
+            .await;
+        })
+    }).collect();
+
+    let results = tokio::time::timeout(
+        Duration::from_secs(30),
+        futures::future::join_all(tasks),
+    )
+    .await
+    .expect("stress test timed out after 30s");
+
+    results.into_iter().enumerate().for_each(|(i, r)| {
+        r.unwrap_or_else(|e| panic!("task {i} panicked: {e}"));
+    });
+
+    tokio::time::sleep(Duration::from_secs(12)).await;
+
+    shutdown.cancel();
+}

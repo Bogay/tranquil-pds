@@ -1,5 +1,4 @@
 use super::hlc::HlcTimestamp;
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -27,11 +26,37 @@ impl LwwEntry {
     }
 
     fn entry_byte_size(&self, key: &str) -> usize {
-        const OVERHEAD: usize = 128;
-        key.len()
-            + self.value.as_ref().map_or(0, Vec::len)
-            + std::mem::size_of::<Self>()
-            + OVERHEAD
+        const HASHMAP_ENTRY_OVERHEAD: usize = 64;
+        const BTREE_NODE_OVERHEAD: usize = 64;
+        const STRING_HEADER: usize = 24;
+        const COUNTER_SIZE: usize = 8;
+
+        let key_len = key.len();
+        let value_len = self.value.as_ref().map_or(0, Vec::len);
+
+        let main_entry = key_len
+            .saturating_add(value_len)
+            .saturating_add(std::mem::size_of::<Self>())
+            .saturating_add(HASHMAP_ENTRY_OVERHEAD);
+
+        match self.is_tombstone() {
+            true => main_entry,
+            false => {
+                let lru_btree = COUNTER_SIZE
+                    .saturating_add(STRING_HEADER)
+                    .saturating_add(key_len)
+                    .saturating_add(BTREE_NODE_OVERHEAD);
+
+                let lru_hashmap = STRING_HEADER
+                    .saturating_add(key_len)
+                    .saturating_add(COUNTER_SIZE)
+                    .saturating_add(HASHMAP_ENTRY_OVERHEAD);
+
+                main_entry
+                    .saturating_add(lru_btree)
+                    .saturating_add(lru_hashmap)
+            }
+        }
     }
 }
 
@@ -59,9 +84,24 @@ impl LruTracker {
         if let Some(old_counter) = self.key_to_counter.remove(key) {
             self.counter_to_key.remove(&old_counter);
         }
+        if self.counter >= u64::MAX - 1 {
+            self.compact();
+        }
         self.counter = self.counter.saturating_add(1);
         self.counter_to_key.insert(self.counter, key.to_string());
         self.key_to_counter.insert(key.to_string(), self.counter);
+    }
+
+    fn compact(&mut self) {
+        let keys: Vec<String> = self.counter_to_key.values().cloned().collect();
+        self.counter_to_key.clear();
+        self.key_to_counter.clear();
+        keys.into_iter().enumerate().for_each(|(i, key)| {
+            let new_counter = (i as u64).saturating_add(1);
+            self.counter_to_key.insert(new_counter, key.clone());
+            self.key_to_counter.insert(key, new_counter);
+        });
+        self.counter = self.counter_to_key.len() as u64;
     }
 
     fn remove(&mut self, key: &str) {
@@ -80,7 +120,7 @@ impl LruTracker {
 
 pub struct LwwMap {
     entries: HashMap<String, LwwEntry>,
-    lru: Mutex<LruTracker>,
+    lru: LruTracker,
     estimated_bytes: usize,
 }
 
@@ -88,7 +128,7 @@ impl LwwMap {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
-            lru: Mutex::new(LruTracker::new()),
+            lru: LruTracker::new(),
             estimated_bytes: 0,
         }
     }
@@ -98,9 +138,7 @@ impl LwwMap {
         if entry.is_expired(now_wall_ms) || entry.is_tombstone() {
             return None;
         }
-        let value = entry.value.clone();
-        self.lru.lock().promote(key);
-        value
+        entry.value.clone()
     }
 
     pub fn set(&mut self, key: String, value: Vec<u8>, timestamp: HlcTimestamp, ttl_ms: u64, wall_ms_now: u64) {
@@ -113,18 +151,15 @@ impl LwwMap {
         self.remove_estimated_bytes(&key);
         self.estimated_bytes += entry.entry_byte_size(&key);
         self.entries.insert(key.clone(), entry);
-        self.lru.lock().promote(&key);
+        self.lru.promote(&key);
     }
 
     pub fn delete(&mut self, key: &str, timestamp: HlcTimestamp, wall_ms_now: u64) {
-        match self.entries.get(key) {
+        let ttl_ms = match self.entries.get(key) {
             Some(existing) if existing.timestamp >= timestamp => return,
-            _ => {}
-        }
-        let ttl_ms = self
-            .entries
-            .get(key)
-            .map_or(60_000, |e| e.ttl_ms.max(60_000));
+            Some(existing) => existing.ttl_ms.max(60_000),
+            None => 60_000,
+        };
         let entry = LwwEntry {
             value: None,
             timestamp,
@@ -134,7 +169,7 @@ impl LwwMap {
         self.remove_estimated_bytes(key);
         self.estimated_bytes += entry.entry_byte_size(key);
         self.entries.insert(key.to_string(), entry);
-        self.lru.lock().remove(key);
+        self.lru.remove(key);
     }
 
     pub fn merge_entry(&mut self, key: String, remote: LwwEntry) -> bool {
@@ -145,10 +180,9 @@ impl LwwMap {
                 self.remove_estimated_bytes(&key);
                 self.estimated_bytes += remote.entry_byte_size(&key);
                 self.entries.insert(key.clone(), remote);
-                let mut lru = self.lru.lock();
                 match is_tombstone {
-                    true => lru.remove(&key),
-                    false => lru.promote(&key),
+                    true => self.lru.remove(&key),
+                    false => self.lru.promote(&key),
                 }
                 true
             }
@@ -175,10 +209,7 @@ impl LwwMap {
         expired_keys.iter().for_each(|key| {
             self.remove_estimated_bytes(key);
             self.entries.remove(key);
-        });
-        let mut lru = self.lru.lock();
-        expired_keys.iter().for_each(|key| {
-            lru.remove(key);
+            self.lru.remove(key);
         });
     }
 
@@ -192,18 +223,21 @@ impl LwwMap {
         expired_keys.iter().for_each(|key| {
             self.remove_estimated_bytes(key);
             self.entries.remove(key);
-        });
-        let mut lru = self.lru.lock();
-        expired_keys.iter().for_each(|key| {
-            lru.remove(key);
+            self.lru.remove(key);
         });
     }
 
     pub fn evict_lru(&mut self) -> Option<String> {
-        let key = self.lru.lock().pop_least_recent()?;
+        let key = self.lru.pop_least_recent()?;
         self.remove_estimated_bytes(&key);
         self.entries.remove(&key);
         Some(key)
+    }
+
+    pub fn touch(&mut self, key: &str) {
+        if self.entries.contains_key(key) {
+            self.lru.promote(key);
+        }
     }
 
     pub fn estimated_bytes(&self) -> usize {
@@ -359,14 +393,13 @@ mod tests {
     }
 
     #[test]
-    fn lru_eviction() {
+    fn lru_eviction_by_write_order() {
         let mut map = LwwMap::new();
         map.set("k1".into(), b"a".to_vec(), ts(100, 0, 1), 60_000, 100);
         map.set("k2".into(), b"b".to_vec(), ts(101, 0, 1), 60_000, 101);
         map.set("k3".into(), b"c".to_vec(), ts(102, 0, 1), 60_000, 102);
-        let _ = map.get("k1", 102);
         let evicted = map.evict_lru();
-        assert_eq!(evicted.as_deref(), Some("k2"));
+        assert_eq!(evicted.as_deref(), Some("k1"));
     }
 
     #[test]
