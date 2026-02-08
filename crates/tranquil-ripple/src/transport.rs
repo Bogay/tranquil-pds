@@ -3,15 +3,16 @@ use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 const MAX_INBOUND_CONNECTIONS: usize = 512;
+const MAX_OUTBOUND_CONNECTIONS: usize = 512;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +45,7 @@ pub struct IncomingFrame {
 
 struct ConnectionWriter {
     tx: mpsc::Sender<Vec<u8>>,
+    generation: u64,
 }
 
 pub struct Transport {
@@ -51,8 +53,10 @@ pub struct Transport {
     _machine_id: u64,
     connections: Arc<parking_lot::Mutex<HashMap<SocketAddr, ConnectionWriter>>>,
     connecting: Arc<parking_lot::Mutex<std::collections::HashSet<SocketAddr>>>,
+    conn_generation: Arc<AtomicU64>,
     #[allow(dead_code)]
     inbound_count: Arc<AtomicUsize>,
+    outbound_count: Arc<AtomicUsize>,
     shutdown: CancellationToken,
     incoming_tx: mpsc::Sender<IncomingFrame>,
 }
@@ -73,7 +77,9 @@ impl Transport {
             _machine_id: machine_id,
             connections: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             connecting: Arc::new(parking_lot::Mutex::new(std::collections::HashSet::new())),
+            conn_generation: Arc::new(AtomicU64::new(0)),
             inbound_count: inbound_count.clone(),
+            outbound_count: Arc::new(AtomicUsize::new(0)),
             shutdown: shutdown.clone(),
             incoming_tx: incoming_tx.clone(),
         };
@@ -99,6 +105,7 @@ impl Transport {
                                     continue;
                                 }
                                 inbound_counter.fetch_add(1, Ordering::Relaxed);
+                                configure_socket(&stream);
                                 Self::spawn_reader(
                                     stream,
                                     peer_addr,
@@ -144,12 +151,20 @@ impl Transport {
         };
         let writer = {
             let conns = self.connections.lock();
-            conns.get(&target).map(|w| w.tx.clone())
+            conns.get(&target).map(|w| (w.tx.clone(), w.generation))
         };
         match writer {
-            Some(tx) => {
+            Some((tx, acquired_gen)) => {
                 if tx.send(frame).await.is_err() {
-                    self.connections.lock().remove(&target);
+                    {
+                        let mut conns = self.connections.lock();
+                        let stale = conns
+                            .get(&target)
+                            .is_some_and(|w| w.generation == acquired_gen);
+                        if stale {
+                            conns.remove(&target);
+                        }
+                    }
                     self.connect_and_send(target, tag, data).await;
                 }
             }
@@ -163,7 +178,7 @@ impl Transport {
         {
             let mut connecting = self.connecting.lock();
             if connecting.contains(&target) {
-                tracing::debug!(peer = %target, "connection already in-flight, dropping frame");
+                tracing::warn!(peer = %target, "connection already in-flight, dropping frame");
                 return;
             }
             connecting.insert(target);
@@ -191,17 +206,39 @@ impl Transport {
         .await;
         match stream {
             Ok(stream) => {
+                if self.outbound_count.load(Ordering::Relaxed) >= MAX_OUTBOUND_CONNECTIONS {
+                    tracing::warn!(
+                        peer = %target,
+                        max = MAX_OUTBOUND_CONNECTIONS,
+                        "outbound connection limit reached, dropping"
+                    );
+                    return;
+                }
+                self.outbound_count.fetch_add(1, Ordering::Relaxed);
+                configure_socket(&stream);
                 let (read_half, write_half) = stream.into_split();
                 let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(1024);
-                let cancel = self.shutdown.clone();
+
+                let conn_gen = self.conn_generation.fetch_add(1, Ordering::Relaxed);
+                self.connections.lock().insert(
+                    target,
+                    ConnectionWriter { tx: write_tx.clone(), generation: conn_gen },
+                );
+                if let Some(frame) = encode_frame(tag, data) {
+                    let _ = write_tx.try_send(frame);
+                }
+
+                let conn_cancel = self.shutdown.child_token();
+                let reader_cancel = conn_cancel.clone();
                 let connections = self.connections.clone();
+                let outbound_counter = self.outbound_count.clone();
                 let peer = target;
 
                 tokio::spawn(async move {
                     let mut writer = write_half;
                     loop {
                         tokio::select! {
-                            _ = cancel.cancelled() => break,
+                            _ = conn_cancel.cancelled() => break,
                             msg = write_rx.recv() => {
                                 match msg {
                                     Some(buf) => {
@@ -227,19 +264,11 @@ impl Transport {
                         }
                     }
                     connections.lock().remove(&peer);
+                    outbound_counter.fetch_sub(1, Ordering::Relaxed);
+                    conn_cancel.cancel();
                 });
 
-                Self::spawn_reader_half(read_half, target, self.incoming_tx.clone(), self.shutdown.clone());
-
-                let frame = match encode_frame(tag, data) {
-                    Some(f) => f,
-                    None => return,
-                };
-                let _ = write_tx.send(frame).await;
-                self.connections.lock().insert(
-                    target,
-                    ConnectionWriter { tx: write_tx },
-                );
+                Self::spawn_reader_half(read_half, target, self.incoming_tx.clone(), reader_cancel);
                 tracing::debug!(peer = %target, "established outbound connection");
             }
             Err(e) => {
@@ -309,6 +338,7 @@ impl Transport {
                     }
                 }
             }
+            cancel.cancel();
         });
     }
 
@@ -332,6 +362,19 @@ impl Transport {
                 DecodeResult::Corrupt => return false,
             }
         }
+    }
+}
+
+fn configure_socket(stream: &TcpStream) {
+    let sock_ref = socket2::SockRef::from(stream);
+    if let Err(e) = sock_ref.set_tcp_nodelay(true) {
+        tracing::warn!(error = %e, "failed to set TCP_NODELAY");
+    }
+    let params = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(30))
+        .with_interval(Duration::from_secs(10));
+    if let Err(e) = sock_ref.set_tcp_keepalive(&params) {
+        tracing::warn!(error = %e, "failed to set TCP keepalive");
     }
 }
 

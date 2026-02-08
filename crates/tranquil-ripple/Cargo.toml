@@ -12,9 +12,11 @@ backon = { workspace = true }
 bincode = { workspace = true }
 bytes = { workspace = true }
 foca = { workspace = true }
+metrics = { workspace = true }
 parking_lot = { workspace = true }
 rand = "0.9"
 serde = { workspace = true }
+socket2 = "0.6.2"
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "io-util", "sync", "time"] }
 tokio-util = { workspace = true }

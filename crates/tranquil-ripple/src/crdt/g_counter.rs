@@ -163,6 +163,9 @@ impl RateLimitStore {
     }
 
     pub fn peek_count(&self, key: &str, window_ms: u64, now_wall_ms: u64) -> u64 {
+        if window_ms == 0 {
+            return 0;
+        }
         match self.counters.get(key) {
             Some(counter) if counter.window_start_ms == Self::aligned_window_start(now_wall_ms, window_ms) => {
                 counter.total()
@@ -193,6 +196,16 @@ impl RateLimitStore {
                     + PER_COUNTER_OVERHEAD
             })
             .fold(0usize, usize::saturating_add)
+    }
+
+    pub fn extract_all_deltas(&self) -> Vec<GCounterDelta> {
+        self.counters
+            .iter()
+            .map(|(key, counter)| GCounterDelta {
+                key: key.clone(),
+                counter: counter.clone(),
+            })
+            .collect()
     }
 
     pub fn gc_expired(&mut self, now_wall_ms: u64) {

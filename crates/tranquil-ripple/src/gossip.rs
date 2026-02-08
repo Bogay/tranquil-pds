@@ -1,8 +1,9 @@
 use crate::crdt::delta::CrdtDelta;
-use crate::crdt::CrdtStore;
+use crate::crdt::lww_map::LwwDelta;
+use crate::crdt::ShardedCrdtStore;
+use crate::metrics;
 use crate::transport::{ChannelTag, IncomingFrame, Transport};
 use foca::{Config, Foca, Notification, Runtime, Timer};
-use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use std::collections::HashSet;
@@ -114,6 +115,10 @@ impl MemberTracker {
     fn active_peers(&self) -> impl Iterator<Item = SocketAddr> + '_ {
         self.active_addrs.iter().copied()
     }
+
+    fn peer_count(&self) -> usize {
+        self.active_addrs.len()
+    }
 }
 
 impl Runtime<PeerId> for &mut BufferedRuntime {
@@ -141,14 +146,14 @@ impl Runtime<PeerId> for &mut BufferedRuntime {
 
 pub struct GossipEngine {
     transport: Arc<Transport>,
-    store: Arc<RwLock<CrdtStore>>,
+    store: Arc<ShardedCrdtStore>,
     local_id: PeerId,
 }
 
 impl GossipEngine {
     pub fn new(
         transport: Arc<Transport>,
-        store: Arc<RwLock<CrdtStore>>,
+        store: Arc<ShardedCrdtStore>,
         local_id: PeerId,
     ) -> Self {
         Self {
@@ -203,11 +208,11 @@ impl GossipEngine {
                 }
             });
 
-            drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &shutdown);
+            drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &store, &shutdown);
 
             let mut gossip_tick =
                 tokio::time::interval(Duration::from_millis(gossip_interval_ms));
-            let mut maintenance_tick = tokio::time::interval(Duration::from_secs(10));
+            gossip_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             loop {
                 tokio::select! {
@@ -222,11 +227,13 @@ impl GossipEngine {
                                 if let Err(e) = foca.handle_data(&frame.data, &mut runtime) {
                                     tracing::warn!(error = %e, "foca handle_data error");
                                 }
-                                drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &shutdown);
+                                drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &store, &shutdown);
                             }
                             ChannelTag::CrdtSync => {
                                 const MAX_DELTA_ENTRIES: usize = 10_000;
                                 const MAX_DELTA_RATE_LIMITS: usize = 10_000;
+                                metrics::record_gossip_delta_received();
+                                metrics::record_gossip_delta_bytes(frame.data.len());
                                 match bincode::serde::decode_from_slice::<CrdtDelta, _>(&frame.data, bincode::config::standard()) {
                                     Ok((delta, _)) => {
                                         let cache_len = delta.cache_delta.as_ref().map_or(0, |d| d.entries.len());
@@ -235,6 +242,7 @@ impl GossipEngine {
                                         let window_mismatch = delta.rate_limit_deltas.iter().any(|rd| rd.counter.window_duration_ms == 0);
                                         match cache_len > MAX_DELTA_ENTRIES || rl_len > MAX_DELTA_RATE_LIMITS || gcounter_oversize || window_mismatch {
                                             true => {
+                                                metrics::record_gossip_drop();
                                                 tracing::warn!(
                                                     cache_entries = cache_len,
                                                     rate_limit_entries = rl_len,
@@ -243,11 +251,14 @@ impl GossipEngine {
                                                 );
                                             }
                                             false => {
-                                                store.write().merge_delta(&delta);
+                                                if store.merge_delta(&delta) {
+                                                    metrics::record_gossip_merge();
+                                                }
                                             }
                                         }
                                     }
                                     Err(e) => {
+                                        metrics::record_gossip_drop();
                                         tracing::warn!(error = %e, "failed to decode crdt sync delta");
                                     }
                                 }
@@ -256,72 +267,76 @@ impl GossipEngine {
                         }
                     }
                     _ = gossip_tick.tick() => {
-                        let pending = {
-                            let s = store.read();
-                            let delta = s.peek_broadcast_delta();
-                            match delta.is_empty() {
-                                true => None,
-                                false => {
-                                    match bincode::serde::encode_to_vec(&delta, bincode::config::standard()) {
-                                        Ok(bytes) => Some((bytes, delta)),
-                                        Err(e) => {
-                                            tracing::warn!(error = %e, "failed to serialize broadcast delta");
-                                            None
-                                        }
-                                    }
-                                },
-                            }
-                        };
-                        if let Some((ref data, ref delta)) = pending {
-                            let peers: Vec<SocketAddr> = members.active_peers().collect();
-                            let mut all_queued = true;
-                            let cancel = shutdown.clone();
-                            peers.iter().for_each(|&addr| {
-                                match transport.try_queue(addr, ChannelTag::CrdtSync, data) {
-                                    true => {}
-                                    false => {
-                                        all_queued = false;
-                                        let t = transport.clone();
-                                        let d = data.clone();
-                                        let c = cancel.clone();
-                                        tokio::spawn(async move {
-                                            tokio::select! {
-                                                _ = c.cancelled() => {}
-                                                _ = t.send(addr, ChannelTag::CrdtSync, &d) => {}
-                                            }
-                                        });
-                                    }
-                                }
-                            });
-                            let stale = last_commit.elapsed() > Duration::from_secs(WATERMARK_STALE_SECS);
-                            if all_queued || peers.is_empty() || stale {
-                                if stale && !all_queued {
-                                    tracing::warn!(
-                                        elapsed_secs = last_commit.elapsed().as_secs(),
-                                        "force-advancing broadcast watermark (staleness cap)"
-                                    );
-                                }
-                                store.write().commit_broadcast(delta);
+                        let delta = store.peek_broadcast_delta();
+                        match delta.is_empty() {
+                            true => {
                                 last_commit = tokio::time::Instant::now();
                             }
-                        }
+                            false => {
+                                let chunks = chunk_and_serialize(&delta);
+                                match chunks.is_empty() {
+                                    true => {
+                                        tracing::warn!("all delta chunks failed to serialize, force-committing watermark");
+                                        store.commit_broadcast(&delta);
+                                        last_commit = tokio::time::Instant::now();
+                                    }
+                                    false => {
+                                        let peers: Vec<SocketAddr> = members.active_peers().collect();
+                                        let mut all_queued = true;
+                                        let cancel = shutdown.clone();
+                                        chunks.iter().for_each(|chunk| {
+                                            metrics::record_gossip_delta_bytes(chunk.len());
+                                            peers.iter().for_each(|&addr| {
+                                                metrics::record_gossip_delta_sent();
+                                                match transport.try_queue(addr, ChannelTag::CrdtSync, chunk) {
+                                                    true => {}
+                                                    false => {
+                                                        all_queued = false;
+                                                        let t = transport.clone();
+                                                        let d = chunk.clone();
+                                                        let c = cancel.clone();
+                                                        tokio::spawn(async move {
+                                                            tokio::select! {
+                                                                _ = c.cancelled() => {}
+                                                                _ = t.send(addr, ChannelTag::CrdtSync, &d) => {}
+                                                            }
+                                                        });
+                                                    }
+                                                }
+                                            });
+                                        });
+                                        let stale = last_commit.elapsed() > Duration::from_secs(WATERMARK_STALE_SECS);
+                                        if all_queued || peers.is_empty() || stale {
+                                            if stale && !all_queued {
+                                                tracing::warn!(
+                                                    elapsed_secs = last_commit.elapsed().as_secs(),
+                                                    "force-advancing broadcast watermark (staleness cap)"
+                                                );
+                                            }
+                                            store.commit_broadcast(&delta);
+                                            last_commit = tokio::time::Instant::now();
+                                        }
+                                    }
+                                }
+                            }
+                        };
                         if let Err(e) = foca.gossip(&mut runtime) {
                             tracing::warn!(error = %e, "foca gossip error");
                         }
-                        drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &shutdown);
+                        drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &store, &shutdown);
                     }
                     Some((timer, _)) = timer_rx.recv() => {
                         if let Err(e) = foca.handle_timer(timer, &mut runtime) {
                             tracing::warn!(error = %e, "foca handle_timer error");
                         }
-                        drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &shutdown);
+                        drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &store, &shutdown);
                     }
-                    _ = maintenance_tick.tick() => {
-                        store.write().run_maintenance();
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => {
                         tracing::trace!(
                             members = foca.num_members(),
-                            cache_bytes = store.read().cache_estimated_bytes(),
-                            "maintenance cycle"
+                            cache_bytes = store.cache_estimated_bytes(),
+                            rate_limit_bytes = store.rate_limit_estimated_bytes(),
+                            "gossip health check"
                         );
                     }
                 }
@@ -331,25 +346,21 @@ impl GossipEngine {
 }
 
 fn flush_final_delta(
-    store: &Arc<RwLock<CrdtStore>>,
+    store: &Arc<ShardedCrdtStore>,
     transport: &Arc<Transport>,
     members: &MemberTracker,
 ) {
-    let s = store.read();
-    let delta = s.peek_broadcast_delta();
+    let delta = store.peek_broadcast_delta();
     if delta.is_empty() {
         return;
     }
-    match bincode::serde::encode_to_vec(&delta, bincode::config::standard()) {
-        Ok(bytes) => {
-            members.active_peers().for_each(|addr| {
-                let _ = transport.try_queue(addr, ChannelTag::CrdtSync, &bytes);
-            });
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to serialize final delta on shutdown");
-        }
-    }
+    let chunks = chunk_and_serialize(&delta);
+    chunks.iter().for_each(|chunk| {
+        members.active_peers().for_each(|addr| {
+            let _ = transport.try_queue(addr, ChannelTag::CrdtSync, chunk);
+        });
+    });
+    store.commit_broadcast(&delta);
 }
 
 fn drain_runtime_actions(
@@ -357,6 +368,7 @@ fn drain_runtime_actions(
     transport: &Arc<Transport>,
     timer_tx: &mpsc::Sender<(Timer<PeerId>, Duration)>,
     members: &mut MemberTracker,
+    store: &Arc<ShardedCrdtStore>,
     shutdown: &CancellationToken,
 ) {
     let actions: Vec<RuntimeAction> = runtime.actions.drain(..).collect();
@@ -373,18 +385,105 @@ fn drain_runtime_actions(
         }
         RuntimeAction::ScheduleTimer(timer, duration) => {
             let tx = timer_tx.clone();
+            let c = shutdown.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(duration).await;
-                let _ = tx.send((timer, duration)).await;
+                tokio::select! {
+                    _ = c.cancelled() => {}
+                    _ = tokio::time::sleep(duration) => {
+                        let _ = tx.send((timer, duration)).await;
+                    }
+                }
             });
         }
         RuntimeAction::MemberUp(addr) => {
             tracing::info!(peer = %addr, "member up");
             members.member_up(addr);
+            metrics::set_gossip_peers(members.peer_count());
+            let snapshot = store.peek_full_state();
+            if !snapshot.is_empty() {
+                chunk_and_serialize(&snapshot).into_iter().for_each(|chunk| {
+                    let t = transport.clone();
+                    let c = shutdown.clone();
+                    tokio::spawn(async move {
+                        tokio::select! {
+                            _ = c.cancelled() => {}
+                            _ = t.send(addr, ChannelTag::CrdtSync, &chunk) => {}
+                        }
+                    });
+                });
+            }
         }
         RuntimeAction::MemberDown(addr) => {
             tracing::info!(peer = %addr, "member down");
             members.member_down(addr);
+            metrics::set_gossip_peers(members.peer_count());
         }
     });
+}
+
+fn chunk_and_serialize(delta: &CrdtDelta) -> Vec<Vec<u8>> {
+    let config = bincode::config::standard();
+    match bincode::serde::encode_to_vec(delta, config) {
+        Ok(bytes) if bytes.len() <= crate::transport::MAX_FRAME_SIZE => vec![bytes],
+        Ok(_) => split_and_serialize(delta.clone()),
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to serialize delta");
+            vec![]
+        }
+    }
+}
+
+fn split_and_serialize(delta: CrdtDelta) -> Vec<Vec<u8>> {
+    let version = delta.version;
+    let source_node = delta.source_node;
+    let cache_entries = delta.cache_delta.map_or(Vec::new(), |d| d.entries);
+    let rl_deltas = delta.rate_limit_deltas;
+
+    if cache_entries.is_empty() && rl_deltas.is_empty() {
+        return vec![];
+    }
+
+    if cache_entries.len() <= 1 && rl_deltas.len() <= 1 {
+        let mini = CrdtDelta {
+            version,
+            source_node,
+            cache_delta: match cache_entries.is_empty() {
+                true => None,
+                false => Some(LwwDelta { entries: cache_entries }),
+            },
+            rate_limit_deltas: rl_deltas,
+        };
+        match bincode::serde::encode_to_vec(&mini, bincode::config::standard()) {
+            Ok(bytes) if bytes.len() <= crate::transport::MAX_FRAME_SIZE => return vec![bytes],
+            _ => {
+                tracing::error!("irreducible delta entry exceeds max frame size, dropping");
+                return vec![];
+            }
+        }
+    }
+
+    let mid_cache = cache_entries.len() / 2;
+    let mid_rl = rl_deltas.len() / 2;
+
+    let mut left_cache = cache_entries;
+    let right_cache = left_cache.split_off(mid_cache);
+    let mut left_rl = rl_deltas;
+    let right_rl = left_rl.split_off(mid_rl);
+
+    let make_sub = |entries: Vec<_>, rls| CrdtDelta {
+        version,
+        source_node,
+        cache_delta: match entries.is_empty() {
+            true => None,
+            false => Some(LwwDelta { entries }),
+        },
+        rate_limit_deltas: rls,
+    };
+
+    let left = make_sub(left_cache, left_rl);
+    let right = make_sub(right_cache, right_rl);
+
+    let mut result = chunk_and_serialize(&left);
+    result.extend(chunk_and_serialize(&right));
+    result
 }
