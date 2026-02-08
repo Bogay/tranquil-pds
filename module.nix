@@ -1,4 +1,4 @@
-{
+self: {
   config,
   lib,
   pkgs,
@@ -8,18 +8,19 @@
 
   optionalStr = lib.types.nullOr lib.types.str;
   optionalInt = lib.types.nullOr lib.types.int;
-  optionalBool = lib.types.nullOr lib.types.bool;
   optionalPath = lib.types.nullOr lib.types.str;
-  optionalPort = lib.types.nullOr lib.types.port;
 
   filterNulls = lib.filterAttrs (_: v: v != null);
 
   boolToStr = b:
-    if b == true
+    if b
     then "true"
-    else if b == false
-    then "false"
-    else null;
+    else "false";
+
+  backendUrl = "http://127.0.0.1:${toString cfg.settings.server.port}";
+
+  useACME = cfg.nginx.enableACME && cfg.nginx.useACMEHost == null;
+  hasSSL = useACME || cfg.nginx.useACMEHost != null;
 
   settingsToEnv = settings: let
     raw = {
@@ -38,7 +39,7 @@
       AWS_REGION = settings.storage.awsRegion;
       S3_BUCKET = settings.storage.s3Bucket;
 
-      BACKUP_ENABLED = boolToStr settings.backup.enabled;
+      BACKUP_ENABLED = boolToStr settings.backup.enable;
       BACKUP_STORAGE_BACKEND = settings.backup.backend;
       BACKUP_STORAGE_PATH = settings.backup.path;
       BACKUP_S3_BUCKET = settings.backup.s3Bucket;
@@ -94,25 +95,25 @@
       PDS_AGE_ASSURANCE_OVERRIDE = boolToStr settings.misc.ageAssuranceOverride;
       ALLOW_HTTP_PROXY = boolToStr settings.misc.allowHttpProxy;
 
-      SSO_GITHUB_ENABLED = boolToStr settings.sso.github.enabled;
+      SSO_GITHUB_ENABLED = boolToStr settings.sso.github.enable;
       SSO_GITHUB_CLIENT_ID = settings.sso.github.clientId;
 
-      SSO_DISCORD_ENABLED = boolToStr settings.sso.discord.enabled;
+      SSO_DISCORD_ENABLED = boolToStr settings.sso.discord.enable;
       SSO_DISCORD_CLIENT_ID = settings.sso.discord.clientId;
 
-      SSO_GOOGLE_ENABLED = boolToStr settings.sso.google.enabled;
+      SSO_GOOGLE_ENABLED = boolToStr settings.sso.google.enable;
       SSO_GOOGLE_CLIENT_ID = settings.sso.google.clientId;
 
-      SSO_GITLAB_ENABLED = boolToStr settings.sso.gitlab.enabled;
+      SSO_GITLAB_ENABLED = boolToStr settings.sso.gitlab.enable;
       SSO_GITLAB_CLIENT_ID = settings.sso.gitlab.clientId;
       SSO_GITLAB_ISSUER = settings.sso.gitlab.issuer;
 
-      SSO_OIDC_ENABLED = boolToStr settings.sso.oidc.enabled;
+      SSO_OIDC_ENABLED = boolToStr settings.sso.oidc.enable;
       SSO_OIDC_CLIENT_ID = settings.sso.oidc.clientId;
       SSO_OIDC_ISSUER = settings.sso.oidc.issuer;
       SSO_OIDC_NAME = settings.sso.oidc.name;
 
-      SSO_APPLE_ENABLED = boolToStr settings.sso.apple.enabled;
+      SSO_APPLE_ENABLED = boolToStr settings.sso.apple.enable;
       SSO_APPLE_CLIENT_ID = settings.sso.apple.clientId;
       SSO_APPLE_TEAM_ID = settings.sso.apple.teamId;
       SSO_APPLE_KEY_ID = settings.sso.apple.keyId;
@@ -123,7 +124,12 @@ in {
   options.services.tranquil-pds = {
     enable = lib.mkEnableOption "tranquil-pds AT Protocol personal data server";
 
-    package = lib.mkPackageOption pkgs "tranquil-pds" {};
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-pds;
+      defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.tranquil-pds";
+      description = "The tranquil-pds package to use";
+    };
 
     user = lib.mkOption {
       type = lib.types.str;
@@ -155,6 +161,47 @@ in {
       '';
     };
 
+    database.createLocally = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Create the postgres database and user on the local host.
+      '';
+    };
+
+    frontend.package = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.tranquil-frontend;
+      defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.tranquil-frontend";
+      description = "Frontend package to serve via nginx (set null to disable frontend)";
+    };
+
+    nginx = {
+      enable = lib.mkEnableOption "nginx reverse proxy for tranquil-pds";
+
+      enableACME = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable ACME for the pds domain";
+      };
+
+      useACMEHost = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          Use a pre-configured ACME certificate instead of generating one.
+          Set this to the cert name from security.acme.certs for wildcard setups.
+          REMEMBER: Handle subdomains (*.pds.example.com) require a wildcard cert via DNS-01.
+        '';
+      };
+
+      openFirewall = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Open ports 80 and 443 in the firewall";
+      };
+    };
+
     settings = {
       server = {
         host = lib.mkOption {
@@ -182,20 +229,20 @@ in {
         };
 
         maxConnections = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 100;
           description = "Maximum database connections";
         };
 
         minConnections = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 10;
           description = "Minimum database connections";
         };
 
         acquireTimeoutSecs = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 10;
           description = "Connection acquire timeout in seconds";
         };
       };
@@ -208,8 +255,9 @@ in {
         };
 
         blobPath = lib.mkOption {
-          type = optionalPath;
-          default = null;
+          type = lib.types.str;
+          default = "${cfg.dataDir}/blobs";
+          defaultText = lib.literalExpression ''"''${cfg.dataDir}/blobs"'';
           description = "Path for filesystem blob storage";
         };
 
@@ -233,11 +281,7 @@ in {
       };
 
       backup = {
-        enabled = lib.mkOption {
-          type = optionalBool;
-          default = null;
-          description = "Enable automatic repo backups";
-        };
+        enable = lib.mkEnableOption "automatic repo backups";
 
         backend = lib.mkOption {
           type = lib.types.enum ["filesystem" "s3"];
@@ -246,8 +290,9 @@ in {
         };
 
         path = lib.mkOption {
-          type = optionalPath;
-          default = null;
+          type = lib.types.str;
+          default = "${cfg.dataDir}/backups";
+          defaultText = lib.literalExpression ''"''${cfg.dataDir}/backups"'';
           description = "Path for filesystem backup storage";
         };
 
@@ -258,14 +303,14 @@ in {
         };
 
         retentionCount = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 7;
           description = "Number of backups to retain";
         };
 
         intervalSecs = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 86400;
           description = "Backup interval in seconds";
         };
       };
@@ -280,28 +325,28 @@ in {
 
       security = {
         allowInsecureSecrets = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = false;
           description = "Allow default/weak secrets (development only, NEVER in production ofc)";
         };
       };
 
       plc = {
         directoryUrl = lib.mkOption {
-          type = optionalStr;
-          default = null;
+          type = lib.types.str;
+          default = "https://plc.directory";
           description = "PLC directory URL";
         };
 
         timeoutSecs = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 10;
           description = "PLC request timeout in seconds";
         };
 
         connectTimeoutSecs = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 5;
           description = "PLC connection timeout in seconds";
         };
 
@@ -314,8 +359,8 @@ in {
 
       did = {
         cacheTtlSecs = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 300;
           description = "DID document cache TTL in seconds";
         };
       };
@@ -330,8 +375,8 @@ in {
 
       firehose = {
         bufferSize = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 10000;
           description = "Firehose broadcast channel buffer size";
         };
 
@@ -344,14 +389,14 @@ in {
 
       notifications = {
         batchSize = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 100;
           description = "Notification queue batch size";
         };
 
         pollIntervalMs = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 1000;
           description = "Notification queue poll interval in ms";
         };
 
@@ -388,42 +433,42 @@ in {
 
       limits = {
         maxBlobSize = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 10737418240;
           description = "Maximum blob size in bytes";
         };
       };
 
       import = {
         accepting = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = true;
           description = "Accept repository imports";
         };
 
         maxSize = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 1073741824;
           description = "Maximum import size in bytes";
         };
 
         maxBlocks = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 500000;
           description = "Maximum blocks per import";
         };
 
         skipVerification = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = false;
           description = "Skip verification during import (testing only)";
         };
       };
 
       registration = {
         inviteCodeRequired = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = false;
           description = "Require invite codes for registration";
         };
 
@@ -434,8 +479,8 @@ in {
         };
 
         enableSelfHostedDidWeb = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = true;
           description = "Enable self-hosted did:web identities";
         };
       };
@@ -462,16 +507,16 @@ in {
 
       rateLimiting = {
         disable = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = false;
           description = "Disable rate limiting (testing only, NEVER in production you naughty!)";
         };
       };
 
       scheduling = {
         deleteCheckIntervalSecs = lib.mkOption {
-          type = optionalInt;
-          default = null;
+          type = lib.types.int;
+          default = 3600;
           description = "Scheduled deletion check interval in seconds";
         };
       };
@@ -492,23 +537,23 @@ in {
 
       misc = {
         ageAssuranceOverride = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = false;
           description = "Override age assurance checks";
         };
 
         allowHttpProxy = lib.mkOption {
-          type = optionalBool;
-          default = null;
+          type = lib.types.bool;
+          default = false;
           description = "Allow HTTP for proxy requests (development only)";
         };
       };
 
       sso = {
         github = {
-          enabled = lib.mkOption {
-            type = optionalBool;
-            default = null;
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
             description = "Enable GitHub SSO";
           };
 
@@ -520,9 +565,9 @@ in {
         };
 
         discord = {
-          enabled = lib.mkOption {
-            type = optionalBool;
-            default = null;
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
             description = "Enable Discord SSO";
           };
 
@@ -534,9 +579,9 @@ in {
         };
 
         google = {
-          enabled = lib.mkOption {
-            type = optionalBool;
-            default = null;
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
             description = "Enable Google SSO";
           };
 
@@ -548,9 +593,9 @@ in {
         };
 
         gitlab = {
-          enabled = lib.mkOption {
-            type = optionalBool;
-            default = null;
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
             description = "Enable GitLab SSO";
           };
 
@@ -568,9 +613,9 @@ in {
         };
 
         oidc = {
-          enabled = lib.mkOption {
-            type = optionalBool;
-            default = null;
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
             description = "Enable generic OIDC SSO";
           };
 
@@ -594,9 +639,9 @@ in {
         };
 
         apple = {
-          enabled = lib.mkOption {
-            type = optionalBool;
-            default = null;
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
             description = "Enable Apple Sign-in";
           };
 
@@ -622,30 +667,151 @@ in {
     };
   };
 
-  config = let
-    effectiveBlobPath =
-      if cfg.settings.storage.blobPath != null
-      then cfg.settings.storage.blobPath
-      else "${cfg.dataDir}/blobs";
-    effectiveBackupPath =
-      if cfg.settings.backup.path != null
-      then cfg.settings.backup.path
-      else "${cfg.dataDir}/backups";
-    envVars =
-      (settingsToEnv cfg.settings)
-      // {
-        BLOB_STORAGE_PATH = effectiveBlobPath;
-        BACKUP_STORAGE_PATH = effectiveBackupPath;
-      };
-  in
-    lib.mkIf cfg.enable {
-      assertions = [
-        {
-          assertion = config.systemd.enable or true;
-          message = "services.tranquil-pds requires systemd";
-        }
-      ];
+  config = lib.mkIf cfg.enable (lib.mkMerge [
+    (lib.mkIf (cfg.settings.notifications.mailFromAddress != null) {
+      services.tranquil-pds.settings.notifications.sendmailPath =
+        lib.mkDefault "/run/wrappers/bin/sendmail";
+    })
 
+    (lib.mkIf (cfg.settings.notifications.signalSenderNumber != null) {
+      services.tranquil-pds.settings.notifications.signalCliPath =
+        lib.mkDefault (lib.getExe pkgs.signal-cli);
+    })
+
+    (lib.mkIf cfg.database.createLocally {
+      services.postgresql = {
+        enable = true;
+        ensureDatabases = [cfg.user];
+        ensureUsers = [
+          {
+            name = cfg.user;
+            ensureDBOwnership = true;
+          }
+        ];
+      };
+
+      services.tranquil-pds.settings.database.url =
+        lib.mkDefault "postgresql:///${cfg.user}?host=/run/postgresql";
+
+      systemd.services.tranquil-pds = {
+        requires = ["postgresql.service"];
+        after = ["postgresql.service"];
+      };
+    })
+
+    (lib.mkIf cfg.nginx.enable (lib.mkMerge [
+      {
+        services.nginx = {
+          enable = true;
+          recommendedProxySettings = lib.mkDefault true;
+          recommendedTlsSettings = lib.mkDefault true;
+          recommendedGzipSettings = lib.mkDefault true;
+          recommendedOptimisation = lib.mkDefault true;
+
+          virtualHosts.${cfg.settings.server.pdsHostname} = {
+            serverAliases = ["*.${cfg.settings.server.pdsHostname}"];
+            forceSSL = hasSSL;
+            enableACME = useACME;
+            useACMEHost = cfg.nginx.useACMEHost;
+
+            root = lib.mkIf (cfg.frontend.package != null) "${cfg.frontend.package}";
+
+            extraConfig = "client_max_body_size ${toString cfg.settings.limits.maxBlobSize};";
+
+            locations = let
+              proxyLocations = {
+                "/xrpc/" = {
+                  proxyPass = backendUrl;
+                  proxyWebsockets = true;
+                  extraConfig = ''
+                    proxy_read_timeout 86400;
+                    proxy_send_timeout 86400;
+                    proxy_buffering off;
+                    proxy_request_buffering off;
+                  '';
+                };
+
+                "/oauth/" = {
+                  proxyPass = backendUrl;
+                  extraConfig = ''
+                    proxy_read_timeout 300;
+                    proxy_send_timeout 300;
+                  '';
+                };
+
+                "/.well-known/" = {
+                  proxyPass = backendUrl;
+                };
+
+                "/webhook/" = {
+                  proxyPass = backendUrl;
+                };
+
+                "= /metrics" = {
+                  proxyPass = backendUrl;
+                };
+
+                "= /health" = {
+                  proxyPass = backendUrl;
+                };
+
+                "= /robots.txt" = {
+                  proxyPass = backendUrl;
+                };
+
+                "= /logo" = {
+                  proxyPass = backendUrl;
+                };
+
+                "~ ^/u/[^/]+/did\\.json$" = {
+                  proxyPass = backendUrl;
+                };
+              };
+
+              frontendLocations = lib.optionalAttrs (cfg.frontend.package != null) {
+                "= /oauth/client-metadata.json" = {
+                  root = "${cfg.frontend.package}";
+                  extraConfig = ''
+                    default_type application/json;
+                    sub_filter_once off;
+                    sub_filter_types application/json;
+                    sub_filter '__PDS_HOSTNAME__' $host;
+                  '';
+                };
+
+                "/assets/" = {
+                  extraConfig = ''
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                  '';
+                  tryFiles = "$uri =404";
+                };
+
+                "/app/" = {
+                  tryFiles = "$uri $uri/ /index.html";
+                };
+
+                "= /" = {
+                  tryFiles = "/homepage.html /index.html";
+                };
+
+                "/" = {
+                  tryFiles = "$uri $uri/ /index.html";
+                  priority = 9999;
+                };
+              };
+            in
+              proxyLocations // frontendLocations;
+          };
+        };
+      }
+
+      (lib.mkIf cfg.nginx.openFirewall {
+        networking.firewall.allowedTCPPorts = [80 443];
+      })
+    ]))
+
+    {
       users.users.${cfg.user} = {
         isSystemUser = true;
         inherit (cfg) group;
@@ -656,8 +822,8 @@ in {
 
       systemd.tmpfiles.rules = [
         "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} -"
-        "d ${effectiveBlobPath} 0750 ${cfg.user} ${cfg.group} -"
-        "d ${effectiveBackupPath} 0750 ${cfg.user} ${cfg.group} -"
+        "d ${cfg.settings.storage.blobPath} 0750 ${cfg.user} ${cfg.group} -"
+        "d ${cfg.settings.backup.path} 0750 ${cfg.user} ${cfg.group} -"
       ];
 
       systemd.services.tranquil-pds = {
@@ -666,7 +832,7 @@ in {
         wants = ["network.target"];
         wantedBy = ["multi-user.target"];
 
-        environment = envVars;
+        environment = settingsToEnv cfg.settings;
 
         serviceConfig = {
           Type = "exec";
@@ -698,10 +864,11 @@ in {
           RemoveIPC = true;
 
           ReadWritePaths = [
-            effectiveBlobPath
-            effectiveBackupPath
+            cfg.settings.storage.blobPath
+            cfg.settings.backup.path
           ];
         };
       };
-    };
+    }
+  ]);
 }

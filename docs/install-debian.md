@@ -179,6 +179,14 @@ server {
         proxy_request_buffering off;
     }
 
+    location = /oauth/client-metadata.json {
+        root /var/www/tranquil-pds;
+        default_type application/json;
+        sub_filter_once off;
+        sub_filter_types application/json;
+        sub_filter '__PDS_HOSTNAME__' $host;
+    }
+
     location /oauth/ {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
