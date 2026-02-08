@@ -1,13 +1,13 @@
 pub mod delta;
+pub mod g_counter;
 pub mod hlc;
 pub mod lww_map;
-pub mod g_counter;
 
 use crate::config::fnv1a;
 use delta::CrdtDelta;
+use g_counter::RateLimitStore;
 use hlc::{Hlc, HlcTimestamp};
 use lww_map::{LwwDelta, LwwMap};
-use g_counter::RateLimitStore;
 use parking_lot::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -45,9 +45,8 @@ impl ShardedCrdtStore {
         let shards: Vec<RwLock<CrdtShard>> = (0..SHARD_COUNT)
             .map(|_| RwLock::new(CrdtShard::new(node_id)))
             .collect();
-        let promotions: Vec<Mutex<Vec<String>>> = (0..SHARD_COUNT)
-            .map(|_| Mutex::new(Vec::new()))
-            .collect();
+        let promotions: Vec<Mutex<Vec<String>>> =
+            (0..SHARD_COUNT).map(|_| Mutex::new(Vec::new())).collect();
         Self {
             hlc: Mutex::new(Hlc::new(node_id)),
             shards: shards.into_boxed_slice(),
@@ -136,7 +135,9 @@ impl ShardedCrdtStore {
 
         let cache_delta = match cache_entries.is_empty() {
             true => None,
-            false => Some(LwwDelta { entries: cache_entries }),
+            false => Some(LwwDelta {
+                entries: cache_entries,
+            }),
         };
 
         CrdtDelta {
@@ -159,9 +160,8 @@ impl ShardedCrdtStore {
             })
             .unwrap_or_default();
 
-        let mut max_ts_per_shard: Vec<Option<HlcTimestamp>> = (0..self.shards.len())
-            .map(|_| None)
-            .collect();
+        let mut max_ts_per_shard: Vec<Option<HlcTimestamp>> =
+            (0..self.shards.len()).map(|_| None).collect();
 
         cache_entries_by_shard.iter().for_each(|&(shard_idx, ts)| {
             let slot = &mut max_ts_per_shard[shard_idx];
@@ -177,37 +177,39 @@ impl ShardedCrdtStore {
             .map(|d| (d.key.as_str(), &d.counter))
             .collect();
 
-        let mut shard_rl_keys: Vec<Vec<&str>> = (0..self.shards.len())
-            .map(|_| Vec::new())
-            .collect();
+        let mut shard_rl_keys: Vec<Vec<&str>> =
+            (0..self.shards.len()).map(|_| Vec::new()).collect();
         rl_index.keys().for_each(|&key| {
             shard_rl_keys[self.shard_for(key)].push(key);
         });
 
-        self.shards.iter().enumerate().for_each(|(idx, shard_lock)| {
-            let has_cache_update = max_ts_per_shard[idx].is_some();
-            let has_rl_keys = !shard_rl_keys[idx].is_empty();
-            if !has_cache_update && !has_rl_keys {
-                return;
-            }
-            let mut shard = shard_lock.write();
-            if let Some(max_ts) = max_ts_per_shard[idx] {
-                shard.last_broadcast_ts = max_ts;
-            }
-            shard_rl_keys[idx].iter().for_each(|&key| {
-                let still_matches = shard
-                    .rate_limits
-                    .peek_dirty_counter(key)
-                    .zip(rl_index.get(key))
-                    .is_some_and(|(current, committed)| {
-                        current.window_start_ms == committed.window_start_ms
-                            && current.total() == committed.total()
-                    });
-                if still_matches {
-                    shard.rate_limits.clear_single_dirty(key);
+        self.shards
+            .iter()
+            .enumerate()
+            .for_each(|(idx, shard_lock)| {
+                let has_cache_update = max_ts_per_shard[idx].is_some();
+                let has_rl_keys = !shard_rl_keys[idx].is_empty();
+                if !has_cache_update && !has_rl_keys {
+                    return;
                 }
+                let mut shard = shard_lock.write();
+                if let Some(max_ts) = max_ts_per_shard[idx] {
+                    shard.last_broadcast_ts = max_ts;
+                }
+                shard_rl_keys[idx].iter().for_each(|&key| {
+                    let still_matches = shard
+                        .rate_limits
+                        .peek_dirty_counter(key)
+                        .zip(rl_index.get(key))
+                        .is_some_and(|(current, committed)| {
+                            current.window_start_ms == committed.window_start_ms
+                                && current.total() == committed.total()
+                        });
+                    if still_matches {
+                        shard.rate_limits.clear_single_dirty(key);
+                    }
+                });
             });
-        });
     }
 
     pub fn merge_delta(&self, delta: &CrdtDelta) -> bool {
@@ -219,10 +221,10 @@ impl ShardedCrdtStore {
             return false;
         }
 
-        if let Some(ref cache_delta) = delta.cache_delta {
-            if let Some(max_ts) = cache_delta.entries.iter().map(|(_, e)| e.timestamp).max() {
-                let _ = self.hlc.lock().receive(max_ts);
-            }
+        if let Some(ref cache_delta) = delta.cache_delta
+            && let Some(max_ts) = cache_delta.entries.iter().map(|(_, e)| e.timestamp).max()
+        {
+            let _ = self.hlc.lock().receive(max_ts);
         }
 
         let mut changed = false;
@@ -235,17 +237,20 @@ impl ShardedCrdtStore {
                 entries_by_shard[self.shard_for(key)].push((key.clone(), entry.clone()));
             });
 
-            entries_by_shard.into_iter().enumerate().for_each(|(idx, entries)| {
-                if entries.is_empty() {
-                    return;
-                }
-                let mut shard = self.shards[idx].write();
-                entries.into_iter().for_each(|(key, entry)| {
-                    if shard.cache.merge_entry(key, entry) {
-                        changed = true;
+            entries_by_shard
+                .into_iter()
+                .enumerate()
+                .for_each(|(idx, entries)| {
+                    if entries.is_empty() {
+                        return;
                     }
+                    let mut shard = self.shards[idx].write();
+                    entries.into_iter().for_each(|(key, entry)| {
+                        if shard.cache.merge_entry(key, entry) {
+                            changed = true;
+                        }
+                    });
                 });
-            });
         }
 
         if !delta.rate_limit_deltas.is_empty() {
@@ -256,17 +261,20 @@ impl ShardedCrdtStore {
                 rl_by_shard[self.shard_for(&rd.key)].push((rd.key.clone(), &rd.counter));
             });
 
-            rl_by_shard.into_iter().enumerate().for_each(|(idx, entries)| {
-                if entries.is_empty() {
-                    return;
-                }
-                let mut shard = self.shards[idx].write();
-                entries.into_iter().for_each(|(key, counter)| {
-                    if shard.rate_limits.merge_counter(key, counter) {
-                        changed = true;
+            rl_by_shard
+                .into_iter()
+                .enumerate()
+                .for_each(|(idx, entries)| {
+                    if entries.is_empty() {
+                        return;
                     }
+                    let mut shard = self.shards[idx].write();
+                    entries.into_iter().for_each(|(key, counter)| {
+                        if shard.rate_limits.merge_counter(key, counter) {
+                            changed = true;
+                        }
+                    });
                 });
-            });
         }
 
         changed
@@ -274,14 +282,17 @@ impl ShardedCrdtStore {
 
     pub fn run_maintenance(&self) {
         let now = Self::wall_ms_now();
-        self.shards.iter().enumerate().for_each(|(idx, shard_lock)| {
-            let pending: Vec<String> = self.promotions[idx].lock().drain(..).collect();
-            let mut shard = shard_lock.write();
-            pending.iter().for_each(|key| shard.cache.touch(key));
-            shard.cache.gc_tombstones(now);
-            shard.cache.gc_expired(now);
-            shard.rate_limits.gc_expired(now);
-        });
+        self.shards
+            .iter()
+            .enumerate()
+            .for_each(|(idx, shard_lock)| {
+                let pending: Vec<String> = self.promotions[idx].lock().drain(..).collect();
+                let mut shard = shard_lock.write();
+                pending.iter().for_each(|key| shard.cache.touch(key));
+                shard.cache.gc_tombstones(now);
+                shard.cache.gc_expired(now);
+                shard.rate_limits.gc_expired(now);
+            });
     }
 
     pub fn peek_full_state(&self) -> CrdtDelta {
@@ -297,7 +308,9 @@ impl ShardedCrdtStore {
 
         let cache_delta = match cache_entries.is_empty() {
             true => None,
-            false => Some(LwwDelta { entries: cache_entries }),
+            false => Some(LwwDelta {
+                entries: cache_entries,
+            }),
         };
 
         CrdtDelta {
@@ -327,7 +340,10 @@ impl ShardedCrdtStore {
             .iter()
             .map(|s| {
                 let shard = s.read();
-                shard.cache.estimated_bytes().saturating_add(shard.rate_limits.estimated_bytes())
+                shard
+                    .cache
+                    .estimated_bytes()
+                    .saturating_add(shard.rate_limits.estimated_bytes())
             })
             .fold(0usize, usize::saturating_add)
     }
@@ -335,7 +351,7 @@ impl ShardedCrdtStore {
     pub fn evict_lru_round_robin(&self, start_shard: usize) -> Option<(usize, usize)> {
         (0..self.shards.len()).find_map(|offset| {
             let idx = (start_shard + offset) & self.shard_mask;
-            let has_entries = self.shards[idx].read().cache.len() > 0;
+            let has_entries = !self.shards[idx].read().cache.is_empty();
             match has_entries {
                 true => {
                     let mut shard = self.shards[idx].write();

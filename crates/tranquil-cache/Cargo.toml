@@ -4,12 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+valkey = ["dep:redis"]
+
 [dependencies]
 tranquil-infra = { workspace = true }
 tranquil-ripple = { workspace = true }
 
 async-trait = { workspace = true }
 base64 = { workspace = true }
-redis = { workspace = true }
+redis = { workspace = true, optional = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

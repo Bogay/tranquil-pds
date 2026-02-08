@@ -168,7 +168,10 @@ async fn two_node_lww_conflict_resolution() {
     let val_a = cache_a.get(&key).await.expect("A should have the key");
     let val_b = cache_b.get(&key).await.expect("B should have the key");
 
-    assert_eq!(val_a, val_b, "both nodes must agree on the same value after LWW resolution");
+    assert_eq!(
+        val_a, val_b,
+        "both nodes must agree on the same value after LWW resolution"
+    );
 
     shutdown.cancel();
 }
@@ -240,8 +243,14 @@ async fn two_node_ttl_expiration() {
 
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    assert!(cache_a.get(&key).await.is_none(), "A should have expired the key");
-    assert!(cache_b.get(&key).await.is_none(), "B should have expired the key");
+    assert!(
+        cache_a.get(&key).await.is_none(),
+        "A should have expired the key"
+    );
+    assert!(
+        cache_b.get(&key).await.is_none(),
+        "B should have expired the key"
+    );
 
     shutdown.cancel();
 }
@@ -715,50 +724,49 @@ async fn two_node_stress_concurrent_load() {
     let shutdown = CancellationToken::new();
     let ((cache_a, rl_a), (cache_b, rl_b)) = spawn_pair(shutdown.clone()).await;
 
-    let tasks: Vec<tokio::task::JoinHandle<()>> = (0u32..8).map(|task_id| {
-        let cache = match task_id < 4 {
-            true => cache_a.clone(),
-            false => cache_b.clone(),
-        };
-        let rl = match task_id < 4 {
-            true => rl_a.clone(),
-            false => rl_b.clone(),
-        };
-        tokio::spawn(async move {
-            let value = vec![0xABu8; 1024];
-            futures::future::join_all((0u32..500).map(|op| {
-                let cache = cache.clone();
-                let rl = rl.clone();
-                let value = value.clone();
-                async move {
-                    let key_idx = op % 100;
-                    let key = format!("stress-{task_id}-{key_idx}");
-                    match op % 4 {
-                        0 | 1 => {
-                            cache
-                                .set_bytes(&key, &value, Duration::from_secs(120))
-                                .await
-                                .expect("set_bytes failed");
-                        }
-                        2 => {
-                            let _ = cache.get(&key).await;
-                        }
-                        _ => {
-                            let _ = rl.check_rate_limit(&key, 1000, 60_000).await;
+    let tasks: Vec<tokio::task::JoinHandle<()>> = (0u32..8)
+        .map(|task_id| {
+            let cache = match task_id < 4 {
+                true => cache_a.clone(),
+                false => cache_b.clone(),
+            };
+            let rl = match task_id < 4 {
+                true => rl_a.clone(),
+                false => rl_b.clone(),
+            };
+            tokio::spawn(async move {
+                let value = vec![0xABu8; 1024];
+                futures::future::join_all((0u32..500).map(|op| {
+                    let cache = cache.clone();
+                    let rl = rl.clone();
+                    let value = value.clone();
+                    async move {
+                        let key_idx = op % 100;
+                        let key = format!("stress-{task_id}-{key_idx}");
+                        match op % 4 {
+                            0 | 1 => {
+                                cache
+                                    .set_bytes(&key, &value, Duration::from_secs(120))
+                                    .await
+                                    .expect("set_bytes failed");
+                            }
+                            2 => {
+                                let _ = cache.get(&key).await;
+                            }
+                            _ => {
+                                let _ = rl.check_rate_limit(&key, 1000, 60_000).await;
+                            }
                         }
                     }
-                }
-            }))
-            .await;
+                }))
+                .await;
+            })
         })
-    }).collect();
+        .collect();
 
-    let results = tokio::time::timeout(
-        Duration::from_secs(30),
-        futures::future::join_all(tasks),
-    )
-    .await
-    .expect("stress test timed out after 30s");
+    let results = tokio::time::timeout(Duration::from_secs(30), futures::future::join_all(tasks))
+        .await
+        .expect("stress test timed out after 30s");
 
     results.into_iter().enumerate().for_each(|(i, r)| {
         r.unwrap_or_else(|e| panic!("task {i} panicked: {e}"));

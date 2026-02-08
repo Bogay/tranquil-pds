@@ -1,72 +1,135 @@
 pub use tranquil_infra::{Cache, CacheError, DistributedRateLimiter};
 
 use async_trait::async_trait;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::sync::Arc;
 use std::time::Duration;
 
-#[derive(Clone)]
-pub struct ValkeyCache {
-    conn: redis::aio::ConnectionManager,
+#[cfg(feature = "valkey")]
+mod valkey {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    #[derive(Clone)]
+    pub struct ValkeyCache {
+        conn: redis::aio::ConnectionManager,
+    }
+
+    impl ValkeyCache {
+        pub async fn new(url: &str) -> Result<Self, CacheError> {
+            let client =
+                redis::Client::open(url).map_err(|e| CacheError::Connection(e.to_string()))?;
+            let manager = client
+                .get_connection_manager()
+                .await
+                .map_err(|e| CacheError::Connection(e.to_string()))?;
+            Ok(Self { conn: manager })
+        }
+
+        pub fn connection(&self) -> redis::aio::ConnectionManager {
+            self.conn.clone()
+        }
+    }
+
+    #[async_trait]
+    impl Cache for ValkeyCache {
+        async fn get(&self, key: &str) -> Option<String> {
+            let mut conn = self.conn.clone();
+            redis::cmd("GET")
+                .arg(key)
+                .query_async::<Option<String>>(&mut conn)
+                .await
+                .ok()
+                .flatten()
+        }
+
+        async fn set(&self, key: &str, value: &str, ttl: Duration) -> Result<(), CacheError> {
+            let mut conn = self.conn.clone();
+            redis::cmd("SET")
+                .arg(key)
+                .arg(value)
+                .arg("PX")
+                .arg(ttl.as_millis().min(i64::MAX as u128) as i64)
+                .query_async::<()>(&mut conn)
+                .await
+                .map_err(|e| CacheError::Connection(e.to_string()))
+        }
+
+        async fn delete(&self, key: &str) -> Result<(), CacheError> {
+            let mut conn = self.conn.clone();
+            redis::cmd("DEL")
+                .arg(key)
+                .query_async::<()>(&mut conn)
+                .await
+                .map_err(|e| CacheError::Connection(e.to_string()))
+        }
+
+        async fn get_bytes(&self, key: &str) -> Option<Vec<u8>> {
+            self.get(key).await.and_then(|s| BASE64.decode(&s).ok())
+        }
+
+        async fn set_bytes(
+            &self,
+            key: &str,
+            value: &[u8],
+            ttl: Duration,
+        ) -> Result<(), CacheError> {
+            let encoded = BASE64.encode(value);
+            self.set(key, &encoded, ttl).await
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct RedisRateLimiter {
+        conn: redis::aio::ConnectionManager,
+    }
+
+    impl RedisRateLimiter {
+        pub fn new(conn: redis::aio::ConnectionManager) -> Self {
+            Self { conn }
+        }
+    }
+
+    #[async_trait]
+    impl DistributedRateLimiter for RedisRateLimiter {
+        async fn check_rate_limit(&self, key: &str, limit: u32, window_ms: u64) -> bool {
+            let mut conn = self.conn.clone();
+            let full_key = format!("rl:{}", key);
+            let window_secs = window_ms.div_ceil(1000).max(1) as i64;
+            let result: Result<i64, _> = redis::Script::new(
+                r"local c = redis.call('INCR', KEYS[1])
+if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+if redis.call('TTL', KEYS[1]) == -1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return c",
+            )
+            .key(&full_key)
+            .arg(window_secs)
+            .invoke_async(&mut conn)
+            .await;
+            match result {
+                Ok(count) => count <= limit as i64,
+                Err(e) => {
+                    tracing::warn!(error = %e, "redis rate limit script failed, allowing request");
+                    true
+                }
+            }
+        }
+
+        async fn peek_rate_limit_count(&self, key: &str, _window_ms: u64) -> u64 {
+            let mut conn = self.conn.clone();
+            let full_key = format!("rl:{}", key);
+            redis::cmd("GET")
+                .arg(&full_key)
+                .query_async::<Option<u64>>(&mut conn)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0)
+        }
+    }
 }
 
-impl ValkeyCache {
-    pub async fn new(url: &str) -> Result<Self, CacheError> {
-        let client = redis::Client::open(url).map_err(|e| CacheError::Connection(e.to_string()))?;
-        let manager = client
-            .get_connection_manager()
-            .await
-            .map_err(|e| CacheError::Connection(e.to_string()))?;
-        Ok(Self { conn: manager })
-    }
-
-    pub fn connection(&self) -> redis::aio::ConnectionManager {
-        self.conn.clone()
-    }
-}
-
-#[async_trait]
-impl Cache for ValkeyCache {
-    async fn get(&self, key: &str) -> Option<String> {
-        let mut conn = self.conn.clone();
-        redis::cmd("GET")
-            .arg(key)
-            .query_async::<Option<String>>(&mut conn)
-            .await
-            .ok()
-            .flatten()
-    }
-
-    async fn set(&self, key: &str, value: &str, ttl: Duration) -> Result<(), CacheError> {
-        let mut conn = self.conn.clone();
-        redis::cmd("SET")
-            .arg(key)
-            .arg(value)
-            .arg("PX")
-            .arg(ttl.as_millis().min(i64::MAX as u128) as i64)
-            .query_async::<()>(&mut conn)
-            .await
-            .map_err(|e| CacheError::Connection(e.to_string()))
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), CacheError> {
-        let mut conn = self.conn.clone();
-        redis::cmd("DEL")
-            .arg(key)
-            .query_async::<()>(&mut conn)
-            .await
-            .map_err(|e| CacheError::Connection(e.to_string()))
-    }
-
-    async fn get_bytes(&self, key: &str) -> Option<Vec<u8>> {
-        self.get(key).await.and_then(|s| BASE64.decode(&s).ok())
-    }
-
-    async fn set_bytes(&self, key: &str, value: &[u8], ttl: Duration) -> Result<(), CacheError> {
-        let encoded = BASE64.encode(value);
-        self.set(key, &encoded, ttl).await
-    }
-}
+#[cfg(feature = "valkey")]
+pub use valkey::{RedisRateLimiter, ValkeyCache};
 
 pub struct NoOpCache;
 
@@ -97,55 +160,6 @@ impl Cache for NoOpCache {
     }
 }
 
-#[derive(Clone)]
-pub struct RedisRateLimiter {
-    conn: redis::aio::ConnectionManager,
-}
-
-impl RedisRateLimiter {
-    pub fn new(conn: redis::aio::ConnectionManager) -> Self {
-        Self { conn }
-    }
-}
-
-#[async_trait]
-impl DistributedRateLimiter for RedisRateLimiter {
-    async fn check_rate_limit(&self, key: &str, limit: u32, window_ms: u64) -> bool {
-        let mut conn = self.conn.clone();
-        let full_key = format!("rl:{}", key);
-        let window_secs = window_ms.div_ceil(1000).max(1) as i64;
-        let result: Result<i64, _> = redis::Script::new(
-            r"local c = redis.call('INCR', KEYS[1])
-if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
-if redis.call('TTL', KEYS[1]) == -1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
-return c"
-        )
-        .key(&full_key)
-        .arg(window_secs)
-        .invoke_async(&mut conn)
-        .await;
-        match result {
-            Ok(count) => count <= limit as i64,
-            Err(e) => {
-                tracing::warn!(error = %e, "redis rate limit script failed, allowing request");
-                true
-            }
-        }
-    }
-
-    async fn peek_rate_limit_count(&self, key: &str, _window_ms: u64) -> u64 {
-        let mut conn = self.conn.clone();
-        let full_key = format!("rl:{}", key);
-        redis::cmd("GET")
-            .arg(&full_key)
-            .query_async::<Option<u64>>(&mut conn)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(0)
-    }
-}
-
 pub struct NoOpRateLimiter;
 
 #[async_trait]
@@ -158,6 +172,7 @@ impl DistributedRateLimiter for NoOpRateLimiter {
 pub async fn create_cache(
     shutdown: tokio_util::sync::CancellationToken,
 ) -> (Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>) {
+    #[cfg(feature = "valkey")]
     if let Ok(url) = std::env::var("VALKEY_URL") {
         match ValkeyCache::new(&url).await {
             Ok(cache) => {
@@ -169,6 +184,13 @@ pub async fn create_cache(
                 tracing::warn!("failed to connect to valkey: {e}. falling back to ripple.");
             }
         }
+    }
+
+    #[cfg(not(feature = "valkey"))]
+    if std::env::var("VALKEY_URL").is_ok() {
+        tracing::warn!(
+            "VALKEY_URL is set but binary was compiled without valkey feature. using ripple."
+        );
     }
 
     match tranquil_ripple::RippleConfig::from_env() {

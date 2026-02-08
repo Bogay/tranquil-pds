@@ -190,7 +190,11 @@ async fn test_list_repos_shows_status_field() {
     assert!(takendown_repo.is_some(), "Takendown repo should be in list");
     let repo = takendown_repo.unwrap();
     assert_eq!(repo["active"], false, "repo should be inactive: {:?}", repo);
-    assert_eq!(repo["status"], "takendown", "repo status should be takendown: {:?}", repo);
+    assert_eq!(
+        repo["status"], "takendown",
+        "repo status should be takendown: {:?}",
+        repo
+    );
 }
 
 #[tokio::test]

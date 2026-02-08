@@ -1,5 +1,5 @@
-use super::lww_map::LwwDelta;
 use super::g_counter::GCounterDelta;
+use super::lww_map::LwwDelta;
 use serde::{Deserialize, Serialize};
 
 const SCHEMA_VERSION: u8 = 1;
@@ -21,7 +21,7 @@ impl CrdtDelta {
     pub fn is_empty(&self) -> bool {
         self.cache_delta
             .as_ref()
-            .map_or(true, |d| d.entries.is_empty())
+            .is_none_or(|d| d.entries.is_empty())
             && self.rate_limit_deltas.is_empty()
     }
 

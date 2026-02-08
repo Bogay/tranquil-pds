@@ -1400,10 +1400,16 @@ async fn test_scale_many_users_social_graph() {
         .iter()
         .enumerate()
         .flat_map(|(i, (follower_did, follower_jwt))| {
-            users.iter().enumerate()
+            users
+                .iter()
+                .enumerate()
                 .filter(move |(j, _)| *j != i)
                 .map(|(_, (followee_did, _))| {
-                    (follower_did.clone(), follower_jwt.clone(), followee_did.clone())
+                    (
+                        follower_did.clone(),
+                        follower_jwt.clone(),
+                        followee_did.clone(),
+                    )
                 })
                 .collect::<Vec<_>>()
         })

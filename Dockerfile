@@ -1,13 +1,18 @@
 FROM rust:1.92-alpine AS builder
-RUN apk add --no-cache ca-certificates openssl openssl-dev openssl-libs-static pkgconfig musl-dev
+RUN apk add --no-cache ca-certificates musl-dev pkgconfig openssl-dev openssl-libs-static
 WORKDIR /app
+ARG SLIM="false"
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY .sqlx ./.sqlx
 COPY migrations ./crates/tranquil-pds/migrations
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    SQLX_OFFLINE=true cargo build --release -p tranquil-pds && \
+    if [ "$SLIM" = "true" ]; then \
+      SQLX_OFFLINE=true cargo build --release -p tranquil-pds --no-default-features; \
+    else \
+      SQLX_OFFLINE=true cargo build --release -p tranquil-pds; \
+    fi && \
     cp target/release/tranquil-pds /tmp/tranquil-pds
 
 FROM alpine:3.23

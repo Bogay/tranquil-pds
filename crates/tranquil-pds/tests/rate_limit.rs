@@ -118,6 +118,7 @@ async fn test_account_creation_rate_limiting() {
     );
 }
 
+#[cfg(feature = "valkey")]
 #[tokio::test]
 async fn test_valkey_connection() {
     if std::env::var("VALKEY_URL").is_err() {
@@ -156,6 +157,7 @@ async fn test_valkey_connection() {
         .expect("DEL failed");
 }
 
+#[cfg(feature = "valkey")]
 #[tokio::test]
 async fn test_distributed_rate_limiter_directly() {
     if std::env::var("VALKEY_URL").is_err() {

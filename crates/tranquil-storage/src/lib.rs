@@ -4,12 +4,6 @@ pub use tranquil_infra::{
 };
 
 use async_trait::async_trait;
-use aws_config::BehaviorVersion;
-use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_s3::Client;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::CompletedMultipartUpload;
-use aws_sdk_s3::types::CompletedPart;
 use bytes::Bytes;
 use futures::Stream;
 use sha2::{Digest, Sha256};
@@ -17,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
-const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
 const EXDEV: i32 = 18;
 const CID_SHARD_PREFIX_LEN: usize = 9;
 
@@ -109,359 +102,384 @@ fn map_io_not_found(key: &str) -> impl FnOnce(std::io::Error) -> StorageError + 
     }
 }
 
-pub struct S3BlobStorage {
-    client: Client,
-    bucket: String,
-}
+#[cfg(feature = "s3")]
+mod s3 {
+    use super::*;
+    use aws_config::BehaviorVersion;
+    use aws_config::meta::region::RegionProviderChain;
+    use aws_sdk_s3::Client;
+    use aws_sdk_s3::primitives::ByteStream;
+    use aws_sdk_s3::types::CompletedMultipartUpload;
+    use aws_sdk_s3::types::CompletedPart;
 
-impl S3BlobStorage {
-    pub async fn new() -> Self {
-        let bucket = std::env::var("S3_BUCKET").expect("S3_BUCKET must be set");
-        let client = create_s3_client().await;
-        Self { client, bucket }
+    const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
+
+    pub struct S3BlobStorage {
+        client: Client,
+        bucket: String,
     }
 
-    pub async fn with_bucket(bucket: String) -> Self {
-        let client = create_s3_client().await;
-        Self { client, bucket }
-    }
-}
-
-async fn create_s3_client() -> Client {
-    let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
-
-    let config = aws_config::defaults(BehaviorVersion::latest())
-        .region(region_provider)
-        .load()
-        .await;
-
-    std::env::var("S3_ENDPOINT").ok().map_or_else(
-        || Client::new(&config),
-        |endpoint| {
-            let s3_config = aws_sdk_s3::config::Builder::from(&config)
-                .endpoint_url(endpoint)
-                .force_path_style(true)
-                .build();
-            Client::from_conf(s3_config)
-        },
-    )
-}
-
-pub struct S3BackupStorage {
-    client: Client,
-    bucket: String,
-}
-
-impl S3BackupStorage {
-    pub async fn new() -> Option<Self> {
-        let bucket = std::env::var("BACKUP_S3_BUCKET").ok()?;
-        let client = create_s3_client().await;
-        Some(Self { client, bucket })
-    }
-}
-
-#[async_trait]
-impl BackupStorage for S3BackupStorage {
-    async fn put_backup(&self, did: &str, rev: &str, data: &[u8]) -> Result<String, StorageError> {
-        let key = format!("{}/{}.car", did, rev);
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .key(&key)
-            .body(ByteStream::from(Bytes::copy_from_slice(data)))
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        Ok(key)
-    }
-
-    async fn get_backup(&self, storage_key: &str) -> Result<Bytes, StorageError> {
-        let resp = self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(storage_key)
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        resp.body
-            .collect()
-            .await
-            .map(|agg| agg.into_bytes())
-            .map_err(|e| StorageError::Backend(e.to_string()))
-    }
-
-    async fn delete_backup(&self, storage_key: &str) -> Result<(), StorageError> {
-        self.client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(storage_key)
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl BlobStorage for S3BlobStorage {
-    async fn put(&self, key: &str, data: &[u8]) -> Result<(), StorageError> {
-        self.put_bytes(key, Bytes::copy_from_slice(data)).await
-    }
-
-    async fn put_bytes(&self, key: &str, data: Bytes) -> Result<(), StorageError> {
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .body(ByteStream::from(data))
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        Ok(())
-    }
-
-    async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError> {
-        self.get_bytes(key).await.map(|b| b.to_vec())
-    }
-
-    async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError> {
-        let resp = self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        resp.body
-            .collect()
-            .await
-            .map(|agg| agg.into_bytes())
-            .map_err(|e| StorageError::Backend(e.to_string()))
-    }
-
-    async fn get_head(&self, key: &str, size: usize) -> Result<Bytes, StorageError> {
-        let range = format!("bytes=0-{}", size.saturating_sub(1));
-        let resp = self
-            .client
-            .get_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .range(range)
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        resp.body
-            .collect()
-            .await
-            .map(|agg| agg.into_bytes())
-            .map_err(|e| StorageError::Backend(e.to_string()))
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        self.client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        Ok(())
-    }
-
-    async fn put_stream(
-        &self,
-        key: &str,
-        stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>,
-    ) -> Result<StreamUploadResult, StorageError> {
-        use futures::StreamExt;
-
-        let create_resp = self
-            .client
-            .create_multipart_upload()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-            .map_err(|e| {
-                StorageError::Backend(format!("Failed to create multipart upload: {}", e))
-            })?;
-
-        let upload_id = create_resp
-            .upload_id()
-            .ok_or_else(|| StorageError::Backend("No upload ID returned".to_string()))?
-            .to_string();
-
-        let upload_part = |client: &Client,
-                           bucket: &str,
-                           key: &str,
-                           upload_id: &str,
-                           part_num: i32,
-                           data: Vec<u8>|
-         -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<CompletedPart, StorageError>> + Send>,
-        > {
-            let client = client.clone();
-            let bucket = bucket.to_string();
-            let key = key.to_string();
-            let upload_id = upload_id.to_string();
-            Box::pin(async move {
-                let resp = client
-                    .upload_part()
-                    .bucket(&bucket)
-                    .key(&key)
-                    .upload_id(&upload_id)
-                    .part_number(part_num)
-                    .body(ByteStream::from(data))
-                    .send()
-                    .await
-                    .map_err(|e| StorageError::Backend(format!("Failed to upload part: {}", e)))?;
-
-                let etag = resp
-                    .e_tag()
-                    .ok_or_else(|| StorageError::Backend("No ETag returned for part".to_string()))?
-                    .to_string();
-
-                Ok(CompletedPart::builder()
-                    .part_number(part_num)
-                    .e_tag(etag)
-                    .build())
-            })
-        };
-
-        struct UploadState {
-            hasher: Sha256,
-            total_size: u64,
-            part_number: i32,
-            completed_parts: Vec<CompletedPart>,
-            buffer: Vec<u8>,
+    impl S3BlobStorage {
+        pub async fn new() -> Self {
+            let bucket = std::env::var("S3_BUCKET").expect("S3_BUCKET must be set");
+            let client = create_s3_client().await;
+            Self { client, bucket }
         }
 
-        let initial_state = UploadState {
-            hasher: Sha256::new(),
-            total_size: 0,
-            part_number: 1,
-            completed_parts: Vec::new(),
-            buffer: Vec::with_capacity(MIN_PART_SIZE),
-        };
+        pub async fn with_bucket(bucket: String) -> Self {
+            let client = create_s3_client().await;
+            Self { client, bucket }
+        }
+    }
 
-        let abort_upload = || async {
-            let _ = self
+    async fn create_s3_client() -> Client {
+        let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
+
+        let config = aws_config::defaults(BehaviorVersion::latest())
+            .region(region_provider)
+            .load()
+            .await;
+
+        std::env::var("S3_ENDPOINT").ok().map_or_else(
+            || Client::new(&config),
+            |endpoint| {
+                let s3_config = aws_sdk_s3::config::Builder::from(&config)
+                    .endpoint_url(endpoint)
+                    .force_path_style(true)
+                    .build();
+                Client::from_conf(s3_config)
+            },
+        )
+    }
+
+    pub struct S3BackupStorage {
+        client: Client,
+        bucket: String,
+    }
+
+    impl S3BackupStorage {
+        pub async fn new() -> Option<Self> {
+            let bucket = std::env::var("BACKUP_S3_BUCKET").ok()?;
+            let client = create_s3_client().await;
+            Some(Self { client, bucket })
+        }
+    }
+
+    #[async_trait]
+    impl BackupStorage for S3BackupStorage {
+        async fn put_backup(
+            &self,
+            did: &str,
+            rev: &str,
+            data: &[u8],
+        ) -> Result<String, StorageError> {
+            let key = format!("{}/{}.car", did, rev);
+            self.client
+                .put_object()
+                .bucket(&self.bucket)
+                .key(&key)
+                .body(ByteStream::from(Bytes::copy_from_slice(data)))
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(key)
+        }
+
+        async fn get_backup(&self, storage_key: &str) -> Result<Bytes, StorageError> {
+            let resp = self
                 .client
-                .abort_multipart_upload()
+                .get_object()
+                .bucket(&self.bucket)
+                .key(storage_key)
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            resp.body
+                .collect()
+                .await
+                .map(|agg| agg.into_bytes())
+                .map_err(|e| StorageError::Backend(e.to_string()))
+        }
+
+        async fn delete_backup(&self, storage_key: &str) -> Result<(), StorageError> {
+            self.client
+                .delete_object()
+                .bucket(&self.bucket)
+                .key(storage_key)
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl BlobStorage for S3BlobStorage {
+        async fn put(&self, key: &str, data: &[u8]) -> Result<(), StorageError> {
+            self.put_bytes(key, Bytes::copy_from_slice(data)).await
+        }
+
+        async fn put_bytes(&self, key: &str, data: Bytes) -> Result<(), StorageError> {
+            self.client
+                .put_object()
+                .bucket(&self.bucket)
+                .key(key)
+                .body(ByteStream::from(data))
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        }
+
+        async fn get(&self, key: &str) -> Result<Vec<u8>, StorageError> {
+            self.get_bytes(key).await.map(|b| b.to_vec())
+        }
+
+        async fn get_bytes(&self, key: &str) -> Result<Bytes, StorageError> {
+            let resp = self
+                .client
+                .get_object()
+                .bucket(&self.bucket)
+                .key(key)
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            resp.body
+                .collect()
+                .await
+                .map(|agg| agg.into_bytes())
+                .map_err(|e| StorageError::Backend(e.to_string()))
+        }
+
+        async fn get_head(&self, key: &str, size: usize) -> Result<Bytes, StorageError> {
+            let range = format!("bytes=0-{}", size.saturating_sub(1));
+            let resp = self
+                .client
+                .get_object()
+                .bucket(&self.bucket)
+                .key(key)
+                .range(range)
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            resp.body
+                .collect()
+                .await
+                .map(|agg| agg.into_bytes())
+                .map_err(|e| StorageError::Backend(e.to_string()))
+        }
+
+        async fn delete(&self, key: &str) -> Result<(), StorageError> {
+            self.client
+                .delete_object()
+                .bucket(&self.bucket)
+                .key(key)
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        }
+
+        async fn put_stream(
+            &self,
+            key: &str,
+            stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>,
+        ) -> Result<StreamUploadResult, StorageError> {
+            use futures::StreamExt;
+
+            let create_resp = self
+                .client
+                .create_multipart_upload()
+                .bucket(&self.bucket)
+                .key(key)
+                .send()
+                .await
+                .map_err(|e| {
+                    StorageError::Backend(format!("Failed to create multipart upload: {}", e))
+                })?;
+
+            let upload_id = create_resp
+                .upload_id()
+                .ok_or_else(|| StorageError::Backend("No upload ID returned".to_string()))?
+                .to_string();
+
+            let upload_part = |client: &Client,
+                               bucket: &str,
+                               key: &str,
+                               upload_id: &str,
+                               part_num: i32,
+                               data: Vec<u8>|
+             -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<CompletedPart, StorageError>> + Send>,
+            > {
+                let client = client.clone();
+                let bucket = bucket.to_string();
+                let key = key.to_string();
+                let upload_id = upload_id.to_string();
+                Box::pin(async move {
+                    let resp = client
+                        .upload_part()
+                        .bucket(&bucket)
+                        .key(&key)
+                        .upload_id(&upload_id)
+                        .part_number(part_num)
+                        .body(ByteStream::from(data))
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            StorageError::Backend(format!("Failed to upload part: {}", e))
+                        })?;
+
+                    let etag = resp
+                        .e_tag()
+                        .ok_or_else(|| {
+                            StorageError::Backend("No ETag returned for part".to_string())
+                        })?
+                        .to_string();
+
+                    Ok(CompletedPart::builder()
+                        .part_number(part_num)
+                        .e_tag(etag)
+                        .build())
+                })
+            };
+
+            struct UploadState {
+                hasher: Sha256,
+                total_size: u64,
+                part_number: i32,
+                completed_parts: Vec<CompletedPart>,
+                buffer: Vec<u8>,
+            }
+
+            let initial_state = UploadState {
+                hasher: Sha256::new(),
+                total_size: 0,
+                part_number: 1,
+                completed_parts: Vec::new(),
+                buffer: Vec::with_capacity(MIN_PART_SIZE),
+            };
+
+            let abort_upload = || async {
+                let _ = self
+                    .client
+                    .abort_multipart_upload()
+                    .bucket(&self.bucket)
+                    .key(key)
+                    .upload_id(&upload_id)
+                    .send()
+                    .await;
+            };
+
+            let result: Result<UploadState, StorageError> = {
+                let mut state = initial_state;
+
+                let chunk_results: Vec<Result<Bytes, std::io::Error>> = stream.collect().await;
+
+                for chunk_result in chunk_results {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            state.hasher.update(&chunk);
+                            state.total_size += chunk.len() as u64;
+                            state.buffer.extend_from_slice(&chunk);
+
+                            if state.buffer.len() >= MIN_PART_SIZE {
+                                let part_data = std::mem::replace(
+                                    &mut state.buffer,
+                                    Vec::with_capacity(MIN_PART_SIZE),
+                                );
+                                let part = upload_part(
+                                    &self.client,
+                                    &self.bucket,
+                                    key,
+                                    &upload_id,
+                                    state.part_number,
+                                    part_data,
+                                )
+                                .await?;
+                                state.completed_parts.push(part);
+                                state.part_number += 1;
+                            }
+                        }
+                        Err(e) => {
+                            abort_upload().await;
+                            return Err(StorageError::Io(e));
+                        }
+                    }
+                }
+
+                Ok(state)
+            };
+
+            let mut state = result?;
+
+            if !state.buffer.is_empty() {
+                let part = upload_part(
+                    &self.client,
+                    &self.bucket,
+                    key,
+                    &upload_id,
+                    state.part_number,
+                    std::mem::take(&mut state.buffer),
+                )
+                .await?;
+                state.completed_parts.push(part);
+            }
+
+            if state.completed_parts.is_empty() {
+                abort_upload().await;
+                return Err(StorageError::Other("Empty upload".to_string()));
+            }
+
+            let completed_upload = CompletedMultipartUpload::builder()
+                .set_parts(Some(state.completed_parts))
+                .build();
+
+            self.client
+                .complete_multipart_upload()
                 .bucket(&self.bucket)
                 .key(key)
                 .upload_id(&upload_id)
+                .multipart_upload(completed_upload)
                 .send()
-                .await;
-        };
+                .await
+                .map_err(|e| {
+                    StorageError::Backend(format!("Failed to complete multipart upload: {}", e))
+                })?;
 
-        let result: Result<UploadState, StorageError> = {
-            let mut state = initial_state;
-
-            let chunk_results: Vec<Result<Bytes, std::io::Error>> = stream.collect().await;
-
-            for chunk_result in chunk_results {
-                match chunk_result {
-                    Ok(chunk) => {
-                        state.hasher.update(&chunk);
-                        state.total_size += chunk.len() as u64;
-                        state.buffer.extend_from_slice(&chunk);
-
-                        if state.buffer.len() >= MIN_PART_SIZE {
-                            let part_data = std::mem::replace(
-                                &mut state.buffer,
-                                Vec::with_capacity(MIN_PART_SIZE),
-                            );
-                            let part = upload_part(
-                                &self.client,
-                                &self.bucket,
-                                key,
-                                &upload_id,
-                                state.part_number,
-                                part_data,
-                            )
-                            .await?;
-                            state.completed_parts.push(part);
-                            state.part_number += 1;
-                        }
-                    }
-                    Err(e) => {
-                        abort_upload().await;
-                        return Err(StorageError::Io(e));
-                    }
-                }
-            }
-
-            Ok(state)
-        };
-
-        let mut state = result?;
-
-        if !state.buffer.is_empty() {
-            let part = upload_part(
-                &self.client,
-                &self.bucket,
-                key,
-                &upload_id,
-                state.part_number,
-                std::mem::take(&mut state.buffer),
-            )
-            .await?;
-            state.completed_parts.push(part);
+            let hash: [u8; 32] = state.hasher.finalize().into();
+            Ok(StreamUploadResult {
+                sha256_hash: hash,
+                size: state.total_size,
+            })
         }
 
-        if state.completed_parts.is_empty() {
-            abort_upload().await;
-            return Err(StorageError::Other("Empty upload".to_string()));
+        async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+            let copy_source = format!("{}/{}", self.bucket, src_key);
+
+            self.client
+                .copy_object()
+                .bucket(&self.bucket)
+                .copy_source(&copy_source)
+                .key(dst_key)
+                .send()
+                .await
+                .map_err(|e| StorageError::Backend(format!("Failed to copy object: {}", e)))?;
+
+            Ok(())
         }
-
-        let completed_upload = CompletedMultipartUpload::builder()
-            .set_parts(Some(state.completed_parts))
-            .build();
-
-        self.client
-            .complete_multipart_upload()
-            .bucket(&self.bucket)
-            .key(key)
-            .upload_id(&upload_id)
-            .multipart_upload(completed_upload)
-            .send()
-            .await
-            .map_err(|e| {
-                StorageError::Backend(format!("Failed to complete multipart upload: {}", e))
-            })?;
-
-        let hash: [u8; 32] = state.hasher.finalize().into();
-        Ok(StreamUploadResult {
-            sha256_hash: hash,
-            size: state.total_size,
-        })
-    }
-
-    async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-        let copy_source = format!("{}/{}", self.bucket, src_key);
-
-        self.client
-            .copy_object()
-            .bucket(&self.bucket)
-            .copy_source(&copy_source)
-            .key(dst_key)
-            .send()
-            .await
-            .map_err(|e| StorageError::Backend(format!("Failed to copy object: {}", e)))?;
-
-        Ok(())
     }
 }
+
+#[cfg(feature = "s3")]
+pub use s3::{S3BackupStorage, S3BlobStorage};
 
 pub struct FilesystemBlobStorage {
     base_path: PathBuf,
@@ -686,9 +704,17 @@ pub async fn create_blob_storage() -> Arc<dyn BlobStorage> {
     let backend = std::env::var("BLOB_STORAGE_BACKEND").unwrap_or_else(|_| "filesystem".into());
 
     match backend.as_str() {
+        #[cfg(feature = "s3")]
         "s3" => {
             tracing::info!("Initializing S3 blob storage");
             Arc::new(S3BlobStorage::new().await)
+        }
+        #[cfg(not(feature = "s3"))]
+        "s3" => {
+            panic!(
+                "BLOB_STORAGE_BACKEND=s3 but binary was compiled without s3 feature. \
+                 Rebuild with --features s3 to enable S3 storage."
+            );
         }
         _ => {
             tracing::info!("Initializing filesystem blob storage");
@@ -719,6 +745,7 @@ pub async fn create_backup_storage() -> Option<Arc<dyn BackupStorage>> {
     let backend = std::env::var("BACKUP_STORAGE_BACKEND").unwrap_or_else(|_| "filesystem".into());
 
     match backend.as_str() {
+        #[cfg(feature = "s3")]
         "s3" => S3BackupStorage::new().await.map_or_else(
             || {
                 tracing::error!(
@@ -732,6 +759,14 @@ pub async fn create_backup_storage() -> Option<Arc<dyn BackupStorage>> {
                 Some(Arc::new(storage) as Arc<dyn BackupStorage>)
             },
         ),
+        #[cfg(not(feature = "s3"))]
+        "s3" => {
+            tracing::error!(
+                "BACKUP_STORAGE_BACKEND=s3 but binary was compiled without s3 feature. \
+                 Backups will be disabled."
+            );
+            None
+        }
         _ => FilesystemBackupStorage::from_env().await.map_or_else(
             |e| {
                 tracing::error!(

@@ -17,12 +17,14 @@ impl RippleEngine {
     pub async fn start(
         config: RippleConfig,
         shutdown: CancellationToken,
-    ) -> Result<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>, SocketAddr), RippleStartError> {
+    ) -> Result<(Arc<dyn Cache>, Arc<dyn DistributedRateLimiter>, SocketAddr), RippleStartError>
+    {
         let store = Arc::new(ShardedCrdtStore::new(config.machine_id));
 
-        let (transport, incoming_rx) = Transport::bind(config.bind_addr, config.machine_id, shutdown.clone())
-            .await
-            .map_err(|e| RippleStartError::Bind(e.to_string()))?;
+        let (transport, incoming_rx) =
+            Transport::bind(config.bind_addr, config.machine_id, shutdown.clone())
+                .await
+                .map_err(|e| RippleStartError::Bind(e.to_string()))?;
 
         let transport = Arc::new(transport);
 
@@ -79,8 +81,7 @@ impl RippleEngine {
         });
 
         let cache: Arc<dyn Cache> = Arc::new(RippleCache::new(store.clone()));
-        let rate_limiter: Arc<dyn DistributedRateLimiter> =
-            Arc::new(RippleRateLimiter::new(store));
+        let rate_limiter: Arc<dyn DistributedRateLimiter> = Arc::new(RippleRateLimiter::new(store));
 
         metrics::describe_metrics();
 
