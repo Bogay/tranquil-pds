@@ -113,6 +113,6 @@ testcontainers-modules = { version = "0.14", features = ["postgres"] }
 wiremock = "0.6"
 
 [profile.release]
-lto = "thin"
+lto = "fat"
 strip = true
 codegen-units = 1
