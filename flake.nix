@@ -30,7 +30,7 @@
       default = pkgs.callPackage ./shell.nix {};
     });
 
-    nixosModules.default = import ./module.nix;
+    nixosModules.default = import ./module.nix self;
 
     checks.x86_64-linux.integration = import ./test.nix {
       pkgs = nixpkgs.legacyPackages.x86_64-linux;
