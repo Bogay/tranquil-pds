@@ -124,6 +124,12 @@ pub struct LwwMap {
     estimated_bytes: usize,
 }
 
+impl Default for LwwMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LwwMap {
     pub fn new() -> Self {
         Self {
@@ -141,7 +147,14 @@ impl LwwMap {
         entry.value.clone()
     }
 
-    pub fn set(&mut self, key: String, value: Vec<u8>, timestamp: HlcTimestamp, ttl_ms: u64, wall_ms_now: u64) {
+    pub fn set(
+        &mut self,
+        key: String,
+        value: Vec<u8>,
+        timestamp: HlcTimestamp,
+        ttl_ms: u64,
+        wall_ms_now: u64,
+    ) {
         let entry = LwwEntry {
             created_at_wall_ms: wall_ms_now,
             value: Some(value),
@@ -246,6 +259,10 @@ impl LwwMap {
 
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     fn remove_estimated_bytes(&mut self, key: &str) {

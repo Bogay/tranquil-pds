@@ -13,10 +13,7 @@ pub fn describe_metrics() {
         "tranquil_ripple_gossip_peers",
         "Number of active gossip peers"
     );
-    metrics::describe_counter!(
-        "tranquil_ripple_cache_hits_total",
-        "Total cache read hits"
-    );
+    metrics::describe_counter!("tranquil_ripple_cache_hits_total", "Total cache read hits");
     metrics::describe_counter!(
         "tranquil_ripple_cache_misses_total",
         "Total cache read misses"

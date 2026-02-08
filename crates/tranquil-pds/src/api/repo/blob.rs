@@ -162,7 +162,10 @@ pub async fn upload_blob(
     if let Err(e) = state.blob_store.copy(&temp_key, &storage_key).await {
         let _ = state.blob_store.delete(&temp_key).await;
         if let Err(db_err) = state.blob_repo.delete_blob_by_cid(&cid_link).await {
-            error!("Failed to clean up orphaned blob record after copy failure: {:?}", db_err);
+            error!(
+                "Failed to clean up orphaned blob record after copy failure: {:?}",
+                db_err
+            );
         }
         error!("Failed to copy blob to final location: {:?}", e);
         return Err(ApiError::InternalError(Some("Failed to store blob".into())));
@@ -170,8 +173,8 @@ pub async fn upload_blob(
 
     let _ = state.blob_store.delete(&temp_key).await;
 
-    if let Some(ref controller) = controller_did {
-        if let Err(e) = state
+    if let Some(ref controller) = controller_did
+        && let Err(e) = state
             .delegation_repo
             .log_delegation_action(
                 &did,
@@ -187,9 +190,8 @@ pub async fn upload_blob(
                 None,
             )
             .await
-        {
-            warn!("Failed to log delegation action for blob upload: {:?}", e);
-        }
+    {
+        warn!("Failed to log delegation action for blob upload: {:?}", e);
     }
 
     Ok(Json(json!({

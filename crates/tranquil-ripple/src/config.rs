@@ -19,7 +19,11 @@ fn parse_env_with_warning<T: std::str::FromStr>(var_name: &str, raw: &str) -> Op
     match raw.parse::<T>() {
         Ok(v) => Some(v),
         Err(_) => {
-            tracing::warn!(var = var_name, value = raw, "invalid env var value, using default");
+            tracing::warn!(
+                var = var_name,
+                value = raw,
+                "invalid env var value, using default"
+            );
             None
         }
     }

@@ -1,11 +1,11 @@
+use crate::crdt::ShardedCrdtStore;
 use crate::crdt::delta::CrdtDelta;
 use crate::crdt::lww_map::LwwDelta;
-use crate::crdt::ShardedCrdtStore;
 use crate::metrics;
 use crate::transport::{ChannelTag, IncomingFrame, Transport};
 use foca::{Config, Foca, Notification, Runtime, Timer};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::collections::HashSet;
 use std::fmt;
 use std::net::SocketAddr;
@@ -135,12 +135,12 @@ impl Runtime<PeerId> for &mut BufferedRuntime {
     }
 
     fn send_to(&mut self, to: PeerId, data: &[u8]) {
-        self.actions
-            .push(RuntimeAction::SendTo(to, data.to_vec()));
+        self.actions.push(RuntimeAction::SendTo(to, data.to_vec()));
     }
 
     fn submit_after(&mut self, event: Timer<PeerId>, after: Duration) {
-        self.actions.push(RuntimeAction::ScheduleTimer(event, after));
+        self.actions
+            .push(RuntimeAction::ScheduleTimer(event, after));
     }
 }
 
@@ -151,11 +151,7 @@ pub struct GossipEngine {
 }
 
 impl GossipEngine {
-    pub fn new(
-        transport: Arc<Transport>,
-        store: Arc<ShardedCrdtStore>,
-        local_id: PeerId,
-    ) -> Self {
+    pub fn new(transport: Arc<Transport>, store: Arc<ShardedCrdtStore>, local_id: PeerId) -> Self {
         Self {
             transport,
             store,
@@ -208,10 +204,16 @@ impl GossipEngine {
                 }
             });
 
-            drain_runtime_actions(&mut runtime, &transport, &timer_tx, &mut members, &store, &shutdown);
+            drain_runtime_actions(
+                &mut runtime,
+                &transport,
+                &timer_tx,
+                &mut members,
+                &store,
+                &shutdown,
+            );
 
-            let mut gossip_tick =
-                tokio::time::interval(Duration::from_millis(gossip_interval_ms));
+            let mut gossip_tick = tokio::time::interval(Duration::from_millis(gossip_interval_ms));
             gossip_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             loop {
@@ -401,16 +403,18 @@ fn drain_runtime_actions(
             metrics::set_gossip_peers(members.peer_count());
             let snapshot = store.peek_full_state();
             if !snapshot.is_empty() {
-                chunk_and_serialize(&snapshot).into_iter().for_each(|chunk| {
-                    let t = transport.clone();
-                    let c = shutdown.clone();
-                    tokio::spawn(async move {
-                        tokio::select! {
-                            _ = c.cancelled() => {}
-                            _ = t.send(addr, ChannelTag::CrdtSync, &chunk) => {}
-                        }
+                chunk_and_serialize(&snapshot)
+                    .into_iter()
+                    .for_each(|chunk| {
+                        let t = transport.clone();
+                        let c = shutdown.clone();
+                        tokio::spawn(async move {
+                            tokio::select! {
+                                _ = c.cancelled() => {}
+                                _ = t.send(addr, ChannelTag::CrdtSync, &chunk) => {}
+                            }
+                        });
                     });
-                });
             }
         }
         RuntimeAction::MemberDown(addr) => {
@@ -449,7 +453,9 @@ fn split_and_serialize(delta: CrdtDelta) -> Vec<Vec<u8>> {
             source_node,
             cache_delta: match cache_entries.is_empty() {
                 true => None,
-                false => Some(LwwDelta { entries: cache_entries }),
+                false => Some(LwwDelta {
+                    entries: cache_entries,
+                }),
             },
             rate_limit_deltas: rl_deltas,
         };

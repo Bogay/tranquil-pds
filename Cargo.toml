@@ -81,7 +81,7 @@ p384 = { version = "0.13", features = ["ecdsa"] }
 rand = "0.8"
 redis = { version = "1.0", features = ["tokio-comp", "connection-manager"] }
 regex = "1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "http2", "charset", "macos-system-configuration"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"
 serde_ipld_dagcbor = "0.6"
@@ -91,9 +91,9 @@ sha2 = "0.10"
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 subtle = "2.5"
 thiserror = "2.0"
-tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time", "signal", "process"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time", "signal", "process", "io-util", "fs"] }
 tokio-util = "0.7.18"
-tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 totp-rs = { version = "5", features = ["qr"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
@@ -111,3 +111,8 @@ ctor = "0.6"
 testcontainers = "0.26"
 testcontainers-modules = { version = "0.14", features = ["postgres"] }
 wiremock = "0.6"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

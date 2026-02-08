@@ -330,10 +330,8 @@ unsafe fn configure_external_storage_env() {
             );
             std::env::set_var("S3_ENDPOINT", &s3_endpoint);
         } else {
-            let process_dir = std::env::temp_dir().join(format!(
-                "tranquil-pds-test-{}",
-                std::process::id()
-            ));
+            let process_dir =
+                std::env::temp_dir().join(format!("tranquil-pds-test-{}", std::process::id()));
             let blob_path = process_dir.join("blobs");
             let backup_path = process_dir.join("backups");
             std::fs::create_dir_all(&blob_path).expect("Failed to create blob directory");
@@ -715,7 +713,8 @@ async fn setup_cluster_external_infra() -> String {
 
 #[cfg(not(feature = "external-infra"))]
 async fn setup_cluster_testcontainers() -> String {
-    let temp_dir = std::env::temp_dir().join(format!("tranquil-pds-cluster-{}", uuid::Uuid::new_v4()));
+    let temp_dir =
+        std::env::temp_dir().join(format!("tranquil-pds-cluster-{}", uuid::Uuid::new_v4()));
     let blob_path = temp_dir.join("blobs");
     let backup_path = temp_dir.join("backups");
     std::fs::create_dir_all(&blob_path).expect("Failed to create blob temp directory");

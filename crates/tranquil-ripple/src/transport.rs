@@ -222,7 +222,10 @@ impl Transport {
                 let conn_gen = self.conn_generation.fetch_add(1, Ordering::Relaxed);
                 self.connections.lock().insert(
                     target,
-                    ConnectionWriter { tx: write_tx.clone(), generation: conn_gen },
+                    ConnectionWriter {
+                        tx: write_tx.clone(),
+                        generation: conn_gen,
+                    },
                 );
                 if let Some(frame) = encode_frame(tag, data) {
                     let _ = write_tx.try_send(frame);
@@ -412,7 +415,11 @@ fn decode_frame(buf: &mut BytesMut) -> DecodeResult {
         }
         let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
         if len > MAX_FRAME_SIZE {
-            tracing::warn!(frame_len = len, max = MAX_FRAME_SIZE, "oversized frame, closing connection");
+            tracing::warn!(
+                frame_len = len,
+                max = MAX_FRAME_SIZE,
+                "oversized frame, closing connection"
+            );
             buf.clear();
             return DecodeResult::Corrupt;
         }

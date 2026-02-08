@@ -21,8 +21,6 @@ aes-gcm = { workspace = true }
 async-trait = { workspace = true }
 backon = { workspace = true }
 anyhow = { workspace = true }
-aws-config = { workspace = true }
-aws-sdk-s3 = { workspace = true }
 axum = { workspace = true }
 base32 = { workspace = true }
 base64 = { workspace = true }
@@ -55,7 +53,7 @@ multibase = { workspace = true }
 multihash = { workspace = true }
 p256 = { workspace = true }
 rand = { workspace = true }
-redis = { workspace = true }
+redis = { workspace = true, optional = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -79,10 +77,15 @@ urlencoding = { workspace = true }
 uuid = { workspace = true }
 webauthn-rs = { workspace = true }
 zip = { workspace = true }
+aws-config = { workspace = true, optional = true }
+aws-sdk-s3 = { workspace = true, optional = true }
 
 [features]
+default = ["s3", "valkey"]
 external-infra = []
-s3-storage = []
+s3-storage = ["tranquil-storage/s3", "dep:aws-config", "dep:aws-sdk-s3"]
+s3 = ["s3-storage"]
+valkey = ["tranquil-cache/valkey", "dep:redis"]
 
 [dev-dependencies]
 ciborium = { workspace = true }

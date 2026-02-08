@@ -39,24 +39,22 @@ impl MemoryBudget {
         let mut remaining = total_bytes;
         let mut next_shard: usize = self.next_shard.load(std::sync::atomic::Ordering::Relaxed);
         let mut evicted: usize = 0;
-        (0..batch_size).try_for_each(|_| {
-            match remaining > max_bytes {
-                true => {
-                    match store.evict_lru_round_robin(next_shard) {
-                        Some((ns, freed)) => {
-                            next_shard = ns;
-                            remaining = remaining.saturating_sub(freed);
-                            evicted += 1;
-                            Ok(())
-                        }
-                        None => Err(()),
+        (0..batch_size)
+            .try_for_each(|_| match remaining > max_bytes {
+                true => match store.evict_lru_round_robin(next_shard) {
+                    Some((ns, freed)) => {
+                        next_shard = ns;
+                        remaining = remaining.saturating_sub(freed);
+                        evicted += 1;
+                        Ok(())
                     }
-                }
+                    None => Err(()),
+                },
                 false => Err(()),
-            }
-        })
-        .ok();
-        self.next_shard.store(next_shard, std::sync::atomic::Ordering::Relaxed);
+            })
+            .ok();
+        self.next_shard
+            .store(next_shard, std::sync::atomic::Ordering::Relaxed);
         if evicted > 0 {
             metrics::record_evictions(evicted);
             let cache_bytes_after = store.cache_estimated_bytes();
@@ -92,11 +90,7 @@ mod tests {
         let store = ShardedCrdtStore::new(1);
         let budget = MemoryBudget::new(100);
         (0..50).for_each(|i| {
-            store.cache_set(
-                format!("key-{i}"),
-                vec![0u8; 64],
-                60_000,
-            );
+            store.cache_set(format!("key-{i}"), vec![0u8; 64], 60_000);
         });
         budget.enforce(&store);
         assert!(store.total_estimated_bytes() <= 100);

@@ -45,21 +45,22 @@ async fn cluster_formation() {
     assert!(nodes.len() >= 3, "expected at least 3 cluster nodes");
 
     let client = common::client();
-    let results: Vec<_> = futures::future::join_all(
-        nodes.iter().map(|node| {
-            let client = client.clone();
-            let url = node.url.clone();
-            async move {
-                client
-                    .get(format!("{url}/xrpc/com.atproto.server.describeServer"))
-                    .send()
-                    .await
-            }
-        })
-    ).await;
+    let results: Vec<_> = futures::future::join_all(nodes.iter().map(|node| {
+        let client = client.clone();
+        let url = node.url.clone();
+        async move {
+            client
+                .get(format!("{url}/xrpc/com.atproto.server.describeServer"))
+                .send()
+                .await
+        }
+    }))
+    .await;
 
     results.iter().enumerate().for_each(|(i, result)| {
-        let resp = result.as_ref().unwrap_or_else(|e| panic!("node {i} unreachable: {e}"));
+        let resp = result
+            .as_ref()
+            .unwrap_or_else(|e| panic!("node {i} unreachable: {e}"));
         assert_eq!(
             resp.status(),
             StatusCode::OK,
@@ -91,7 +92,10 @@ async fn cluster_any_node_access() {
     assert_eq!(create_res.status(), StatusCode::OK);
     let body: serde_json::Value = create_res.json().await.expect("invalid json");
     let did = body["did"].as_str().expect("no did").to_string();
-    let access_jwt = body["accessJwt"].as_str().expect("no accessJwt").to_string();
+    let access_jwt = body["accessJwt"]
+        .as_str()
+        .expect("no accessJwt")
+        .to_string();
 
     let pool = common::get_test_db_pool().await;
     let body_text: String = sqlx::query_scalar!(
@@ -132,8 +136,10 @@ async fn cluster_any_node_access() {
 
     let token = match confirm_res.status() {
         StatusCode::OK => {
-            let confirm_body: serde_json::Value =
-                confirm_res.json().await.expect("invalid json from confirmSignup");
+            let confirm_body: serde_json::Value = confirm_res
+                .json()
+                .await
+                .expect("invalid json from confirmSignup");
             confirm_body["accessJwt"]
                 .as_str()
                 .unwrap_or(&access_jwt)
@@ -164,14 +170,8 @@ async fn cluster_any_node_access() {
 async fn cache_convergence() {
     let nodes = common::cluster().await;
 
-    let cache_a = nodes[0]
-        .cache
-        .as_ref()
-        .expect("node 0 should have a cache");
-    let cache_b = nodes[1]
-        .cache
-        .as_ref()
-        .expect("node 1 should have a cache");
+    let cache_a = nodes[0].cache.as_ref().expect("node 0 should have a cache");
+    let cache_b = nodes[1].cache.as_ref().expect("node 1 should have a cache");
 
     let test_key = format!("ripple-test-{}", uuid::Uuid::new_v4());
     let test_value = "converged-value";
@@ -407,14 +407,13 @@ async fn cluster_bulk_key_convergence() {
     })
     .await;
 
-    let spot_checks: Vec<Option<String>> = futures::future::join_all(
-        [0, 99, 250, 499].iter().map(|&i| {
+    let spot_checks: Vec<Option<String>> =
+        futures::future::join_all([0, 99, 250, 499].iter().map(|&i| {
             let c = cache_2.clone();
             let p = prefix.clone();
             async move { c.get(&format!("{p}-{i}")).await }
-        }),
-    )
-    .await;
+        }))
+        .await;
 
     spot_checks.iter().enumerate().for_each(|(idx, val)| {
         assert!(
@@ -620,7 +619,10 @@ fn create_account_on_node<'a>(
         assert_eq!(create_res.status(), StatusCode::OK, "createAccount non-200");
         let body: serde_json::Value = create_res.json().await.expect("invalid json");
         let did = body["did"].as_str().expect("no did").to_string();
-        let access_jwt = body["accessJwt"].as_str().expect("no accessJwt").to_string();
+        let access_jwt = body["accessJwt"]
+            .as_str()
+            .expect("no accessJwt")
+            .to_string();
 
         let pool = common::get_test_db_pool().await;
         let body_text: String = sqlx::query_scalar!(
@@ -654,8 +656,10 @@ fn create_account_on_node<'a>(
 
         let token = match confirm_res.status() {
             StatusCode::OK => {
-                let confirm_body: serde_json::Value =
-                    confirm_res.json().await.expect("invalid json from confirmSignup");
+                let confirm_body: serde_json::Value = confirm_res
+                    .json()
+                    .await
+                    .expect("invalid json from confirmSignup");
                 confirm_body["accessJwt"]
                     .as_str()
                     .unwrap_or(&access_jwt)
@@ -744,7 +748,10 @@ async fn cross_node_handle_resolution_from_cache() {
     let cache_0 = cache_for(nodes, 0);
 
     let fake_handle = format!("cached-{}.test", uuid::Uuid::new_v4().simple());
-    let fake_did = format!("did:plc:cached{}", &uuid::Uuid::new_v4().simple().to_string()[..16]);
+    let fake_did = format!(
+        "did:plc:cached{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..16]
+    );
 
     cache_0
         .set(
@@ -795,7 +802,10 @@ async fn cross_node_cache_delete_observable_via_http() {
     let cache_1 = cache_for(nodes, 1);
 
     let fake_handle = format!("deltest-{}.test", uuid::Uuid::new_v4().simple());
-    let fake_did = format!("did:plc:del{}", &uuid::Uuid::new_v4().simple().to_string()[..16]);
+    let fake_did = format!(
+        "did:plc:del{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..16]
+    );
     let cache_key = format!("handle:{fake_handle}");
 
     cache_0

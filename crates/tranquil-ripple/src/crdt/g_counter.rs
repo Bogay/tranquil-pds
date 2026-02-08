@@ -142,12 +142,10 @@ impl RateLimitStore {
         self.dirty
             .iter()
             .filter_map(|key| {
-                self.counters
-                    .get(key)
-                    .map(|counter| GCounterDelta {
-                        key: key.clone(),
-                        counter: counter.clone(),
-                    })
+                self.counters.get(key).map(|counter| GCounterDelta {
+                    key: key.clone(),
+                    counter: counter.clone(),
+                })
             })
             .collect()
     }
@@ -167,7 +165,10 @@ impl RateLimitStore {
             return 0;
         }
         match self.counters.get(key) {
-            Some(counter) if counter.window_start_ms == Self::aligned_window_start(now_wall_ms, window_ms) => {
+            Some(counter)
+                if counter.window_start_ms
+                    == Self::aligned_window_start(now_wall_ms, window_ms) =>
+            {
                 counter.total()
             }
             _ => 0,
