@@ -3,11 +3,26 @@ use cid::Cid;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tranquil_scopes::RepoAction;
+use tranquil_types::Did;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FrameType {
+    #[serde(rename = "#commit")]
+    Commit,
+    #[serde(rename = "#identity")]
+    Identity,
+    #[serde(rename = "#account")]
+    Account,
+    #[serde(rename = "#sync")]
+    Sync,
+    #[serde(rename = "#info")]
+    Info,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FrameHeader {
     pub op: i64,
-    pub t: String,
+    pub t: FrameType,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -16,7 +31,7 @@ pub struct CommitFrame {
     pub rebase: bool,
     #[serde(rename = "tooBig")]
     pub too_big: bool,
-    pub repo: String,
+    pub repo: Did,
     pub commit: Cid,
     pub rev: String,
     pub since: Option<String>,
@@ -48,7 +63,7 @@ pub struct RepoOp {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityFrame {
-    pub did: String,
+    pub did: Did,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handle: Option<String>,
     pub seq: i64,
@@ -57,17 +72,17 @@ pub struct IdentityFrame {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccountFrame {
-    pub did: String,
+    pub did: Did,
     pub active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<tranquil_db_traits::AccountStatus>,
     pub seq: i64,
     pub time: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncFrame {
-    pub did: String,
+    pub did: Did,
     pub rev: String,
     #[serde(with = "serde_bytes")]
     pub blocks: Vec<u8>,
@@ -75,9 +90,21 @@ pub struct SyncFrame {
     pub time: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum InfoFrameName {
+    #[serde(rename = "OutdatedCursor")]
+    OutdatedCursor,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ErrorFrameName {
+    #[serde(rename = "FutureCursor")]
+    FutureCursor,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InfoFrame {
-    pub name: String,
+    pub name: InfoFrameName,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -89,7 +116,7 @@ pub struct ErrorFrameHeader {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorFrameBody {
-    pub error: String,
+    pub error: ErrorFrameName,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -113,7 +140,7 @@ impl std::error::Error for CommitFrameError {}
 
 pub struct CommitFrameBuilder {
     seq: i64,
-    did: String,
+    did: Did,
     commit_cid: Cid,
     prev_cid: Option<Cid>,
     ops_json: serde_json::Value,
@@ -126,7 +153,7 @@ impl CommitFrameBuilder {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         seq: i64,
-        did: String,
+        did: Did,
         commit_cid_str: &str,
         prev_cid_str: Option<&str>,
         ops_json: serde_json::Value,
@@ -206,7 +233,7 @@ impl TryFrom<SequencedEvent> for CommitFrame {
         })?;
         let builder = CommitFrameBuilder::new(
             event.seq.as_i64(),
-            event.did.to_string(),
+            event.did.clone(),
             commit_cid.as_str(),
             event.prev_cid.as_ref().map(|c| c.as_str()),
             event.ops.unwrap_or_default(),

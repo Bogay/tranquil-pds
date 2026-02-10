@@ -23,7 +23,7 @@ impl ValidatedLocalHandle {
     }
 
     pub fn new_allow_reserved(handle: impl AsRef<str>) -> Result<Self, HandleValidationError> {
-        let validated = validate_service_handle(handle.as_ref(), true)?;
+        let validated = validate_service_handle(handle.as_ref(), ReservedHandlePolicy::Allow)?;
         Ok(Self(validated))
     }
 
@@ -252,13 +252,19 @@ impl std::fmt::Display for HandleValidationError {
 
 impl std::error::Error for HandleValidationError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReservedHandlePolicy {
+    Allow,
+    Reject,
+}
+
 pub fn validate_short_handle(handle: &str) -> Result<String, HandleValidationError> {
-    validate_service_handle(handle, false)
+    validate_service_handle(handle, ReservedHandlePolicy::Reject)
 }
 
 pub fn validate_service_handle(
     handle: &str,
-    allow_reserved: bool,
+    reserved_policy: ReservedHandlePolicy,
 ) -> Result<String, HandleValidationError> {
     let handle = handle.trim();
 
@@ -301,7 +307,9 @@ pub fn validate_service_handle(
         return Err(HandleValidationError::BannedWord);
     }
 
-    if !allow_reserved && crate::handle::reserved::is_reserved_subdomain(handle) {
+    if reserved_policy == ReservedHandlePolicy::Reject
+        && crate::handle::reserved::is_reserved_subdomain(handle)
+    {
         return Err(HandleValidationError::Reserved);
     }
 
@@ -501,12 +509,15 @@ mod tests {
     #[test]
     fn test_allow_reserved() {
         assert_eq!(
-            validate_service_handle("admin", true),
+            validate_service_handle("admin", ReservedHandlePolicy::Allow),
             Ok("admin".to_string())
         );
-        assert_eq!(validate_service_handle("api", true), Ok("api".to_string()));
         assert_eq!(
-            validate_service_handle("admin", false),
+            validate_service_handle("api", ReservedHandlePolicy::Allow),
+            Ok("api".to_string())
+        );
+        assert_eq!(
+            validate_service_handle("admin", ReservedHandlePolicy::Reject),
             Err(HandleValidationError::Reserved)
         );
     }

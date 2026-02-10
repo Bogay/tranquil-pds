@@ -1,47 +1,45 @@
 use crate::api::error::ApiError;
 use crate::state::AppState;
-use crate::sync::car::encode_car_header;
-use crate::sync::util::assert_repo_availability;
+use crate::sync::car::{encode_car_block, encode_car_header};
+use crate::sync::util::{RepoAccessLevel, assert_repo_availability};
 use axum::{
     Json,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
 use cid::Cid;
 use ipld_core::ipld::Ipld;
 use jacquard_repo::storage::BlockStore;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::str::FromStr;
 use tranquil_types::Did;
 
 const MAX_REPO_BLOCKS_TRAVERSAL: usize = 20_000;
 
-async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &str) -> bool {
+async fn check_admin_or_self(state: &AppState, headers: &HeaderMap, did: &Did) -> bool {
     let extracted = match crate::auth::extract_auth_token_from_header(crate::util::get_header_str(
         headers,
-        "Authorization",
+        axum::http::header::AUTHORIZATION,
     )) {
         Some(t) => t,
         None => return false,
     };
-    let dpop_proof = crate::util::get_header_str(headers, "DPoP");
+    let dpop_proof = crate::util::get_header_str(headers, crate::util::HEADER_DPOP);
     let http_uri = "/";
     match crate::auth::validate_token_with_dpop(
         state.user_repo.as_ref(),
         state.oauth_repo.as_ref(),
         &extracted.token,
-        extracted.is_dpop,
+        extracted.scheme,
         dpop_proof,
-        "GET",
+        Method::GET.as_str(),
         http_uri,
-        false,
-        true,
+        crate::auth::AccountRequirement::AnyStatus,
     )
     .await
     {
-        Ok(auth_user) => auth_user.is_admin || auth_user.did == did,
+        Ok(auth_user) => auth_user.is_admin || auth_user.did == *did,
         Err(_) => false,
     }
 }
@@ -69,15 +67,24 @@ pub async fn get_head(
         Ok(d) => d,
         Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
     };
-    let is_admin_or_self = check_admin_or_self(&state, &headers, did_str).await;
-    let account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
-            Ok(a) => a,
-            Err(e) => return e.into_response(),
-        };
+    let is_admin_or_self = check_admin_or_self(&state, &headers, &did).await;
+    let account = match assert_repo_availability(
+        state.repo_repo.as_ref(),
+        &did,
+        if is_admin_or_self {
+            RepoAccessLevel::Privileged
+        } else {
+            RepoAccessLevel::Public
+        },
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err(e) => return e.into_response(),
+    };
     match account.repo_root_cid {
         Some(root) => (StatusCode::OK, Json(GetHeadOutput { root })).into_response(),
-        None => ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did_str)))
+        None => ApiError::RepoNotFound(Some(format!("Could not find root for DID: {}", did)))
             .into_response(),
     }
 }
@@ -100,12 +107,21 @@ pub async fn get_checkout(
         Ok(d) => d,
         Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
     };
-    let is_admin_or_self = check_admin_or_self(&state, &headers, did_str).await;
-    let account =
-        match assert_repo_availability(state.repo_repo.as_ref(), &did, is_admin_or_self).await {
-            Ok(a) => a,
-            Err(e) => return e.into_response(),
-        };
+    let is_admin_or_self = check_admin_or_self(&state, &headers, &did).await;
+    let account = match assert_repo_availability(
+        state.repo_repo.as_ref(),
+        &did,
+        if is_admin_or_self {
+            RepoAccessLevel::Privileged
+        } else {
+            RepoAccessLevel::Public
+        },
+    )
+    .await
+    {
+        Ok(a) => a,
+        Err(e) => return e.into_response(),
+    };
     let Some(head_str) = account.repo_root_cid else {
         return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
     };
@@ -128,18 +144,7 @@ pub async fn get_checkout(
         }
         remaining -= 1;
         if let Ok(Some(block)) = state.block_store.get(&cid).await {
-            let cid_bytes = cid.to_bytes();
-            let total_len = cid_bytes.len() + block.len();
-            let mut writer = Vec::new();
-            crate::sync::car::write_varint(&mut writer, total_len as u64)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&cid_bytes)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&block)
-                .expect("Writing to Vec<u8> should never fail");
-            car_bytes.extend_from_slice(&writer);
+            car_bytes.extend_from_slice(&encode_car_block(&cid, &block));
             if let Ok(value) = serde_ipld_dagcbor::from_slice::<Ipld>(&block) {
                 extract_links_ipld(&value, &mut stack);
             }

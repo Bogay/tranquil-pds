@@ -36,7 +36,7 @@ fn generate_nonce() -> String {
 
 #[derive(Debug, Serialize)]
 pub struct SsoProviderInfo {
-    pub provider: String,
+    pub provider: SsoProviderType,
     pub name: String,
     pub icon: String,
 }
@@ -52,7 +52,7 @@ pub async fn get_sso_providers(State(state): State<AppState>) -> Json<SsoProvide
         .enabled_providers()
         .iter()
         .map(|(t, name, icon)| SsoProviderInfo {
-            provider: t.as_str().to_string(),
+            provider: *t,
             name: name.to_string(),
             icon: icon.to_string(),
         })
@@ -63,9 +63,9 @@ pub async fn get_sso_providers(State(state): State<AppState>) -> Json<SsoProvide
 
 #[derive(Debug, Deserialize)]
 pub struct SsoInitiateRequest {
-    pub provider: String,
+    pub provider: SsoProviderType,
     pub request_uri: Option<String>,
-    pub action: Option<String>,
+    pub action: Option<SsoAction>,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,34 +79,20 @@ pub async fn sso_initiate(
     headers: HeaderMap,
     Json(input): Json<SsoInitiateRequest>,
 ) -> Result<Json<SsoInitiateResponse>, ApiError> {
-    if input.provider.len() > 20 {
-        return Err(ApiError::SsoProviderNotFound);
-    }
     if let Some(ref uri) = input.request_uri
         && uri.len() > 500
     {
         return Err(ApiError::InvalidRequest("Request URI too long".into()));
     }
-    if let Some(ref action) = input.action
-        && action.len() > 20
-    {
-        return Err(ApiError::SsoInvalidAction);
-    }
 
-    let provider_type =
-        SsoProviderType::parse(&input.provider).ok_or(ApiError::SsoProviderNotFound)?;
+    let provider_type = input.provider;
 
     let provider = state
         .sso_manager
         .get_provider(provider_type)
         .ok_or(ApiError::SsoProviderNotEnabled)?;
 
-    let action = input
-        .action
-        .as_deref()
-        .map(SsoAction::parse)
-        .unwrap_or(Some(SsoAction::Login))
-        .ok_or(ApiError::SsoInvalidAction)?;
+    let action = input.action.unwrap_or(SsoAction::Login);
 
     let is_standalone = action == SsoAction::Register && input.request_uri.is_none();
     let request_uri = input
@@ -616,7 +602,7 @@ async fn handle_sso_register(
 #[derive(Debug, Serialize)]
 pub struct LinkedAccountInfo {
     pub id: String,
-    pub provider: String,
+    pub provider: SsoProviderType,
     pub provider_name: String,
     pub provider_username: Option<String>,
     pub provider_email: Option<String>,
@@ -642,7 +628,7 @@ pub async fn get_linked_accounts(
         .into_iter()
         .map(|id| LinkedAccountInfo {
             id: id.id.to_string(),
-            provider: id.provider.as_str().to_string(),
+            provider: id.provider,
             provider_name: id.provider.display_name().to_string(),
             provider_username: id.provider_username.map(|u| u.into_inner()),
             provider_email: id.provider_email.map(|e| e.into_inner()),
@@ -723,7 +709,7 @@ pub struct PendingRegistrationQuery {
 #[derive(Debug, Serialize)]
 pub struct PendingRegistrationResponse {
     pub request_uri: String,
-    pub provider: String,
+    pub provider: SsoProviderType,
     pub provider_user_id: String,
     pub provider_username: Option<String>,
     pub provider_email: Option<String>,
@@ -747,7 +733,7 @@ pub async fn get_pending_registration(
 
     Ok(Json(PendingRegistrationResponse {
         request_uri: pending.request_uri,
-        provider: pending.provider.as_str().to_string(),
+        provider: pending.provider,
         provider_user_id: pending.provider_user_id.into_inner(),
         provider_username: pending.provider_username.map(|u| u.into_inner()),
         provider_email: pending.provider_email.map(|e| e.into_inner()),
@@ -789,7 +775,10 @@ pub async fn check_handle_available(
 
     let hostname_for_handles = pds_hostname_without_port();
     let full_handle = format!("{}.{}", validated, hostname_for_handles);
-    let handle_typed = unsafe { crate::types::Handle::new_unchecked(&full_handle) };
+    let handle_typed: crate::types::Handle = match full_handle.parse() {
+        Ok(h) => h,
+        Err(_) => return Err(ApiError::InvalidHandle(None)),
+    };
 
     let db_available = state
         .user_repo
@@ -816,7 +805,7 @@ pub struct CompleteRegistrationInput {
     pub handle: String,
     pub email: Option<String>,
     pub invite_code: Option<String>,
-    pub verification_channel: Option<String>,
+    pub verification_channel: Option<tranquil_db_traits::CommsChannel>,
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_username: Option<String>,
@@ -875,9 +864,11 @@ pub async fn complete_registration(
         Err(_) => return Err(ApiError::InvalidHandle(None)),
     };
 
-    let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
+    let verification_channel = input
+        .verification_channel
+        .unwrap_or(tranquil_db_traits::CommsChannel::Email);
     let verification_recipient = match verification_channel {
-        "email" => {
+        tranquil_db_traits::CommsChannel::Email => {
             let email = input
                 .email
                 .clone()
@@ -894,7 +885,7 @@ pub async fn complete_registration(
                 _ => return Err(ApiError::MissingEmail),
             }
         }
-        "discord" => match &input.discord_username {
+        tranquil_db_traits::CommsChannel::Discord => match &input.discord_username {
             Some(username) if !username.trim().is_empty() => {
                 let clean = username.trim().to_lowercase();
                 if !crate::api::validation::is_valid_discord_username(&clean) {
@@ -906,7 +897,7 @@ pub async fn complete_registration(
             }
             _ => return Err(ApiError::MissingDiscordId),
         },
-        "telegram" => match &input.telegram_username {
+        tranquil_db_traits::CommsChannel::Telegram => match &input.telegram_username {
             Some(username) if !username.trim().is_empty() => {
                 let clean = username.trim().trim_start_matches('@');
                 if !crate::api::validation::is_valid_telegram_username(clean) {
@@ -918,13 +909,12 @@ pub async fn complete_registration(
             }
             _ => return Err(ApiError::MissingTelegramUsername),
         },
-        "signal" => match &input.signal_username {
+        tranquil_db_traits::CommsChannel::Signal => match &input.signal_username {
             Some(username) if !username.trim().is_empty() => {
                 username.trim().trim_start_matches('@').to_lowercase()
             }
             _ => return Err(ApiError::MissingSignalNumber),
         },
-        _ => return Err(ApiError::InvalidVerificationChannel),
     };
 
     let email = input
@@ -958,16 +948,15 @@ pub async fn complete_registration(
             Err(_) => return Err(ApiError::InvalidInviteCode),
         }
     } else {
-        let invite_required = std::env::var("INVITE_CODE_REQUIRED")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let invite_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
         if invite_required {
             return Err(ApiError::InviteCodeRequired);
         }
         None
     };
 
-    let handle_typed = unsafe { crate::types::Handle::new_unchecked(&handle) };
+    let handle_typed: crate::types::Handle =
+        handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     let reserved = state
         .user_repo
         .reserve_handle(&handle_typed, client_ip)
@@ -1069,7 +1058,9 @@ pub async fn complete_registration(
     };
 
     let rev = Tid::now(LimitedU32::MIN);
-    let did_typed = unsafe { crate::types::Did::new_unchecked(&did) };
+    let did_typed: crate::types::Did = did
+        .parse()
+        .map_err(|_| ApiError::InternalError(Some("Invalid DID".into())))?;
     let (commit_bytes, _sig) = match crate::api::repo::record::utils::create_signed_commit(
         &did_typed,
         mst_root,
@@ -1101,19 +1092,11 @@ pub async fn complete_registration(
         })
     });
 
-    let preferred_comms_channel = match verification_channel {
-        "email" => tranquil_db_traits::CommsChannel::Email,
-        "discord" => tranquil_db_traits::CommsChannel::Discord,
-        "telegram" => tranquil_db_traits::CommsChannel::Telegram,
-        "signal" => tranquil_db_traits::CommsChannel::Signal,
-        _ => tranquil_db_traits::CommsChannel::Email,
-    };
-
     let create_input = tranquil_db_traits::CreateSsoAccountInput {
         handle: handle_typed.clone(),
         email: email.clone(),
         did: did_typed.clone(),
-        preferred_comms_channel,
+        preferred_comms_channel: verification_channel,
         discord_username: input
             .discord_username
             .clone()
@@ -1192,13 +1175,11 @@ pub async fn complete_registration(
         "$type": "app.bsky.actor.profile",
         "displayName": handle_typed.as_str()
     });
-    let profile_collection = unsafe { crate::types::Nsid::new_unchecked("app.bsky.actor.profile") };
-    let profile_rkey = unsafe { crate::types::Rkey::new_unchecked("self") };
     if let Err(e) = crate::api::repo::record::create_record_internal(
         &state,
         &did_typed,
-        &profile_collection,
-        &profile_rkey,
+        &crate::types::PROFILE_COLLECTION,
+        &crate::types::PROFILE_RKEY,
         &profile_record,
     )
     .await
@@ -1261,7 +1242,7 @@ pub async fn complete_registration(
         .await
         .unwrap_or(None);
 
-    let channel_auto_verified = verification_channel == "email"
+    let channel_auto_verified = verification_channel == tranquil_db_traits::CommsChannel::Email
         && pending_preview.provider_email_verified
         && pending_preview.provider_email.as_ref().map(|e| e.as_str()) == email.as_deref();
 
@@ -1357,7 +1338,7 @@ pub async fn complete_registration(
 
     if let Some(uid) = user_id {
         let verification_token = crate::auth::verification_token::generate_signup_token(
-            &did,
+            &did_typed,
             verification_channel,
             &verification_recipient,
         );

@@ -112,11 +112,7 @@ async fn test_verify_channel_invalid_code() {
         .send()
         .await
         .unwrap();
-    assert!(
-        resp.status() == 400 || resp.status() == 422,
-        "Expected 400 or 422, got {}",
-        resp.status()
-    );
+    assert_eq!(resp.status(), 400);
 }
 
 #[tokio::test]
@@ -137,11 +133,7 @@ async fn test_verify_channel_not_set() {
         .send()
         .await
         .unwrap();
-    assert!(
-        resp.status() == 400 || resp.status() == 422,
-        "Expected 400 or 422, got {}",
-        resp.status()
-    );
+    assert_eq!(resp.status(), 400);
 }
 
 #[tokio::test]

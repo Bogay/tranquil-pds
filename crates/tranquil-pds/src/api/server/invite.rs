@@ -226,7 +226,7 @@ pub async fn get_account_invite_codes(
                 })
                 .unwrap_or_default();
 
-            let use_count = uses.len() as i32;
+            let use_count = i32::try_from(uses.len()).unwrap_or(i32::MAX);
             if !include_used && use_count >= info.available_uses {
                 return None;
             }

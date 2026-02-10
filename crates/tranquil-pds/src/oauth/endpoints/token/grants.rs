@@ -1,5 +1,7 @@
 use super::helpers::{create_access_token_with_delegation, verify_pkce};
-use super::types::{TokenGrant, TokenResponse, ValidatedTokenRequest};
+use super::types::{
+    RequestClientAuth, TokenGrant, TokenResponse, TokenType, ValidatedTokenRequest,
+};
 use crate::config::AuthConfig;
 use crate::delegation::intersect_scopes;
 use crate::oauth::{
@@ -12,12 +14,12 @@ use crate::oauth::{
 use crate::state::AppState;
 use crate::util::pds_hostname;
 use axum::Json;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Method};
 use chrono::{Duration, Utc};
 use tranquil_db_traits::RefreshTokenLookup;
 use tranquil_types::{AuthorizationCode, Did, RefreshToken as RefreshTokenType};
 
-const ACCESS_TOKEN_EXPIRY_SECONDS: i64 = 300;
+const ACCESS_TOKEN_EXPIRY_SECONDS: u64 = 300;
 const REFRESH_TOKEN_EXPIRY_DAYS_CONFIDENTIAL: i64 = 60;
 const REFRESH_TOKEN_EXPIRY_DAYS_PUBLIC: i64 = 14;
 
@@ -29,7 +31,7 @@ pub async fn handle_authorization_code_grant(
 ) -> Result<(HeaderMap, Json<TokenResponse>), OAuthError> {
     tracing::info!(
         has_dpop = dpop_proof.is_some(),
-        client_id = ?request.client_auth.client_id,
+        client_id = ?request.client_auth.client_id(),
         "Authorization code grant requested"
     );
     let (code, code_verifier, redirect_uri) = match request.grant {
@@ -59,32 +61,33 @@ pub async fn handle_authorization_code_grant(
         .require_authorized()
         .map_err(|_| OAuthError::InvalidGrant("Authorization not completed".to_string()))?;
 
-    if let Some(request_client_id) = &request.client_auth.client_id
-        && request_client_id != &authorized.client_id
+    if let Some(request_client_id) = request.client_auth.client_id()
+        && request_client_id != authorized.client_id
     {
         return Err(OAuthError::InvalidGrant("client_id mismatch".to_string()));
     }
     let did = authorized.did.to_string();
     let client_metadata_cache = ClientMetadataCache::new(3600);
     let client_metadata = client_metadata_cache.get(&authorized.client_id).await?;
-    let client_auth = if let (Some(assertion), Some(assertion_type)) = (
-        &request.client_auth.client_assertion,
-        &request.client_auth.client_assertion_type,
-    ) {
-        if assertion_type != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
-            return Err(OAuthError::InvalidClient(
-                "Unsupported client_assertion_type".to_string(),
-            ));
+    let client_auth = match &request.client_auth {
+        RequestClientAuth::PrivateKeyJwt {
+            assertion,
+            assertion_type,
+            ..
+        } => {
+            if assertion_type != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
+                return Err(OAuthError::InvalidClient(
+                    "Unsupported client_assertion_type".to_string(),
+                ));
+            }
+            ClientAuth::PrivateKeyJwt {
+                client_assertion: assertion.clone(),
+            }
         }
-        ClientAuth::PrivateKeyJwt {
-            client_assertion: assertion.clone(),
-        }
-    } else if let Some(secret) = &request.client_auth.client_secret {
-        ClientAuth::SecretPost {
-            client_secret: secret.clone(),
-        }
-    } else {
-        ClientAuth::None
+        RequestClientAuth::SecretPost { client_secret, .. } => ClientAuth::SecretPost {
+            client_secret: client_secret.clone(),
+        },
+        RequestClientAuth::None { .. } => ClientAuth::None,
     };
     verify_client_auth(&client_metadata_cache, &client_metadata, &client_auth).await?;
     verify_pkce(&authorized.parameters.code_challenge, &code_verifier)?;
@@ -100,7 +103,7 @@ pub async fn handle_authorization_code_grant(
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
         let pds_hostname = pds_hostname();
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
-        let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
+        let result = verifier.verify_proof(proof, Method::POST.as_str(), &token_endpoint, None)?;
         if !state
             .oauth_repo
             .check_and_record_dpop_jti(&result.jti)
@@ -220,13 +223,20 @@ pub async fn handle_authorization_code_grant(
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();
     let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-    response_headers.insert("DPoP-Nonce", verifier.generate_nonce().parse().unwrap());
+    let nonce = verifier.generate_nonce();
+    let nonce_header = nonce.parse().map_err(|_| {
+        OAuthError::ServerError("Failed to encode DPoP nonce as header value".to_string())
+    })?;
+    response_headers.insert("DPoP-Nonce", nonce_header);
     Ok((
         response_headers,
         Json(TokenResponse {
             access_token,
-            token_type: if dpop_jkt.is_some() { "DPoP" } else { "Bearer" }.to_string(),
-            expires_in: ACCESS_TOKEN_EXPIRY_SECONDS as u64,
+            token_type: match dpop_jkt {
+                Some(_) => TokenType::DPoP,
+                None => TokenType::Bearer,
+            },
+            expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
             refresh_token: Some(refresh_token.0),
             scope: final_scope,
             sub: Some(did),
@@ -283,13 +293,20 @@ pub async fn handle_refresh_token_grant(
             let mut response_headers = HeaderMap::new();
             let config = AuthConfig::get();
             let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-            response_headers.insert("DPoP-Nonce", verifier.generate_nonce().parse().unwrap());
+            let nonce = verifier.generate_nonce();
+            let nonce_header = nonce.parse().map_err(|_| {
+                OAuthError::ServerError("Failed to encode DPoP nonce as header value".to_string())
+            })?;
+            response_headers.insert("DPoP-Nonce", nonce_header);
             return Ok((
                 response_headers,
                 Json(TokenResponse {
                     access_token,
-                    token_type: if dpop_jkt.is_some() { "DPoP" } else { "Bearer" }.to_string(),
-                    expires_in: ACCESS_TOKEN_EXPIRY_SECONDS as u64,
+                    token_type: match dpop_jkt {
+                        Some(_) => TokenType::DPoP,
+                        None => TokenType::Bearer,
+                    },
+                    expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
                     refresh_token: token_data.current_refresh_token.map(|r| r.0),
                     scope: token_data.scope,
                     sub: Some(token_data.did.to_string()),
@@ -333,7 +350,7 @@ pub async fn handle_refresh_token_grant(
         let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
         let pds_hostname = pds_hostname();
         let token_endpoint = format!("https://{}/oauth/token", pds_hostname);
-        let result = verifier.verify_proof(proof, "POST", &token_endpoint, None)?;
+        let result = verifier.verify_proof(proof, Method::POST.as_str(), &token_endpoint, None)?;
         if !state
             .oauth_repo
             .check_and_record_dpop_jti(&result.jti)
@@ -387,13 +404,20 @@ pub async fn handle_refresh_token_grant(
     let mut response_headers = HeaderMap::new();
     let config = AuthConfig::get();
     let verifier = DPoPVerifier::new(config.dpop_secret().as_bytes());
-    response_headers.insert("DPoP-Nonce", verifier.generate_nonce().parse().unwrap());
+    let nonce = verifier.generate_nonce();
+    let nonce_header = nonce.parse().map_err(|_| {
+        OAuthError::ServerError("Failed to encode DPoP nonce as header value".to_string())
+    })?;
+    response_headers.insert("DPoP-Nonce", nonce_header);
     Ok((
         response_headers,
         Json(TokenResponse {
             access_token,
-            token_type: if dpop_jkt.is_some() { "DPoP" } else { "Bearer" }.to_string(),
-            expires_in: ACCESS_TOKEN_EXPIRY_SECONDS as u64,
+            token_type: match dpop_jkt {
+                Some(_) => TokenType::DPoP,
+                None => TokenType::Bearer,
+            },
+            expires_in: ACCESS_TOKEN_EXPIRY_SECONDS,
             refresh_token: Some(new_refresh_token.0),
             scope: token_data.scope,
             sub: Some(token_data.did.to_string()),

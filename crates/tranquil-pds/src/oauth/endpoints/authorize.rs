@@ -1,5 +1,5 @@
 use crate::auth::{BareLoginIdentifier, NormalizedLoginIdentifier};
-use crate::comms::{channel_display_name, comms_repo::enqueue_2fa_code};
+use crate::comms::comms_repo::enqueue_2fa_code;
 use crate::oauth::{
     AuthFlow, ClientMetadataCache, Code, DeviceData, DeviceId, OAuthError, Prompt, SessionId,
     db::should_show_consent, scopes::expand_include_scopes,
@@ -23,7 +23,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
-use tranquil_db_traits::ScopePreference;
+use tranquil_db_traits::{ScopePreference, WebauthnChallengeType};
 use tranquil_types::{AuthorizationCode, ClientId, DeviceId as DeviceIdType, RequestId};
 use urlencoding::encode as url_encode;
 
@@ -85,7 +85,7 @@ fn is_valid_scope(s: &str) -> bool {
         || s.starts_with("include:")
 }
 
-fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
+fn extract_device_cookie(headers: &HeaderMap) -> Option<tranquil_types::DeviceId> {
     headers
         .get("cookie")
         .and_then(|v| v.to_str().ok())
@@ -94,6 +94,7 @@ fn extract_device_cookie(headers: &HeaderMap) -> Option<String> {
                 cookie
                     .strip_prefix(&format!("{}=", DEVICE_COOKIE_NAME))
                     .and_then(|value| crate::config::AuthConfig::get().verify_device_cookie(value))
+                    .map(tranquil_types::DeviceId::new)
             })
         })
 }
@@ -105,8 +106,8 @@ fn extract_user_agent(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn make_device_cookie(device_id: &str) -> String {
-    let signed_value = crate::config::AuthConfig::get().sign_device_cookie(device_id);
+fn make_device_cookie(device_id: &tranquil_types::DeviceId) -> String {
+    let signed_value = crate::config::AuthConfig::get().sign_device_cookie(device_id.as_str());
     format!(
         "{}={}; Path=/oauth; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000",
         DEVICE_COOKIE_NAME, signed_value
@@ -313,7 +314,7 @@ pub async fn authorize_get(
         && let Some(device_id) = extract_device_cookie(&headers)
         && let Ok(accounts) = state
             .oauth_repo
-            .get_device_accounts(&DeviceIdType::from(device_id.clone()))
+            .get_device_accounts(&device_id.clone())
             .await
         && !accounts.is_empty()
     {
@@ -419,8 +420,7 @@ pub async fn authorize_accounts(
             .into_response();
         }
     };
-    let device_id_typed = DeviceIdType::from(device_id.clone());
-    let accounts = match state.oauth_repo.get_device_accounts(&device_id_typed).await {
+    let accounts = match state.oauth_repo.get_device_accounts(&device_id).await {
         Ok(accts) => accts,
         Err(_) => {
             return Json(AccountsResponse {
@@ -693,7 +693,7 @@ pub async fn authorize_post(
                         "Failed to enqueue 2FA notification"
                     );
                 }
-                let channel_name = channel_display_name(user.preferred_comms_channel);
+                let channel_name = user.preferred_comms_channel.display_name();
                 if json_response {
                     return Json(serde_json::json!({
                         "needs_2fa": true,
@@ -712,38 +712,37 @@ pub async fn authorize_post(
             }
         }
     }
-    let mut device_id: Option<String> = extract_device_cookie(&headers);
+    let mut device_id: Option<DeviceIdType> = extract_device_cookie(&headers);
     let mut new_cookie: Option<String> = None;
     if form.remember_device {
         let final_device_id = if let Some(existing_id) = &device_id {
             existing_id.clone()
         } else {
             let new_id = DeviceId::generate();
+            let new_device_id_typed = DeviceIdType::new(new_id.0.clone());
             let device_data = DeviceData {
                 session_id: SessionId::generate(),
                 user_agent: extract_user_agent(&headers),
                 ip_address: extract_client_ip(&headers, None),
                 last_seen_at: Utc::now(),
             };
-            let new_device_id_typed = DeviceIdType::from(new_id.0.clone());
             if state
                 .oauth_repo
                 .create_device(&new_device_id_typed, &device_data)
                 .await
                 .is_ok()
             {
-                new_cookie = Some(make_device_cookie(&new_id.0));
-                device_id = Some(new_id.0.clone());
+                new_cookie = Some(make_device_cookie(&new_device_id_typed));
+                device_id = Some(new_device_id_typed.clone());
             }
-            new_id.0
+            new_device_id_typed
         };
-        let final_device_typed = DeviceIdType::from(final_device_id.clone());
         let _ = state
             .oauth_repo
-            .upsert_account_device(&user.did, &final_device_typed)
+            .upsert_account_device(&user.did, &final_device_id)
             .await;
     }
-    let set_auth_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let set_auth_device_id = device_id.clone();
     if state
         .oauth_repo
         .set_authorization_did(&form_request_id, &user.did, set_auth_device_id.as_ref())
@@ -796,7 +795,7 @@ pub async fn authorize_post(
         return redirect_see_other(&consent_url);
     }
     let code = Code::generate();
-    let auth_post_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let auth_post_device_id = device_id.clone();
     let auth_post_code = AuthorizationCode::from(code.0.clone());
     if state
         .oauth_repo
@@ -915,7 +914,7 @@ pub async fn authorize_select(
             );
         }
     };
-    let verify_device_id = DeviceIdType::from(device_id.clone());
+    let verify_device_id = device_id.clone();
     let account_valid = match state
         .oauth_repo
         .verify_account_on_device(&verify_device_id, &did)
@@ -963,7 +962,7 @@ pub async fn authorize_select(
         );
     }
     let has_totp = crate::api::server::has_totp_enabled(&state, &did).await;
-    let select_early_device_typed = DeviceIdType::from(device_id.clone());
+    let select_early_device_typed = device_id.clone();
     if has_totp {
         if state
             .oauth_repo
@@ -1009,7 +1008,7 @@ pub async fn authorize_select(
                         "Failed to enqueue 2FA notification"
                     );
                 }
-                let channel_name = channel_display_name(user.preferred_comms_channel);
+                let channel_name = user.preferred_comms_channel.display_name();
                 return Json(serde_json::json!({
                     "needs_2fa": true,
                     "channel": channel_name
@@ -1025,7 +1024,7 @@ pub async fn authorize_select(
             }
         }
     }
-    let select_device_typed = DeviceIdType::from(device_id.clone());
+    let select_device_typed = device_id.clone();
     let _ = state
         .oauth_repo
         .upsert_account_device(&did, &select_device_typed)
@@ -1714,7 +1713,7 @@ pub async fn consent_post(
     let consent_post_device_id = request_data
         .device_id
         .as_ref()
-        .map(|d| DeviceIdType::from(d.0.clone()));
+        .map(|d| DeviceIdType::new(d.0.clone()));
     let consent_post_code = AuthorizationCode::from(code.0.clone());
     if state
         .oauth_repo
@@ -1837,7 +1836,7 @@ pub async fn authorize_2fa_post(
         let _ = state.oauth_repo.delete_2fa_challenge(challenge.id).await;
         let code = Code::generate();
         let device_id = extract_device_cookie(&headers);
-        let twofa_totp_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+        let twofa_totp_device_id = device_id.clone();
         let twofa_totp_code = AuthorizationCode::from(code.0.clone());
         if state
             .oauth_repo
@@ -1945,7 +1944,7 @@ pub async fn authorize_2fa_post(
         return Json(serde_json::json!({"redirect_uri": consent_url})).into_response();
     }
     let code = Code::generate();
-    let twofa_final_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let twofa_final_device_id = device_id.clone();
     let twofa_final_code = AuthorizationCode::from(code.0.clone());
     if state
         .oauth_repo
@@ -2273,7 +2272,11 @@ pub async fn passkey_start(
 
     if let Err(e) = state
         .user_repo
-        .save_webauthn_challenge(&user.did, "authentication", &state_json)
+        .save_webauthn_challenge(
+            &user.did,
+            WebauthnChallengeType::Authentication,
+            &state_json,
+        )
         .await
     {
         tracing::error!(error = %e, "Failed to save authentication state");
@@ -2461,7 +2464,7 @@ pub async fn passkey_finish(
 
     let auth_state_json = match state
         .user_repo
-        .load_webauthn_challenge(passkey_owner_did, "authentication")
+        .load_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
         .await
     {
         Ok(Some(s)) => s,
@@ -2540,7 +2543,7 @@ pub async fn passkey_finish(
 
     if let Err(e) = state
         .user_repo
-        .delete_webauthn_challenge(passkey_owner_did, "authentication")
+        .delete_webauthn_challenge(passkey_owner_did, WebauthnChallengeType::Authentication)
         .await
     {
         tracing::warn!(error = %e, "Failed to delete authentication state");
@@ -2550,7 +2553,10 @@ pub async fn passkey_finish(
         let cred_id_bytes = auth_result.cred_id().as_slice();
         match state
             .user_repo
-            .update_passkey_counter(cred_id_bytes, auth_result.counter() as i32)
+            .update_passkey_counter(
+                cred_id_bytes,
+                i32::try_from(auth_result.counter()).unwrap_or(i32::MAX),
+            )
             .await
         {
             Ok(false) => {
@@ -2608,7 +2614,7 @@ pub async fn passkey_finish(
                 {
                     tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
                 }
-                let channel_name = channel_display_name(user.preferred_comms_channel);
+                let channel_name = user.preferred_comms_channel.display_name();
                 return Json(serde_json::json!({
                     "needs_2fa": true,
                     "channel": channel_name
@@ -2658,7 +2664,7 @@ pub async fn passkey_finish(
     }
 
     let code = Code::generate();
-    let passkey_final_device_id = device_id.as_ref().map(|d| DeviceIdType::from(d.clone()));
+    let passkey_final_device_id = device_id.clone();
     let passkey_final_code = AuthorizationCode::from(code.0.clone());
     if state
         .oauth_repo
@@ -2844,7 +2850,7 @@ pub async fn authorize_passkey_start(
 
     if let Err(e) = state
         .user_repo
-        .save_webauthn_challenge(&did, "authentication", &state_json)
+        .save_webauthn_challenge(&did, WebauthnChallengeType::Authentication, &state_json)
         .await
     {
         tracing::error!("Failed to save authentication state: {:?}", e);
@@ -2951,7 +2957,7 @@ pub async fn authorize_passkey_finish(
 
     let auth_state_json = match state
         .user_repo
-        .load_webauthn_challenge(&did, "authentication")
+        .load_webauthn_challenge(&did, WebauthnChallengeType::Authentication)
         .await
     {
         Ok(Some(s)) => s,
@@ -3025,12 +3031,15 @@ pub async fn authorize_passkey_finish(
 
     let _ = state
         .user_repo
-        .delete_webauthn_challenge(&did, "authentication")
+        .delete_webauthn_challenge(&did, WebauthnChallengeType::Authentication)
         .await;
 
     match state
         .user_repo
-        .update_passkey_counter(credential.id.as_ref(), auth_result.counter() as i32)
+        .update_passkey_counter(
+            credential.id.as_ref(),
+            i32::try_from(auth_result.counter()).unwrap_or(i32::MAX),
+        )
         .await
     {
         Ok(false) => {
@@ -3101,7 +3110,7 @@ pub async fn authorize_passkey_finish(
                     {
                         tracing::warn!(did = %did, error = %e, "Failed to enqueue 2FA notification");
                     }
-                    let channel_name = channel_display_name(user.preferred_comms_channel);
+                    let channel_name = user.preferred_comms_channel.display_name();
                     let redirect_url = format!(
                         "/app/oauth/2fa?request_uri={}&channel={}",
                         url_encode(&form.request_uri),
@@ -3440,22 +3449,18 @@ pub async fn establish_session(
 
     let (device_id, new_cookie) = match existing_device {
         Some(id) => {
-            let device_typed = DeviceIdType::from(id.clone());
-            let _ = state
-                .oauth_repo
-                .upsert_account_device(did, &device_typed)
-                .await;
+            let _ = state.oauth_repo.upsert_account_device(did, &id).await;
             (id, None)
         }
         None => {
             let new_id = DeviceId::generate();
+            let device_typed = DeviceIdType::new(new_id.0.clone());
             let device_data = DeviceData {
                 session_id: SessionId::generate(),
                 user_agent: extract_user_agent(&headers),
                 ip_address: extract_client_ip(&headers, None),
                 last_seen_at: Utc::now(),
             };
-            let device_typed = DeviceIdType::from(new_id.0.clone());
 
             if let Err(e) = state
                 .oauth_repo
@@ -3489,7 +3494,8 @@ pub async fn establish_session(
                     .into_response();
             }
 
-            (new_id.0.clone(), Some(make_device_cookie(&new_id.0)))
+            let cookie = make_device_cookie(&device_typed);
+            (device_typed, Some(cookie))
         }
     };
 

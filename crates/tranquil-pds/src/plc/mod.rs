@@ -31,10 +31,41 @@ pub enum PlcError {
     CircuitBreakerOpen,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PlcOpType {
+    #[serde(rename = "plc_operation")]
+    Operation,
+    #[serde(rename = "plc_tombstone")]
+    Tombstone,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ServiceType {
+    #[serde(rename = "AtprotoPersonalDataServer")]
+    Pds,
+    #[serde(rename = "AtprotoAppView")]
+    AppView,
+}
+
+impl ServiceType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pds => "AtprotoPersonalDataServer",
+            Self::AppView => "AtprotoAppView",
+        }
+    }
+
+    pub fn is_pds(self) -> bool {
+        matches!(self, Self::Pds)
+    }
+}
+
+pub const SECP256K1_MULTICODEC_PREFIX: [u8; 2] = [0xe7, 0x01];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcOperation {
     #[serde(rename = "type")]
-    pub op_type: String,
+    pub op_type: PlcOpType,
     #[serde(rename = "rotationKeys")]
     pub rotation_keys: Vec<String>,
     #[serde(rename = "verificationMethods")]
@@ -50,14 +81,14 @@ pub struct PlcOperation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcService {
     #[serde(rename = "type")]
-    pub service_type: String,
+    pub service_type: ServiceType,
     pub endpoint: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlcTombstone {
     #[serde(rename = "type")]
-    pub op_type: String,
+    pub op_type: PlcOpType,
     pub prev: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sig: Option<String>,
@@ -74,7 +105,7 @@ impl PlcOpOrTombstone {
     pub fn is_tombstone(&self) -> bool {
         match self {
             PlcOpOrTombstone::Tombstone(_) => true,
-            PlcOpOrTombstone::Operation(op) => op.op_type == "plc_tombstone",
+            PlcOpOrTombstone::Operation(op) => op.op_type == PlcOpType::Tombstone,
         }
     }
 }
@@ -124,7 +155,7 @@ impl PlcClient {
     }
 
     pub async fn get_document(&self, did: &str) -> Result<Value, PlcError> {
-        let cache_key = format!("plc:doc:{}", did);
+        let cache_key = crate::cache_keys::plc_doc_key(did);
         if let Some(ref cache) = self.cache
             && let Some(cached) = cache.get(&cache_key).await
             && let Ok(value) = serde_json::from_str(&cached)
@@ -163,7 +194,7 @@ impl PlcClient {
     }
 
     pub async fn get_document_data(&self, did: &str) -> Result<Value, PlcError> {
-        let cache_key = format!("plc:data:{}", did);
+        let cache_key = crate::cache_keys::plc_data_key(did);
         if let Some(ref cache) = self.cache
             && let Some(cached) = cache.get(&cache_key).await
             && let Ok(value) = serde_json::from_str(&cached)
@@ -313,7 +344,7 @@ pub fn create_update_op(
             }
         };
     let new_op = PlcOperation {
-        op_type: "plc_operation".to_string(),
+        op_type: PlcOpType::Operation,
         rotation_keys: rotation_keys.unwrap_or(base_rotation_keys),
         verification_methods: verification_methods.unwrap_or(base_verification_methods),
         also_known_as: also_known_as.unwrap_or(base_also_known_as),
@@ -328,7 +359,7 @@ pub fn signing_key_to_did_key(signing_key: &SigningKey) -> String {
     let verifying_key = signing_key.verifying_key();
     let point = verifying_key.to_encoded_point(true);
     let compressed_bytes = point.as_bytes();
-    let mut prefixed = vec![0xe7, 0x01];
+    let mut prefixed = Vec::from(SECP256K1_MULTICODEC_PREFIX);
     prefixed.extend_from_slice(compressed_bytes);
     let encoded = multibase::encode(multibase::Base::Base58Btc, &prefixed);
     format!("did:key:{}", encoded)
@@ -352,12 +383,12 @@ pub fn create_genesis_operation(
     services.insert(
         "atproto_pds".to_string(),
         PlcService {
-            service_type: "AtprotoPersonalDataServer".to_string(),
+            service_type: ServiceType::Pds,
             endpoint: pds_endpoint.to_string(),
         },
     );
     let genesis_op = PlcOperation {
-        op_type: "plc_operation".to_string(),
+        op_type: PlcOpType::Operation,
         rotation_keys: vec![rotation_key.to_string()],
         verification_methods,
         also_known_as: vec![format!("at://{}", handle)],
@@ -386,42 +417,39 @@ pub fn did_for_genesis_op(signed_op: &Value) -> Result<String, PlcError> {
     Ok(format!("did:plc:{}", truncated))
 }
 
-pub fn validate_plc_operation(op: &Value) -> Result<(), PlcError> {
+pub fn validate_plc_operation(op: &Value) -> Result<PlcOpType, PlcError> {
     let obj = op
         .as_object()
         .ok_or_else(|| PlcError::InvalidResponse("Operation must be an object".to_string()))?;
-    let op_type = obj
+    let op_type_str = obj
         .get("type")
-        .and_then(|v| v.as_str())
         .ok_or_else(|| PlcError::InvalidResponse("Missing type field".to_string()))?;
-    if op_type != "plc_operation" && op_type != "plc_tombstone" {
-        return Err(PlcError::InvalidResponse(format!(
+    let op_type: PlcOpType = serde_json::from_value(op_type_str.clone()).map_err(|_| {
+        PlcError::InvalidResponse(format!(
             "Invalid type: {}",
-            op_type
-        )));
-    }
-    if op_type == "plc_operation" {
-        if obj.get("rotationKeys").is_none() {
-            return Err(PlcError::InvalidResponse(
-                "Missing rotationKeys".to_string(),
-            ));
+            op_type_str.as_str().unwrap_or("<non-string>")
+        ))
+    })?;
+    match op_type {
+        PlcOpType::Operation => {
+            let required_fields = [
+                "rotationKeys",
+                "verificationMethods",
+                "alsoKnownAs",
+                "services",
+            ];
+            required_fields.iter().try_for_each(|field| {
+                obj.get(*field)
+                    .map(|_| ())
+                    .ok_or_else(|| PlcError::InvalidResponse(format!("Missing {}", field)))
+            })?;
         }
-        if obj.get("verificationMethods").is_none() {
-            return Err(PlcError::InvalidResponse(
-                "Missing verificationMethods".to_string(),
-            ));
-        }
-        if obj.get("alsoKnownAs").is_none() {
-            return Err(PlcError::InvalidResponse("Missing alsoKnownAs".to_string()));
-        }
-        if obj.get("services").is_none() {
-            return Err(PlcError::InvalidResponse("Missing services".to_string()));
-        }
+        PlcOpType::Tombstone => {}
     }
     if obj.get("sig").is_none() {
         return Err(PlcError::InvalidResponse("Missing sig".to_string()));
     }
-    Ok(())
+    Ok(op_type)
 }
 
 pub struct PlcValidationContext {
@@ -435,14 +463,13 @@ pub fn validate_plc_operation_for_submission(
     op: &Value,
     ctx: &PlcValidationContext,
 ) -> Result<(), PlcError> {
-    validate_plc_operation(op)?;
+    let op_type = validate_plc_operation(op)?;
+    if op_type != PlcOpType::Operation {
+        return Ok(());
+    }
     let obj = op
         .as_object()
         .ok_or_else(|| PlcError::InvalidResponse("Operation must be an object".to_string()))?;
-    let op_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
-    if op_type != "plc_operation" {
-        return Ok(());
-    }
     let rotation_keys = obj
         .get("rotationKeys")
         .and_then(|v| v.as_array())
@@ -489,7 +516,7 @@ pub fn validate_plc_operation_for_submission(
             .get("type")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        if service_type != "AtprotoPersonalDataServer" {
+        if service_type != ServiceType::Pds.as_str() {
             return Err(PlcError::InvalidResponse(
                 "Incorrect type on atproto_pds service".to_string(),
             ));
@@ -551,18 +578,13 @@ fn verify_signature_with_did_key(
             "Invalid did:key data".to_string(),
         ));
     }
-    let (codec, key_bytes) = if decoded[0] == 0xe7 && decoded[1] == 0x01 {
-        (0xe701u16, &decoded[2..])
+    let key_bytes = if decoded.starts_with(&SECP256K1_MULTICODEC_PREFIX) {
+        &decoded[SECP256K1_MULTICODEC_PREFIX.len()..]
     } else {
         return Err(PlcError::InvalidResponse(
-            "Unsupported key type in did:key".to_string(),
+            "Unsupported key type in did:key (expected secp256k1)".to_string(),
         ));
     };
-    if codec != 0xe701 {
-        return Err(PlcError::InvalidResponse(
-            "Only secp256k1 keys are supported".to_string(),
-        ));
-    }
     let verifying_key = VerifyingKey::from_sec1_bytes(key_bytes)
         .map_err(|e| PlcError::InvalidResponse(format!("Invalid public key: {}", e)))?;
     Ok(verifying_key.verify(message, signature).is_ok())

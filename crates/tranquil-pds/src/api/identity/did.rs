@@ -42,7 +42,7 @@ pub async fn resolve_handle(
     if handle_str.is_empty() {
         return ApiError::InvalidRequest("handle is required".into()).into_response();
     }
-    let cache_key = format!("handle:{}", handle_str);
+    let cache_key = crate::cache_keys::handle_key(handle_str);
     if let Some(did) = state.cache.get(&cache_key).await {
         return DidResponse::response(did).into_response();
     }
@@ -78,12 +78,29 @@ pub async fn resolve_handle(
     }
 }
 
-pub fn get_jwk(key_bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
-    let secret_key = SecretKey::from_slice(key_bytes).map_err(|_| "Invalid key length")?;
+#[derive(Debug)]
+pub enum KeyError {
+    InvalidKeyLength,
+    MissingCoordinate,
+}
+
+impl std::fmt::Display for KeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidKeyLength => write!(f, "invalid key length"),
+            Self::MissingCoordinate => write!(f, "missing elliptic curve coordinate"),
+        }
+    }
+}
+
+impl std::error::Error for KeyError {}
+
+pub fn get_jwk(key_bytes: &[u8]) -> Result<serde_json::Value, KeyError> {
+    let secret_key = SecretKey::from_slice(key_bytes).map_err(|_| KeyError::InvalidKeyLength)?;
     let public_key = secret_key.public_key();
     let encoded = public_key.to_encoded_point(false);
-    let x = encoded.x().ok_or("Missing x coordinate")?;
-    let y = encoded.y().ok_or("Missing y coordinate")?;
+    let x = encoded.x().ok_or(KeyError::MissingCoordinate)?;
+    let y = encoded.y().ok_or(KeyError::MissingCoordinate)?;
     let x_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(x);
     let y_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(y);
     Ok(json!({
@@ -94,8 +111,8 @@ pub fn get_jwk(key_bytes: &[u8]) -> Result<serde_json::Value, &'static str> {
     }))
 }
 
-pub fn get_public_key_multibase(key_bytes: &[u8]) -> Result<String, &'static str> {
-    let secret_key = SecretKey::from_slice(key_bytes).map_err(|_| "Invalid key length")?;
+pub fn get_public_key_multibase(key_bytes: &[u8]) -> Result<String, KeyError> {
+    let secret_key = SecretKey::from_slice(key_bytes).map_err(|_| KeyError::InvalidKeyLength)?;
     let public_key = secret_key.public_key();
     let compressed = public_key.to_encoded_point(true);
     let compressed_bytes = compressed.as_bytes();
@@ -107,7 +124,7 @@ pub fn get_public_key_multibase(key_bytes: &[u8]) -> Result<String, &'static str
 pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let hostname = pds_hostname();
     let hostname_without_port = pds_hostname_without_port();
-    let host_header = get_header_str(&headers, "host").unwrap_or(hostname);
+    let host_header = get_header_str(&headers, http::header::HOST).unwrap_or(hostname);
     let host_without_port = host_header.split(':').next().unwrap_or(host_header);
     if host_without_port != hostname_without_port
         && host_without_port.ends_with(&format!(".{}", hostname_without_port))
@@ -127,7 +144,7 @@ pub async fn well_known_did(State(state): State<AppState>, headers: HeaderMap) -
         "id": did,
         "service": [{
             "id": "#atproto_pds",
-            "type": "AtprotoPersonalDataServer",
+            "type": crate::plc::ServiceType::Pds.as_str(),
             "serviceEndpoint": format!("https://{}", hostname)
         }]
     }))
@@ -197,7 +214,7 @@ async fn serve_subdomain_did_doc(state: &AppState, subdomain: &str, hostname: &s
             })).collect::<Vec<_>>(),
             "service": [{
                 "id": "#atproto_pds",
-                "type": "AtprotoPersonalDataServer",
+                "type": crate::plc::ServiceType::Pds.as_str(),
                 "serviceEndpoint": service_endpoint
             }]
         }))
@@ -250,7 +267,7 @@ async fn serve_subdomain_did_doc(state: &AppState, subdomain: &str, hostname: &s
         }],
         "service": [{
             "id": "#atproto_pds",
-            "type": "AtprotoPersonalDataServer",
+            "type": crate::plc::ServiceType::Pds.as_str(),
             "serviceEndpoint": service_endpoint
         }]
     }))
@@ -332,7 +349,7 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
             })).collect::<Vec<_>>(),
             "service": [{
                 "id": "#atproto_pds",
-                "type": "AtprotoPersonalDataServer",
+                "type": crate::plc::ServiceType::Pds.as_str(),
                 "serviceEndpoint": service_endpoint
             }]
         }))
@@ -385,11 +402,35 @@ pub async fn user_did_doc(State(state): State<AppState>, Path(handle): Path<Stri
         }],
         "service": [{
             "id": "#atproto_pds",
-            "type": "AtprotoPersonalDataServer",
+            "type": crate::plc::ServiceType::Pds.as_str(),
             "serviceEndpoint": service_endpoint
         }]
     }))
     .into_response()
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DidWebVerifyError {
+    #[error("Invalid did:web format")]
+    InvalidFormat,
+    #[error("Invalid DID path for this PDS. Expected {0}")]
+    InvalidPath(String),
+    #[error(
+        "External did:web requires a pre-reserved signing key. Call com.atproto.server.reserveSigningKey first, configure your DID document with the returned key, then provide the signingKey in createAccount."
+    )]
+    MissingSigningKey,
+    #[error("Failed to fetch DID doc: {0}")]
+    FetchFailed(String),
+    #[error("Invalid DID document: {0}")]
+    InvalidDocument(String),
+    #[error("DID document does not list this PDS ({0}) as AtprotoPersonalDataServer")]
+    PdsNotListed(String),
+    #[error(
+        "DID document verification key does not match reserved signing key. Expected publicKeyMultibase: {0}"
+    )]
+    KeyMismatch(String),
+    #[error("Invalid signing key format")]
+    InvalidSigningKey,
 }
 
 pub async fn verify_did_web(
@@ -397,7 +438,7 @@ pub async fn verify_did_web(
     hostname: &str,
     handle: &str,
     expected_signing_key: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), DidWebVerifyError> {
     let hostname_for_handles = hostname.split(':').next().unwrap_or(hostname);
     let subdomain_host = format!("{}.{}", handle, hostname_for_handles);
     let encoded_subdomain = subdomain_host.replace(':', "%3A");
@@ -413,21 +454,16 @@ pub async fn verify_did_web(
     if did.starts_with(&expected_prefix) {
         let suffix = &did[expected_prefix.len()..];
         let expected_suffix = format!(":u:{}", handle);
-        if suffix == expected_suffix {
-            return Ok(());
+        return if suffix == expected_suffix {
+            Ok(())
         } else {
-            return Err(format!(
-                "Invalid DID path for this PDS. Expected {}",
-                expected_suffix
-            ));
-        }
+            Err(DidWebVerifyError::InvalidPath(expected_suffix))
+        };
     }
-    let expected_signing_key = expected_signing_key.ok_or_else(|| {
-        "External did:web requires a pre-reserved signing key. Call com.atproto.server.reserveSigningKey first, configure your DID document with the returned key, then provide the signingKey in createAccount.".to_string()
-    })?;
+    let expected_signing_key = expected_signing_key.ok_or(DidWebVerifyError::MissingSigningKey)?;
     let parts: Vec<&str> = did.split(':').collect();
     if parts.len() < 3 || parts[0] != "did" || parts[1] != "web" {
-        return Err("Invalid did:web format".into());
+        return Err(DidWebVerifyError::InvalidFormat);
     }
     let domain_segment = parts[2];
     let domain = domain_segment.replace("%3A", ":");
@@ -447,43 +483,46 @@ pub async fn verify_did_web(
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch DID doc: {}", e))?;
+        .map_err(|e| DidWebVerifyError::FetchFailed(e.to_string()))?;
     if !resp.status().is_success() {
-        return Err(format!("Failed to fetch DID doc: HTTP {}", resp.status()));
+        return Err(DidWebVerifyError::FetchFailed(format!(
+            "HTTP {}",
+            resp.status()
+        )));
     }
     let doc: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("Failed to parse DID doc: {}", e))?;
+        .map_err(|e| DidWebVerifyError::InvalidDocument(e.to_string()))?;
     let services = doc["service"]
         .as_array()
-        .ok_or("No services found in DID doc")?;
+        .ok_or(DidWebVerifyError::InvalidDocument(
+            "No services found".to_string(),
+        ))?;
     let pds_endpoint = format!("https://{}", hostname);
-    let has_valid_service = services
-        .iter()
-        .any(|s| s["type"] == "AtprotoPersonalDataServer" && s["serviceEndpoint"] == pds_endpoint);
+    let has_valid_service = services.iter().any(|s| {
+        s["type"] == crate::plc::ServiceType::Pds.as_str() && s["serviceEndpoint"] == pds_endpoint
+    });
     if !has_valid_service {
-        return Err(format!(
-            "DID document does not list this PDS ({}) as AtprotoPersonalDataServer",
-            pds_endpoint
-        ));
+        return Err(DidWebVerifyError::PdsNotListed(pds_endpoint));
     }
-    let verification_methods = doc["verificationMethod"]
-        .as_array()
-        .ok_or("No verificationMethod found in DID doc")?;
+    let verification_methods =
+        doc["verificationMethod"]
+            .as_array()
+            .ok_or(DidWebVerifyError::InvalidDocument(
+                "No verificationMethod found".to_string(),
+            ))?;
     let expected_multibase = expected_signing_key
         .strip_prefix("did:key:")
-        .ok_or("Invalid signing key format")?;
+        .ok_or(DidWebVerifyError::InvalidSigningKey)?;
     let has_matching_key = verification_methods.iter().any(|vm| {
         vm["publicKeyMultibase"]
             .as_str()
-            .map(|pk| pk == expected_multibase)
-            .unwrap_or(false)
+            .is_some_and(|pk| pk == expected_multibase)
     });
     if !has_matching_key {
-        return Err(format!(
-            "DID document verification key does not match reserved signing key. Expected publicKeyMultibase: {}",
-            expected_multibase
+        return Err(DidWebVerifyError::KeyMismatch(
+            expected_multibase.to_string(),
         ));
     }
     Ok(())
@@ -559,7 +598,7 @@ pub async fn get_recommended_did_credentials(
             verification_methods: VerificationMethods { atproto: did_key },
             services: Services {
                 atproto_pds: AtprotoPds {
-                    service_type: "AtprotoPersonalDataServer".to_string(),
+                    service_type: crate::plc::ServiceType::Pds.as_str().to_string(),
                     endpoint: pds_endpoint,
                 },
             },
@@ -579,7 +618,7 @@ pub async fn update_handle(
     Json(input): Json<UpdateHandleInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::IdentityAttr::Handle,
     ) {
@@ -652,7 +691,10 @@ pub async fn update_handle(
             format!("{}.{}", new_handle, hostname_for_handles)
         };
         if full_handle == current_handle {
-            let handle_typed = unsafe { Handle::new_unchecked(&full_handle) };
+            let handle_typed: Handle = match full_handle.parse() {
+                Ok(h) => h,
+                Err(_) => return Err(ApiError::InvalidHandle(None)),
+            };
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
                     .await
@@ -675,7 +717,10 @@ pub async fn update_handle(
         full_handle
     } else {
         if new_handle == current_handle {
-            let handle_typed = unsafe { Handle::new_unchecked(&new_handle) };
+            let handle_typed: Handle = match new_handle.parse() {
+                Ok(h) => h,
+                Err(_) => return Err(ApiError::InvalidHandle(None)),
+            };
             if let Err(e) =
                 crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed))
                     .await
@@ -728,10 +773,13 @@ pub async fn update_handle(
     if !current_handle.is_empty() {
         let _ = state
             .cache
-            .delete(&format!("handle:{}", current_handle))
+            .delete(&crate::cache_keys::handle_key(&current_handle))
             .await;
     }
-    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+    let _ = state
+        .cache
+        .delete(&crate::cache_keys::handle_key(&handle))
+        .await;
     if let Err(e) =
         crate::api::repo::record::sequence_identity_event(&state, &did, Some(&handle_typed)).await
     {
@@ -768,7 +816,7 @@ pub async fn update_plc_handle(
 }
 
 pub async fn well_known_atproto_did(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let host = match crate::util::get_header_str(&headers, "host") {
+    let host = match crate::util::get_header_str(&headers, http::header::HOST) {
         Some(h) => h,
         None => return (StatusCode::BAD_REQUEST, "Missing host header").into_response(),
     };

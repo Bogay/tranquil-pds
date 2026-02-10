@@ -12,10 +12,42 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tracing::{error, info};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReportReasonType {
+    #[serde(rename = "com.atproto.moderation.defs#reasonSpam")]
+    Spam,
+    #[serde(rename = "com.atproto.moderation.defs#reasonViolation")]
+    Violation,
+    #[serde(rename = "com.atproto.moderation.defs#reasonMisleading")]
+    Misleading,
+    #[serde(rename = "com.atproto.moderation.defs#reasonSexual")]
+    Sexual,
+    #[serde(rename = "com.atproto.moderation.defs#reasonRude")]
+    Rude,
+    #[serde(rename = "com.atproto.moderation.defs#reasonOther")]
+    Other,
+    #[serde(rename = "com.atproto.moderation.defs#reasonAppeal")]
+    Appeal,
+}
+
+impl ReportReasonType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Spam => "com.atproto.moderation.defs#reasonSpam",
+            Self::Violation => "com.atproto.moderation.defs#reasonViolation",
+            Self::Misleading => "com.atproto.moderation.defs#reasonMisleading",
+            Self::Sexual => "com.atproto.moderation.defs#reasonSexual",
+            Self::Rude => "com.atproto.moderation.defs#reasonRude",
+            Self::Other => "com.atproto.moderation.defs#reasonOther",
+            Self::Appeal => "com.atproto.moderation.defs#reasonAppeal",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateReportInput {
-    pub reason_type: String,
+    pub reason_type: ReportReasonType,
     pub reason: Option<String>,
     pub subject: Value,
 }
@@ -24,20 +56,25 @@ pub struct CreateReportInput {
 #[serde(rename_all = "camelCase")]
 pub struct CreateReportOutput {
     pub id: i64,
-    pub reason_type: String,
+    pub reason_type: ReportReasonType,
     pub reason: Option<String>,
     pub subject: Value,
     pub reported_by: String,
     pub created_at: String,
 }
 
-fn get_report_service_config() -> Option<(String, String)> {
+struct ReportServiceConfig {
+    url: String,
+    did: String,
+}
+
+fn get_report_service_config() -> Option<ReportServiceConfig> {
     let url = std::env::var("REPORT_SERVICE_URL").ok()?;
     let did = std::env::var("REPORT_SERVICE_DID").ok()?;
     if url.is_empty() || did.is_empty() {
         return None;
     }
-    Some((url, did))
+    Some(ReportServiceConfig { url, did })
 }
 
 pub async fn create_report(
@@ -47,8 +84,8 @@ pub async fn create_report(
 ) -> Response {
     let did = &auth.did;
 
-    if let Some((service_url, service_did)) = get_report_service_config() {
-        return proxy_to_report_service(&state, &auth, &service_url, &service_did, &input).await;
+    if let Some(config) = get_report_service_config() {
+        return proxy_to_report_service(&state, &auth, &config.url, &config.did, &input).await;
     }
 
     create_report_locally(&state, did, auth.status.is_takendown(), input).await
@@ -177,36 +214,21 @@ async fn create_report_locally(
     is_takendown: bool,
     input: CreateReportInput,
 ) -> Response {
-    const REASON_APPEAL: &str = "com.atproto.moderation.defs#reasonAppeal";
-
-    if is_takendown && input.reason_type != REASON_APPEAL {
+    if is_takendown && input.reason_type != ReportReasonType::Appeal {
         return ApiError::InvalidRequest("Report not accepted from takendown account".into())
             .into_response();
     }
 
-    let valid_reason_types = [
-        "com.atproto.moderation.defs#reasonSpam",
-        "com.atproto.moderation.defs#reasonViolation",
-        "com.atproto.moderation.defs#reasonMisleading",
-        "com.atproto.moderation.defs#reasonSexual",
-        "com.atproto.moderation.defs#reasonRude",
-        "com.atproto.moderation.defs#reasonOther",
-        REASON_APPEAL,
-    ];
-
-    if !valid_reason_types.contains(&input.reason_type.as_str()) {
-        return ApiError::InvalidRequest("Invalid reasonType".into()).into_response();
-    }
-
     let created_at = chrono::Utc::now();
-    let report_id = (uuid::Uuid::now_v7().as_u128() & 0x7FFF_FFFF_FFFF_FFFF) as i64;
+    let report_id = i64::try_from(uuid::Uuid::now_v7().as_u128() & 0x7FFF_FFFF_FFFF_FFFF)
+        .expect("masked to 63 bits, always fits i64");
     let subject_json = json!(input.subject);
 
     if let Err(e) = state
         .infra_repo
         .insert_report(
             report_id,
-            &input.reason_type,
+            input.reason_type.as_str(),
             input.reason.as_deref(),
             subject_json,
             did,
@@ -221,7 +243,7 @@ async fn create_report_locally(
     info!(
         report_id = %report_id,
         reported_by = %did,
-        reason_type = %input.reason_type,
+        reason_type = input.reason_type.as_str(),
         "Report created locally (no report service configured)"
     );
 

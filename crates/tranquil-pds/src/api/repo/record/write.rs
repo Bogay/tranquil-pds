@@ -6,7 +6,7 @@ use crate::api::repo::record::utils::{
     get_current_root_cid,
 };
 use crate::auth::{
-    Active, Auth, RepoScopeAction, ScopeVerified, VerifyScope, require_not_migrated,
+    Active, Auth, AuthSource, RepoScopeAction, ScopeVerified, VerifyScope, require_not_migrated,
     require_verified_or_delegated,
 };
 use crate::cid_types::CommitCid;
@@ -14,6 +14,7 @@ use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use crate::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
+use crate::validation::ValidationStatus;
 use axum::{
     Json,
     extract::State,
@@ -32,7 +33,7 @@ use uuid::Uuid;
 pub struct RepoWriteAuth {
     pub did: Did,
     pub user_id: Uuid,
-    pub is_oauth: bool,
+    pub auth_source: AuthSource,
     pub scope: Option<String>,
     pub controller_did: Option<Did>,
 }
@@ -66,7 +67,7 @@ pub async fn prepare_repo_write<A: RepoScopeAction>(
     Ok(RepoWriteAuth {
         did: principal_did.into_did(),
         user_id,
-        is_oauth: user.is_oauth(),
+        auth_source: user.auth_source.clone(),
         scope: user.scope.clone(),
         controller_did: scope_proof.controller_did().map(|c| c.into_did()),
     })
@@ -97,7 +98,7 @@ pub struct CreateRecordOutput {
     pub cid: String,
     pub commit: CommitInfo,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub validation_status: Option<String>,
+    pub validation_status: Option<ValidationStatus>,
 }
 pub async fn create_record(
     State(state): State<AppState>,
@@ -323,10 +324,7 @@ pub async fn create_record(
     .await
     {
         Ok(res) => res,
-        Err(e) if e.contains("ConcurrentModification") => {
-            return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
-        }
-        Err(e) => return Ok(ApiError::InternalError(Some(e)).into_response()),
+        Err(e) => return Ok(ApiError::from(e).into_response()),
     };
 
     for conflict_uri in conflict_uris_to_cleanup {
@@ -375,7 +373,7 @@ pub async fn create_record(
                 cid: commit_result.commit_cid.to_string(),
                 rev: commit_result.rev,
             },
-            validation_status: validation_status.map(|s| s.to_string()),
+            validation_status,
         }),
     )
         .into_response())
@@ -402,7 +400,7 @@ pub struct PutRecordOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub commit: Option<CommitInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub validation_status: Option<String>,
+    pub validation_status: Option<ValidationStatus>,
 }
 pub async fn put_record(
     State(state): State<AppState>,
@@ -494,7 +492,7 @@ pub async fn put_record(
                 uri: AtUri::from_parts(&did, &input.collection, &input.rkey),
                 cid: record_cid.to_string(),
                 commit: None,
-                validation_status: validation_status.map(|s| s.to_string()),
+                validation_status,
             }),
         )
             .into_response());
@@ -600,10 +598,7 @@ pub async fn put_record(
     .await
     {
         Ok(res) => res,
-        Err(e) if e.contains("ConcurrentModification") => {
-            return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
-        }
-        Err(e) => return Ok(ApiError::InternalError(Some(e)).into_response()),
+        Err(e) => return Ok(ApiError::from(e).into_response()),
     };
 
     if let Some(ref controller) = controller_did {
@@ -634,7 +629,7 @@ pub async fn put_record(
                 cid: commit_result.commit_cid.to_string(),
                 rev: commit_result.rev,
             }),
-            validation_status: validation_status.map(|s| s.to_string()),
+            validation_status,
         }),
     )
         .into_response())

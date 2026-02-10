@@ -10,7 +10,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmChannelVerificationInput {
-    pub channel: String,
+    pub channel: tranquil_db_traits::CommsChannel,
     pub identifier: String,
     pub code: String,
 }

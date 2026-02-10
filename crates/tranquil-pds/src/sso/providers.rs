@@ -14,6 +14,16 @@ use super::config::{AppleProviderConfig, ProviderConfig, SsoConfig};
 
 const SSO_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
+struct PkceChallenge {
+    code_verifier: String,
+    code_challenge: String,
+}
+
+struct ClientSecretWithExpiry {
+    secret: String,
+    expires_at: u64,
+}
+
 fn create_http_client() -> Client {
     Client::builder()
         .timeout(SSO_HTTP_TIMEOUT)
@@ -473,17 +483,20 @@ impl OidcProvider {
             .await
     }
 
-    fn generate_pkce() -> (String, String) {
+    fn generate_pkce() -> PkceChallenge {
         use rand::RngCore;
         let mut verifier_bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut verifier_bytes);
-        let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+        let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
 
         use sha2::{Digest, Sha256};
-        let challenge_bytes = Sha256::digest(verifier.as_bytes());
-        let challenge = URL_SAFE_NO_PAD.encode(challenge_bytes);
+        let challenge_bytes = Sha256::digest(code_verifier.as_bytes());
+        let code_challenge = URL_SAFE_NO_PAD.encode(challenge_bytes);
 
-        (verifier, challenge)
+        PkceChallenge {
+            code_verifier,
+            code_challenge,
+        }
     }
 
     fn validate_id_token(
@@ -585,7 +598,7 @@ impl SsoProvider for OidcProvider {
         redirect_uri: &str,
         nonce: Option<&str>,
     ) -> Result<AuthUrlResult, SsoError> {
-        let (verifier, challenge) = Self::generate_pkce();
+        let pkce = Self::generate_pkce();
 
         let auth_endpoint = match self.provider_type {
             SsoProviderType::Google => "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
@@ -604,7 +617,7 @@ impl SsoProvider for OidcProvider {
             urlencoding::encode(&self.client_id),
             urlencoding::encode(redirect_uri),
             urlencoding::encode(state),
-            urlencoding::encode(&challenge),
+            urlencoding::encode(&pkce.code_challenge),
         );
 
         if let Some(n) = nonce {
@@ -613,7 +626,7 @@ impl SsoProvider for OidcProvider {
 
         Ok(AuthUrlResult {
             url,
-            code_verifier: Some(verifier),
+            code_verifier: Some(pkce.code_verifier),
         })
     }
 
@@ -785,10 +798,10 @@ impl AppleProvider {
         })
     }
 
-    fn generate_client_secret(&self) -> Result<(String, u64), SsoError> {
+    fn generate_client_secret(&self) -> Result<ClientSecretWithExpiry, SsoError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         let exp = now + (150 * 24 * 60 * 60);
 
@@ -821,13 +834,16 @@ impl AppleProvider {
             SsoError::Provider(format!("Failed to generate Apple client secret: {}", e))
         })?;
 
-        Ok((token, exp))
+        Ok(ClientSecretWithExpiry {
+            secret: token,
+            expires_at: exp,
+        })
     }
 
     async fn get_client_secret(&self) -> Result<String, SsoError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         {
@@ -839,17 +855,17 @@ impl AppleProvider {
             }
         }
 
-        let (secret, expires_at) = self.generate_client_secret()?;
+        let generated = self.generate_client_secret()?;
 
         {
             let mut cache = self.client_secret_cache.write().await;
             *cache = Some(CachedClientSecret {
-                secret: secret.clone(),
-                expires_at,
+                secret: generated.secret.clone(),
+                expires_at: generated.expires_at,
             });
         }
 
-        Ok(secret)
+        Ok(generated.secret)
     }
 
     async fn get_jwks(&self) -> Result<&JwkSet, SsoError> {

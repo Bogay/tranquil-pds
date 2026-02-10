@@ -1,4 +1,3 @@
-use crate::api::error::ApiError;
 use crate::rate_limit::{HandleVerificationLimit, RateLimited};
 use crate::types::{Did, Handle};
 use axum::{
@@ -9,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct VerifyHandleOwnershipInput {
-    pub handle: String,
+    pub handle: Handle,
     pub did: Did,
 }
 
@@ -27,14 +26,7 @@ pub async fn verify_handle_ownership(
     _rate_limit: RateLimited<HandleVerificationLimit>,
     Json(input): Json<VerifyHandleOwnershipInput>,
 ) -> Response {
-    let handle: Handle = match input.handle.parse() {
-        Ok(h) => h,
-        Err(_) => {
-            return ApiError::InvalidHandle(Some("Invalid handle format".into())).into_response();
-        }
-    };
-
-    let handle_str = handle.as_str();
+    let handle_str = input.handle.as_str();
     let did_str = input.did.as_str();
 
     let dns_mismatch = match crate::handle::resolve_handle_dns(handle_str).await {

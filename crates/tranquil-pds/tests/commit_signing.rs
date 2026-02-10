@@ -99,7 +99,9 @@ fn test_create_signed_commit_helper() {
     use tranquil_pds::api::repo::record::utils::create_signed_commit;
 
     let signing_key = SigningKey::random(&mut rand::thread_rng());
-    let did = unsafe { Did::new_unchecked("did:plc:testuser123456789abcdef") };
+    let did: Did = "did:plc:testuser123456789abcdef"
+        .parse()
+        .expect("valid test DID");
     let data_cid =
         Cid::from_str("bafyreib2rxk3ryblouj3fxza5jvx6psmwewwessc4m6g6e7pqhhkwqomfi").unwrap();
     let rev = Tid::now(LimitedU32::MIN).to_string();

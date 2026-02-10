@@ -57,7 +57,7 @@ pub async fn dereference_scope(
 
     for part in scope_parts {
         if let Some(cid_str) = part.strip_prefix("ref:") {
-            let cache_key = format!("scope_ref:{}", cid_str);
+            let cache_key = crate::cache_keys::scope_ref_key(cid_str);
             if let Some(cached) = state.cache.get(&cache_key).await {
                 for s in cached.split_whitespace() {
                     if !resolved_scopes.contains(&s.to_string()) {

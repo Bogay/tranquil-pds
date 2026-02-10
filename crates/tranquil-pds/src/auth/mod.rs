@@ -26,8 +26,9 @@ pub use login_identifier::{BareLoginIdentifier, NormalizedLoginIdentifier};
 
 pub use account_verified::{AccountVerified, require_not_migrated, require_verified_or_delegated};
 pub use extractor::{
-    Active, Admin, AnyUser, Auth, AuthAny, AuthError, AuthPolicy, ExtractedToken, NotTakendown,
-    Permissive, ServiceAuth, extract_auth_token_from_header, extract_bearer_token_from_header,
+    Active, Admin, AnyUser, Auth, AuthAny, AuthError, AuthPolicy, AuthScheme, ExtractedToken,
+    NotTakendown, Permissive, ServiceAuth, extract_auth_token_from_header,
+    extract_bearer_token_from_header,
 };
 pub use mfa_verified::{
     MfaMethod, MfaVerified, require_legacy_session_mfa, require_reauth_window,
@@ -39,12 +40,11 @@ pub use scope_verified::{
     RpcCall, ScopeAction, ScopeVerificationError, ScopeVerified, VerifyScope, WriteOpKind,
     verify_batch_write_scopes,
 };
-pub use service::{ServiceTokenClaims, ServiceTokenVerifier, is_service_token};
+pub use service::{ServiceTokenClaims, ServiceTokenError, ServiceTokenVerifier, is_service_token};
 
 pub use tranquil_auth::{
-    ActClaim, Claims, Header, SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED,
-    SCOPE_REFRESH, TOKEN_TYPE_ACCESS, TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, TokenData,
-    TokenVerifyError, TokenWithMetadata, UnsafeClaims, create_access_token,
+    ActClaim, Claims, Header, SigningAlgorithm, TokenData, TokenDecodeError, TokenScope, TokenType,
+    TokenVerifyError, TokenWithMetadata, TotpError, UnsafeClaims, create_access_token,
     create_access_token_hs256, create_access_token_hs256_with_metadata,
     create_access_token_with_delegation, create_access_token_with_metadata,
     create_access_token_with_scope_metadata, create_refresh_token, create_refresh_token_hs256,
@@ -56,11 +56,18 @@ pub use tranquil_auth::{
     verify_refresh_token, verify_refresh_token_hs256, verify_token, verify_totp_code,
 };
 
-pub fn encrypt_totp_secret(secret: &[u8]) -> Result<Vec<u8>, String> {
+pub fn lxm_permits(lxm: &str, expected: &str) -> bool {
+    lxm == "*" || lxm == expected
+}
+
+pub fn encrypt_totp_secret(secret: &[u8]) -> Result<Vec<u8>, crate::config::CryptoError> {
     crate::config::encrypt_key(secret)
 }
 
-pub fn decrypt_totp_secret(encrypted: &[u8], version: i32) -> Result<Vec<u8>, String> {
+pub fn decrypt_totp_secret(
+    encrypted: &[u8],
+    version: i32,
+) -> Result<Vec<u8>, crate::config::CryptoError> {
     crate::config::decrypt_key(encrypted, Some(version))
 }
 
@@ -113,6 +120,7 @@ impl fmt::Display for TokenValidationError {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum AuthSource {
     Session,
     OAuth,
@@ -162,7 +170,7 @@ impl AuthenticatedUser {
     pub fn require_lxm(&self, expected_lxm: &str) -> Result<(), ApiError> {
         match self.auth_source.service_claims() {
             Some(claims) => match &claims.lxm {
-                Some(lxm) if lxm == "*" || lxm == expected_lxm => Ok(()),
+                Some(lxm) if lxm_permits(lxm, expected_lxm) => Ok(()),
                 Some(lxm) => Err(ApiError::AuthorizationError(format!(
                     "Token lxm '{}' does not permit '{}'",
                     lxm, expected_lxm
@@ -192,7 +200,7 @@ impl AuthenticatedUser {
 impl AuthenticatedUser {
     pub fn permissions(&self) -> ScopePermissions {
         if let Some(ref scope) = self.scope
-            && scope != SCOPE_ACCESS
+            && scope != TokenScope::Access.as_str()
         {
             return ScopePermissions::from_scope_string(Some(scope));
         }
@@ -265,7 +273,7 @@ async fn validate_bearer_token_with_options_internal(
             Ok(d) => d,
             Err(_) => return Err(TokenValidationError::InvalidToken),
         };
-        let key_cache_key = format!("auth:key:{}", did_str);
+        let key_cache_key = crate::cache_keys::signing_key_key(did_str);
         let mut cached_key: Option<Vec<u8>> = None;
 
         if let Some(c) = cache {
@@ -279,7 +287,7 @@ async fn validate_bearer_token_with_options_internal(
 
         let (decrypted_key, deactivated_at, takedown_ref, is_admin) = if let Some(key) = cached_key
         {
-            let status_cache_key = format!("auth:status:{}", did_str);
+            let status_cache_key = crate::cache_keys::user_status_key(did_str);
             let cached_status: Option<CachedUserStatus> = if let Some(c) = cache {
                 c.get(&status_cache_key)
                     .await
@@ -347,7 +355,7 @@ async fn validate_bearer_token_with_options_internal(
                     )
                     .await;
 
-                let status_cache_key = format!("auth:status:{}", did);
+                let status_cache_key = crate::cache_keys::user_status_key(&did.to_string());
                 let cached = CachedUserStatus {
                     deactivated: user.deactivated_at.is_some(),
                     takendown: user.takedown_ref.is_some(),
@@ -386,7 +394,7 @@ async fn validate_bearer_token_with_options_internal(
             match verify_access_token_typed(token, &decrypted_key) {
                 Ok(token_data) => {
                     let jti = &token_data.claims.jti;
-                    let session_cache_key = format!("auth:session:{}:{}", did, jti);
+                    let session_cache_key = crate::cache_keys::session_key(&did, &jti);
                     let mut session_valid = false;
 
                     if let Some(c) = cache {
@@ -424,11 +432,14 @@ async fn validate_bearer_token_with_options_internal(
                     }
 
                     if session_valid {
-                        let controller_did = token_data
-                            .claims
-                            .act
-                            .as_ref()
-                            .map(|a| unsafe { Did::new_unchecked(a.sub.clone()) });
+                        let controller_did: Option<Did> = match &token_data.claims.act {
+                            Some(act) => Some(
+                                act.sub
+                                    .parse()
+                                    .map_err(|_| TokenValidationError::InvalidToken)?,
+                            ),
+                            None => None,
+                        };
                         let status =
                             AccountStatus::from_db_fields(takedown_ref.as_deref(), deactivated_at);
                         return Ok(AuthenticatedUser {
@@ -479,15 +490,22 @@ async fn validate_bearer_token_with_options_internal(
             } else {
                 None
             };
+            let did: Did = oauth_token
+                .did
+                .parse()
+                .map_err(|_| TokenValidationError::InvalidToken)?;
+            let controller_did: Option<Did> = oauth_info
+                .controller_did
+                .map(|d| d.parse())
+                .transpose()
+                .map_err(|_| TokenValidationError::InvalidToken)?;
             return Ok(AuthenticatedUser {
-                did: unsafe { Did::new_unchecked(oauth_token.did) },
+                did,
                 key_bytes,
                 is_admin: oauth_token.is_admin,
                 status,
                 scope: oauth_info.scope,
-                controller_did: oauth_info
-                    .controller_did
-                    .map(|d| unsafe { Did::new_unchecked(d) }),
+                controller_did,
                 auth_source: AuthSource::OAuth,
             });
         } else {
@@ -499,33 +517,45 @@ async fn validate_bearer_token_with_options_internal(
 }
 
 pub async fn invalidate_auth_cache(cache: &dyn Cache, did: &str) {
-    let key_cache_key = format!("auth:key:{}", did);
-    let status_cache_key = format!("auth:status:{}", did);
+    let key_cache_key = crate::cache_keys::signing_key_key(did);
+    let status_cache_key = crate::cache_keys::user_status_key(did);
     let _ = cache.delete(&key_cache_key).await;
     let _ = cache.delete(&status_cache_key).await;
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountRequirement {
+    Active,
+    NotTakendown,
+    AnyStatus,
+}
+
 pub async fn validate_token_with_dpop(
     user_repo: &dyn UserRepository,
     oauth_repo: &dyn OAuthRepository,
     token: &str,
-    is_dpop_token: bool,
+    scheme: AuthScheme,
     dpop_proof: Option<&str>,
     http_method: &str,
     http_uri: &str,
-    allow_deactivated: bool,
-    allow_takendown: bool,
+    requirement: AccountRequirement,
 ) -> Result<AuthenticatedUser, TokenValidationError> {
-    if !is_dpop_token {
-        if allow_takendown {
-            return validate_bearer_token_allow_takendown(user_repo, token).await;
-        } else if allow_deactivated {
-            return validate_bearer_token_allow_deactivated(user_repo, token).await;
-        } else {
-            return validate_bearer_token(user_repo, token).await;
-        }
+    if !scheme.is_dpop() {
+        return match requirement {
+            AccountRequirement::AnyStatus => {
+                validate_bearer_token_allow_takendown(user_repo, token).await
+            }
+            AccountRequirement::NotTakendown => {
+                validate_bearer_token_allow_deactivated(user_repo, token).await
+            }
+            AccountRequirement::Active => validate_bearer_token(user_repo, token).await,
+        };
     }
+    let (allow_deactivated, allow_takendown) = match requirement {
+        AccountRequirement::Active => (false, false),
+        AccountRequirement::NotTakendown => (true, false),
+        AccountRequirement::AnyStatus => (true, true),
+    };
     match crate::oauth::verify::verify_oauth_access_token(
         oauth_repo,
         token,
@@ -566,7 +596,7 @@ pub async fn validate_token_with_dpop(
                 None
             };
             Ok(AuthenticatedUser {
-                did: unsafe { Did::new_unchecked(result.did) },
+                did: result_did,
                 key_bytes,
                 is_admin: user_info.is_admin,
                 status,
@@ -579,5 +609,37 @@ pub async fn validate_token_with_dpop(
             Err(TokenValidationError::OAuthTokenExpired)
         }
         Err(_) => Err(TokenValidationError::AuthenticationFailed),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lxm_permits_exact_match() {
+        assert!(lxm_permits(
+            "com.atproto.repo.uploadBlob",
+            "com.atproto.repo.uploadBlob"
+        ));
+    }
+
+    #[test]
+    fn test_lxm_permits_wildcard() {
+        assert!(lxm_permits("*", "com.atproto.repo.uploadBlob"));
+        assert!(lxm_permits("*", "anything.at.all"));
+    }
+
+    #[test]
+    fn test_lxm_permits_mismatch() {
+        assert!(!lxm_permits(
+            "com.atproto.repo.uploadBlob",
+            "com.atproto.repo.createRecord"
+        ));
+    }
+
+    #[test]
+    fn test_lxm_permits_partial_not_wildcard() {
+        assert!(!lxm_permits("com.atproto.*", "com.atproto.repo.uploadBlob"));
     }
 }

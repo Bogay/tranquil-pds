@@ -40,7 +40,7 @@ async fn test_sso_initiate_invalid_provider() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.unwrap();
-    assert_eq!(body["error"], "SsoProviderNotFound");
+    assert_eq!(body["error"], "InvalidRequest");
 }
 
 #[tokio::test]
@@ -61,11 +61,7 @@ async fn test_sso_initiate_invalid_action() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let body: Value = res.json().await.unwrap();
-    assert!(
-        body["error"] == "SsoInvalidAction" || body["error"] == "SsoProviderNotEnabled",
-        "Expected SsoInvalidAction or SsoProviderNotEnabled, got: {}",
-        body["error"]
-    );
+    assert_eq!(body["error"], "InvalidRequest");
 }
 
 #[tokio::test]
@@ -232,12 +228,12 @@ async fn test_external_identity_repository_crud() {
     let _url = base_url().await;
     let pool = get_test_db_pool().await;
 
-    let did = unsafe {
-        Did::new_unchecked(format!(
-            "did:plc:test{}",
-            &uuid::Uuid::new_v4().simple().to_string()[..12]
-        ))
-    };
+    let did: Did = format!(
+        "did:plc:test{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
+    )
+    .parse()
+    .expect("valid test DID");
     let provider = SsoProviderType::Github;
     let provider_user_id = format!("github_user_{}", uuid::Uuid::new_v4().simple());
 
@@ -352,18 +348,18 @@ async fn test_external_identity_unique_constraints() {
     let _url = base_url().await;
     let pool = get_test_db_pool().await;
 
-    let did1 = unsafe {
-        Did::new_unchecked(format!(
-            "did:plc:uc1{}",
-            &uuid::Uuid::new_v4().simple().to_string()[..10]
-        ))
-    };
-    let did2 = unsafe {
-        Did::new_unchecked(format!(
-            "did:plc:uc2{}",
-            &uuid::Uuid::new_v4().simple().to_string()[..10]
-        ))
-    };
+    let did1: Did = format!(
+        "did:plc:uc1{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..10]
+    )
+    .parse()
+    .expect("valid test DID");
+    let did2: Did = format!(
+        "did:plc:uc2{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..10]
+    )
+    .parse()
+    .expect("valid test DID");
     let provider_user_id = format!("unique_test_{}", uuid::Uuid::new_v4().simple());
 
     sqlx::query!(
@@ -583,13 +579,13 @@ async fn test_delete_external_identity_wrong_did() {
     let _url = base_url().await;
     let pool = get_test_db_pool().await;
 
-    let did = unsafe {
-        Did::new_unchecked(format!(
-            "did:plc:del{}",
-            &uuid::Uuid::new_v4().simple().to_string()[..10]
-        ))
-    };
-    let wrong_did = unsafe { Did::new_unchecked("did:plc:wrongdid12345") };
+    let did: Did = format!(
+        "did:plc:del{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..10]
+    )
+    .parse()
+    .expect("valid test DID");
+    let wrong_did: Did = "did:plc:wrongdid12345".parse().expect("valid test DID");
 
     sqlx::query!(
         "INSERT INTO users (did, handle, email, password_hash) VALUES ($1, $2, $3, 'hash')",

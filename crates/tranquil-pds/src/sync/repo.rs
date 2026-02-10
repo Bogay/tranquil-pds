@@ -1,8 +1,8 @@
 use crate::api::error::ApiError;
 use crate::scheduled::generate_repo_car_from_user_blocks;
 use crate::state::AppState;
-use crate::sync::car::encode_car_header;
-use crate::sync::util::assert_repo_availability;
+use crate::sync::car::{encode_car_block, encode_car_header};
+use crate::sync::util::{RepoAccessLevel, assert_repo_availability};
 use axum::{
     extract::{Query, RawQuery, State},
     http::StatusCode,
@@ -11,18 +11,25 @@ use axum::{
 use cid::Cid;
 use jacquard_repo::storage::BlockStore;
 use serde::Deserialize;
-use std::io::Write;
 use std::str::FromStr;
 use tracing::error;
 use tranquil_types::Did;
 
-fn parse_get_blocks_query(query_string: &str) -> Result<(String, Vec<String>), String> {
-    let did = crate::util::parse_repeated_query_param(Some(query_string), "did")
+struct GetBlocksParams {
+    did: Did,
+    cids: Vec<String>,
+}
+
+fn parse_get_blocks_query(query_string: &str) -> Result<GetBlocksParams, ApiError> {
+    let did_str = crate::util::parse_repeated_query_param(Some(query_string), "did")
         .into_iter()
         .next()
-        .ok_or("Missing required parameter: did")?;
+        .ok_or_else(|| ApiError::InvalidRequest("Missing required parameter: did".into()))?;
+    let did: Did = did_str
+        .parse()
+        .map_err(|_| ApiError::InvalidRequest("invalid did".into()))?;
     let cids = crate::util::parse_repeated_query_param(Some(query_string), "cids");
-    Ok((did, cids))
+    Ok(GetBlocksParams { did, cids })
 }
 
 pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery) -> Response {
@@ -30,19 +37,21 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
         return ApiError::InvalidRequest("Missing query parameters".into()).into_response();
     };
 
-    let (did_str, cid_strings) = match parse_get_blocks_query(&query_string) {
+    let GetBlocksParams {
+        did,
+        cids: cid_strings,
+    } = match parse_get_blocks_query(&query_string) {
         Ok(parsed) => parsed,
-        Err(msg) => return ApiError::InvalidRequest(msg).into_response(),
-    };
-    let did: Did = match did_str.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
-
-    let _account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
-        Ok(a) => a,
         Err(e) => return e.into_response(),
     };
+
+    let _account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
 
     let cids: Vec<Cid> = match cid_strings
         .iter()
@@ -89,23 +98,11 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
         }
     };
     let mut car_bytes = header;
-    for (i, block_opt) in blocks.into_iter().enumerate() {
-        if let Some(block) = block_opt {
-            let cid = cids[i];
-            let cid_bytes = cid.to_bytes();
-            let total_len = cid_bytes.len() + block.len();
-            let mut writer = Vec::new();
-            crate::sync::car::write_varint(&mut writer, total_len as u64)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&cid_bytes)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&block)
-                .expect("Writing to Vec<u8> should never fail");
-            car_bytes.extend_from_slice(&writer);
-        }
-    }
+    blocks
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, block_opt)| block_opt.map(|block| (cids[i], block)))
+        .for_each(|(cid, block)| car_bytes.extend_from_slice(&encode_car_block(&cid, &block)));
     (
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],
@@ -116,7 +113,7 @@ pub async fn get_blocks(State(state): State<AppState>, RawQuery(query): RawQuery
 
 #[derive(Deserialize)]
 pub struct GetRepoQuery {
-    pub did: String,
+    pub did: Did,
     pub since: Option<String>,
 }
 
@@ -124,14 +121,14 @@ pub async fn get_repo(
     State(state): State<AppState>,
     Query(query): Query<GetRepoQuery>,
 ) -> Response {
-    let did: Did = match query.did.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
-    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
-        Ok(a) => a,
-        Err(e) => return e.into_response(),
-    };
+    let did = query.did;
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
 
     let Some(head_str) = account.repo_root_cid else {
         return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
@@ -223,23 +220,11 @@ async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str
         }
     };
 
-    for (i, block_opt) in blocks.into_iter().enumerate() {
-        if let Some(block) = block_opt {
-            let cid = block_cids[i];
-            let cid_bytes = cid.to_bytes();
-            let total_len = cid_bytes.len() + block.len();
-            let mut writer = Vec::new();
-            crate::sync::car::write_varint(&mut writer, total_len as u64)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&cid_bytes)
-                .expect("Writing to Vec<u8> should never fail");
-            writer
-                .write_all(&block)
-                .expect("Writing to Vec<u8> should never fail");
-            car_bytes.extend_from_slice(&writer);
-        }
-    }
+    blocks
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, block_opt)| block_opt.map(|block| (block_cids[i], block)))
+        .for_each(|(cid, block)| car_bytes.extend_from_slice(&encode_car_block(&cid, &block)));
 
     (
         StatusCode::OK,
@@ -251,7 +236,7 @@ async fn get_repo_since(state: &AppState, did: &Did, head_cid: &Cid, since: &str
 
 #[derive(Deserialize)]
 pub struct GetRecordQuery {
-    pub did: String,
+    pub did: Did,
     pub collection: String,
     pub rkey: String,
 }
@@ -265,14 +250,14 @@ pub async fn get_record(
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    let did: Did = match query.did.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
-    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
-        Ok(a) => a,
-        Err(e) => return e.into_response(),
-    };
+    let did = query.did;
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
 
     let commit_cid_str = match account.repo_root_cid {
         Some(cid) => cid,
@@ -321,25 +306,11 @@ pub async fn get_record(
         }
     };
     let mut car_bytes = header;
-    let write_block = |car: &mut Vec<u8>, cid: &Cid, data: &[u8]| {
-        let cid_bytes = cid.to_bytes();
-        let total_len = cid_bytes.len() + data.len();
-        let mut writer = Vec::new();
-        crate::sync::car::write_varint(&mut writer, total_len as u64)
-            .expect("Writing to Vec<u8> should never fail");
-        writer
-            .write_all(&cid_bytes)
-            .expect("Writing to Vec<u8> should never fail");
-        writer
-            .write_all(data)
-            .expect("Writing to Vec<u8> should never fail");
-        car.extend_from_slice(&writer);
-    };
-    write_block(&mut car_bytes, &commit_cid, &commit_bytes);
+    car_bytes.extend_from_slice(&encode_car_block(&commit_cid, &commit_bytes));
     proof_blocks
         .iter()
-        .for_each(|(cid, data)| write_block(&mut car_bytes, cid, data));
-    write_block(&mut car_bytes, &record_cid, &record_block);
+        .for_each(|(cid, data)| car_bytes.extend_from_slice(&encode_car_block(cid, data)));
+    car_bytes.extend_from_slice(&encode_car_block(&record_cid, &record_block));
     (
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/vnd.ipld.car")],

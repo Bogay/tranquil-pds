@@ -225,7 +225,8 @@ fn test_mst_validation_cycle_detection() {
 #[tokio::test]
 async fn test_unsupported_did_method() {
     let verifier = CarVerifier::new();
-    let result = verifier.resolve_did_document("did:unknown:test").await;
+    let did: tranquil_types::Did = "did:unknown:test".parse().expect("valid DID format");
+    let result = verifier.resolve_did_document(&did).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err, VerifyError::DidResolutionFailed(_)));

@@ -16,13 +16,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+use tranquil_db_traits::WebauthnChallengeType;
 use uuid::Uuid;
 
 use crate::api::repo::record::utils::create_signed_commit;
 use crate::auth::{ServiceTokenVerifier, generate_app_password, is_service_token};
 use crate::rate_limit::{AccountCreationLimit, PasswordResetLimit, RateLimited};
 use crate::state::AppState;
-use crate::types::{Did, Handle, Nsid, PlainPassword, Rkey};
+use crate::types::{Did, Handle, PlainPassword};
 use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
 
@@ -49,7 +50,7 @@ pub struct CreatePasskeyAccountInput {
     pub did: Option<String>,
     pub did_type: Option<String>,
     pub signing_key: Option<String>,
-    pub verification_channel: Option<String>,
+    pub verification_channel: Option<tranquil_db_traits::CommsChannel>,
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_username: Option<String>,
@@ -73,7 +74,7 @@ pub async fn create_passkey_account(
     Json(input): Json<CreatePasskeyAccountInput>,
 ) -> Response {
     let byod_auth = if let Some(extracted) = crate::auth::extract_auth_token_from_header(
-        crate::util::get_header_str(&headers, "Authorization"),
+        crate::util::get_header_str(&headers, http::header::AUTHORIZATION),
     ) {
         let token = extracted.token;
         if is_service_token(&token) {
@@ -152,22 +153,22 @@ pub async fn create_passkey_account(
             Err(_) => return ApiError::InvalidInviteCode.into_response(),
         }
     } else {
-        let invite_required = std::env::var("INVITE_CODE_REQUIRED")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let invite_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
         if invite_required {
             return ApiError::InviteCodeRequired.into_response();
         }
         None
     };
 
-    let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
+    let verification_channel = input
+        .verification_channel
+        .unwrap_or(tranquil_db_traits::CommsChannel::Email);
     let verification_recipient = match verification_channel {
-        "email" => match &email {
+        tranquil_db_traits::CommsChannel::Email => match &email {
             Some(e) if !e.is_empty() => e.clone(),
             _ => return ApiError::MissingEmail.into_response(),
         },
-        "discord" => match &input.discord_username {
+        tranquil_db_traits::CommsChannel::Discord => match &input.discord_username {
             Some(username) if !username.trim().is_empty() => {
                 let clean = username.trim().to_lowercase();
                 if !crate::api::validation::is_valid_discord_username(&clean) {
@@ -179,7 +180,7 @@ pub async fn create_passkey_account(
             }
             _ => return ApiError::MissingDiscordId.into_response(),
         },
-        "telegram" => match &input.telegram_username {
+        tranquil_db_traits::CommsChannel::Telegram => match &input.telegram_username {
             Some(username) if !username.trim().is_empty() => {
                 let clean = username.trim().trim_start_matches('@');
                 if !crate::api::validation::is_valid_telegram_username(clean) {
@@ -191,13 +192,12 @@ pub async fn create_passkey_account(
             }
             _ => return ApiError::MissingTelegramUsername.into_response(),
         },
-        "signal" => match &input.signal_username {
+        tranquil_db_traits::CommsChannel::Signal => match &input.signal_username {
             Some(username) if !username.trim().is_empty() => {
                 username.trim().trim_start_matches('@').to_lowercase()
             }
             _ => return ApiError::MissingSignalNumber.into_response(),
         },
-        _ => return ApiError::InvalidVerificationChannel.into_response(),
     };
 
     use k256::ecdsa::SigningKey;
@@ -277,7 +277,7 @@ pub async fn create_passkey_account(
                 )
                 .await
                 {
-                    return ApiError::InvalidDid(e).into_response();
+                    return ApiError::InvalidDid(e.to_string()).into_response();
                 }
                 info!(did = %d, "Creating external did:web passkey account (reserved key)");
             }
@@ -380,7 +380,10 @@ pub async fn create_passkey_account(
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
-    let did_typed = unsafe { Did::new_unchecked(&did) };
+    let did_typed: Did = match did.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InternalError(Some("Invalid DID".into())).into_response(),
+    };
     let (commit_bytes, _sig) =
         match create_signed_commit(&did_typed, mst_root, rev.as_ref(), None, &secret_key) {
             Ok(result) => result,
@@ -405,20 +408,15 @@ pub async fn create_passkey_account(
         })
     });
 
-    let preferred_comms_channel = match verification_channel {
-        "email" => tranquil_db_traits::CommsChannel::Email,
-        "discord" => tranquil_db_traits::CommsChannel::Discord,
-        "telegram" => tranquil_db_traits::CommsChannel::Telegram,
-        "signal" => tranquil_db_traits::CommsChannel::Signal,
-        _ => tranquil_db_traits::CommsChannel::Email,
+    let handle_typed: Handle = match handle.parse() {
+        Ok(h) => h,
+        Err(_) => return ApiError::InvalidHandle(None).into_response(),
     };
-
-    let handle_typed = unsafe { Handle::new_unchecked(&handle) };
     let create_input = tranquil_db_traits::CreatePasskeyAccountInput {
         handle: handle_typed.clone(),
         email: email.clone().unwrap_or_default(),
         did: did_typed.clone(),
-        preferred_comms_channel,
+        preferred_comms_channel: verification_channel,
         discord_username: input
             .discord_username
             .as_deref()
@@ -487,13 +485,11 @@ pub async fn create_passkey_account(
             "$type": "app.bsky.actor.profile",
             "displayName": handle
         });
-        let profile_collection = unsafe { Nsid::new_unchecked("app.bsky.actor.profile") };
-        let profile_rkey = unsafe { Rkey::new_unchecked("self") };
         if let Err(e) = crate::api::repo::record::create_record_internal(
             &state,
             &did_typed,
-            &profile_collection,
-            &profile_rkey,
+            &crate::types::PROFILE_COLLECTION,
+            &crate::types::PROFILE_RKEY,
             &profile_record,
         )
         .await
@@ -503,7 +499,7 @@ pub async fn create_passkey_account(
     }
 
     let verification_token = crate::auth::verification_token::generate_signup_token(
-        &did,
+        &did_typed,
         verification_channel,
         &verification_recipient,
     );
@@ -625,7 +621,7 @@ pub async fn complete_passkey_setup(
 
     let reg_state = match state
         .user_repo
-        .load_webauthn_challenge(&input.did, "registration")
+        .load_webauthn_challenge(&input.did, WebauthnChallengeType::Registration)
         .await
     {
         Ok(Some(json)) => match serde_json::from_str(&json) {
@@ -706,7 +702,7 @@ pub async fn complete_passkey_setup(
 
     let _ = state
         .user_repo
-        .delete_webauthn_challenge(&input.did, "registration")
+        .delete_webauthn_challenge(&input.did, WebauthnChallengeType::Registration)
         .await;
 
     info!(did = %input.did, "Passkey-only account setup completed");
@@ -793,7 +789,7 @@ pub async fn start_passkey_registration_for_setup(
     };
     if let Err(e) = state
         .user_repo
-        .save_webauthn_challenge(&input.did, "registration", &state_json)
+        .save_webauthn_challenge(&input.did, WebauthnChallengeType::Registration, &state_json)
         .await
     {
         error!("Failed to save registration state: {:?}", e);

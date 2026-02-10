@@ -1,6 +1,8 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::Mac;
 use sha2::{Digest, Sha256};
+use tranquil_db_traits::CommsChannel;
+use tranquil_types::Did;
 
 type HmacSha256 = hmac::Hmac<Sha256>;
 
@@ -9,7 +11,8 @@ const DEFAULT_SIGNUP_EXPIRY_MINUTES: u64 = 30;
 const DEFAULT_MIGRATION_EXPIRY_HOURS: u64 = 48;
 const DEFAULT_CHANNEL_UPDATE_EXPIRY_MINUTES: u64 = 10;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VerificationPurpose {
     Signup,
     Migration,
@@ -25,15 +28,6 @@ impl VerificationPurpose {
         }
     }
 
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "signup" => Some(Self::Signup),
-            "migration" => Some(Self::Migration),
-            "channel_update" => Some(Self::ChannelUpdate),
-            _ => None,
-        }
-    }
-
     fn default_expiry_seconds(&self) -> u64 {
         match self {
             Self::Signup => DEFAULT_SIGNUP_EXPIRY_MINUTES * 60,
@@ -43,11 +37,24 @@ impl VerificationPurpose {
     }
 }
 
+impl std::str::FromStr for VerificationPurpose {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "signup" => Ok(Self::Signup),
+            "migration" => Ok(Self::Migration),
+            "channel_update" => Ok(Self::ChannelUpdate),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct VerificationToken {
-    pub did: String,
+    pub did: Did,
     pub purpose: VerificationPurpose,
-    pub channel: String,
+    pub channel: CommsChannel,
     pub identifier_hash: String,
     pub expires_at: u64,
 }
@@ -75,22 +82,27 @@ pub fn hash_identifier(identifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(&result[..16])
 }
 
-pub fn generate_signup_token(did: &str, channel: &str, identifier: &str) -> String {
+pub fn generate_signup_token(did: &Did, channel: CommsChannel, identifier: &str) -> String {
     generate_token(did, VerificationPurpose::Signup, channel, identifier)
 }
 
-pub fn generate_migration_token(did: &str, email: &str) -> String {
-    generate_token(did, VerificationPurpose::Migration, "email", email)
+pub fn generate_migration_token(did: &Did, email: &str) -> String {
+    generate_token(
+        did,
+        VerificationPurpose::Migration,
+        CommsChannel::Email,
+        email,
+    )
 }
 
-pub fn generate_channel_update_token(did: &str, channel: &str, identifier: &str) -> String {
+pub fn generate_channel_update_token(did: &Did, channel: CommsChannel, identifier: &str) -> String {
     generate_token(did, VerificationPurpose::ChannelUpdate, channel, identifier)
 }
 
 pub fn generate_token(
-    did: &str,
+    did: &Did,
     purpose: VerificationPurpose,
-    channel: &str,
+    channel: CommsChannel,
     identifier: &str,
 ) -> String {
     generate_token_with_expiry(
@@ -103,14 +115,15 @@ pub fn generate_token(
 }
 
 pub fn generate_token_with_expiry(
-    did: &str,
+    did: &Did,
     purpose: VerificationPurpose,
-    channel: &str,
+    channel: CommsChannel,
     identifier: &str,
     expiry_seconds: u64,
 ) -> String {
     let key = derive_verification_key();
     let identifier_hash = hash_identifier(identifier);
+    let channel_str = channel.as_str();
     let expires_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -121,7 +134,7 @@ pub fn generate_token_with_expiry(
         "{}|{}|{}|{}|{}",
         did,
         purpose.as_str(),
-        channel,
+        channel_str,
         identifier_hash,
         expires_at
     );
@@ -135,7 +148,7 @@ pub fn generate_token_with_expiry(
         TOKEN_VERSION,
         did,
         purpose.as_str(),
-        channel,
+        channel_str,
         identifier_hash,
         expires_at,
         signature
@@ -170,7 +183,7 @@ impl std::fmt::Display for VerifyError {
 
 pub fn verify_signup_token(
     token: &str,
-    expected_channel: &str,
+    expected_channel: CommsChannel,
     expected_identifier: &str,
 ) -> Result<VerificationToken, VerifyError> {
     let parsed = verify_token_signature(token)?;
@@ -195,7 +208,7 @@ pub fn verify_migration_token(
     if parsed.purpose != VerificationPurpose::Migration {
         return Err(VerifyError::PurposeMismatch);
     }
-    if parsed.channel != "email" {
+    if parsed.channel != CommsChannel::Email {
         return Err(VerifyError::ChannelMismatch);
     }
     let expected_hash = hash_identifier(expected_email);
@@ -207,7 +220,7 @@ pub fn verify_migration_token(
 
 pub fn verify_channel_update_token(
     token: &str,
-    expected_channel: &str,
+    expected_channel: CommsChannel,
     expected_identifier: &str,
 ) -> Result<VerificationToken, VerifyError> {
     let parsed = verify_token_signature(token)?;
@@ -226,10 +239,10 @@ pub fn verify_channel_update_token(
 
 pub fn verify_token_for_did(
     token: &str,
-    expected_did: &str,
+    expected_did: &Did,
 ) -> Result<VerificationToken, VerifyError> {
     let parsed = verify_token_signature(token)?;
-    if parsed.did != expected_did {
+    if parsed.did != *expected_did {
         return Err(VerifyError::IdentifierMismatch);
     }
     Ok(parsed)
@@ -253,12 +266,17 @@ pub fn verify_token_signature(token: &str) -> Result<VerificationToken, VerifyEr
 
     let did = parts[1];
     let purpose_str = parts[2];
-    let channel = parts[3];
+    let channel_str = parts[3];
     let identifier_hash = parts[4];
     let expires_at: u64 = parts[5].parse().map_err(|_| VerifyError::InvalidFormat)?;
     let provided_signature = parts[6];
 
-    let purpose = VerificationPurpose::from_str(purpose_str).ok_or(VerifyError::InvalidFormat)?;
+    let purpose: VerificationPurpose = purpose_str
+        .parse()
+        .map_err(|_| VerifyError::InvalidFormat)?;
+    let channel: CommsChannel = channel_str
+        .parse()
+        .map_err(|_| VerifyError::InvalidFormat)?;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -271,7 +289,7 @@ pub fn verify_token_signature(token: &str) -> Result<VerificationToken, VerifyEr
     let key = derive_verification_key();
     let payload = format!(
         "{}|{}|{}|{}|{}",
-        did, purpose_str, channel, identifier_hash, expires_at
+        did, purpose_str, channel_str, identifier_hash, expires_at
     );
     let mut mac = <HmacSha256 as Mac>::new_from_slice(&key).expect("HMAC key size is valid");
     mac.update(payload.as_bytes());
@@ -286,10 +304,12 @@ pub fn verify_token_signature(token: &str) -> Result<VerificationToken, VerifyEr
         return Err(VerifyError::InvalidSignature);
     }
 
+    let parsed_did: Did = did.parse().map_err(|_| VerifyError::InvalidFormat)?;
+
     Ok(VerificationToken {
-        did: did.to_string(),
+        did: parsed_did,
         purpose,
-        channel: channel.to_string(),
+        channel,
         identifier_hash: identifier_hash.to_string(),
         expires_at,
     })
@@ -309,10 +329,10 @@ mod tests {
 
     #[test]
     fn test_signup_token() {
-        let did = "did:plc:test123";
-        let channel = "email";
+        let did: Did = "did:plc:test123".parse().unwrap();
+        let channel = CommsChannel::Email;
         let identifier = "test@example.com";
-        let token = generate_signup_token(did, channel, identifier);
+        let token = generate_signup_token(&did, channel, identifier);
         let result = verify_signup_token(&token, channel, identifier);
         assert!(result.is_ok(), "Expected Ok, got {:?}", result);
         let parsed = result.unwrap();
@@ -323,9 +343,9 @@ mod tests {
 
     #[test]
     fn test_migration_token() {
-        let did = "did:plc:test123";
+        let did: Did = "did:plc:test123".parse().unwrap();
         let email = "test@example.com";
-        let token = generate_migration_token(did, email);
+        let token = generate_migration_token(&did, email);
         let result = verify_migration_token(&token, email);
         assert!(result.is_ok(), "Expected Ok, got {:?}", result);
         let parsed = result.unwrap();
@@ -335,64 +355,64 @@ mod tests {
 
     #[test]
     fn test_token_case_insensitive() {
-        let did = "did:plc:test123";
-        let token = generate_signup_token(did, "email", "Test@Example.COM");
-        let result = verify_signup_token(&token, "email", "test@example.com");
+        let did: Did = "did:plc:test123".parse().unwrap();
+        let token = generate_signup_token(&did, CommsChannel::Email, "Test@Example.COM");
+        let result = verify_signup_token(&token, CommsChannel::Email, "test@example.com");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_token_wrong_identifier() {
-        let did = "did:plc:test123";
-        let token = generate_signup_token(did, "email", "test@example.com");
-        let result = verify_signup_token(&token, "email", "other@example.com");
+        let did: Did = "did:plc:test123".parse().unwrap();
+        let token = generate_signup_token(&did, CommsChannel::Email, "test@example.com");
+        let result = verify_signup_token(&token, CommsChannel::Email, "other@example.com");
         assert!(matches!(result, Err(VerifyError::IdentifierMismatch)));
     }
 
     #[test]
     fn test_token_wrong_channel() {
-        let did = "did:plc:test123";
-        let token = generate_signup_token(did, "email", "test@example.com");
-        let result = verify_signup_token(&token, "discord", "test@example.com");
+        let did: Did = "did:plc:test123".parse().unwrap();
+        let token = generate_signup_token(&did, CommsChannel::Email, "test@example.com");
+        let result = verify_signup_token(&token, CommsChannel::Discord, "test@example.com");
         assert!(matches!(result, Err(VerifyError::ChannelMismatch)));
     }
 
     #[test]
     fn test_expired_token() {
-        let did = "did:plc:test123";
+        let did: Did = "did:plc:test123".parse().unwrap();
         let token = generate_token_with_expiry(
-            did,
+            &did,
             VerificationPurpose::Signup,
-            "email",
+            CommsChannel::Email,
             "test@example.com",
             0,
         );
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let result = verify_signup_token(&token, "email", "test@example.com");
+        let result = verify_signup_token(&token, CommsChannel::Email, "test@example.com");
         assert!(matches!(result, Err(VerifyError::Expired)));
     }
 
     #[test]
     fn test_invalid_token() {
-        let result = verify_signup_token("invalid-token", "email", "test@example.com");
+        let result = verify_signup_token("invalid-token", CommsChannel::Email, "test@example.com");
         assert!(matches!(result, Err(VerifyError::InvalidFormat)));
     }
 
     #[test]
     fn test_purpose_mismatch() {
-        let did = "did:plc:test123";
+        let did: Did = "did:plc:test123".parse().unwrap();
         let email = "test@example.com";
-        let signup_token = generate_signup_token(did, "email", email);
+        let signup_token = generate_signup_token(&did, CommsChannel::Email, email);
         let result = verify_migration_token(&signup_token, email);
         assert!(matches!(result, Err(VerifyError::PurposeMismatch)));
     }
 
     #[test]
     fn test_discord_channel() {
-        let did = "did:plc:test123";
+        let did: Did = "did:plc:test123".parse().unwrap();
         let discord_id = "123456789012345678";
-        let token = generate_signup_token(did, "discord", discord_id);
-        let result = verify_signup_token(&token, "discord", discord_id);
+        let token = generate_signup_token(&did, CommsChannel::Discord, discord_id);
+        let result = verify_signup_token(&token, CommsChannel::Discord, discord_id);
         assert!(result.is_ok());
     }
 

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use cid::Cid;
 use ipld_core::ipld::Ipld;
 use jacquard_repo::commit::Commit;
@@ -18,24 +19,51 @@ use crate::repo::PostgresBlockStore;
 use crate::storage::{BackupStorage, BlobStorage, backup_interval_secs, backup_retention_count};
 use crate::sync::car::encode_car_header;
 
+#[derive(Debug)]
+enum GenesisBackfillError {
+    MissingCommitCid,
+    InvalidCid,
+    BlockFetchFailed,
+    BlockNotFound,
+    CommitParseFailed,
+    UpdateFailed,
+}
+
+impl std::fmt::Display for GenesisBackfillError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingCommitCid => f.write_str("missing commit_cid"),
+            Self::InvalidCid => f.write_str("invalid CID"),
+            Self::BlockFetchFailed => f.write_str("failed to fetch block"),
+            Self::BlockNotFound => f.write_str("block not found"),
+            Self::CommitParseFailed => f.write_str("failed to parse commit"),
+            Self::UpdateFailed => f.write_str("failed to update"),
+        }
+    }
+}
+
 async fn process_genesis_commit(
     repo_repo: &dyn RepoRepository,
     block_store: &PostgresBlockStore,
     row: BrokenGenesisCommit,
-) -> Result<(Did, SequenceNumber), (SequenceNumber, &'static str)> {
-    let commit_cid_str = row.commit_cid.ok_or((row.seq, "missing commit_cid"))?;
-    let commit_cid = Cid::from_str(&commit_cid_str).map_err(|_| (row.seq, "invalid CID"))?;
+) -> Result<(Did, SequenceNumber), (SequenceNumber, GenesisBackfillError)> {
+    let commit_cid_str = row
+        .commit_cid
+        .ok_or((row.seq, GenesisBackfillError::MissingCommitCid))?;
+    let commit_cid =
+        Cid::from_str(&commit_cid_str).map_err(|_| (row.seq, GenesisBackfillError::InvalidCid))?;
     let block = block_store
         .get(&commit_cid)
         .await
-        .map_err(|_| (row.seq, "failed to fetch block"))?
-        .ok_or((row.seq, "block not found"))?;
-    let commit = Commit::from_cbor(&block).map_err(|_| (row.seq, "failed to parse commit"))?;
+        .map_err(|_| (row.seq, GenesisBackfillError::BlockFetchFailed))?
+        .ok_or((row.seq, GenesisBackfillError::BlockNotFound))?;
+    let commit = Commit::from_cbor(&block)
+        .map_err(|_| (row.seq, GenesisBackfillError::CommitParseFailed))?;
     let blocks_cids = vec![commit.data.to_string(), commit_cid.to_string()];
     repo_repo
         .update_seq_blocks_cids(row.seq, &blocks_cids)
         .await
-        .map_err(|_| (row.seq, "failed to update"))?;
+        .map_err(|_| (row.seq, GenesisBackfillError::UpdateFailed))?;
     Ok((row.did, row.seq))
 }
 
@@ -79,7 +107,7 @@ pub async fn backfill_genesis_commit_blocks(
         Err((seq, reason)) => {
             warn!(
                 seq = seq.as_i64(),
-                reason = reason,
+                reason = %reason,
                 "Failed to process genesis commit"
             );
             (s, f + 1)
@@ -99,7 +127,17 @@ async fn process_repo_rev(
     repo_root_cid: String,
 ) -> Result<uuid::Uuid, uuid::Uuid> {
     let cid = Cid::from_str(&repo_root_cid).map_err(|_| user_id)?;
-    let block = block_store.get(&cid).await.ok().flatten().ok_or(user_id)?;
+    let block = match block_store.get(&cid).await {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            tracing::warn!(user_id = %user_id, cid = %cid, "block not found for repo rev backfill");
+            return Err(user_id);
+        }
+        Err(e) => {
+            tracing::warn!(user_id = %user_id, cid = %cid, error = %e, "block store error during repo rev backfill");
+            return Err(user_id);
+        }
+    };
     let commit = Commit::from_cbor(&block).map_err(|_| user_id)?;
     let rev = commit.rev().to_string();
     repo_repo
@@ -235,7 +273,7 @@ pub async fn backfill_user_blocks(
 pub async fn collect_current_repo_blocks(
     block_store: &PostgresBlockStore,
     head_cid: &Cid,
-) -> Result<Vec<Vec<u8>>, String> {
+) -> anyhow::Result<Vec<Vec<u8>>> {
     let mut block_cids: Vec<Vec<u8>> = Vec::new();
     let mut to_visit = vec![*head_cid];
     let mut visited = std::collections::HashSet::new();
@@ -250,7 +288,7 @@ pub async fn collect_current_repo_blocks(
         let block = match block_store.get(&cid).await {
             Ok(Some(b)) => b,
             Ok(None) => continue,
-            Err(e) => return Err(format!("Failed to get block {}: {:?}", cid, e)),
+            Err(e) => anyhow::bail!("Failed to get block {}: {:?}", cid, e),
         };
 
         if let Ok(commit) = Commit::from_cbor(&block) {
@@ -308,13 +346,19 @@ async fn process_record_blobs(
             Some(
                 blob_refs
                     .into_iter()
-                    .map(|blob_ref| {
+                    .filter_map(|blob_ref| {
                         let record_uri = AtUri::from_parts(
                             did.as_str(),
                             record.collection.as_str(),
                             record.rkey.as_str(),
                         );
-                        (record_uri, unsafe { CidLink::new_unchecked(blob_ref.cid) })
+                        match CidLink::new(&blob_ref.cid) {
+                            Ok(cid_link) => Some((record_uri, cid_link)),
+                            Err(_) => {
+                                tracing::warn!(cid = %blob_ref.cid, "skipping unparseable blob CID in record blob backfill");
+                                None
+                            }
+                        }
                     })
                     .collect::<Vec<_>>(),
             )
@@ -462,11 +506,11 @@ async fn process_scheduled_deletions(
     user_repo: &dyn UserRepository,
     blob_repo: &dyn BlobRepository,
     blob_store: &dyn BlobStorage,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let accounts_to_delete = user_repo
         .get_accounts_scheduled_for_deletion(100)
         .await
-        .map_err(|e| format!("DB error fetching accounts to delete: {:?}", e))?;
+        .context("DB error fetching accounts to delete")?;
 
     if accounts_to_delete.is_empty() {
         debug!("No accounts scheduled for deletion");
@@ -501,11 +545,11 @@ async fn delete_account_data(
     blob_store: &dyn BlobStorage,
     user_id: uuid::Uuid,
     did: &Did,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let blob_storage_keys = blob_repo
         .get_blob_storage_keys_by_user(user_id)
         .await
-        .map_err(|e| format!("DB error fetching blob keys: {:?}", e))?;
+        .context("DB error fetching blob keys")?;
 
     futures::future::join_all(blob_storage_keys.iter().map(|storage_key| async move {
         (storage_key, blob_store.delete(storage_key).await)
@@ -520,7 +564,7 @@ async fn delete_account_data(
     let _account_seq = user_repo
         .delete_account_with_firehose(user_id, did)
         .await
-        .map_err(|e| format!("Failed to delete account: {:?}", e))?;
+        .context("Failed to delete account")?;
 
     info!(
         did = %did,
@@ -570,7 +614,7 @@ pub async fn start_backup_tasks(
 }
 
 struct BackupResult {
-    did: String,
+    did: Did,
     repo_rev: String,
     size_bytes: i64,
     block_count: i32,
@@ -579,8 +623,8 @@ struct BackupResult {
 
 enum BackupOutcome {
     Success(BackupResult),
-    Skipped(String, &'static str),
-    Failed(String, String),
+    Skipped(Did, &'static str),
+    Failed(Did, String),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -590,7 +634,7 @@ async fn process_single_backup(
     block_store: &PostgresBlockStore,
     backup_storage: &dyn BackupStorage,
     user_id: uuid::Uuid,
-    did: String,
+    did: Did,
     repo_root_cid: String,
     repo_rev: Option<String>,
 ) -> BackupOutcome {
@@ -610,9 +654,12 @@ async fn process_single_backup(
     };
 
     let block_count = count_car_blocks(&car_bytes);
-    let size_bytes = car_bytes.len() as i64;
+    let size_bytes = i64::try_from(car_bytes.len()).unwrap_or(i64::MAX);
 
-    let storage_key = match backup_storage.put_backup(&did, &repo_rev, &car_bytes).await {
+    let storage_key = match backup_storage
+        .put_backup(did.as_str(), &repo_rev, &car_bytes)
+        .await
+    {
         Ok(key) => key,
         Err(e) => return BackupOutcome::Failed(did, format!("S3 upload: {}", e)),
     };
@@ -653,14 +700,14 @@ async fn process_scheduled_backups(
     backup_repo: &dyn BackupRepository,
     block_store: &PostgresBlockStore,
     backup_storage: &dyn BackupStorage,
-) -> Result<(), String> {
-    let interval_secs = backup_interval_secs() as i64;
+) -> anyhow::Result<()> {
+    let interval_secs = i64::try_from(backup_interval_secs()).unwrap_or(i64::MAX);
     let retention = backup_retention_count();
 
     let users_needing_backup = backup_repo
         .get_users_needing_backup(interval_secs, 50)
         .await
-        .map_err(|e| format!("DB error fetching users for backup: {:?}", e))?;
+        .context("DB error fetching users for backup")?;
 
     if users_needing_backup.is_empty() {
         debug!("No accounts need backup");
@@ -679,7 +726,7 @@ async fn process_scheduled_backups(
             block_store,
             backup_storage,
             user.id,
-            user.did.to_string(),
+            user.did,
             user.repo_root_cid.to_string(),
             user.repo_rev,
         )
@@ -719,22 +766,27 @@ async fn process_scheduled_backups(
 pub async fn generate_repo_car(
     block_store: &PostgresBlockStore,
     head_cid: &Cid,
-) -> Result<Vec<u8>, String> {
+) -> anyhow::Result<Vec<u8>> {
     use jacquard_repo::storage::BlockStore;
 
     let block_cids_bytes = collect_current_repo_blocks(block_store, head_cid).await?;
     let block_cids: Vec<Cid> = block_cids_bytes
         .iter()
-        .filter_map(|b| Cid::try_from(b.as_slice()).ok())
+        .filter_map(|b| match Cid::try_from(b.as_slice()) {
+            Ok(cid) => Some(cid),
+            Err(e) => {
+                tracing::warn!(error = %e, "skipping unparseable CID in backup generation");
+                None
+            }
+        })
         .collect();
 
-    let car_bytes =
-        encode_car_header(head_cid).map_err(|e| format!("Failed to encode CAR header: {}", e))?;
+    let car_bytes = encode_car_header(head_cid).context("Failed to encode CAR header")?;
 
     let blocks = block_store
         .get_many(&block_cids)
         .await
-        .map_err(|e| format!("Failed to fetch blocks: {:?}", e))?;
+        .context("Failed to fetch blocks")?;
 
     let car_bytes = block_cids
         .iter()
@@ -753,7 +805,7 @@ fn encode_car_block(cid: &Cid, block: &[u8]) -> Vec<u8> {
     let cid_bytes = cid.to_bytes();
     let total_len = cid_bytes.len() + block.len();
     let mut writer = Vec::new();
-    crate::sync::car::write_varint(&mut writer, total_len as u64)
+    crate::sync::car::write_varint(&mut writer, u64::try_from(total_len).expect("len fits u64"))
         .expect("Writing to Vec<u8> should never fail");
     writer
         .write_all(&cid_bytes)
@@ -769,18 +821,17 @@ pub async fn generate_repo_car_from_user_blocks(
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
     _head_cid: &Cid,
-) -> Result<Vec<u8>, String> {
+) -> anyhow::Result<Vec<u8>> {
     use std::str::FromStr;
 
     let repo_root_cid_str: String = repo_repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
-        .map_err(|e| format!("Failed to fetch repo: {:?}", e))?
-        .ok_or_else(|| "Repository not found".to_string())?
+        .context("Failed to fetch repo")?
+        .ok_or_else(|| anyhow::anyhow!("Repository not found"))?
         .to_string();
 
-    let actual_head_cid =
-        Cid::from_str(&repo_root_cid_str).map_err(|e| format!("Invalid repo_root_cid: {}", e))?;
+    let actual_head_cid = Cid::from_str(&repo_root_cid_str).context("Invalid repo_root_cid")?;
 
     generate_repo_car(block_store, &actual_head_cid).await
 }
@@ -790,24 +841,42 @@ pub async fn generate_full_backup(
     block_store: &PostgresBlockStore,
     user_id: uuid::Uuid,
     head_cid: &Cid,
-) -> Result<Vec<u8>, String> {
+) -> anyhow::Result<Vec<u8>> {
     generate_repo_car_from_user_blocks(repo_repo, block_store, user_id, head_cid).await
 }
 
 pub fn count_car_blocks(car_bytes: &[u8]) -> i32 {
-    let mut count = 0;
-    let mut pos = 0;
+    let mut count: i32 = 0;
+    let mut pos: usize = 0;
 
     if let Some((header_len, header_varint_len)) = read_varint(&car_bytes[pos..]) {
-        pos += header_varint_len + header_len as usize;
+        let Some(header_size) = usize::try_from(header_len).ok() else {
+            return 0;
+        };
+        let Some(next_pos) = header_varint_len
+            .checked_add(header_size)
+            .and_then(|skip| pos.checked_add(skip))
+        else {
+            return 0;
+        };
+        pos = next_pos;
     } else {
         return 0;
     }
 
     while pos < car_bytes.len() {
         if let Some((block_len, varint_len)) = read_varint(&car_bytes[pos..]) {
-            pos += varint_len + block_len as usize;
-            count += 1;
+            let Some(block_size) = usize::try_from(block_len).ok() else {
+                break;
+            };
+            let Some(next_pos) = varint_len
+                .checked_add(block_size)
+                .and_then(|skip| pos.checked_add(skip))
+            else {
+                break;
+            };
+            pos = next_pos;
+            count = count.saturating_add(1);
         } else {
             break;
         }
@@ -839,21 +908,18 @@ async fn cleanup_old_backups(
     backup_storage: &dyn BackupStorage,
     user_id: uuid::Uuid,
     retention_count: u32,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let old_backups = backup_repo
-        .get_old_backups(user_id, retention_count as i64)
+        .get_old_backups(user_id, i64::from(retention_count))
         .await
-        .map_err(|e| format!("DB error fetching old backups: {:?}", e))?;
+        .context("DB error fetching old backups")?;
 
     let results = futures::future::join_all(old_backups.into_iter().map(|backup| async move {
         match backup_storage.delete_backup(&backup.storage_key).await {
-            Ok(()) => match backup_repo.delete_backup(backup.id).await {
-                Ok(()) => Ok(()),
-                Err(e) => Err(format!(
-                    "DB delete failed for {}: {:?}",
-                    backup.storage_key, e
-                )),
-            },
+            Ok(()) => backup_repo
+                .delete_backup(backup.id)
+                .await
+                .with_context(|| format!("DB delete failed for {}", backup.storage_key)),
             Err(e) => {
                 warn!(
                     storage_key = %backup.storage_key,

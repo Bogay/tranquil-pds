@@ -21,7 +21,7 @@ fn get_age_from_datestring(birth_date: &str) -> Option<i32> {
     let bday = NaiveDate::parse_from_str(birth_date, "%Y-%m-%d").ok()?;
     let today = Utc::now().date_naive();
     let mut age = today.year() - bday.year();
-    let m = today.month() as i32 - bday.month() as i32;
+    let m = i32::try_from(today.month()).unwrap_or(0) - i32::try_from(bday.month()).unwrap_or(0);
     if m < 0 || (m == 0 && today.day() < bday.day()) {
         age -= 1;
     }

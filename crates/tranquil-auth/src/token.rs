@@ -1,4 +1,6 @@
-use super::types::{ActClaim, Claims, Header, TokenWithMetadata};
+use super::types::{
+    ActClaim, Claims, Header, SigningAlgorithm, TokenScope, TokenType, TokenWithMetadata,
+};
 use anyhow::Result;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -8,14 +10,6 @@ use k256::ecdsa::{Signature, SigningKey, signature::Signer};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
-
-pub const TOKEN_TYPE_ACCESS: &str = "at+jwt";
-pub const TOKEN_TYPE_REFRESH: &str = "refresh+jwt";
-pub const TOKEN_TYPE_SERVICE: &str = "jwt";
-pub const SCOPE_ACCESS: &str = "com.atproto.access";
-pub const SCOPE_REFRESH: &str = "com.atproto.refresh";
-pub const SCOPE_APP_PASS: &str = "com.atproto.appPass";
-pub const SCOPE_APP_PASS_PRIVILEGED: &str = "com.atproto.appPassPrivileged";
 
 pub fn create_access_token(did: &str, key_bytes: &[u8]) -> Result<String> {
     Ok(create_access_token_with_metadata(did, key_bytes)?.token)
@@ -35,11 +29,11 @@ pub fn create_access_token_with_scope_metadata(
     scopes: Option<&str>,
     hostname: Option<&str>,
 ) -> Result<TokenWithMetadata> {
-    let scope = scopes.unwrap_or(SCOPE_ACCESS);
+    let scope = scopes.unwrap_or(TokenScope::Access.as_str());
     create_signed_token_with_metadata(
         did,
         scope,
-        TOKEN_TYPE_ACCESS,
+        TokenType::Access,
         key_bytes,
         Duration::minutes(15),
         hostname,
@@ -53,12 +47,12 @@ pub fn create_access_token_with_delegation(
     controller_did: Option<&str>,
     hostname: Option<&str>,
 ) -> Result<TokenWithMetadata> {
-    let scope = scopes.unwrap_or(SCOPE_ACCESS);
+    let scope = scopes.unwrap_or(TokenScope::Access.as_str());
     let act = controller_did.map(|c| ActClaim { sub: c.to_string() });
     create_signed_token_with_act(
         did,
         scope,
-        TOKEN_TYPE_ACCESS,
+        TokenType::Access,
         key_bytes,
         Duration::minutes(15),
         act,
@@ -72,8 +66,8 @@ pub fn create_refresh_token_with_metadata(
 ) -> Result<TokenWithMetadata> {
     create_signed_token_with_metadata(
         did,
-        SCOPE_REFRESH,
-        TOKEN_TYPE_REFRESH,
+        TokenScope::Refresh.as_str(),
+        TokenType::Refresh,
         key_bytes,
         Duration::days(14),
         None,
@@ -92,8 +86,8 @@ pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -
         iss: did.to_owned(),
         sub: did.to_owned(),
         aud: aud.to_owned(),
-        exp: expiration as usize,
-        iat: Utc::now().timestamp() as usize,
+        exp: expiration,
+        iat: Utc::now().timestamp(),
         scope: None,
         lxm: Some(lxm.to_string()),
         jti: uuid::Uuid::new_v4().to_string(),
@@ -106,7 +100,7 @@ pub fn create_service_token(did: &str, aud: &str, lxm: &str, key_bytes: &[u8]) -
 fn create_signed_token_with_metadata(
     did: &str,
     scope: &str,
-    typ: &str,
+    typ: TokenType,
     key_bytes: &[u8],
     duration: Duration,
     hostname: Option<&str>,
@@ -117,7 +111,7 @@ fn create_signed_token_with_metadata(
 fn create_signed_token_with_act(
     did: &str,
     scope: &str,
-    typ: &str,
+    typ: TokenType,
     key_bytes: &[u8],
     duration: Duration,
     act: Option<ActClaim>,
@@ -140,8 +134,8 @@ fn create_signed_token_with_act(
         iss: did.to_owned(),
         sub: did.to_owned(),
         aud: format!("did:web:{}", aud_hostname),
-        exp: expiration as usize,
-        iat: Utc::now().timestamp() as usize,
+        exp: expiration,
+        iat: Utc::now().timestamp(),
         scope: Some(scope.to_string()),
         lxm: None,
         jti: jti.clone(),
@@ -158,13 +152,13 @@ fn create_signed_token_with_act(
 }
 
 fn sign_claims(claims: Claims, key: &SigningKey) -> Result<String> {
-    sign_claims_with_type(claims, key, TOKEN_TYPE_SERVICE)
+    sign_claims_with_type(claims, key, TokenType::Service)
 }
 
-fn sign_claims_with_type(claims: Claims, key: &SigningKey, typ: &str) -> Result<String> {
+fn sign_claims_with_type(claims: Claims, key: &SigningKey, typ: TokenType) -> Result<String> {
     let header = Header {
-        alg: "ES256K".to_string(),
-        typ: typ.to_string(),
+        alg: SigningAlgorithm::ES256K,
+        typ,
     };
 
     let header_json = serde_json::to_string(&header)?;
@@ -194,8 +188,8 @@ pub fn create_access_token_hs256_with_metadata(
 ) -> Result<TokenWithMetadata> {
     create_hs256_token_with_metadata(
         did,
-        SCOPE_ACCESS,
-        TOKEN_TYPE_ACCESS,
+        TokenScope::Access.as_str(),
+        TokenType::Access,
         secret,
         Duration::minutes(15),
     )
@@ -207,8 +201,8 @@ pub fn create_refresh_token_hs256_with_metadata(
 ) -> Result<TokenWithMetadata> {
     create_hs256_token_with_metadata(
         did,
-        SCOPE_REFRESH,
-        TOKEN_TYPE_REFRESH,
+        TokenScope::Refresh.as_str(),
+        TokenType::Refresh,
         secret,
         Duration::days(14),
     )
@@ -229,21 +223,21 @@ pub fn create_service_token_hs256(
         iss: did.to_owned(),
         sub: did.to_owned(),
         aud: aud.to_owned(),
-        exp: expiration as usize,
-        iat: Utc::now().timestamp() as usize,
+        exp: expiration,
+        iat: Utc::now().timestamp(),
         scope: None,
         lxm: Some(lxm.to_string()),
         jti: uuid::Uuid::new_v4().to_string(),
         act: None,
     };
 
-    sign_claims_hs256(claims, TOKEN_TYPE_SERVICE, secret)
+    sign_claims_hs256(claims, TokenType::Service, secret)
 }
 
 fn create_hs256_token_with_metadata(
     did: &str,
     scope: &str,
-    typ: &str,
+    typ: TokenType,
     secret: &[u8],
     duration: Duration,
 ) -> Result<TokenWithMetadata> {
@@ -261,8 +255,8 @@ fn create_hs256_token_with_metadata(
             "did:web:{}",
             std::env::var("PDS_HOSTNAME").unwrap_or_else(|_| "localhost".to_string())
         ),
-        exp: expiration as usize,
-        iat: Utc::now().timestamp() as usize,
+        exp: expiration,
+        iat: Utc::now().timestamp(),
         scope: Some(scope.to_string()),
         lxm: None,
         jti: jti.clone(),
@@ -278,10 +272,10 @@ fn create_hs256_token_with_metadata(
     })
 }
 
-fn sign_claims_hs256(claims: Claims, typ: &str, secret: &[u8]) -> Result<String> {
+fn sign_claims_hs256(claims: Claims, typ: TokenType, secret: &[u8]) -> Result<String> {
     let header = Header {
-        alg: "HS256".to_string(),
-        typ: typ.to_string(),
+        alg: SigningAlgorithm::HS256,
+        typ,
     };
 
     let header_json = serde_json::to_string(&header)?;

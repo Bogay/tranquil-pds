@@ -14,7 +14,7 @@ use tranquil_db_traits::{
     UserIdHandleEmail, UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref,
     UserLoginCheck, UserLoginFull, UserLoginInfo, UserPasswordInfo, UserRepository,
     UserResendVerification, UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus,
-    UserVerificationInfo, UserWithKey,
+    UserVerificationInfo, UserWithKey, WebauthnChallengeType,
 };
 
 pub struct PostgresUserRepository {
@@ -281,7 +281,7 @@ impl UserRepository for PostgresUserRepository {
             password_hash: r.password_hash,
             deactivated_at: r.deactivated_at,
             takedown_ref: r.takedown_ref,
-            channel_verification: ChannelVerificationStatus::new(
+            channel_verification: ChannelVerificationStatus::from_db_row(
                 r.email_verified,
                 r.discord_verified,
                 r.telegram_verified,
@@ -746,7 +746,7 @@ impl UserRepository for PostgresUserRepository {
             id: r.id,
             handle: Handle::from(r.handle),
             email: r.email,
-            channel_verification: ChannelVerificationStatus::new(
+            channel_verification: ChannelVerificationStatus::from_db_row(
                 r.email_verified,
                 r.discord_verified,
                 r.telegram_verified,
@@ -1029,7 +1029,7 @@ impl UserRepository for PostgresUserRepository {
     async fn save_webauthn_challenge(
         &self,
         did: &Did,
-        challenge_type: &str,
+        challenge_type: WebauthnChallengeType,
         state_json: &str,
     ) -> Result<Uuid, DbError> {
         let id = Uuid::new_v4();
@@ -1041,7 +1041,7 @@ impl UserRepository for PostgresUserRepository {
             id,
             did.as_str(),
             challenge,
-            challenge_type,
+            challenge_type.as_str(),
             state_json,
             expires_at,
         )
@@ -1055,14 +1055,14 @@ impl UserRepository for PostgresUserRepository {
     async fn load_webauthn_challenge(
         &self,
         did: &Did,
-        challenge_type: &str,
+        challenge_type: WebauthnChallengeType,
     ) -> Result<Option<String>, DbError> {
         let row = sqlx::query_scalar!(
             r#"SELECT state_json FROM webauthn_challenges
                WHERE did = $1 AND challenge_type = $2 AND expires_at > NOW()
                ORDER BY created_at DESC LIMIT 1"#,
             did.as_str(),
-            challenge_type
+            challenge_type.as_str()
         )
         .fetch_optional(&self.pool)
         .await
@@ -1074,12 +1074,12 @@ impl UserRepository for PostgresUserRepository {
     async fn delete_webauthn_challenge(
         &self,
         did: &Did,
-        challenge_type: &str,
+        challenge_type: WebauthnChallengeType,
     ) -> Result<(), DbError> {
         sqlx::query!(
             "DELETE FROM webauthn_challenges WHERE did = $1 AND challenge_type = $2",
             did.as_str(),
-            challenge_type
+            challenge_type.as_str()
         )
         .execute(&self.pool)
         .await
@@ -1365,7 +1365,7 @@ impl UserRepository for PostgresUserRepository {
                 preferred_comms_channel: row.preferred_comms_channel,
                 deactivated_at: row.deactivated_at,
                 takedown_ref: row.takedown_ref,
-                channel_verification: ChannelVerificationStatus::new(
+                channel_verification: ChannelVerificationStatus::from_db_row(
                     row.email_verified,
                     row.discord_verified,
                     row.telegram_verified,
@@ -1395,7 +1395,7 @@ impl UserRepository for PostgresUserRepository {
                 id: row.id,
                 two_factor_enabled: row.two_factor_enabled,
                 preferred_comms_channel: row.preferred_comms_channel,
-                channel_verification: ChannelVerificationStatus::new(
+                channel_verification: ChannelVerificationStatus::from_db_row(
                     row.email_verified,
                     row.discord_verified,
                     row.telegram_verified,
@@ -1432,7 +1432,7 @@ impl UserRepository for PostgresUserRepository {
                 takedown_ref: row.takedown_ref,
                 preferred_locale: row.preferred_locale,
                 preferred_comms_channel: row.preferred_comms_channel,
-                channel_verification: ChannelVerificationStatus::new(
+                channel_verification: ChannelVerificationStatus::from_db_row(
                     row.email_verified,
                     row.discord_verified,
                     row.telegram_verified,
@@ -1525,7 +1525,7 @@ impl UserRepository for PostgresUserRepository {
                 email: row.email,
                 deactivated_at: row.deactivated_at,
                 takedown_ref: row.takedown_ref,
-                channel_verification: ChannelVerificationStatus::new(
+                channel_verification: ChannelVerificationStatus::from_db_row(
                     row.email_verified,
                     row.discord_verified,
                     row.telegram_verified,
@@ -1602,7 +1602,7 @@ impl UserRepository for PostgresUserRepository {
                 discord_username: row.discord_username,
                 telegram_username: row.telegram_username,
                 signal_username: row.signal_username,
-                channel_verification: ChannelVerificationStatus::new(
+                channel_verification: ChannelVerificationStatus::from_db_row(
                     row.email_verified,
                     row.discord_verified,
                     row.telegram_verified,

@@ -2,6 +2,7 @@ use crate::AccountStatus;
 use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::types::Did;
+use axum::http::Method;
 use axum::{
     Json,
     extract::{Query, State},
@@ -10,34 +11,44 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashSet;
+use std::sync::LazyLock;
 use tracing::{error, info, warn};
+use tranquil_types::Nsid;
+
+static CREATE_ACCOUNT_NSID: LazyLock<Nsid> =
+    LazyLock::new(|| "com.atproto.server.createAccount".parse().unwrap());
 
 const HOUR_SECS: i64 = 3600;
 const MINUTE_SECS: i64 = 60;
 
-const PROTECTED_METHODS: &[&str] = &[
-    "com.atproto.admin.sendEmail",
-    "com.atproto.identity.requestPlcOperationSignature",
-    "com.atproto.identity.signPlcOperation",
-    "com.atproto.identity.updateHandle",
-    "com.atproto.server.activateAccount",
-    "com.atproto.server.confirmEmail",
-    "com.atproto.server.createAppPassword",
-    "com.atproto.server.deactivateAccount",
-    "com.atproto.server.getAccountInviteCodes",
-    "com.atproto.server.getSession",
-    "com.atproto.server.listAppPasswords",
-    "com.atproto.server.requestAccountDelete",
-    "com.atproto.server.requestEmailConfirmation",
-    "com.atproto.server.requestEmailUpdate",
-    "com.atproto.server.revokeAppPassword",
-    "com.atproto.server.updateEmail",
-];
+static PROTECTED_METHODS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "com.atproto.admin.sendEmail",
+        "com.atproto.identity.requestPlcOperationSignature",
+        "com.atproto.identity.signPlcOperation",
+        "com.atproto.identity.updateHandle",
+        "com.atproto.server.activateAccount",
+        "com.atproto.server.confirmEmail",
+        "com.atproto.server.createAppPassword",
+        "com.atproto.server.deactivateAccount",
+        "com.atproto.server.getAccountInviteCodes",
+        "com.atproto.server.getSession",
+        "com.atproto.server.listAppPasswords",
+        "com.atproto.server.requestAccountDelete",
+        "com.atproto.server.requestEmailConfirmation",
+        "com.atproto.server.requestEmailUpdate",
+        "com.atproto.server.revokeAppPassword",
+        "com.atproto.server.updateEmail",
+    ]
+    .into_iter()
+    .collect()
+});
 
 #[derive(Deserialize)]
 pub struct GetServiceAuthParams {
-    pub aud: String,
-    pub lxm: Option<String>,
+    pub aud: Did,
+    pub lxm: Option<Nsid>,
     pub exp: Option<i64>,
 }
 
@@ -51,8 +62,8 @@ pub async fn get_service_auth(
     headers: axum::http::HeaderMap,
     Query(params): Query<GetServiceAuthParams>,
 ) -> Response {
-    let auth_header = crate::util::get_header_str(&headers, "Authorization");
-    let dpop_proof = crate::util::get_header_str(&headers, "DPoP");
+    let auth_header = crate::util::get_header_str(&headers, axum::http::header::AUTHORIZATION);
+    let dpop_proof = crate::util::get_header_str(&headers, crate::util::HEADER_DPOP);
     info!(
         has_auth_header = auth_header.is_some(),
         has_dpop_proof = dpop_proof.is_some(),
@@ -68,40 +79,47 @@ pub async fn get_service_auth(
         }
     };
 
-    let (token, is_dpop) = if auth_header.len() >= 7
-        && auth_header[..7].eq_ignore_ascii_case("bearer ")
-    {
-        (auth_header[7..].trim().to_string(), false)
-    } else if auth_header.len() >= 5 && auth_header[..5].eq_ignore_ascii_case("dpop ") {
-        (auth_header[5..].trim().to_string(), true)
-    } else {
-        warn!(auth_scheme = ?auth_header.split_whitespace().next(), "getServiceAuth: invalid auth scheme");
-        return ApiError::AuthenticationRequired.into_response();
+    let extracted = match crate::auth::extract_auth_token_from_header(Some(auth_header)) {
+        Some(e) => e,
+        None => {
+            warn!(auth_scheme = ?auth_header.split_whitespace().next(), "getServiceAuth: invalid auth scheme");
+            return ApiError::AuthenticationRequired.into_response();
+        }
     };
+    let token = extracted.token;
 
-    let auth_user = if is_dpop {
+    let auth_user = if extracted.scheme.is_dpop() {
         match crate::oauth::verify::verify_oauth_access_token(
             state.oauth_repo.as_ref(),
             &token,
             dpop_proof,
-            "GET",
+            Method::GET.as_str(),
             &crate::util::build_full_url(&format!(
                 "/xrpc/com.atproto.server.getServiceAuth?aud={}&lxm={}",
                 params.aud,
-                params.lxm.as_deref().unwrap_or("")
+                params.lxm.as_ref().map_or("", |n| n.as_str())
             )),
         )
         .await
         {
-            Ok(result) => crate::auth::AuthenticatedUser {
-                did: unsafe { Did::new_unchecked(result.did) },
-                is_admin: false,
-                status: AccountStatus::Active,
-                scope: result.scope,
-                key_bytes: None,
-                controller_did: None,
-                auth_source: crate::auth::AuthSource::OAuth,
-            },
+            Ok(result) => {
+                let did: Did = match result.did.parse() {
+                    Ok(d) => d,
+                    Err(_) => {
+                        return ApiError::InternalError(Some("Invalid DID in token".into()))
+                            .into_response();
+                    }
+                };
+                crate::auth::AuthenticatedUser {
+                    did,
+                    is_admin: false,
+                    status: AccountStatus::Active,
+                    scope: result.scope,
+                    key_bytes: None,
+                    controller_did: None,
+                    auth_source: crate::auth::AuthSource::OAuth,
+                }
+            }
             Err(crate::oauth::OAuthError::UseDpopNonce(nonce)) => {
                 return (
                     StatusCode::UNAUTHORIZED,
@@ -179,15 +197,15 @@ pub async fn get_service_auth(
         }
     };
 
-    let lxm = params.lxm.as_deref();
-    let lxm_for_token = lxm.unwrap_or("*");
+    let lxm = params.lxm.as_ref();
+    let lxm_for_token = lxm.map_or("*", |n| n.as_str());
 
     if let Some(method) = lxm {
         if let Err(e) = crate::auth::scope_check::check_rpc_scope(
-            auth_user.is_oauth(),
+            &auth_user.auth_source,
             auth_user.scope.as_deref(),
-            &params.aud,
-            method,
+            params.aud.as_str(),
+            method.as_str(),
         ) {
             return e;
         }
@@ -209,12 +227,12 @@ pub async fn get_service_auth(
         .flatten()
         .is_some_and(|s| s.takedown_ref.is_some());
 
-    if is_takendown && lxm != Some("com.atproto.server.createAccount") {
+    if is_takendown && lxm != Some(&*CREATE_ACCOUNT_NSID) {
         return ApiError::InvalidToken(Some("Bad token scope".into())).into_response();
     }
 
     if let Some(method) = lxm
-        && PROTECTED_METHODS.contains(&method)
+        && PROTECTED_METHODS.contains(&method.as_str())
     {
         return ApiError::InvalidRequest(format!(
             "cannot request a service auth token for the following protected method: {}",
@@ -248,7 +266,7 @@ pub async fn get_service_auth(
 
     let service_token = match crate::auth::create_service_token(
         &auth_user.did,
-        &params.aud,
+        params.aud.as_str(),
         lxm_for_token,
         &key_bytes,
     ) {

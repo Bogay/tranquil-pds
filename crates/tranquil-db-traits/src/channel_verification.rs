@@ -10,12 +10,21 @@ pub struct ChannelVerificationStatus {
 }
 
 impl ChannelVerificationStatus {
-    pub fn new(email: bool, discord: bool, telegram: bool, signal: bool) -> Self {
+    pub fn from_db_row(email: bool, discord: bool, telegram: bool, signal: bool) -> Self {
         Self {
             email,
             discord,
             telegram,
             signal,
+        }
+    }
+
+    pub fn from_verified_channels(channels: &[CommsChannel]) -> Self {
+        Self {
+            email: channels.contains(&CommsChannel::Email),
+            discord: channels.contains(&CommsChannel::Discord),
+            telegram: channels.contains(&CommsChannel::Telegram),
+            signal: channels.contains(&CommsChannel::Signal),
         }
     }
 

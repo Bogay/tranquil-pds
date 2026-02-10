@@ -65,10 +65,7 @@ async fn test_account_and_session_lifecycle() {
         .send()
         .await
         .unwrap();
-    assert!(
-        missing_id.status() == StatusCode::BAD_REQUEST
-            || missing_id.status() == StatusCode::UNPROCESSABLE_ENTITY
-    );
+    assert_eq!(missing_id.status(), StatusCode::BAD_REQUEST);
     let invalid_handle = client.post(format!("{}/xrpc/com.atproto.server.createAccount", base))
         .json(&json!({ "handle": "invalid!handle.com", "email": "test@example.com", "password": "Testpass123!" }))
         .send().await.unwrap();

@@ -6,6 +6,18 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+#[derive(Debug, thiserror::Error)]
+pub enum DidResolutionError {
+    #[error("Invalid did:web format")]
+    InvalidDidWeb,
+    #[error("HTTP request failed: {0}")]
+    HttpFailed(String),
+    #[error("Invalid DID document: {0}")]
+    InvalidDocument(String),
+    #[error("DID not found")]
+    NotFound,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DidDocument {
     pub id: String,
@@ -78,10 +90,10 @@ impl DidResolver {
         }
     }
 
-    fn build_did_web_url(did: &str) -> Result<String, String> {
+    fn build_did_web_url(did: &str) -> Result<String, DidResolutionError> {
         let host = did
             .strip_prefix("did:web:")
-            .ok_or("Invalid did:web format")?;
+            .ok_or(DidResolutionError::InvalidDidWeb)?;
 
         let (host, path) = if host.contains(':') {
             let decoded = host.replace("%3A", ":");
@@ -184,7 +196,7 @@ impl DidResolver {
         self.extract_service_endpoint(&doc)
     }
 
-    async fn resolve_did_web(&self, did: &str) -> Result<DidDocument, String> {
+    async fn resolve_did_web(&self, did: &str) -> Result<DidDocument, DidResolutionError> {
         let url = Self::build_did_web_url(did)?;
 
         debug!("Resolving did:web {} via {}", did, url);
@@ -194,18 +206,21 @@ impl DidResolver {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .map_err(|e| DidResolutionError::HttpFailed(e.to_string()))?;
 
         if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
+            return Err(DidResolutionError::HttpFailed(format!(
+                "HTTP {}",
+                resp.status()
+            )));
         }
 
         resp.json::<DidDocument>()
             .await
-            .map_err(|e| format!("Failed to parse DID document: {}", e))
+            .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
-    async fn resolve_did_plc(&self, did: &str) -> Result<DidDocument, String> {
+    async fn resolve_did_plc(&self, did: &str) -> Result<DidDocument, DidResolutionError> {
         let url = format!("{}/{}", self.plc_directory_url, urlencoding::encode(did));
 
         debug!("Resolving did:plc {} via {}", did, url);
@@ -215,24 +230,27 @@ impl DidResolver {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .map_err(|e| DidResolutionError::HttpFailed(e.to_string()))?;
 
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err("DID not found".to_string());
+            return Err(DidResolutionError::NotFound);
         }
 
         if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
+            return Err(DidResolutionError::HttpFailed(format!(
+                "HTTP {}",
+                resp.status()
+            )));
         }
 
         resp.json::<DidDocument>()
             .await
-            .map_err(|e| format!("Failed to parse DID document: {}", e))
+            .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
     fn extract_service_endpoint(&self, doc: &DidDocument) -> Option<ResolvedService> {
         if let Some(service) = doc.service.iter().find(|s| {
-            s.service_type == "AtprotoAppView"
+            s.service_type == crate::plc::ServiceType::AppView.as_str()
                 || s.id.contains("atproto_appview")
                 || s.id.ends_with("#bsky_appview")
         }) {
@@ -329,7 +347,10 @@ impl DidResolver {
         }
     }
 
-    async fn fetch_did_document_web(&self, did: &str) -> Result<serde_json::Value, String> {
+    async fn fetch_did_document_web(
+        &self,
+        did: &str,
+    ) -> Result<serde_json::Value, DidResolutionError> {
         let url = Self::build_did_web_url(did)?;
 
         let resp = self
@@ -337,18 +358,24 @@ impl DidResolver {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .map_err(|e| DidResolutionError::HttpFailed(e.to_string()))?;
 
         if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
+            return Err(DidResolutionError::HttpFailed(format!(
+                "HTTP {}",
+                resp.status()
+            )));
         }
 
         resp.json::<serde_json::Value>()
             .await
-            .map_err(|e| format!("Failed to parse DID document: {}", e))
+            .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
-    async fn fetch_did_document_plc(&self, did: &str) -> Result<serde_json::Value, String> {
+    async fn fetch_did_document_plc(
+        &self,
+        did: &str,
+    ) -> Result<serde_json::Value, DidResolutionError> {
         let url = format!("{}/{}", self.plc_directory_url, urlencoding::encode(did));
 
         let resp = self
@@ -356,19 +383,22 @@ impl DidResolver {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
+            .map_err(|e| DidResolutionError::HttpFailed(e.to_string()))?;
 
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err("DID not found".to_string());
+            return Err(DidResolutionError::NotFound);
         }
 
         if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
+            return Err(DidResolutionError::HttpFailed(format!(
+                "HTTP {}",
+                resp.status()
+            )));
         }
 
         resp.json::<serde_json::Value>()
             .await
-            .map_err(|e| format!("Failed to parse DID document: {}", e))
+            .map_err(|e| DidResolutionError::InvalidDocument(e.to_string()))
     }
 
     pub async fn invalidate_cache(&self, did: &str) {

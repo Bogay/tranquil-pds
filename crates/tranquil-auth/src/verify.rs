@@ -1,8 +1,7 @@
-use super::token::{
-    SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH, TOKEN_TYPE_ACCESS,
-    TOKEN_TYPE_REFRESH,
+use super::types::{
+    Claims, Header, SigningAlgorithm, TokenData, TokenDecodeError, TokenScope, TokenType,
+    TokenVerifyError, UnsafeClaims,
 };
-use super::types::{Claims, Header, TokenData, TokenVerifyError, UnsafeClaims};
 use anyhow::{Context, Result, anyhow};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -14,54 +13,54 @@ use subtle::ConstantTimeEq;
 
 type HmacSha256 = Hmac<Sha256>;
 
-pub fn get_did_from_token(token: &str) -> Result<String, String> {
+pub fn get_did_from_token(token: &str) -> Result<String, TokenDecodeError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err("Invalid token format".to_string());
+        return Err(TokenDecodeError::InvalidFormat);
     }
 
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(parts[1])
-        .map_err(|e| format!("Base64 decode failed: {}", e))?;
+        .map_err(|_| TokenDecodeError::Base64DecodeFailed)?;
 
     let claims: UnsafeClaims =
-        serde_json::from_slice(&payload_bytes).map_err(|e| format!("JSON decode failed: {}", e))?;
+        serde_json::from_slice(&payload_bytes).map_err(|_| TokenDecodeError::JsonDecodeFailed)?;
 
     Ok(claims.sub.unwrap_or(claims.iss))
 }
 
-pub fn get_jti_from_token(token: &str) -> Result<String, String> {
+pub fn get_jti_from_token(token: &str) -> Result<String, TokenDecodeError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err("Invalid token format".to_string());
+        return Err(TokenDecodeError::InvalidFormat);
     }
 
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(parts[1])
-        .map_err(|e| format!("Base64 decode failed: {}", e))?;
+        .map_err(|_| TokenDecodeError::Base64DecodeFailed)?;
 
     let claims: serde_json::Value =
-        serde_json::from_slice(&payload_bytes).map_err(|e| format!("JSON decode failed: {}", e))?;
+        serde_json::from_slice(&payload_bytes).map_err(|_| TokenDecodeError::JsonDecodeFailed)?;
 
     claims
         .get("jti")
         .and_then(|j| j.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| "No jti claim in token".to_string())
+        .ok_or(TokenDecodeError::MissingClaim)
 }
 
-pub fn get_algorithm_from_token(token: &str) -> Result<String, String> {
+pub fn get_algorithm_from_token(token: &str) -> Result<SigningAlgorithm, TokenDecodeError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err("Invalid token format".to_string());
+        return Err(TokenDecodeError::InvalidFormat);
     }
 
     let header_bytes = URL_SAFE_NO_PAD
         .decode(parts[0])
-        .map_err(|e| format!("Base64 decode failed: {}", e))?;
+        .map_err(|_| TokenDecodeError::Base64DecodeFailed)?;
 
     let header: Header =
-        serde_json::from_slice(&header_bytes).map_err(|e| format!("JSON decode failed: {}", e))?;
+        serde_json::from_slice(&header_bytes).map_err(|_| TokenDecodeError::JsonDecodeFailed)?;
 
     Ok(header.alg)
 }
@@ -74,8 +73,12 @@ pub fn verify_access_token(token: &str, key_bytes: &[u8]) -> Result<TokenData<Cl
     verify_token_internal(
         token,
         key_bytes,
-        Some(TOKEN_TYPE_ACCESS),
-        Some(&[SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED]),
+        Some(TokenType::Access),
+        Some(&[
+            TokenScope::Access,
+            TokenScope::AppPass,
+            TokenScope::AppPassPrivileged,
+        ]),
     )
 }
 
@@ -83,8 +86,8 @@ pub fn verify_refresh_token(token: &str, key_bytes: &[u8]) -> Result<TokenData<C
     verify_token_internal(
         token,
         key_bytes,
-        Some(TOKEN_TYPE_REFRESH),
-        Some(&[SCOPE_REFRESH]),
+        Some(TokenType::Refresh),
+        Some(&[TokenScope::Refresh]),
     )
 }
 
@@ -92,8 +95,12 @@ pub fn verify_access_token_hs256(token: &str, secret: &[u8]) -> Result<TokenData
     verify_token_hs256_internal(
         token,
         secret,
-        Some(TOKEN_TYPE_ACCESS),
-        Some(&[SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED]),
+        Some(TokenType::Access),
+        Some(&[
+            TokenScope::Access,
+            TokenScope::AppPass,
+            TokenScope::AppPassPrivileged,
+        ]),
     )
 }
 
@@ -101,16 +108,16 @@ pub fn verify_refresh_token_hs256(token: &str, secret: &[u8]) -> Result<TokenDat
     verify_token_hs256_internal(
         token,
         secret,
-        Some(TOKEN_TYPE_REFRESH),
-        Some(&[SCOPE_REFRESH]),
+        Some(TokenType::Refresh),
+        Some(&[TokenScope::Refresh]),
     )
 }
 
 fn verify_token_internal(
     token: &str,
     key_bytes: &[u8],
-    expected_typ: Option<&str>,
-    allowed_scopes: Option<&[&str]>,
+    expected_typ: Option<TokenType>,
+    allowed_scopes: Option<&[TokenScope]>,
 ) -> Result<TokenData<Claims>> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
@@ -160,13 +167,18 @@ fn verify_token_internal(
     let claims: Claims =
         serde_json::from_slice(&claims_bytes).context("JSON decode of claims failed")?;
 
-    let now = Utc::now().timestamp() as usize;
+    let now = Utc::now().timestamp();
     if claims.exp < now {
         return Err(anyhow!("Token expired"));
     }
 
     if let Some(scopes) = allowed_scopes {
-        let token_scope = claims.scope.as_deref().unwrap_or("");
+        let token_scope: TokenScope = claims
+            .scope
+            .as_deref()
+            .unwrap_or("")
+            .parse()
+            .unwrap_or_else(|e| match e {});
         if !scopes.contains(&token_scope) {
             return Err(anyhow!("Invalid token scope: {}", token_scope));
         }
@@ -178,8 +190,8 @@ fn verify_token_internal(
 fn verify_token_hs256_internal(
     token: &str,
     secret: &[u8],
-    expected_typ: Option<&str>,
-    allowed_scopes: Option<&[&str]>,
+    expected_typ: Option<TokenType>,
+    allowed_scopes: Option<&[TokenScope]>,
 ) -> Result<TokenData<Claims>> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
@@ -197,7 +209,7 @@ fn verify_token_hs256_internal(
     let header: Header =
         serde_json::from_slice(&header_bytes).context("JSON decode of header failed")?;
 
-    if header.alg != "HS256" {
+    if header.alg != SigningAlgorithm::HS256 {
         return Err(anyhow!("Expected HS256 algorithm, got {}", header.alg));
     }
 
@@ -235,13 +247,18 @@ fn verify_token_hs256_internal(
     let claims: Claims =
         serde_json::from_slice(&claims_bytes).context("JSON decode of claims failed")?;
 
-    let now = Utc::now().timestamp() as usize;
+    let now = Utc::now().timestamp();
     if claims.exp < now {
         return Err(anyhow!("Token expired"));
     }
 
     if let Some(scopes) = allowed_scopes {
-        let token_scope = claims.scope.as_deref().unwrap_or("");
+        let token_scope: TokenScope = claims
+            .scope
+            .as_deref()
+            .unwrap_or("")
+            .parse()
+            .unwrap_or_else(|e| match e {});
         if !scopes.contains(&token_scope) {
             return Err(anyhow!("Invalid token scope: {}", token_scope));
         }
@@ -254,14 +271,14 @@ pub fn verify_access_token_typed(
     token: &str,
     key_bytes: &[u8],
 ) -> Result<TokenData<Claims>, TokenVerifyError> {
-    verify_token_typed_internal(token, key_bytes, Some(TOKEN_TYPE_ACCESS), None)
+    verify_token_typed_internal(token, key_bytes, Some(TokenType::Access), None)
 }
 
 fn verify_token_typed_internal(
     token: &str,
     key_bytes: &[u8],
-    expected_typ: Option<&str>,
-    allowed_scopes: Option<&[&str]>,
+    expected_typ: Option<TokenType>,
+    allowed_scopes: Option<&[TokenScope]>,
 ) -> Result<TokenData<Claims>, TokenVerifyError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
@@ -315,13 +332,18 @@ fn verify_token_typed_internal(
         return Err(TokenVerifyError::Invalid);
     };
 
-    let now = Utc::now().timestamp() as usize;
+    let now = Utc::now().timestamp();
     if claims.exp < now {
         return Err(TokenVerifyError::Expired);
     }
 
     if let Some(scopes) = allowed_scopes {
-        let token_scope = claims.scope.as_deref().unwrap_or("");
+        let token_scope: TokenScope = claims
+            .scope
+            .as_deref()
+            .unwrap_or("")
+            .parse()
+            .unwrap_or_else(|e| match e {});
         if !scopes.contains(&token_scope) {
             return Err(TokenVerifyError::Invalid);
         }

@@ -21,7 +21,7 @@ use tranquil_db_traits::CommsChannel;
 const EMAIL_UPDATE_TTL: Duration = Duration::from_secs(30 * 60);
 
 fn email_update_cache_key(did: &str) -> String {
-    format!("email_update:{}", did)
+    crate::cache_keys::email_update_key(did)
 }
 
 fn hash_token(token: &str) -> String {
@@ -51,7 +51,7 @@ pub async fn request_email_update(
     input: Option<Json<RequestEmailUpdateInput>>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Manage,
@@ -111,7 +111,6 @@ pub async fn request_email_update(
             state.infra_repo.as_ref(),
             user.id,
             &token,
-            "email_update",
             hostname,
         )
         .await
@@ -138,7 +137,7 @@ pub async fn confirm_email(
     Json(input): Json<ConfirmEmailInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Manage,
@@ -173,13 +172,13 @@ pub async fn confirm_email(
 
     let verified = crate::auth::verification_token::verify_signup_token(
         &confirmation_code,
-        "email",
+        CommsChannel::Email,
         &provided_email,
     );
 
     match verified {
         Ok(token_data) => {
-            if token_data.did != did.as_str() {
+            if token_data.did != *did {
                 return Err(ApiError::InvalidToken(None));
             }
         }
@@ -216,7 +215,7 @@ pub async fn update_email(
     Json(input): Json<UpdateEmailInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Manage,
@@ -324,13 +323,13 @@ pub async fn update_email(
 
                 let verified = crate::auth::verification_token::verify_channel_update_token(
                     &confirmation_token,
-                    "email_update",
+                    CommsChannel::Email,
                     &current_email_lower,
                 );
 
                 match verified {
                     Ok(token_data) => {
-                        if token_data.did != did.as_str() {
+                        if token_data.did != *did {
                             return Err(ApiError::InvalidToken(None));
                         }
                     }
@@ -361,8 +360,11 @@ pub async fn update_email(
         .await
         .log_db_err("updating email")?;
 
-    let verification_token =
-        crate::auth::verification_token::generate_signup_token(did, "email", &new_email);
+    let verification_token = crate::auth::verification_token::generate_signup_token(
+        did,
+        CommsChannel::Email,
+        &new_email,
+    );
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
     let hostname = pds_hostname();
@@ -370,7 +372,7 @@ pub async fn update_email(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         user_id,
-        "email",
+        tranquil_db_traits::CommsChannel::Email,
         &new_email,
         &formatted_token,
         hostname,
@@ -422,8 +424,8 @@ pub async fn check_email_verified(
 
 #[derive(Deserialize)]
 pub struct CheckChannelVerifiedInput {
-    pub did: String,
-    pub channel: String,
+    pub did: crate::types::Did,
+    pub channel: CommsChannel,
 }
 
 pub async fn check_channel_verified(
@@ -431,23 +433,9 @@ pub async fn check_channel_verified(
     _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckChannelVerifiedInput>,
 ) -> Response {
-    let channel = match input.channel.to_lowercase().as_str() {
-        "email" => CommsChannel::Email,
-        "discord" => CommsChannel::Discord,
-        "telegram" => CommsChannel::Telegram,
-        "signal" => CommsChannel::Signal,
-        _ => {
-            return ApiError::InvalidRequest("invalid channel".into()).into_response();
-        }
-    };
-
-    let did = match crate::Did::new(input.did) {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
     match state
         .user_repo
-        .check_channel_verified_by_did(&did, channel)
+        .check_channel_verified_by_did(&input.did, input.channel)
         .await
     {
         Ok(Some(verified)) => VerifiedResponse::response(verified).into_response(),
@@ -490,9 +478,9 @@ pub async fn authorize_email_update(
         );
         return ApiError::InvalidToken(None).into_response();
     }
-    if token_data.channel != "email_update" {
+    if token_data.channel != CommsChannel::Email {
         warn!(
-            "authorize_email_update: wrong channel: {}",
+            "authorize_email_update: wrong channel: {:?}",
             token_data.channel
         );
         return ApiError::InvalidToken(None).into_response();
@@ -558,7 +546,7 @@ pub async fn check_email_update_status(
     auth: Auth<NotTakendown>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Email,
         crate::oauth::scopes::AccountAction::Read,
@@ -620,7 +608,7 @@ pub async fn check_email_in_use(
 
 #[derive(Deserialize)]
 pub struct CheckCommsChannelInUseInput {
-    pub channel: String,
+    pub channel: CommsChannel,
     pub identifier: String,
 }
 
@@ -629,16 +617,6 @@ pub async fn check_comms_channel_in_use(
     _rate_limit: RateLimited<VerificationCheckLimit>,
     Json(input): Json<CheckCommsChannelInUseInput>,
 ) -> Response {
-    let channel = match input.channel.to_lowercase().as_str() {
-        "email" => CommsChannel::Email,
-        "discord" => CommsChannel::Discord,
-        "telegram" => CommsChannel::Telegram,
-        "signal" => CommsChannel::Signal,
-        _ => {
-            return ApiError::InvalidRequest("invalid channel".into()).into_response();
-        }
-    };
-
     let identifier = input.identifier.trim();
     if identifier.is_empty() {
         return ApiError::InvalidRequest("identifier is required".into()).into_response();
@@ -646,7 +624,7 @@ pub async fn check_comms_channel_in_use(
 
     let count = match state
         .user_repo
-        .count_accounts_by_comms_identifier(channel, identifier)
+        .count_accounts_by_comms_identifier(input.channel, identifier)
         .await
     {
         Ok(c) => c,

@@ -31,25 +31,16 @@ impl InviteCodeState {
     }
 }
 
-impl From<bool> for InviteCodeState {
-    fn from(disabled: bool) -> Self {
-        if disabled {
-            Self::Disabled
-        } else {
-            Self::Active
+impl InviteCodeState {
+    pub fn from_disabled_flag(disabled: bool) -> Self {
+        match disabled {
+            true => Self::Disabled,
+            false => Self::Active,
         }
     }
-}
 
-impl From<Option<bool>> for InviteCodeState {
-    fn from(disabled: Option<bool>) -> Self {
-        Self::from(disabled.unwrap_or(false))
-    }
-}
-
-impl From<InviteCodeState> for bool {
-    fn from(state: InviteCodeState) -> Self {
-        matches!(state, InviteCodeState::Disabled)
+    pub fn from_optional_disabled_flag(disabled: Option<bool>) -> Self {
+        Self::from_disabled_flag(disabled.unwrap_or(false))
     }
 }
 
@@ -62,6 +53,51 @@ pub enum CommsChannel {
     Telegram,
     Signal,
 }
+
+impl CommsChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Email => "email",
+            Self::Discord => "discord",
+            Self::Telegram => "telegram",
+            Self::Signal => "signal",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Email => "email",
+            Self::Discord => "Discord",
+            Self::Telegram => "Telegram",
+            Self::Signal => "Signal",
+        }
+    }
+}
+
+impl std::str::FromStr for CommsChannel {
+    type Err = InvalidCommsChannel;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "email" => Ok(Self::Email),
+            "discord" => Ok(Self::Discord),
+            "telegram" => Ok(Self::Telegram),
+            "signal" => Ok(Self::Signal),
+            _ => Err(InvalidCommsChannel),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidCommsChannel;
+
+impl std::fmt::Display for InvalidCommsChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invalid comms channel")
+    }
+}
+
+impl std::error::Error for InvalidCommsChannel {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "comms_type", rename_all = "snake_case")]
@@ -139,7 +175,7 @@ pub struct InviteCodeRow {
 
 impl InviteCodeRow {
     pub fn state(&self) -> InviteCodeState {
-        InviteCodeState::from(self.disabled)
+        InviteCodeState::from_optional_disabled_flag(self.disabled)
     }
 }
 

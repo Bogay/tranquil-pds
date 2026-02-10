@@ -6,6 +6,29 @@ use p256::ecdsa::SigningKey;
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
 
+#[derive(Debug)]
+pub enum CryptoError {
+    CipherCreationFailed(String),
+    EncryptionFailed(String),
+    DecryptionFailed(String),
+    DataTooShort,
+    UnknownEncryptionVersion(i32),
+}
+
+impl std::fmt::Display for CryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CipherCreationFailed(e) => write!(f, "Failed to create cipher: {}", e),
+            Self::EncryptionFailed(e) => write!(f, "Encryption failed: {}", e),
+            Self::DecryptionFailed(e) => write!(f, "Decryption failed: {}", e),
+            Self::DataTooShort => write!(f, "Encrypted data too short"),
+            Self::UnknownEncryptionVersion(v) => write!(f, "Unknown encryption version: {}", v),
+        }
+    }
+}
+
+impl std::error::Error for CryptoError {}
+
 static CONFIG: OnceLock<AuthConfig> = OnceLock::new();
 
 pub const ENCRYPTION_VERSION: i32 = 1;
@@ -208,11 +231,11 @@ impl AuthConfig {
         }
     }
 
-    pub fn encrypt_user_key(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    pub fn encrypt_user_key(&self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         use rand::RngCore;
 
         let cipher = Aes256Gcm::new_from_slice(&self.key_encryption_key)
-            .map_err(|e| format!("Failed to create cipher: {}", e))?;
+            .map_err(|e| CryptoError::CipherCreationFailed(e.to_string()))?;
 
         let mut nonce_bytes = [0u8; 12];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
@@ -222,7 +245,7 @@ impl AuthConfig {
 
         let ciphertext = cipher
             .encrypt(nonce, plaintext)
-            .map_err(|e| format!("Encryption failed: {}", e))?;
+            .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
 
         let mut result = Vec::with_capacity(12 + ciphertext.len());
         result.extend_from_slice(&nonce_bytes);
@@ -231,13 +254,13 @@ impl AuthConfig {
         Ok(result)
     }
 
-    pub fn decrypt_user_key(&self, encrypted: &[u8]) -> Result<Vec<u8>, String> {
+    pub fn decrypt_user_key(&self, encrypted: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if encrypted.len() < 12 {
-            return Err("Encrypted data too short".to_string());
+            return Err(CryptoError::DataTooShort);
         }
 
         let cipher = Aes256Gcm::new_from_slice(&self.key_encryption_key)
-            .map_err(|e| format!("Failed to create cipher: {}", e))?;
+            .map_err(|e| CryptoError::CipherCreationFailed(e.to_string()))?;
 
         #[allow(deprecated)]
         let nonce = Nonce::from_slice(&encrypted[..12]);
@@ -245,18 +268,37 @@ impl AuthConfig {
 
         cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| format!("Decryption failed: {}", e))
+            .map_err(|e| CryptoError::DecryptionFailed(e.to_string()))
     }
 }
 
-pub fn encrypt_key(plaintext: &[u8]) -> Result<Vec<u8>, String> {
+pub fn encrypt_key(plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     AuthConfig::get().encrypt_user_key(plaintext)
 }
 
-pub fn decrypt_key(encrypted: &[u8], version: Option<i32>) -> Result<Vec<u8>, String> {
-    match version.unwrap_or(0) {
-        0 => Ok(encrypted.to_vec()),
-        1 => AuthConfig::get().decrypt_user_key(encrypted),
-        v => Err(format!("Unknown encryption version: {}", v)),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncryptionVersion {
+    Unencrypted,
+    AesGcm,
+}
+
+impl EncryptionVersion {
+    pub fn from_db(version: Option<i32>) -> Result<Self, CryptoError> {
+        match version.unwrap_or(0) {
+            0 => Ok(Self::Unencrypted),
+            1 => Ok(Self::AesGcm),
+            v => Err(CryptoError::UnknownEncryptionVersion(v)),
+        }
+    }
+
+    pub fn from_db_required(version: i32) -> Result<Self, CryptoError> {
+        Self::from_db(Some(version))
+    }
+}
+
+pub fn decrypt_key(encrypted: &[u8], version: Option<i32>) -> Result<Vec<u8>, CryptoError> {
+    match EncryptionVersion::from_db(version)? {
+        EncryptionVersion::Unencrypted => Ok(encrypted.to_vec()),
+        EncryptionVersion::AesGcm => AuthConfig::get().decrypt_user_key(encrypted),
     }
 }

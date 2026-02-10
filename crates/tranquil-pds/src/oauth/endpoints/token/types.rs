@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub enum GrantType {
     AuthorizationCode,
     RefreshToken,
-    Unsupported(String),
 }
 
 impl GrantType {
@@ -13,45 +12,36 @@ impl GrantType {
         match self {
             Self::AuthorizationCode => "authorization_code",
             Self::RefreshToken => "refresh_token",
-            Self::Unsupported(s) => s,
         }
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct UnsupportedGrantType(pub String);
+
+impl std::fmt::Display for UnsupportedGrantType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unsupported grant type: {}", self.0)
+    }
+}
+
+impl std::error::Error for UnsupportedGrantType {}
+
 impl std::str::FromStr for GrantType {
-    type Err = std::convert::Infallible;
+    type Err = UnsupportedGrantType;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "authorization_code" => Self::AuthorizationCode,
-            "refresh_token" => Self::RefreshToken,
-            other => Self::Unsupported(other.to_string()),
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for GrantType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(s.parse().unwrap())
-    }
-}
-
-impl Serialize for GrantType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
+        match s {
+            "authorization_code" => Ok(Self::AuthorizationCode),
+            "refresh_token" => Ok(Self::RefreshToken),
+            other => Err(UnsupportedGrantType(other.to_string())),
+        }
     }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct TokenRequest {
-    pub grant_type: GrantType,
+    pub grant_type: String,
     #[serde(default)]
     pub code: Option<String>,
     #[serde(default)]
@@ -82,23 +72,45 @@ pub enum TokenGrant {
     },
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ClientAuthParams {
-    pub client_id: Option<String>,
-    pub client_secret: Option<String>,
-    pub client_assertion: Option<String>,
-    pub client_assertion_type: Option<String>,
+#[derive(Debug, Clone)]
+pub enum RequestClientAuth {
+    None {
+        client_id: Option<String>,
+    },
+    SecretPost {
+        client_id: Option<String>,
+        client_secret: String,
+    },
+    PrivateKeyJwt {
+        client_id: Option<String>,
+        assertion: String,
+        assertion_type: String,
+    },
+}
+
+impl RequestClientAuth {
+    pub fn client_id(&self) -> Option<&str> {
+        match self {
+            Self::None { client_id }
+            | Self::SecretPost { client_id, .. }
+            | Self::PrivateKeyJwt { client_id, .. } => client_id.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ValidatedTokenRequest {
     pub grant: TokenGrant,
-    pub client_auth: ClientAuthParams,
+    pub client_auth: RequestClientAuth,
 }
 
 impl TokenRequest {
     pub fn validate(self) -> Result<ValidatedTokenRequest, OAuthError> {
-        let grant = match self.grant_type {
+        let grant_type: GrantType = self
+            .grant_type
+            .parse()
+            .map_err(|e: UnsupportedGrantType| OAuthError::UnsupportedGrantType(e.0))?;
+        let grant = match grant_type {
             GrantType::AuthorizationCode => {
                 let code = self.code.ok_or_else(|| {
                     OAuthError::InvalidRequest(
@@ -124,26 +136,41 @@ impl TokenRequest {
                 })?;
                 TokenGrant::RefreshToken { refresh_token }
             }
-            GrantType::Unsupported(grant_type) => {
-                return Err(OAuthError::UnsupportedGrantType(grant_type));
-            }
         };
 
-        let client_auth = ClientAuthParams {
-            client_id: self.client_id,
-            client_secret: self.client_secret,
-            client_assertion: self.client_assertion,
-            client_assertion_type: self.client_assertion_type,
+        let client_auth = match (self.client_assertion, self.client_assertion_type) {
+            (Some(assertion), Some(assertion_type)) => RequestClientAuth::PrivateKeyJwt {
+                client_id: self.client_id,
+                assertion,
+                assertion_type,
+            },
+            _ => match self.client_secret {
+                Some(secret) => RequestClientAuth::SecretPost {
+                    client_id: self.client_id,
+                    client_secret: secret,
+                },
+                None => RequestClientAuth::None {
+                    client_id: self.client_id,
+                },
+            },
         };
 
         Ok(ValidatedTokenRequest { grant, client_auth })
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum TokenType {
+    Bearer,
+    #[serde(rename = "DPoP")]
+    DPoP,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TokenResponse {
     pub access_token: String,
-    pub token_type: String,
+    pub token_type: TokenType,
     pub expires_in: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,

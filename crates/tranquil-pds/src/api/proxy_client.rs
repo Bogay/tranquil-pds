@@ -1,8 +1,10 @@
+use axum::http::HeaderName;
 use reqwest::{Client, ClientBuilder, Url};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 use tracing::warn;
+use tranquil_types::{Did, Nsid, Rkey};
 
 pub const DEFAULT_HEADERS_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DEFAULT_BODY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -146,20 +148,24 @@ impl std::fmt::Display for SsrfError {
 
 impl std::error::Error for SsrfError {}
 
-pub const HEADERS_TO_FORWARD: &[&str] = &[
-    "accept-language",
-    "atproto-accept-labelers",
-    "x-bsky-topics",
-    "content-type",
-];
-pub const RESPONSE_HEADERS_TO_FORWARD: &[&str] = &[
-    "atproto-repo-rev",
-    "atproto-content-labelers",
-    "retry-after",
-    "content-type",
-    "cache-control",
-    "etag",
-];
+pub static HEADERS_TO_FORWARD: LazyLock<[HeaderName; 4]> = LazyLock::new(|| {
+    [
+        HeaderName::from_static("accept-language"),
+        crate::util::HEADER_ATPROTO_ACCEPT_LABELERS,
+        crate::util::HEADER_X_BSKY_TOPICS,
+        http::header::CONTENT_TYPE,
+    ]
+});
+pub static RESPONSE_HEADERS_TO_FORWARD: LazyLock<[HeaderName; 6]> = LazyLock::new(|| {
+    [
+        crate::util::HEADER_ATPROTO_REPO_REV,
+        crate::util::HEADER_ATPROTO_CONTENT_LABELERS,
+        HeaderName::from_static("retry-after"),
+        http::header::CONTENT_TYPE,
+        http::header::CACHE_CONTROL,
+        http::header::ETAG,
+    ]
+});
 
 pub fn validate_at_uri(uri: &str) -> Result<AtUriParts, &'static str> {
     if !uri.starts_with("at://") {
@@ -170,28 +176,29 @@ pub fn validate_at_uri(uri: &str) -> Result<AtUriParts, &'static str> {
     if parts.is_empty() {
         return Err("URI missing DID");
     }
-    let did = parts[0];
-    if !did.starts_with("did:") {
-        return Err("Invalid DID in URI");
-    }
-    if parts.len() > 1 {
-        let collection = parts[1];
-        if collection.is_empty() || !collection.contains('.') {
-            return Err("Invalid collection NSID");
-        }
-    }
+    let did: Did = parts[0].parse().map_err(|_| "Invalid DID in URI")?;
+    let collection = parts
+        .get(1)
+        .map(|s| s.parse::<Nsid>())
+        .transpose()
+        .map_err(|_| "Invalid collection NSID")?;
+    let rkey = parts
+        .get(2)
+        .map(|s| s.parse::<Rkey>())
+        .transpose()
+        .map_err(|_| "Invalid rkey")?;
     Ok(AtUriParts {
-        did: did.to_string(),
-        collection: parts.get(1).map(|s| s.to_string()),
-        rkey: parts.get(2).map(|s| s.to_string()),
+        did,
+        collection,
+        rkey,
     })
 }
 
 #[derive(Debug, Clone)]
 pub struct AtUriParts {
-    pub did: String,
-    pub collection: Option<String>,
-    pub rkey: Option<String>,
+    pub did: Did,
+    pub collection: Option<Nsid>,
+    pub rkey: Option<Rkey>,
 }
 
 pub fn validate_limit(limit: Option<u32>, default: u32, max: u32) -> u32 {
@@ -201,21 +208,6 @@ pub fn validate_limit(limit: Option<u32>, default: u32, max: u32) -> u32 {
         Some(l) => l,
         None => default,
     }
-}
-
-pub fn validate_did(did: &str) -> Result<(), &'static str> {
-    if !did.starts_with("did:") {
-        return Err("Invalid DID format");
-    }
-    let parts: Vec<&str> = did.split(':').collect();
-    if parts.len() < 3 {
-        return Err("DID must have at least method and identifier");
-    }
-    let method = parts[1];
-    if method != "plc" && method != "web" {
-        return Err("Unsupported DID method");
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -243,9 +235,12 @@ mod tests {
         let result = validate_at_uri("at://did:plc:test/app.bsky.feed.post/abc123");
         assert!(result.is_ok());
         let parts = result.unwrap();
-        assert_eq!(parts.did, "did:plc:test");
-        assert_eq!(parts.collection, Some("app.bsky.feed.post".to_string()));
-        assert_eq!(parts.rkey, Some("abc123".to_string()));
+        assert_eq!(parts.did, "did:plc:test".parse::<Did>().unwrap());
+        assert_eq!(
+            parts.collection,
+            Some("app.bsky.feed.post".parse::<Nsid>().unwrap())
+        );
+        assert_eq!(parts.rkey, Some("abc123".parse::<Rkey>().unwrap()));
     }
     #[test]
     fn test_validate_at_uri_invalid() {
@@ -258,12 +253,5 @@ mod tests {
         assert_eq!(validate_limit(Some(0), 50, 100), 50);
         assert_eq!(validate_limit(Some(200), 50, 100), 100);
         assert_eq!(validate_limit(Some(75), 50, 100), 75);
-    }
-    #[test]
-    fn test_validate_did() {
-        assert!(validate_did("did:plc:abc123").is_ok());
-        assert!(validate_did("did:web:example.com").is_ok());
-        assert!(validate_did("notadid").is_err());
-        assert!(validate_did("did:unknown:test").is_err());
     }
 }

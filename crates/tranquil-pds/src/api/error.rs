@@ -1,10 +1,9 @@
 use axum::{
     Json,
-    extract::{FromRequest, Request, rejection::JsonRejection},
-    http::StatusCode,
+    http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 use std::borrow::Cow;
 
 #[derive(Debug, Serialize)]
@@ -103,7 +102,7 @@ pub enum ApiError {
     UpstreamTimeout,
     UpstreamUnavailable(String),
     UpstreamError {
-        status: u16,
+        status: StatusCode,
         error: Option<String>,
         message: Option<String>,
     },
@@ -127,9 +126,7 @@ impl ApiError {
             }
             Self::ServiceUnavailable(_) | Self::BackupsDisabled => StatusCode::SERVICE_UNAVAILABLE,
             Self::UpstreamTimeout => StatusCode::GATEWAY_TIMEOUT,
-            Self::UpstreamError { status, .. } => {
-                StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY)
-            }
+            Self::UpstreamError { status, .. } => *status,
             Self::AuthenticationRequired
             | Self::AuthenticationFailed(_)
             | Self::AccountDeactivated
@@ -451,7 +448,7 @@ impl ApiError {
             _ => None,
         }
     }
-    pub fn from_upstream_response(status: u16, body: &[u8]) -> Self {
+    pub fn from_upstream_response(status: StatusCode, body: &[u8]) -> Self {
         if let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(body) {
             let error = parsed
                 .get("error")
@@ -485,18 +482,18 @@ impl IntoResponse for ApiError {
         match &self {
             Self::ExpiredToken(_) => {
                 response.headers_mut().insert(
-                    "WWW-Authenticate",
-                    "Bearer error=\"invalid_token\", error_description=\"Token has expired\""
-                        .parse()
-                        .unwrap(),
+                    http::header::WWW_AUTHENTICATE,
+                    HeaderValue::from_static(
+                        "Bearer error=\"invalid_token\", error_description=\"Token has expired\"",
+                    ),
                 );
             }
             Self::OAuthExpiredToken(_) => {
                 response.headers_mut().insert(
-                    "WWW-Authenticate",
-                    "DPoP error=\"invalid_token\", error_description=\"Token has expired\""
-                        .parse()
-                        .unwrap(),
+                    http::header::WWW_AUTHENTICATE,
+                    HeaderValue::from_static(
+                        "DPoP error=\"invalid_token\", error_description=\"Token has expired\"",
+                    ),
                 );
             }
             _ => {}
@@ -721,58 +718,6 @@ pub fn parse_did(s: &str) -> Result<tranquil_types::Did, Response> {
 #[allow(clippy::result_large_err)]
 pub fn parse_did_option(s: Option<&str>) -> Result<Option<tranquil_types::Did>, Response> {
     s.map(parse_did).transpose()
-}
-
-pub struct AtpJson<T>(pub T);
-
-impl<T, S> FromRequest<S> for AtpJson<T>
-where
-    T: DeserializeOwned,
-    S: Send + Sync,
-{
-    type Rejection = (StatusCode, Json<serde_json::Value>);
-
-    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        match Json::<T>::from_request(req, state).await {
-            Ok(Json(value)) => Ok(AtpJson(value)),
-            Err(rejection) => {
-                let message = extract_json_error_message(&rejection);
-                Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": "InvalidRequest",
-                        "message": message
-                    })),
-                ))
-            }
-        }
-    }
-}
-
-fn extract_json_error_message(rejection: &JsonRejection) -> String {
-    match rejection {
-        JsonRejection::JsonDataError(e) => {
-            let inner = e.body_text();
-            if inner.contains("missing field") {
-                let field = inner
-                    .split("missing field `")
-                    .nth(1)
-                    .and_then(|s| s.split('`').next())
-                    .unwrap_or("unknown");
-                format!("Missing required field: {}", field)
-            } else if inner.contains("invalid type") {
-                format!("Invalid field type: {}", inner)
-            } else {
-                inner
-            }
-        }
-        JsonRejection::JsonSyntaxError(_) => "Invalid JSON syntax".to_string(),
-        JsonRejection::MissingJsonContentType(_) => {
-            "Content-Type must be application/json".to_string()
-        }
-        JsonRejection::BytesRejection(_) => "Failed to read request body".to_string(),
-        _ => "Invalid request body".to_string(),
-    }
 }
 
 pub trait DbResultExt<T> {

@@ -285,7 +285,7 @@ async fn assert_valid_did_document_for_service(
                 arr.iter().find(|svc| {
                     svc.get("id").and_then(|id| id.as_str()) == Some("#atproto_pds")
                         || svc.get("type").and_then(|t| t.as_str())
-                            == Some("AtprotoPersonalDataServer")
+                            == Some(crate::plc::ServiceType::Pds.as_str())
                 })
             })
             .and_then(|svc| svc.get("serviceEndpoint"))
@@ -316,7 +316,7 @@ pub async fn activate_account(
     );
 
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Repo,
         crate::oauth::scopes::AccountAction::Manage,
@@ -366,10 +366,16 @@ pub async fn activate_account(
                 did
             );
             if let Some(ref h) = handle {
-                let _ = state.cache.delete(&format!("handle:{}", h)).await;
+                let _ = state.cache.delete(&crate::cache_keys::handle_key(h)).await;
             }
-            let _ = state.cache.delete(&format!("plc:doc:{}", did)).await;
-            let _ = state.cache.delete(&format!("plc:data:{}", did)).await;
+            let _ = state
+                .cache
+                .delete(&crate::cache_keys::plc_doc_key(&did))
+                .await;
+            let _ = state
+                .cache
+                .delete(&crate::cache_keys::plc_data_key(&did))
+                .await;
             if state.did_resolver.refresh_did(did.as_str()).await.is_none() {
                 warn!(
                     "[MIGRATION] activateAccount: Failed to refresh DID cache for {}",
@@ -479,7 +485,7 @@ pub async fn deactivate_account(
     Json(input): Json<DeactivateAccountInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_account_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::AccountAttr::Repo,
         crate::oauth::scopes::AccountAction::Manage,
@@ -502,7 +508,7 @@ pub async fn deactivate_account(
     match result {
         Ok(true) => {
             if let Some(ref h) = handle {
-                let _ = state.cache.delete(&format!("handle:{}", h)).await;
+                let _ = state.cache.delete(&crate::cache_keys::handle_key(h)).await;
             }
             if let Err(e) = crate::api::repo::record::sequence_account_event(
                 &state,
@@ -659,7 +665,10 @@ pub async fn delete_account(
             );
         }
     }
-    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+    let _ = state
+        .cache
+        .delete(&crate::cache_keys::handle_key(&handle))
+        .await;
     info!("Account {} deleted successfully", did);
     EmptyResponse::ok().into_response()
 }

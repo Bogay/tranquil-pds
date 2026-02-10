@@ -175,7 +175,10 @@ pub async fn update_subject_status(
         Some("com.atproto.admin.defs#repoRef") => {
             let did_str = input.subject.get("did").and_then(|d| d.as_str());
             if let Some(did_str) = did_str {
-                let did = unsafe { Did::new_unchecked(did_str) };
+                let did: Did = match did_str.parse() {
+                    Ok(d) => d,
+                    Err(_) => return Err(ApiError::InvalidDid("Invalid DID format".into())),
+                };
                 if let Some(takedown) = &input.takedown {
                     let takedown_ref = if takedown.applied {
                         takedown.r#ref.as_deref()
@@ -230,7 +233,10 @@ pub async fn update_subject_status(
                     }
                 }
                 if let Ok(Some(handle)) = state.user_repo.get_handle_by_did(&did).await {
-                    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+                    let _ = state
+                        .cache
+                        .delete(&crate::cache_keys::handle_key(&handle))
+                        .await;
                 }
                 return Ok((
                     StatusCode::OK,

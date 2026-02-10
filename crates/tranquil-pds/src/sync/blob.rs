@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::state::AppState;
-use crate::sync::util::assert_repo_availability;
+use crate::sync::util::{RepoAccessLevel, assert_repo_availability};
 use axum::{
     Json,
     body::Body,
@@ -15,35 +15,24 @@ use tranquil_types::{CidLink, Did};
 
 #[derive(Deserialize)]
 pub struct GetBlobParams {
-    pub did: String,
-    pub cid: String,
+    pub did: Did,
+    pub cid: CidLink,
 }
 
 pub async fn get_blob(
     State(state): State<AppState>,
     Query(params): Query<GetBlobParams>,
 ) -> Response {
-    let did_str = params.did.trim();
-    let cid_str = params.cid.trim();
-    if did_str.is_empty() {
-        return ApiError::InvalidRequest("did is required".into()).into_response();
-    }
-    if cid_str.is_empty() {
-        return ApiError::InvalidRequest("cid is required".into()).into_response();
-    }
-    let did: Did = match did_str.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
-    let cid: CidLink = match cid_str.parse() {
-        Ok(c) => c,
-        Err(_) => return ApiError::InvalidRequest("invalid cid".into()).into_response(),
-    };
+    let did = params.did;
+    let cid = params.cid;
 
-    let _account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
-        Ok(a) => a,
-        Err(e) => return e.into_response(),
-    };
+    let _account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
 
     let blob_result = state.blob_repo.get_blob_metadata(&cid).await;
     match blob_result {
@@ -55,7 +44,7 @@ pub async fn get_blob(
                 .header("x-content-type-options", "nosniff")
                 .header("content-security-policy", "default-src 'none'; sandbox")
                 .body(Body::from(data))
-                .unwrap(),
+                .unwrap_or_else(|_| ApiError::InternalError(None).into_response()),
             Err(e) => {
                 error!("Failed to fetch blob from storage: {:?}", e);
                 ApiError::BlobNotFound(Some("Blob not found in storage".into())).into_response()
@@ -71,7 +60,7 @@ pub async fn get_blob(
 
 #[derive(Deserialize)]
 pub struct ListBlobsParams {
-    pub did: String,
+    pub did: Did,
     pub since: Option<String>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
@@ -88,19 +77,15 @@ pub async fn list_blobs(
     State(state): State<AppState>,
     Query(params): Query<ListBlobsParams>,
 ) -> Response {
-    let did_str = params.did.trim();
-    if did_str.is_empty() {
-        return ApiError::InvalidRequest("did is required".into()).into_response();
-    }
-    let did: Did = match did_str.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
+    let did = params.did;
 
-    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
-        Ok(a) => a,
-        Err(e) => return e.into_response(),
-    };
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
 
     let limit = params.limit.unwrap_or(500).clamp(1, 1000);
     let cursor_cid = params.cursor.as_deref().unwrap_or("");
@@ -117,7 +102,7 @@ pub async fn list_blobs(
                 cid_strs
                     .into_iter()
                     .filter(|c| c.as_str() > cursor_cid)
-                    .take((limit + 1) as usize)
+                    .take(usize::try_from(limit + 1).unwrap_or(0))
                     .collect()
             })
     } else {
@@ -129,8 +114,9 @@ pub async fn list_blobs(
     };
     match cids_result {
         Ok(cids) => {
-            let has_more = cids.len() as i64 > limit;
-            let cids: Vec<String> = cids.into_iter().take(limit as usize).collect();
+            let limit_usize = usize::try_from(limit).unwrap_or(0);
+            let has_more = cids.len() > limit_usize;
+            let cids: Vec<String> = cids.into_iter().take(limit_usize).collect();
             let next_cursor = if has_more { cids.last().cloned() } else { None };
             (
                 StatusCode::OK,

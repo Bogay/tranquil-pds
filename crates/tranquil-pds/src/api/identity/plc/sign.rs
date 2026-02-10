@@ -2,7 +2,7 @@ use crate::api::ApiError;
 use crate::api::error::DbResultExt;
 use crate::auth::{Auth, Permissive};
 use crate::circuit_breaker::with_circuit_breaker;
-use crate::plc::{PlcClient, PlcError, PlcService, create_update_op, sign_operation};
+use crate::plc::{PlcClient, PlcError, PlcService, ServiceType, create_update_op, sign_operation};
 use crate::state::AppState;
 use axum::{
     Json,
@@ -30,7 +30,7 @@ pub struct SignPlcOperationInput {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServiceInput {
     #[serde(rename = "type")]
-    pub service_type: String,
+    pub service_type: ServiceType,
     pub endpoint: String,
 }
 
@@ -45,7 +45,7 @@ pub async fn sign_plc_operation(
     Json(input): Json<SignPlcOperationInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::IdentityAttr::Wildcard,
     ) {

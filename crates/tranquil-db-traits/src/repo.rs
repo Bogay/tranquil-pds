@@ -57,6 +57,13 @@ impl AccountStatus {
         }
     }
 
+    pub fn for_firehose_typed(&self) -> Option<Self> {
+        match self {
+            Self::Active => None,
+            other => Some(*other),
+        }
+    }
+
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "active" => Some(Self::Active),

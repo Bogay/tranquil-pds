@@ -12,6 +12,7 @@ use subtle::ConstantTimeEq;
 use tranquil_db_traits::{OAuthRepository, UserRepository};
 use tranquil_types::{ClientId, TokenId};
 
+use crate::auth::AuthSource;
 use crate::types::Did;
 
 use super::scopes::ScopePermissions;
@@ -217,7 +218,7 @@ pub struct OAuthUser {
     pub did: Did,
     pub client_id: Option<ClientId>,
     pub scope: Option<String>,
-    pub is_oauth: bool,
+    pub auth_source: AuthSource,
     pub permissions: ScopePermissions,
 }
 
@@ -240,14 +241,22 @@ impl IntoResponse for OAuthAuthError {
         )
             .into_response();
         if let Some(nonce) = self.dpop_nonce {
-            response
-                .headers_mut()
-                .insert("DPoP-Nonce", nonce.parse().unwrap());
+            match nonce.parse() {
+                Ok(val) => {
+                    response.headers_mut().insert("DPoP-Nonce", val);
+                }
+                Err(e) => tracing::warn!(error = %e, "DPoP-Nonce header value failed to encode"),
+            }
         }
         if let Some(www_auth) = self.www_authenticate {
-            response
-                .headers_mut()
-                .insert("WWW-Authenticate", www_auth.parse().unwrap());
+            match www_auth.parse() {
+                Ok(val) => {
+                    response.headers_mut().insert("WWW-Authenticate", val);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "WWW-Authenticate header value failed to encode")
+                }
+            }
         }
         response
     }
@@ -289,13 +298,16 @@ impl FromRequestParts<AppState> for OAuthUser {
                 www_authenticate: None,
             });
         };
-        let dpop_proof = parts.headers.get("DPoP").and_then(|v| v.to_str().ok());
+        let dpop_proof = parts
+            .headers
+            .get(crate::util::HEADER_DPOP)
+            .and_then(|v| v.to_str().ok());
         if let Ok(result) = try_legacy_auth(state.user_repo.as_ref(), token).await {
             return Ok(OAuthUser {
                 did: result.did,
                 client_id: None,
                 scope: None,
-                is_oauth: false,
+                auth_source: AuthSource::Session,
                 permissions: ScopePermissions::default(),
             });
         }
@@ -316,7 +328,7 @@ impl FromRequestParts<AppState> for OAuthUser {
                     did: result.did,
                     client_id: Some(result.client_id),
                     scope: result.scope,
-                    is_oauth: true,
+                    auth_source: AuthSource::OAuth,
                     permissions,
                 })
             }

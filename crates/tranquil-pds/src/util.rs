@@ -1,4 +1,4 @@
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderName};
 use cid::Cid;
 use ipld_core::ipld::Ipld;
 use rand::Rng;
@@ -76,7 +76,20 @@ pub fn parse_repeated_query_param(query: Option<&str>, key: &str) -> Vec<String>
         .unwrap_or_default()
 }
 
-pub fn get_header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub const HEADER_DPOP: HeaderName = HeaderName::from_static("dpop");
+pub const HEADER_DPOP_NONCE: HeaderName = HeaderName::from_static("dpop-nonce");
+pub const HEADER_ATPROTO_PROXY: HeaderName = HeaderName::from_static("atproto-proxy");
+pub const HEADER_ATPROTO_ACCEPT_LABELERS: HeaderName =
+    HeaderName::from_static("atproto-accept-labelers");
+pub const HEADER_ATPROTO_REPO_REV: HeaderName = HeaderName::from_static("atproto-repo-rev");
+pub const HEADER_ATPROTO_CONTENT_LABELERS: HeaderName =
+    HeaderName::from_static("atproto-content-labelers");
+pub const HEADER_X_BSKY_TOPICS: HeaderName = HeaderName::from_static("x-bsky-topics");
+
+pub fn get_header_str(
+    headers: &HeaderMap,
+    name: impl axum::http::header::AsHeaderName,
+) -> Option<&str> {
     headers.get(name).and_then(|h| h.to_str().ok())
 }
 
@@ -140,6 +153,12 @@ pub fn telegram_bot_username() -> Option<&'static str> {
     TELEGRAM_BOT_USERNAME.get().map(|s| s.as_str())
 }
 
+pub fn parse_env_bool(key: &str) -> bool {
+    std::env::var(key)
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false)
+}
+
 pub fn pds_public_url() -> String {
     format!("https://{}", pds_hostname())
 }
@@ -163,7 +182,7 @@ pub fn json_to_ipld(value: &JsonValue) -> Ipld {
         JsonValue::Bool(b) => Ipld::Bool(*b),
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
-                Ipld::Integer(i as i128)
+                Ipld::Integer(i128::from(i))
             } else if let Some(f) = n.as_f64() {
                 Ipld::Float(f)
             } else {
@@ -352,6 +371,30 @@ mod tests {
             return;
         }
         panic!("Failed to find CID link in parsed CBOR");
+    }
+
+    #[test]
+    fn test_parse_env_bool_true_values() {
+        unsafe { std::env::set_var("TEST_PARSE_ENV_BOOL_1", "true") };
+        assert!(parse_env_bool("TEST_PARSE_ENV_BOOL_1"));
+        unsafe { std::env::set_var("TEST_PARSE_ENV_BOOL_1", "1") };
+        assert!(parse_env_bool("TEST_PARSE_ENV_BOOL_1"));
+    }
+
+    #[test]
+    fn test_parse_env_bool_false_values() {
+        unsafe { std::env::set_var("TEST_PARSE_ENV_BOOL_2", "false") };
+        assert!(!parse_env_bool("TEST_PARSE_ENV_BOOL_2"));
+        unsafe { std::env::set_var("TEST_PARSE_ENV_BOOL_2", "0") };
+        assert!(!parse_env_bool("TEST_PARSE_ENV_BOOL_2"));
+        unsafe { std::env::set_var("TEST_PARSE_ENV_BOOL_2", "yes") };
+        assert!(!parse_env_bool("TEST_PARSE_ENV_BOOL_2"));
+    }
+
+    #[test]
+    fn test_parse_env_bool_unset() {
+        unsafe { std::env::remove_var("TEST_PARSE_ENV_BOOL_UNSET_KEY") };
+        assert!(!parse_env_bool("TEST_PARSE_ENV_BOOL_UNSET_KEY"));
     }
 
     #[test]

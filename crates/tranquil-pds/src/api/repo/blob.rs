@@ -56,8 +56,8 @@ pub async fn upload_blob(
             if user.status.is_takendown() {
                 return Err(ApiError::AccountTakedown);
             }
-            let mime_type_for_check =
-                get_header_str(&headers, "content-type").unwrap_or("application/octet-stream");
+            let mime_type_for_check = get_header_str(&headers, http::header::CONTENT_TYPE)
+                .unwrap_or("application/octet-stream");
             let scope_proof = match user.verify_blob_upload(mime_type_for_check) {
                 Ok(proof) => proof,
                 Err(e) => return Ok(e.into_response()),
@@ -79,7 +79,7 @@ pub async fn upload_blob(
     }
 
     let client_mime_hint =
-        get_header_str(&headers, "content-type").unwrap_or("application/octet-stream");
+        get_header_str(&headers, http::header::CONTENT_TYPE).unwrap_or("application/octet-stream");
 
     let user_id = state
         .user_repo
@@ -89,7 +89,7 @@ pub async fn upload_blob(
         .ok_or(ApiError::InternalError(None))?;
 
     let temp_key = format!("temp/{}", uuid::Uuid::new_v4());
-    let max_size = get_max_blob_size() as u64;
+    let max_size = u64::try_from(get_max_blob_size()).unwrap_or(u64::MAX);
 
     let body_stream = body.into_data_stream();
     let mapped_stream =
@@ -148,7 +148,13 @@ pub async fn upload_blob(
 
     match state
         .blob_repo
-        .insert_blob(&cid_link, &mime_type, size as i64, user_id, &storage_key)
+        .insert_blob(
+            &cid_link,
+            &mime_type,
+            i64::try_from(size).unwrap_or(i64::MAX),
+            user_id,
+            &storage_key,
+        )
         .await
     {
         Ok(_) => {}
@@ -248,10 +254,11 @@ pub async fn list_missing_blobs(
         .await
         .log_db_err("fetching missing blobs")?;
 
-    let has_more = missing.len() > limit as usize;
+    let limit_usize = usize::try_from(limit).unwrap_or(0);
+    let has_more = missing.len() > limit_usize;
     let blobs: Vec<RecordBlob> = missing
         .into_iter()
-        .take(limit as usize)
+        .take(limit_usize)
         .map(|m| RecordBlob {
             cid: m.blob_cid.to_string(),
             record_uri: m.record_uri.to_string(),

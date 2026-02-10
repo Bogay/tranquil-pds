@@ -14,7 +14,7 @@ mod session;
 mod sso;
 mod user;
 
-pub use backlink::{Backlink, BacklinkRepository};
+pub use backlink::{Backlink, BacklinkPath, BacklinkRepository};
 pub use backup::{
     BackupForDeletion, BackupRepository, BackupRow, BackupStorageInfo, BlobExportInfo,
     OldBackupInfo, UserBackupInfo,
@@ -68,5 +68,5 @@ pub use user::{
     UserInfoForAuth, UserKeyInfo, UserKeyWithId, UserLegacyLoginPref, UserLoginCheck,
     UserLoginFull, UserLoginInfo, UserPasswordInfo, UserRepository, UserResendVerification,
     UserResetCodeInfo, UserRow, UserSessionInfo, UserStatus, UserVerificationInfo, UserWithKey,
-    VerifiedTotpRecord,
+    VerifiedTotpRecord, WebauthnChallengeType,
 };

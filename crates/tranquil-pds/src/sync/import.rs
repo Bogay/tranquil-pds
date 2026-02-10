@@ -210,12 +210,9 @@ fn walk_mst_node(
                 if let Ipld::Map(entry_obj) = entry {
                     let prefix_len = entry_obj
                         .get("p")
-                        .and_then(|p| {
-                            if let Ipld::Integer(n) = p {
-                                Some(*n as usize)
-                            } else {
-                                None
-                            }
+                        .and_then(|p| match p {
+                            Ipld::Integer(n) => usize::try_from(*n).ok(),
+                            _ => None,
                         })
                         .unwrap_or(0);
 

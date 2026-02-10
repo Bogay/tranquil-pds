@@ -10,6 +10,7 @@ use crate::auth::verification_token::{
     VerificationPurpose, normalize_token_input, verify_token_signature,
 };
 use crate::state::AppState;
+use tranquil_db_traits::CommsChannel;
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -23,8 +24,8 @@ pub struct VerifyTokenInput {
 pub struct VerifyTokenOutput {
     pub success: bool,
     pub did: Did,
-    pub purpose: String,
-    pub channel: String,
+    pub purpose: VerificationPurpose,
+    pub channel: CommsChannel,
 }
 
 pub async fn verify_token(
@@ -53,14 +54,14 @@ pub async fn verify_token_internal(
 
     match token_data.purpose {
         VerificationPurpose::Migration => {
-            handle_migration_verification(state, &token_data.did, &token_data.channel, &identifier)
+            handle_migration_verification(state, &token_data.did, token_data.channel, &identifier)
                 .await
         }
         VerificationPurpose::ChannelUpdate => {
-            handle_channel_update(state, &token_data.did, &token_data.channel, &identifier).await
+            handle_channel_update(state, &token_data.did, token_data.channel, &identifier).await
         }
         VerificationPurpose::Signup => {
-            handle_signup_verification(state, &token_data.did, &token_data.channel, &identifier)
+            handle_signup_verification(state, &token_data.did, token_data.channel, &identifier)
                 .await
         }
     }
@@ -68,20 +69,17 @@ pub async fn verify_token_internal(
 
 async fn handle_migration_verification(
     state: &AppState,
-    did: &str,
-    channel: &str,
+    did: &Did,
+    channel: CommsChannel,
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    if channel != "email" {
+    if channel != CommsChannel::Email {
         return Err(ApiError::InvalidChannel);
     }
 
-    let did_typed: Did = did
-        .parse()
-        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
     let user = state
         .user_repo
-        .get_verification_info(&did_typed)
+        .get_verification_info(did)
         .await
         .log_db_err("during migration verification")?
         .ok_or(ApiError::AccountNotFound)?;
@@ -102,30 +100,27 @@ async fn handle_migration_verification(
 
     Ok(Json(VerifyTokenOutput {
         success: true,
-        did: did.to_string().into(),
-        purpose: "migration".to_string(),
-        channel: channel.to_string(),
+        did: did.clone(),
+        purpose: VerificationPurpose::Migration,
+        channel,
     }))
 }
 
 async fn handle_channel_update(
     state: &AppState,
-    did: &str,
-    channel: &str,
+    did: &Did,
+    channel: CommsChannel,
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    let did_typed: Did = did
-        .parse()
-        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
     let user_id = state
         .user_repo
-        .get_id_by_did(&did_typed)
+        .get_id_by_did(did)
         .await
         .log_db_err("fetching user id")?
         .ok_or(ApiError::AccountNotFound)?;
 
     match channel {
-        "email" => {
+        CommsChannel::Email => {
             let success = state
                 .user_repo
                 .verify_email_channel(user_id, identifier)
@@ -135,33 +130,30 @@ async fn handle_channel_update(
                 return Err(ApiError::EmailTaken);
             }
         }
-        "discord" => {
+        CommsChannel::Discord => {
             state
                 .user_repo
                 .verify_discord_channel(user_id, identifier)
                 .await
                 .log_db_err("updating discord channel")?;
         }
-        "telegram" => {
+        CommsChannel::Telegram => {
             state
                 .user_repo
                 .verify_telegram_channel(user_id, identifier)
                 .await
                 .log_db_err("updating telegram channel")?;
         }
-        "signal" => {
+        CommsChannel::Signal => {
             state
                 .user_repo
                 .verify_signal_channel(user_id, identifier)
                 .await
                 .log_db_err("updating signal channel")?;
         }
-        _ => {
-            return Err(ApiError::InvalidChannel);
-        }
     };
 
-    info!(did = %did, channel = %channel, "Channel verified successfully");
+    info!(did = %did, channel = ?channel, "Channel verified successfully");
 
     let recipient = resolve_verified_recipient(state, user_id, channel, identifier).await;
     if let Err(e) = comms_repo::enqueue_channel_verified(
@@ -179,20 +171,20 @@ async fn handle_channel_update(
 
     Ok(Json(VerifyTokenOutput {
         success: true,
-        did: did.to_string().into(),
-        purpose: "channel_update".to_string(),
-        channel: channel.to_string(),
+        did: did.clone(),
+        purpose: VerificationPurpose::ChannelUpdate,
+        channel,
     }))
 }
 
 async fn resolve_verified_recipient(
     state: &AppState,
     user_id: uuid::Uuid,
-    channel: &str,
+    channel: tranquil_db_traits::CommsChannel,
     identifier: &str,
 ) -> String {
     match channel {
-        "telegram" => state
+        tranquil_db_traits::CommsChannel::Telegram => state
             .user_repo
             .get_telegram_chat_id(user_id)
             .await
@@ -206,16 +198,13 @@ async fn resolve_verified_recipient(
 
 async fn handle_signup_verification(
     state: &AppState,
-    did: &str,
-    channel: &str,
+    did: &Did,
+    channel: CommsChannel,
     identifier: &str,
 ) -> Result<Json<VerifyTokenOutput>, ApiError> {
-    let did_typed: Did = did
-        .parse()
-        .map_err(|_| ApiError::InvalidDid("Invalid DID format".into()))?;
     let user = state
         .user_repo
-        .get_verification_info(&did_typed)
+        .get_verification_info(did)
         .await
         .log_db_err("during signup verification")?
         .ok_or(ApiError::AccountNotFound)?;
@@ -225,47 +214,44 @@ async fn handle_signup_verification(
         info!(did = %did, "Account already verified");
         return Ok(Json(VerifyTokenOutput {
             success: true,
-            did: did.to_string().into(),
-            purpose: "signup".to_string(),
-            channel: channel.to_string(),
+            did: did.clone(),
+            purpose: VerificationPurpose::Signup,
+            channel,
         }));
     }
 
     match channel {
-        "email" => {
+        CommsChannel::Email => {
             state
                 .user_repo
                 .set_email_verified_flag(user.id)
                 .await
                 .log_db_err("updating email verified status")?;
         }
-        "discord" => {
+        CommsChannel::Discord => {
             state
                 .user_repo
                 .set_discord_verified_flag(user.id)
                 .await
                 .log_db_err("updating discord verified status")?;
         }
-        "telegram" => {
+        CommsChannel::Telegram => {
             state
                 .user_repo
                 .set_telegram_verified_flag(user.id)
                 .await
                 .log_db_err("updating telegram verified status")?;
         }
-        "signal" => {
+        CommsChannel::Signal => {
             state
                 .user_repo
                 .set_signal_verified_flag(user.id)
                 .await
                 .log_db_err("updating signal verified status")?;
         }
-        _ => {
-            return Err(ApiError::InvalidChannel);
-        }
     };
 
-    info!(did = %did, channel = %channel, "Signup verified successfully");
+    info!(did = %did, channel = ?channel, "Signup verified successfully");
 
     let recipient = resolve_verified_recipient(state, user.id, channel, identifier).await;
     if let Err(e) = comms_repo::enqueue_channel_verified(
@@ -283,8 +269,8 @@ async fn handle_signup_verification(
 
     Ok(Json(VerifyTokenOutput {
         success: true,
-        did: did.to_string().into(),
-        purpose: "signup".to_string(),
-        channel: channel.to_string(),
+        did: did.clone(),
+        purpose: VerificationPurpose::Signup,
+        channel,
     }))
 }

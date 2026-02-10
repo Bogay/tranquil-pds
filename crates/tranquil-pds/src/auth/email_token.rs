@@ -55,7 +55,7 @@ fn generate_short_token() -> String {
 }
 
 fn current_timestamp() -> u64 {
-    chrono::Utc::now().timestamp().max(0) as u64
+    u64::try_from(chrono::Utc::now().timestamp()).unwrap_or(0)
 }
 
 pub async fn create_email_token(

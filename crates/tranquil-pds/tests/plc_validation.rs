@@ -2,9 +2,9 @@ use k256::ecdsa::SigningKey;
 use serde_json::json;
 use std::collections::HashMap;
 use tranquil_pds::plc::{
-    PlcError, PlcOperation, PlcService, PlcValidationContext, cid_for_cbor, sign_operation,
-    signing_key_to_did_key, validate_plc_operation, validate_plc_operation_for_submission,
-    verify_operation_signature,
+    PlcError, PlcOpType, PlcOperation, PlcService, PlcValidationContext, cid_for_cbor,
+    sign_operation, signing_key_to_did_key, validate_plc_operation,
+    validate_plc_operation_for_submission, verify_operation_signature,
 };
 
 fn create_valid_operation() -> serde_json::Value {
@@ -264,14 +264,14 @@ fn test_sign_operation_and_struct() {
     services.insert(
         "atproto_pds".to_string(),
         PlcService {
-            service_type: "AtprotoPersonalDataServer".to_string(),
+            service_type: tranquil_pds::plc::ServiceType::Pds,
             endpoint: "https://pds.example.com".to_string(),
         },
     );
     let mut verification_methods = HashMap::new();
     verification_methods.insert("atproto".to_string(), "did:key:zTest123".to_string());
     let op = PlcOperation {
-        op_type: "plc_operation".to_string(),
+        op_type: PlcOpType::Operation,
         rotation_keys: vec!["did:key:zTest123".to_string()],
         verification_methods,
         also_known_as: vec!["at://test.handle".to_string()],

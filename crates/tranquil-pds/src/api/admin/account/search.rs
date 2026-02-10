@@ -67,10 +67,11 @@ pub async fn search_accounts(
         .await
         .log_db_err("in search_accounts")?;
 
-    let has_more = rows.len() > limit as usize;
+    let limit_usize = usize::try_from(limit).unwrap_or(0);
+    let has_more = rows.len() > limit_usize;
     let accounts: Vec<AccountView> = rows
         .into_iter()
-        .take(limit as usize)
+        .take(limit_usize)
         .map(|row| AccountView {
             did: row.did.clone(),
             handle: row.handle,

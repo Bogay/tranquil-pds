@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::state::AppState;
-use crate::sync::util::{assert_repo_availability, get_account_with_status};
+use crate::sync::util::{RepoAccessLevel, assert_repo_availability, get_account_with_status};
 use axum::{
     Json,
     extract::{Query, State},
@@ -25,7 +25,7 @@ async fn get_rev_from_commit(state: &AppState, cid_str: &str) -> Option<String> 
 
 #[derive(Deserialize)]
 pub struct GetLatestCommitParams {
-    pub did: String,
+    pub did: Did,
 }
 
 #[derive(Serialize)]
@@ -38,19 +38,15 @@ pub async fn get_latest_commit(
     State(state): State<AppState>,
     Query(params): Query<GetLatestCommitParams>,
 ) -> Response {
-    let did_str = params.did.trim();
-    if did_str.is_empty() {
-        return ApiError::InvalidRequest("did is required".into()).into_response();
-    }
-    let did: Did = match did_str.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
+    let did = params.did;
 
-    let account = match assert_repo_availability(state.repo_repo.as_ref(), &did, false).await {
-        Ok(a) => a,
-        Err(e) => return e.into_response(),
-    };
+    let account =
+        match assert_repo_availability(state.repo_repo.as_ref(), &did, RepoAccessLevel::Public)
+            .await
+        {
+            Ok(a) => a,
+            Err(e) => return e.into_response(),
+        };
 
     let Some(repo_root_cid) = account.repo_root_cid else {
         return ApiError::RepoNotFound(Some("Repo not initialized".into())).into_response();
@@ -59,7 +55,7 @@ pub async fn get_latest_commit(
     let Some(rev) = get_rev_from_commit(&state, &repo_root_cid).await else {
         error!(
             "Failed to parse commit for DID {}: CID {}",
-            did_str, repo_root_cid
+            did, repo_root_cid
         );
         return ApiError::InternalError(Some("Failed to read repo commit".into())).into_response();
     };
@@ -83,12 +79,12 @@ pub struct ListReposParams {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoInfo {
-    pub did: String,
+    pub did: Did,
     pub head: String,
     pub rev: String,
     pub active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<AccountStatus>,
 }
 
 #[derive(Serialize)]
@@ -111,9 +107,10 @@ pub async fn list_repos(
         .await;
     match result {
         Ok(rows) => {
-            let has_more = rows.len() as i64 > limit;
+            let limit_usize = usize::try_from(limit).unwrap_or(0);
+            let has_more = rows.len() > limit_usize;
             let mut repos: Vec<RepoInfo> = Vec::new();
-            for row in rows.iter().take(limit as usize) {
+            for row in rows.iter().take(limit_usize) {
                 let cid_str = row.repo_root_cid.to_string();
                 let rev = get_rev_from_commit(&state, &cid_str)
                     .await
@@ -127,15 +124,15 @@ pub async fn list_repos(
                     AccountStatus::Active
                 };
                 repos.push(RepoInfo {
-                    did: row.did.to_string(),
+                    did: row.did.clone(),
                     head: cid_str,
                     rev,
                     active: status.is_active(),
-                    status: status.for_firehose().map(String::from),
+                    status: status.for_firehose_typed(),
                 });
             }
             let next_cursor = if has_more {
-                repos.last().map(|r| r.did.clone())
+                repos.last().map(|r| r.did.to_string())
             } else {
                 None
             };
@@ -157,15 +154,15 @@ pub async fn list_repos(
 
 #[derive(Deserialize)]
 pub struct GetRepoStatusParams {
-    pub did: String,
+    pub did: Did,
 }
 
 #[derive(Serialize)]
 pub struct GetRepoStatusOutput {
-    pub did: String,
+    pub did: Did,
     pub active: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<AccountStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
 }
@@ -174,23 +171,13 @@ pub async fn get_repo_status(
     State(state): State<AppState>,
     Query(params): Query<GetRepoStatusParams>,
 ) -> Response {
-    let did_str = params.did.trim();
-    if did_str.is_empty() {
-        return ApiError::InvalidRequest("did is required".into()).into_response();
-    }
-    let did: Did = match did_str.parse() {
-        Ok(d) => d,
-        Err(_) => return ApiError::InvalidRequest("invalid did".into()).into_response(),
-    };
+    let did = params.did;
 
     let account = match get_account_with_status(state.repo_repo.as_ref(), &did).await {
         Ok(Some(a)) => a,
         Ok(None) => {
-            return ApiError::RepoNotFound(Some(format!(
-                "Could not find repo for DID: {}",
-                did_str
-            )))
-            .into_response();
+            return ApiError::RepoNotFound(Some(format!("Could not find repo for DID: {}", did)))
+                .into_response();
         }
         Err(e) => {
             error!("DB error in get_repo_status: {:?}", e);
@@ -213,7 +200,7 @@ pub async fn get_repo_status(
         Json(GetRepoStatusOutput {
             did: account.did,
             active: account.status.is_active(),
-            status: account.status.for_firehose().map(String::from),
+            status: account.status.for_firehose_typed(),
             rev,
         }),
     )

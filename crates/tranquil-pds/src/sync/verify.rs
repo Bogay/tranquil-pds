@@ -8,6 +8,7 @@ use reqwest::Client;
 use std::collections::HashMap;
 use thiserror::Error;
 use tracing::{debug, warn};
+use tranquil_types::Did;
 
 #[derive(Error, Debug)]
 pub enum VerifyError {
@@ -57,7 +58,7 @@ impl CarVerifier {
 
     pub async fn verify_car(
         &self,
-        expected_did: &str,
+        expected_did: &Did,
         root_cid: &Cid,
         blocks: &HashMap<Cid, Bytes>,
     ) -> Result<VerifiedCar, VerifyError> {
@@ -67,22 +68,22 @@ impl CarVerifier {
         let commit =
             Commit::from_cbor(root_block).map_err(|e| VerifyError::InvalidCommit(e.to_string()))?;
         let commit_did = commit.did().as_str();
-        if commit_did != expected_did {
+        if commit_did != expected_did.as_str() {
             return Err(VerifyError::DidMismatch {
                 commit_did: commit_did.to_string(),
                 expected_did: expected_did.to_string(),
             });
         }
-        let pubkey = self.resolve_did_signing_key(commit_did).await?;
+        let pubkey = self.resolve_did_signing_key(expected_did).await?;
         commit
             .verify(&pubkey)
             .map_err(|_| VerifyError::InvalidSignature)?;
-        debug!("Commit signature verified for DID {}", commit_did);
+        debug!("Commit signature verified for DID {}", expected_did);
         let data_cid = commit.data();
         self.verify_mst_structure(data_cid, blocks)?;
-        debug!("MST structure verified for DID {}", commit_did);
+        debug!("MST structure verified for DID {}", expected_did);
         Ok(VerifiedCar {
-            did: commit_did.to_string(),
+            did: expected_did.clone(),
             rev: commit.rev().to_string(),
             data_cid: *data_cid,
             prev: commit.prev().cloned(),
@@ -91,7 +92,7 @@ impl CarVerifier {
 
     pub fn verify_car_structure_only(
         &self,
-        expected_did: &str,
+        expected_did: &Did,
         root_cid: &Cid,
         blocks: &HashMap<Cid, Bytes>,
     ) -> Result<VerifiedCar, VerifyError> {
@@ -101,7 +102,7 @@ impl CarVerifier {
         let commit =
             Commit::from_cbor(root_block).map_err(|e| VerifyError::InvalidCommit(e.to_string()))?;
         let commit_did = commit.did().as_str();
-        if commit_did != expected_did {
+        if commit_did != expected_did.as_str() {
             return Err(VerifyError::DidMismatch {
                 commit_did: commit_did.to_string(),
                 expected_did: expected_did.to_string(),
@@ -111,17 +112,17 @@ impl CarVerifier {
         self.verify_mst_structure(data_cid, blocks)?;
         debug!(
             "MST structure verified for DID {} (signature verification skipped for migration)",
-            commit_did
+            expected_did
         );
         Ok(VerifiedCar {
-            did: commit_did.to_string(),
+            did: expected_did.clone(),
             rev: commit.rev().to_string(),
             data_cid: *data_cid,
             prev: commit.prev().cloned(),
         })
     }
 
-    async fn resolve_did_signing_key(&self, did: &str) -> Result<PublicKey<'static>, VerifyError> {
+    async fn resolve_did_signing_key(&self, did: &Did) -> Result<PublicKey<'static>, VerifyError> {
         let did_doc = self.resolve_did_document(did).await?;
         did_doc
             .atproto_public_key()
@@ -129,15 +130,16 @@ impl CarVerifier {
             .ok_or(VerifyError::NoSigningKey)
     }
 
-    async fn resolve_did_document(&self, did: &str) -> Result<DidDocument<'static>, VerifyError> {
-        if did.starts_with("did:plc:") {
-            self.resolve_plc_did(did).await
-        } else if did.starts_with("did:web:") {
-            self.resolve_web_did(did).await
+    async fn resolve_did_document(&self, did: &Did) -> Result<DidDocument<'static>, VerifyError> {
+        let did_str = did.as_str();
+        if did_str.starts_with("did:plc:") {
+            self.resolve_plc_did(did_str).await
+        } else if did_str.starts_with("did:web:") {
+            self.resolve_web_did(did_str).await
         } else {
             Err(VerifyError::DidResolutionFailed(format!(
                 "Unsupported DID method: {}",
-                did
+                did_str
             )))
         }
     }
@@ -239,7 +241,7 @@ impl CarVerifier {
                             let prefix_len = entry_obj
                                 .get("p")
                                 .and_then(|p| match p {
-                                    Ipld::Integer(i) => Some(*i as usize),
+                                    Ipld::Integer(i) => usize::try_from(*i).ok(),
                                     _ => None,
                                 })
                                 .unwrap_or(0);
@@ -294,7 +296,7 @@ impl CarVerifier {
 
 #[derive(Debug, Clone)]
 pub struct VerifiedCar {
-    pub did: String,
+    pub did: Did,
     pub rev: String,
     pub data_cid: Cid,
     pub prev: Option<Cid>,

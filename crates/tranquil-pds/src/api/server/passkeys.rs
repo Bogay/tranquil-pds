@@ -9,6 +9,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
+use tranquil_db_traits::WebauthnChallengeType;
 use webauthn_rs::prelude::*;
 
 #[derive(Deserialize)]
@@ -64,7 +65,7 @@ pub async fn start_passkey_registration(
 
     state
         .user_repo
-        .save_webauthn_challenge(&auth.did, "registration", &state_json)
+        .save_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration, &state_json)
         .await
         .log_db_err("saving registration state")?;
 
@@ -98,7 +99,7 @@ pub async fn finish_passkey_registration(
 
     let reg_state_json = state
         .user_repo
-        .load_webauthn_challenge(&auth.did, "registration")
+        .load_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration)
         .await
         .log_db_err("loading registration state")?
         .ok_or(ApiError::NoRegistrationInProgress)?;
@@ -140,7 +141,7 @@ pub async fn finish_passkey_registration(
 
     if let Err(e) = state
         .user_repo
-        .delete_webauthn_challenge(&auth.did, "registration")
+        .delete_webauthn_challenge(&auth.did, WebauthnChallengeType::Registration)
         .await
     {
         warn!("Failed to delete registration state: {:?}", e);

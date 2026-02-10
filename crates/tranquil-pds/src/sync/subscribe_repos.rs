@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use crate::sync::firehose::SequencedEvent;
+use crate::sync::frame::{ErrorFrameName, InfoFrameName};
 use crate::sync::util::{
     format_error_frame, format_event_for_sending, format_event_with_prefetched_blocks,
     format_info_frame, prefetch_blocks_for_events,
@@ -82,7 +83,7 @@ async fn handle_socket_inner(
 
         if cursor_seq > current_seq {
             if let Ok(error_bytes) =
-                format_error_frame("FutureCursor", Some("Cursor in the future."))
+                format_error_frame(ErrorFrameName::FutureCursor, Some("Cursor in the future."))
             {
                 let _ = socket.send(Message::Binary(error_bytes.into())).await;
             }
@@ -105,7 +106,7 @@ async fn handle_socket_inner(
             && event.created_at < backfill_time
         {
             if let Ok(info_bytes) = format_info_frame(
-                "OutdatedCursor",
+                InfoFrameName::OutdatedCursor,
                 Some("Requested cursor exceeded limit. Possibly missing events"),
             ) {
                 let _ = socket.send(Message::Binary(info_bytes.into())).await;
@@ -161,7 +162,7 @@ async fn handle_socket_inner(
                         }
                         crate::metrics::record_firehose_event();
                     }
-                    if (events_count as i64) < BACKFILL_BATCH_SIZE {
+                    if i64::try_from(events_count).unwrap_or(i64::MAX) < BACKFILL_BATCH_SIZE {
                         break;
                     }
                 }

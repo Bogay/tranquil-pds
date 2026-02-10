@@ -1,4 +1,4 @@
-use crate::api::error::{ApiError, AtpJson, DbResultExt};
+use crate::api::error::{ApiError, DbResultExt};
 use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use crate::types::Did;
@@ -30,7 +30,7 @@ pub struct SendEmailOutput {
 pub async fn send_email(
     State(state): State<AppState>,
     _auth: Auth<Admin>,
-    AtpJson(input): AtpJson<SendEmailInput>,
+    Json(input): Json<SendEmailInput>,
 ) -> Result<Response, ApiError> {
     let content = input.content.trim();
     if content.is_empty() {

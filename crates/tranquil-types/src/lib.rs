@@ -101,10 +101,6 @@ macro_rules! simple_string_newtype {
             pub fn new(s: impl Into<String>) -> Self {
                 Self(s.into())
             }
-
-            pub fn new_unchecked(s: impl Into<String>) -> Self {
-                Self(s.into())
-            }
         }
 
         impl_string_common!($name);
@@ -125,10 +121,6 @@ macro_rules! simple_string_newtype_no_sqlx {
             pub fn new(s: impl Into<String>) -> Self {
                 Self(s.into())
             }
-
-            pub fn new_unchecked(s: impl Into<String>) -> Self {
-                Self(s.into())
-            }
         }
 
         impl_string_common!($name);
@@ -140,6 +132,7 @@ macro_rules! validated_string_newtype {
         $(#[$meta:meta])*
         $vis:vis struct $name:ident;
         error = $error:ident;
+        label = $label:expr;
         validator = $validator:expr;
     ) => {
         $(#[$meta])*
@@ -165,11 +158,6 @@ macro_rules! validated_string_newtype {
                 validator(&s).map_err(|_| $error::Invalid(s.clone()))?;
                 Ok(Self(s))
             }
-
-            #[allow(unsafe_code, clippy::missing_safety_doc)]
-            pub unsafe fn new_unchecked(s: impl Into<String>) -> Self {
-                Self(s.into())
-            }
         }
 
         impl FromStr for $name {
@@ -182,17 +170,27 @@ macro_rules! validated_string_newtype {
 
         impl_string_common!($name);
 
-        #[derive(Debug, Clone, thiserror::Error)]
+        #[derive(Debug, Clone)]
         pub enum $error {
-            #[error("invalid: {0}")]
             Invalid(String),
         }
+
+        impl std::fmt::Display for $error {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    Self::Invalid(s) => write!(f, concat!("invalid ", $label, ": {}"), s),
+                }
+            }
+        }
+
+        impl std::error::Error for $error {}
     };
 }
 
 validated_string_newtype! {
     pub struct Did;
     error = DidError;
+    label = "DID";
     validator = |s| jacquard_common::types::string::Did::new(s).map(|_| ()).map_err(|_| ());
 }
 
@@ -217,7 +215,7 @@ impl<'de> Deserialize<'de> for Handle {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(Handle(s))
+        Handle::new(&s).map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }
 
@@ -227,11 +225,6 @@ impl Handle {
         jacquard_common::types::string::Handle::new(&s)
             .map_err(|_| HandleError::Invalid(s.clone()))?;
         Ok(Self(s))
-    }
-
-    #[allow(unsafe_code, clippy::missing_safety_doc)]
-    pub unsafe fn new_unchecked(s: impl Into<String>) -> Self {
-        Self(s.into())
     }
 }
 
@@ -368,6 +361,7 @@ pub enum AtIdentifierError {
 validated_string_newtype! {
     pub struct Rkey;
     error = RkeyError;
+    label = "rkey";
     validator = |s| jacquard_common::types::string::Rkey::new(s).map(|_| ()).map_err(|_| ());
 }
 
@@ -389,6 +383,7 @@ impl Rkey {
 validated_string_newtype! {
     pub struct Nsid;
     error = NsidError;
+    label = "NSID";
     validator = |s| jacquard_common::types::string::Nsid::new(s).map(|_| ()).map_err(|_| ());
 }
 
@@ -405,6 +400,7 @@ impl Nsid {
 validated_string_newtype! {
     pub struct AtUri;
     error = AtUriError;
+    label = "AT URI";
     validator = |s| jacquard_common::types::string::AtUri::new(s).map(|_| ()).map_err(|_| ());
 }
 
@@ -435,6 +431,7 @@ impl AtUri {
 validated_string_newtype! {
     pub struct Tid;
     error = TidError;
+    label = "TID";
     validator = |s| jacquard_common::types::string::Tid::from_str(s).map(|_| ()).map_err(|_| ());
 }
 
@@ -448,6 +445,7 @@ impl Tid {
 validated_string_newtype! {
     pub struct Datetime;
     error = DatetimeError;
+    label = "datetime";
     validator = |s| jacquard_common::types::string::Datetime::from_str(s).map(|_| ()).map_err(|_| ());
 }
 
@@ -466,6 +464,7 @@ impl Datetime {
 validated_string_newtype! {
     pub struct Language;
     error = LanguageError;
+    label = "language";
     validator = |s| jacquard_common::types::string::Language::from_str(s).map(|_| ()).map_err(|_| ());
 }
 
@@ -491,13 +490,24 @@ impl CidLink {
         Ok(Self(s))
     }
 
-    #[allow(unsafe_code, clippy::missing_safety_doc)]
-    pub unsafe fn new_unchecked(s: impl Into<String>) -> Self {
-        Self(s.into())
+    pub fn from_cid(cid: &cid::Cid) -> Self {
+        Self(cid.to_string())
     }
 
     pub fn to_cid(&self) -> Option<cid::Cid> {
         cid::Cid::from_str(&self.0).ok()
+    }
+}
+
+impl From<cid::Cid> for CidLink {
+    fn from(cid: cid::Cid) -> Self {
+        Self(cid.to_string())
+    }
+}
+
+impl From<&cid::Cid> for CidLink {
+    fn from(cid: &cid::Cid) -> Self {
+        Self(cid.to_string())
     }
 }
 
