@@ -16,11 +16,6 @@ pkgs.testers.nixosTest {
     services.tranquil-pds = {
       enable = true;
       database.createLocally = true;
-      secretsFile = pkgs.writeText "tranquil-secrets" ''
-        JWT_SECRET=test-jwt-secret-must-be-32-chars-long
-        DPOP_SECRET=test-dpop-secret-must-be-32-chars-long
-        MASTER_KEY=test-master-key-must-be-32-chars-long
-      '';
 
       nginx = {
         enable = true;
@@ -28,12 +23,15 @@ pkgs.testers.nixosTest {
       };
 
       settings = {
-        server.pdsHostname = "test.local";
-        server.host = "0.0.0.0";
+        PDS_HOSTNAME = "test.local";
+        SERVER_HOST = "0.0.0.0";
 
-        storage.blobBackend = "filesystem";
-        rateLimiting.disable = true;
-        security.allowInsecureSecrets = true;
+        DISABLE_RATE_LIMITING = 1;
+        TRANQUIL_PDS_ALLOW_INSECURE_SECRETS = 1;
+
+        JWT_SECRET="test-jwt-secret-must-be-32-chars-long";
+        DPOP_SECRET="test-dpop-secret-must-be-32-chars-long";
+        MASTER_KEY="test-master-key-must-be-32-chars-long";
       };
     };
   };

@@ -30,7 +30,13 @@
       default = pkgs.callPackage ./shell.nix {};
     });
 
-    nixosModules.default = import ./module.nix self;
+    nixosModules = {
+      default = self.nixosModules.tranquil-pds;
+      tranquil-pds = {
+        _file = "${self.outPath}/flake.nix#nixosModules.tranquil-pds";
+        imports = [(import ./module.nix self)];
+      };
+    };
 
     checks.x86_64-linux.integration = import ./test.nix {
       pkgs = nixpkgs.legacyPackages.x86_64-linux;
