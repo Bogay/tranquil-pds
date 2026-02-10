@@ -23,7 +23,7 @@ pkgs.testers.nixosTest {
       };
 
       settings = {
-        PDS_HOSTNAME = "test.local";
+        PDS_HOSTNAME = "pds.test";
         SERVER_HOST = "0.0.0.0";
 
         DISABLE_RATE_LIMITING = 1;
@@ -46,7 +46,7 @@ pkgs.testers.nixosTest {
     server.wait_for_open_port(80)
 
     def xrpc(method, endpoint, *, headers=None, data=None, raw_body=None, via="nginx"):
-        host_header = "-H 'Host: test.local'" if via == "nginx" else ""
+        host_header = "-H 'Host: pds.test'" if via == "nginx" else ""
         base = "http://localhost" if via == "nginx" else "http://localhost:3000"
         url = f"{base}/xrpc/{endpoint}"
 
@@ -66,7 +66,7 @@ pkgs.testers.nixosTest {
         return json.loads(xrpc(method, endpoint, **kwargs))
 
     def xrpc_status(endpoint, *, headers=None, via="nginx"):
-        host_header = "-H 'Host: test.local'" if via == "nginx" else ""
+        host_header = "-H 'Host: pds.test'" if via == "nginx" else ""
         base = "http://localhost" if via == "nginx" else "http://localhost:3000"
         url = f"{base}/xrpc/{endpoint}"
 
@@ -77,18 +77,18 @@ pkgs.testers.nixosTest {
 
         return server.succeed(" ".join(parts)).strip()
 
-    def http_status(path, *, host="test.local", via="nginx"):
+    def http_status(path, *, host="pds.test", via="nginx"):
         base = "http://localhost" if via == "nginx" else "http://localhost:3000"
         return server.succeed(
             f"curl -s -o /dev/null -w '%{{http_code}}' -H 'Host: {host}' '{base}{path}'"
         ).strip()
 
-    def http_get(path, *, host="test.local"):
+    def http_get(path, *, host="pds.test"):
         return server.succeed(
             f"curl -sf -H 'Host: {host}' 'http://localhost{path}'"
         )
 
-    def http_header(path, header, *, host="test.local"):
+    def http_header(path, header, *, host="pds.test"):
         return server.succeed(
             f"curl -sI -H 'Host: {host}' 'http://localhost{path}'"
             f" | grep -i '^{header}:'"
@@ -120,7 +120,7 @@ pkgs.testers.nixosTest {
         assert desc.get("inviteCodeRequired") == False
 
     with subtest("nginx serves frontend"):
-        result = server.succeed("curl -sf -H 'Host: test.local' http://localhost/")
+        result = server.succeed("curl -sf -H 'Host: pds.test' http://localhost/")
         assert "<html" in result.lower() or "<!" in result
 
     with subtest("well-known proxied"):
@@ -144,14 +144,14 @@ pkgs.testers.nixosTest {
         assert code != "502" and code != "504", f"oauth proxy broken: {code}"
 
     with subtest("subdomain routing works"):
-        code = http_status("/xrpc/_health", host="alice.test.local")
+        code = http_status("/xrpc/_health", host="alice.pds.test")
         assert code == "200", f"subdomain routing failed: {code}"
 
     with subtest("client-metadata.json served with host substitution"):
         meta_raw = http_get("/oauth/client-metadata.json")
         meta = json.loads(meta_raw)
         assert "client_id" in meta, f"no client_id in client-metadata: {meta}"
-        assert "test.local" in meta_raw, "host substitution did not apply"
+        assert "pds.test" in meta_raw, "host substitution did not apply"
 
     with subtest("static assets location exists"):
         code = http_status("/assets/nonexistent.js")
@@ -169,9 +169,9 @@ pkgs.testers.nixosTest {
 
     with subtest("create account"):
         account = xrpc_json("POST", "com.atproto.server.createAccount", data={
-            "handle": "alice.test.local",
+            "handle": "alice",
             "password": "NixOS-Test-Pass-99!",
-            "email": "alice@test.local",
+            "email": "alice@pds.test",
             "didType": "web",
         })
         assert "accessJwt" in account, f"no accessJwt: {account}"
@@ -191,7 +191,7 @@ pkgs.testers.nixosTest {
     with subtest("get session"):
         session = xrpc_json("GET", "com.atproto.server.getSession", headers=auth)
         assert session["did"] == did
-        assert session["handle"] == "alice.test.local"
+        assert session["handle"] == "alice.pds.test", f"unexpected handle: {session['handle']}"
 
     with subtest("create record"):
         created = xrpc_json("POST", "com.atproto.repo.createRecord", headers=auth, data={
@@ -232,7 +232,7 @@ pkgs.testers.nixosTest {
 
     with subtest("export repo as car"):
         server.succeed(
-            f"curl -sf -H 'Host: test.local' "
+            f"curl -sf -H 'Host: pds.test' "
             f"-o /tmp/repo.car "
             f"'http://localhost/xrpc/com.atproto.sync.getRepo?did={did}'"
         )

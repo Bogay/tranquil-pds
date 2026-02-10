@@ -149,8 +149,8 @@ in
           };
 
           SENDMAIL_PATH = mkOption {
-            type = types.nullOr types.path;
-            default = null;
+            type = types.path;
+            default = lib.getExe pkgs.system-sendmail;
             description = "Path to the sendmail executable to use for sending emails.";
           };
 
@@ -161,8 +161,8 @@ in
           };
 
           SIGNAL_CLI_PATH = mkOption {
-            type = types.nullOr types.path;
-            default = null;
+            type = types.path;
+            default = lib.getExe pkgs.signal-cli;
             description = "Path to the signal-cli executable to use for sending Signal notifications.";
           };
 
@@ -309,16 +309,6 @@ in
       })
 
       {
-        services.tranquil-pds.settings = {
-          SENDMAIL_PATH = lib.mkDefault (
-            if cfg.settings.MAIL_FROM_ADDRESS != null then (lib.getExe pkgs.system-sendmail) else null
-          );
-
-          SIGNAL_CLI_PATH = lib.mkDefault (
-            if cfg.settings.SIGNAL_SENDER_NUMBER != null then (lib.getExe pkgs.signal-cli) else null
-          );
-        };
-
         users.users.${cfg.user} = {
           isSystemUser = true;
           inherit (cfg) group;
@@ -359,7 +349,11 @@ in
 
             EnvironmentFile = cfg.environmentFiles;
             Environment = lib.mapAttrsToList (k: v: "${k}=${if builtins.isInt v then toString v else v}") (
-              lib.filterAttrs (_: v: v != null) cfg.settings
+              lib.filterAttrs (k: v:
+                if k == "SENDMAIL_PATH" then cfg.settings.MAIL_FROM_ADDRESS != null
+                else if k == "SIGNAL_CLI_PATH" then cfg.settings.SIGNAL_SENDER_NUMBER != null
+                else v != null
+              ) cfg.settings
             );
 
             NoNewPrivileges = true;
