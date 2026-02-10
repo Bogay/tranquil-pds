@@ -20,17 +20,12 @@ impl LoginType {
     pub fn is_modern(self) -> bool {
         matches!(self, Self::Modern)
     }
-}
 
-impl From<bool> for LoginType {
-    fn from(legacy: bool) -> Self {
-        if legacy { Self::Legacy } else { Self::Modern }
-    }
-}
-
-impl From<LoginType> for bool {
-    fn from(lt: LoginType) -> Self {
-        matches!(lt, LoginType::Legacy)
+    pub fn from_legacy_flag(legacy: bool) -> Self {
+        match legacy {
+            true => Self::Legacy,
+            false => Self::Modern,
+        }
     }
 }
 
@@ -45,21 +40,12 @@ impl AppPasswordPrivilege {
     pub fn is_privileged(self) -> bool {
         matches!(self, Self::Privileged)
     }
-}
 
-impl From<bool> for AppPasswordPrivilege {
-    fn from(privileged: bool) -> Self {
-        if privileged {
-            Self::Privileged
-        } else {
-            Self::Standard
+    pub fn from_privileged_flag(privileged: bool) -> Self {
+        match privileged {
+            true => Self::Privileged,
+            false => Self::Standard,
         }
-    }
-}
-
-impl From<AppPasswordPrivilege> for bool {
-    fn from(p: AppPasswordPrivilege) -> Self {
-        matches!(p, AppPasswordPrivilege::Privileged)
     }
 }
 

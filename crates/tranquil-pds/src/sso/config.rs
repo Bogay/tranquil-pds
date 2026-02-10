@@ -80,9 +80,7 @@ impl SsoConfig {
     }
 
     fn load_provider(name: &str, needs_issuer: bool) -> Option<ProviderConfig> {
-        let enabled = std::env::var(format!("SSO_{}_ENABLED", name))
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let enabled = crate::util::parse_env_bool(&format!("SSO_{}_ENABLED", name));
 
         if !enabled {
             return None;
@@ -121,9 +119,7 @@ impl SsoConfig {
     }
 
     fn load_apple_provider() -> Option<AppleProviderConfig> {
-        let enabled = std::env::var("SSO_APPLE_ENABLED")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let enabled = crate::util::parse_env_bool("SSO_APPLE_ENABLED");
 
         if !enabled {
             return None;
@@ -178,35 +174,25 @@ impl SsoConfig {
         self.apple.as_ref()
     }
 
+    fn provider_configs(&self) -> [(SsoProviderType, bool); 6] {
+        [
+            (SsoProviderType::Github, self.github.is_some()),
+            (SsoProviderType::Discord, self.discord.is_some()),
+            (SsoProviderType::Google, self.google.is_some()),
+            (SsoProviderType::Gitlab, self.gitlab.is_some()),
+            (SsoProviderType::Oidc, self.oidc.is_some()),
+            (SsoProviderType::Apple, self.apple.is_some()),
+        ]
+    }
+
     pub fn enabled_providers(&self) -> Vec<SsoProviderType> {
-        let mut providers = Vec::new();
-        if self.github.is_some() {
-            providers.push(SsoProviderType::Github);
-        }
-        if self.discord.is_some() {
-            providers.push(SsoProviderType::Discord);
-        }
-        if self.google.is_some() {
-            providers.push(SsoProviderType::Google);
-        }
-        if self.gitlab.is_some() {
-            providers.push(SsoProviderType::Gitlab);
-        }
-        if self.oidc.is_some() {
-            providers.push(SsoProviderType::Oidc);
-        }
-        if self.apple.is_some() {
-            providers.push(SsoProviderType::Apple);
-        }
-        providers
+        self.provider_configs()
+            .into_iter()
+            .filter_map(|(p, enabled)| enabled.then_some(p))
+            .collect()
     }
 
     pub fn is_any_enabled(&self) -> bool {
-        self.github.is_some()
-            || self.discord.is_some()
-            || self.google.is_some()
-            || self.gitlab.is_some()
-            || self.oidc.is_some()
-            || self.apple.is_some()
+        self.provider_configs().into_iter().any(|(_, e)| e)
     }
 }

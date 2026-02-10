@@ -135,7 +135,7 @@ fn generate_code() -> String {
 }
 
 fn current_timestamp() -> u64 {
-    Utc::now().timestamp().max(0) as u64
+    u64::try_from(Utc::now().timestamp()).unwrap_or(0)
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

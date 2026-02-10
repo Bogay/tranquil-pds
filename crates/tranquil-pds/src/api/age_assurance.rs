@@ -1,9 +1,9 @@
-use crate::auth::{extract_auth_token_from_header, validate_token_with_dpop};
+use crate::auth::{AccountRequirement, extract_auth_token_from_header, validate_token_with_dpop};
 use crate::state::AppState;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
 };
 use serde_json::json;
@@ -33,25 +33,24 @@ pub async fn get_age_assurance_state() -> Response {
 }
 
 async fn get_account_created_at(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    let auth_header = crate::util::get_header_str(headers, "Authorization");
+    let auth_header = crate::util::get_header_str(headers, http::header::AUTHORIZATION);
     tracing::debug!(?auth_header, "age assurance: extracting token");
 
     let extracted = extract_auth_token_from_header(auth_header)?;
     tracing::debug!("age assurance: got token, validating");
 
-    let dpop_proof = crate::util::get_header_str(headers, "DPoP");
+    let dpop_proof = crate::util::get_header_str(headers, crate::util::HEADER_DPOP);
     let http_uri = "/";
 
     let auth_user = match validate_token_with_dpop(
         state.user_repo.as_ref(),
         state.oauth_repo.as_ref(),
         &extracted.token,
-        extracted.is_dpop,
+        extracted.scheme,
         dpop_proof,
-        "GET",
+        Method::GET.as_str(),
         http_uri,
-        false,
-        false,
+        AccountRequirement::Active,
     )
     .await
     {

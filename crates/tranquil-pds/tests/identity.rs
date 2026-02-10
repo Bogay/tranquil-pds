@@ -547,7 +547,7 @@ async fn test_verify_handle_ownership_invalid_did() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -582,7 +582,7 @@ async fn test_verify_handle_ownership_missing_fields() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

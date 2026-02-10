@@ -5,7 +5,7 @@ use crate::auth::{ServiceTokenVerifier, extract_auth_token_from_header, is_servi
 use crate::plc::{PlcClient, create_genesis_operation, signing_key_to_did_key};
 use crate::rate_limit::{AccountCreationLimit, RateLimited};
 use crate::state::AppState;
-use crate::types::{Did, Handle, Nsid, PlainPassword, Rkey};
+use crate::types::{Did, Handle, PlainPassword};
 use crate::util::{pds_hostname, pds_hostname_without_port};
 use crate::validation::validate_password;
 use axum::{
@@ -34,7 +34,7 @@ pub struct CreateAccountInput {
     pub did: Option<String>,
     pub did_type: Option<String>,
     pub signing_key: Option<String>,
-    pub verification_channel: Option<String>,
+    pub verification_channel: Option<tranquil_db_traits::CommsChannel>,
     pub discord_username: Option<String>,
     pub telegram_username: Option<String>,
     pub signal_username: Option<String>,
@@ -50,7 +50,7 @@ pub struct CreateAccountOutput {
     pub access_jwt: String,
     pub refresh_jwt: String,
     pub verification_required: bool,
-    pub verification_channel: String,
+    pub verification_channel: tranquil_db_traits::CommsChannel,
 }
 
 pub async fn create_account(
@@ -73,9 +73,9 @@ pub async fn create_account(
         info!("create_account called");
     }
 
-    let migration_auth = if let Some(extracted) =
-        extract_auth_token_from_header(crate::util::get_header_str(&headers, "Authorization"))
-    {
+    let migration_auth = if let Some(extracted) = extract_auth_token_from_header(
+        crate::util::get_header_str(&headers, http::header::AUTHORIZATION),
+    ) {
         let token = extracted.token;
         if is_service_token(&token) {
             let verifier = ServiceTokenVerifier::new();
@@ -190,20 +190,18 @@ pub async fn create_account(
     {
         return ApiError::InvalidEmail.into_response();
     }
-    let verification_channel = input.verification_channel.as_deref().unwrap_or("email");
-    let valid_channels = ["email", "discord", "telegram", "signal"];
-    if !valid_channels.contains(&verification_channel) && !is_migration {
-        return ApiError::InvalidVerificationChannel.into_response();
-    }
+    let verification_channel = input
+        .verification_channel
+        .unwrap_or(tranquil_db_traits::CommsChannel::Email);
     let verification_recipient = if is_migration {
         None
     } else {
         Some(match verification_channel {
-            "email" => match &input.email {
+            tranquil_db_traits::CommsChannel::Email => match &input.email {
                 Some(email) if !email.trim().is_empty() => email.trim().to_string(),
                 _ => return ApiError::MissingEmail.into_response(),
             },
-            "discord" => match &input.discord_username {
+            tranquil_db_traits::CommsChannel::Discord => match &input.discord_username {
                 Some(username) if !username.trim().is_empty() => {
                     let clean = username.trim().to_lowercase();
                     if !crate::api::validation::is_valid_discord_username(&clean) {
@@ -215,7 +213,7 @@ pub async fn create_account(
                 }
                 _ => return ApiError::MissingDiscordId.into_response(),
             },
-            "telegram" => match &input.telegram_username {
+            tranquil_db_traits::CommsChannel::Telegram => match &input.telegram_username {
                 Some(username) if !username.trim().is_empty() => {
                     let clean = username.trim().trim_start_matches('@');
                     if !crate::api::validation::is_valid_telegram_username(clean) {
@@ -227,13 +225,12 @@ pub async fn create_account(
                 }
                 _ => return ApiError::MissingTelegramUsername.into_response(),
             },
-            "signal" => match &input.signal_username {
+            tranquil_db_traits::CommsChannel::Signal => match &input.signal_username {
                 Some(username) if !username.trim().is_empty() => {
                     username.trim().trim_start_matches('@').to_lowercase()
                 }
                 _ => return ApiError::MissingSignalNumber.into_response(),
             },
-            _ => return ApiError::InvalidVerificationChannel.into_response(),
         })
     };
     let hostname = pds_hostname();
@@ -304,7 +301,7 @@ pub async fn create_account(
                 && let Err(e) =
                     verify_did_web(d, hostname, &input.handle, input.signing_key.as_deref()).await
             {
-                return ApiError::InvalidDid(e).into_response();
+                return ApiError::InvalidDid(e.to_string()).into_response();
             }
             info!(did = %d, "Creating external did:web account");
             d.clone()
@@ -320,7 +317,7 @@ pub async fn create_account(
                             verify_did_web(d, hostname, &input.handle, input.signing_key.as_deref())
                                 .await
                     {
-                        return ApiError::InvalidDid(e).into_response();
+                        return ApiError::InvalidDid(e.to_string()).into_response();
                     }
                     d.clone()
                 } else if !d.trim().is_empty() {
@@ -397,9 +394,17 @@ pub async fn create_account(
         }
     };
     if is_migration {
+        let did_typed: Did = match did.parse() {
+            Ok(d) => d,
+            Err(_) => return ApiError::InternalError(Some("Invalid DID".into())).into_response(),
+        };
+        let handle_typed: Handle = match handle.parse() {
+            Ok(h) => h,
+            Err(_) => return ApiError::InvalidHandle(None).into_response(),
+        };
         let reactivate_input = tranquil_db_traits::MigrationReactivationInput {
-            did: unsafe { Did::new_unchecked(&did) },
-            new_handle: unsafe { Handle::new_unchecked(&handle) },
+            did: did_typed.clone(),
+            new_handle: handle_typed.clone(),
             new_email: email.clone(),
         };
         match state
@@ -453,7 +458,7 @@ pub async fn create_account(
                     }
                 };
                 let session_data = tranquil_db_traits::SessionTokenCreate {
-                    did: unsafe { Did::new_unchecked(&did) },
+                    did: did_typed.clone(),
                     access_jti: access_meta.jti.clone(),
                     refresh_jti: refresh_meta.jti.clone(),
                     access_expires_at: access_meta.expires_at,
@@ -470,8 +475,9 @@ pub async fn create_account(
                 }
                 let hostname = pds_hostname();
                 let verification_required = if let Some(ref user_email) = email {
-                    let token =
-                        crate::auth::verification_token::generate_migration_token(&did, user_email);
+                    let token = crate::auth::verification_token::generate_migration_token(
+                        &did_typed, user_email,
+                    );
                     let formatted_token =
                         crate::auth::verification_token::format_token_for_display(&token);
                     if let Err(e) = crate::comms::comms_repo::enqueue_migration_verification(
@@ -494,12 +500,12 @@ pub async fn create_account(
                     axum::http::StatusCode::OK,
                     Json(CreateAccountOutput {
                         handle: handle.clone().into(),
-                        did: unsafe { Did::new_unchecked(&did) },
+                        did: did_typed.clone(),
                         did_doc: state.did_resolver.resolve_did_document(&did).await,
                         access_jwt: access_meta.token,
                         refresh_jwt: refresh_meta.token,
                         verification_required,
-                        verification_channel: "email".to_string(),
+                        verification_channel: tranquil_db_traits::CommsChannel::Email,
                     }),
                 )
                     .into_response();
@@ -518,7 +524,10 @@ pub async fn create_account(
         }
     }
 
-    let handle_typed = unsafe { Handle::new_unchecked(&handle) };
+    let handle_typed: Handle = match handle.parse() {
+        Ok(h) => h,
+        Err(_) => return ApiError::InvalidHandle(None).into_response(),
+    };
     let handle_available = match state
         .user_repo
         .check_handle_available_for_new_account(&handle_typed)
@@ -534,9 +543,7 @@ pub async fn create_account(
         return ApiError::HandleTaken.into_response();
     }
 
-    let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+    let invite_code_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
     if invite_code_required
         && input
             .invite_code
@@ -602,7 +609,10 @@ pub async fn create_account(
         }
     };
     let rev = Tid::now(LimitedU32::MIN);
-    let did_for_commit = unsafe { Did::new_unchecked(&did) };
+    let did_for_commit: Did = match did.parse() {
+        Ok(d) => d,
+        Err(_) => return ApiError::InternalError(Some("Invalid DID".into())).into_response(),
+    };
     let (commit_bytes, _sig) =
         match create_signed_commit(&did_for_commit, mst_root, rev.as_ref(), None, &signing_key) {
             Ok(result) => result,
@@ -629,18 +639,12 @@ pub async fn create_account(
         })
     });
 
-    let preferred_comms_channel = match verification_channel {
-        "email" => tranquil_db_traits::CommsChannel::Email,
-        "discord" => tranquil_db_traits::CommsChannel::Discord,
-        "telegram" => tranquil_db_traits::CommsChannel::Telegram,
-        "signal" => tranquil_db_traits::CommsChannel::Signal,
-        _ => tranquil_db_traits::CommsChannel::Email,
-    };
+    let preferred_comms_channel = verification_channel;
 
     let create_input = tranquil_db_traits::CreatePasswordAccountInput {
-        handle: unsafe { Handle::new_unchecked(&handle) },
+        handle: handle_typed.clone(),
         email: email.clone(),
-        did: unsafe { Did::new_unchecked(&did) },
+        did: did_for_commit.clone(),
         password_hash,
         preferred_comms_channel,
         discord_username: input
@@ -689,11 +693,9 @@ pub async fn create_account(
     };
     let user_id = create_result.user_id;
     if !is_migration && !is_did_web_byod {
-        let did_typed = unsafe { Did::new_unchecked(&did) };
-        let handle_typed = unsafe { Handle::new_unchecked(&handle) };
         if let Err(e) = crate::api::repo::record::sequence_identity_event(
             &state,
-            &did_typed,
+            &did_for_commit,
             Some(&handle_typed),
         )
         .await
@@ -702,7 +704,7 @@ pub async fn create_account(
         }
         if let Err(e) = crate::api::repo::record::sequence_account_event(
             &state,
-            &did_typed,
+            &did_for_commit,
             tranquil_db_traits::AccountStatus::Active,
         )
         .await
@@ -711,7 +713,7 @@ pub async fn create_account(
         }
         if let Err(e) = crate::api::repo::record::sequence_genesis_commit(
             &state,
-            &did_typed,
+            &did_for_commit,
             &commit_cid,
             &mst_root,
             &rev_str,
@@ -722,7 +724,7 @@ pub async fn create_account(
         }
         if let Err(e) = crate::api::repo::record::sequence_sync_event(
             &state,
-            &did_typed,
+            &did_for_commit,
             &commit_cid_str,
             Some(rev.as_ref()),
         )
@@ -734,13 +736,11 @@ pub async fn create_account(
             "$type": "app.bsky.actor.profile",
             "displayName": input.handle
         });
-        let profile_collection = unsafe { Nsid::new_unchecked("app.bsky.actor.profile") };
-        let profile_rkey = unsafe { Rkey::new_unchecked("self") };
         if let Err(e) = crate::api::repo::record::create_record_internal(
             &state,
-            &did_typed,
-            &profile_collection,
-            &profile_rkey,
+            &did_for_commit,
+            &crate::types::PROFILE_COLLECTION,
+            &crate::types::PROFILE_RKEY,
             &profile_record,
         )
         .await
@@ -752,7 +752,7 @@ pub async fn create_account(
     if !is_migration {
         if let Some(ref recipient) = verification_recipient {
             let verification_token = crate::auth::verification_token::generate_signup_token(
-                &did,
+                &did_for_commit,
                 verification_channel,
                 recipient,
             );
@@ -776,7 +776,8 @@ pub async fn create_account(
             }
         }
     } else if let Some(ref user_email) = email {
-        let token = crate::auth::verification_token::generate_migration_token(&did, user_email);
+        let token =
+            crate::auth::verification_token::generate_migration_token(&did_for_commit, user_email);
         let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
         if let Err(e) = crate::comms::comms_repo::enqueue_migration_verification(
             state.user_repo.as_ref(),
@@ -809,7 +810,7 @@ pub async fn create_account(
             }
         };
     let session_data = tranquil_db_traits::SessionTokenCreate {
-        did: unsafe { Did::new_unchecked(&did) },
+        did: did_for_commit.clone(),
         access_jti: access_meta.jti.clone(),
         refresh_jti: refresh_meta.jti.clone(),
         access_expires_at: access_meta.expires_at,
@@ -838,12 +839,12 @@ pub async fn create_account(
         StatusCode::OK,
         Json(CreateAccountOutput {
             handle: handle.clone().into(),
-            did: unsafe { Did::new_unchecked(&did) },
+            did: did_for_commit,
             did_doc,
             access_jwt: access_meta.token,
             refresh_jwt: refresh_meta.token,
             verification_required: !is_migration,
-            verification_channel: verification_channel.to_string(),
+            verification_channel,
         }),
     )
         .into_response()

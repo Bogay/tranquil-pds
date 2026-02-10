@@ -48,6 +48,9 @@ pub async fn delete_account(
             did, e
         );
     }
-    let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+    let _ = state
+        .cache
+        .delete(&crate::cache_keys::handle_key(&handle))
+        .await;
     Ok(EmptyResponse::ok().into_response())
 }

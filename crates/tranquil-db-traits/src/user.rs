@@ -6,6 +6,21 @@ use uuid::Uuid;
 
 use crate::{ChannelVerificationStatus, CommsChannel, DbError, SsoProviderType};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebauthnChallengeType {
+    Registration,
+    Authentication,
+}
+
+impl WebauthnChallengeType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Registration => "registration",
+            Self::Authentication => "authentication",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "account_type", rename_all = "snake_case")]
 pub enum AccountType {
@@ -325,20 +340,20 @@ pub trait UserRepository: Send + Sync {
     async fn save_webauthn_challenge(
         &self,
         did: &Did,
-        challenge_type: &str,
+        challenge_type: WebauthnChallengeType,
         state_json: &str,
     ) -> Result<Uuid, DbError>;
 
     async fn load_webauthn_challenge(
         &self,
         did: &Did,
-        challenge_type: &str,
+        challenge_type: WebauthnChallengeType,
     ) -> Result<Option<String>, DbError>;
 
     async fn delete_webauthn_challenge(
         &self,
         did: &Did,
-        challenge_type: &str,
+        challenge_type: WebauthnChallengeType,
     ) -> Result<(), DbError>;
 
     async fn get_totp_record(&self, did: &Did) -> Result<Option<TotpRecord>, DbError>;

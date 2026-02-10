@@ -163,4 +163,16 @@ mod tests {
     fn test_validate_scopes_invalid() {
         assert!(validate_delegation_scopes("invalid:scope").is_err());
     }
+
+    #[test]
+    fn test_scope_presets_parse() {
+        SCOPE_PRESETS.iter().for_each(|p| {
+            validate_delegation_scopes(p.scopes).unwrap_or_else(|e| {
+                panic!(
+                    "preset '{}' has invalid scopes '{}': {}",
+                    p.name, p.scopes, e
+                )
+            });
+        });
+    }
 }

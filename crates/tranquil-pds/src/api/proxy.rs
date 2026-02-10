@@ -1,4 +1,6 @@
+use std::collections::HashSet;
 use std::convert::Infallible;
+use std::sync::LazyLock;
 
 use crate::api::error::ApiError;
 use crate::api::proxy_client::proxy_client;
@@ -15,92 +17,96 @@ use futures_util::future::Either;
 use tower::{Service, util::BoxCloneSyncService};
 use tracing::{error, info, warn};
 
-const PROTECTED_METHODS: &[&str] = &[
-    "app.bsky.actor.getPreferences",
-    "app.bsky.actor.putPreferences",
-    "com.atproto.admin.deleteAccount",
-    "com.atproto.admin.disableAccountInvites",
-    "com.atproto.admin.disableInviteCodes",
-    "com.atproto.admin.enableAccountInvites",
-    "com.atproto.admin.getAccountInfo",
-    "com.atproto.admin.getAccountInfos",
-    "com.atproto.admin.getInviteCodes",
-    "com.atproto.admin.getSubjectStatus",
-    "com.atproto.admin.searchAccounts",
-    "com.atproto.admin.sendEmail",
-    "com.atproto.admin.updateAccountEmail",
-    "com.atproto.admin.updateAccountHandle",
-    "com.atproto.admin.updateAccountPassword",
-    "com.atproto.admin.updateSubjectStatus",
-    "com.atproto.identity.getRecommendedDidCredentials",
-    "com.atproto.identity.requestPlcOperationSignature",
-    "com.atproto.identity.signPlcOperation",
-    "com.atproto.identity.submitPlcOperation",
-    "com.atproto.identity.updateHandle",
-    "com.atproto.repo.applyWrites",
-    "com.atproto.repo.createRecord",
-    "com.atproto.repo.deleteRecord",
-    "com.atproto.repo.importRepo",
-    "com.atproto.repo.putRecord",
-    "com.atproto.repo.uploadBlob",
-    "com.atproto.server.activateAccount",
-    "com.atproto.server.checkAccountStatus",
-    "com.atproto.server.confirmEmail",
-    "com.atproto.server.confirmSignup",
-    "com.atproto.server.createAccount",
-    "com.atproto.server.createAppPassword",
-    "com.atproto.server.createInviteCode",
-    "com.atproto.server.createInviteCodes",
-    "com.atproto.server.createSession",
-    "com.atproto.server.createTotpSecret",
-    "com.atproto.server.deactivateAccount",
-    "com.atproto.server.deleteAccount",
-    "com.atproto.server.deletePasskey",
-    "com.atproto.server.deleteSession",
-    "com.atproto.server.describeServer",
-    "com.atproto.server.disableTotp",
-    "com.atproto.server.enableTotp",
-    "com.atproto.server.finishPasskeyRegistration",
-    "com.atproto.server.getAccountInviteCodes",
-    "com.atproto.server.getServiceAuth",
-    "com.atproto.server.getSession",
-    "com.atproto.server.getTotpStatus",
-    "com.atproto.server.listAppPasswords",
-    "com.atproto.server.listPasskeys",
-    "com.atproto.server.refreshSession",
-    "com.atproto.server.regenerateBackupCodes",
-    "com.atproto.server.requestAccountDelete",
-    "com.atproto.server.requestEmailConfirmation",
-    "com.atproto.server.requestEmailUpdate",
-    "com.atproto.server.requestPasswordReset",
-    "com.atproto.server.resendMigrationVerification",
-    "com.atproto.server.resendVerification",
-    "com.atproto.server.reserveSigningKey",
-    "com.atproto.server.resetPassword",
-    "com.atproto.server.revokeAppPassword",
-    "com.atproto.server.startPasskeyRegistration",
-    "com.atproto.server.updateEmail",
-    "com.atproto.server.updatePasskey",
-    "com.atproto.server.verifyMigrationEmail",
-    "com.atproto.sync.getBlob",
-    "com.atproto.sync.getBlocks",
-    "com.atproto.sync.getCheckout",
-    "com.atproto.sync.getHead",
-    "com.atproto.sync.getLatestCommit",
-    "com.atproto.sync.getRecord",
-    "com.atproto.sync.getRepo",
-    "com.atproto.sync.getRepoStatus",
-    "com.atproto.sync.listBlobs",
-    "com.atproto.sync.listRepos",
-    "com.atproto.sync.notifyOfUpdate",
-    "com.atproto.sync.requestCrawl",
-    "com.atproto.sync.subscribeRepos",
-    "com.atproto.temp.checkSignupQueue",
-    "com.atproto.temp.dereferenceScope",
-];
+static PROTECTED_METHODS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "app.bsky.actor.getPreferences",
+        "app.bsky.actor.putPreferences",
+        "com.atproto.admin.deleteAccount",
+        "com.atproto.admin.disableAccountInvites",
+        "com.atproto.admin.disableInviteCodes",
+        "com.atproto.admin.enableAccountInvites",
+        "com.atproto.admin.getAccountInfo",
+        "com.atproto.admin.getAccountInfos",
+        "com.atproto.admin.getInviteCodes",
+        "com.atproto.admin.getSubjectStatus",
+        "com.atproto.admin.searchAccounts",
+        "com.atproto.admin.sendEmail",
+        "com.atproto.admin.updateAccountEmail",
+        "com.atproto.admin.updateAccountHandle",
+        "com.atproto.admin.updateAccountPassword",
+        "com.atproto.admin.updateSubjectStatus",
+        "com.atproto.identity.getRecommendedDidCredentials",
+        "com.atproto.identity.requestPlcOperationSignature",
+        "com.atproto.identity.signPlcOperation",
+        "com.atproto.identity.submitPlcOperation",
+        "com.atproto.identity.updateHandle",
+        "com.atproto.repo.applyWrites",
+        "com.atproto.repo.createRecord",
+        "com.atproto.repo.deleteRecord",
+        "com.atproto.repo.importRepo",
+        "com.atproto.repo.putRecord",
+        "com.atproto.repo.uploadBlob",
+        "com.atproto.server.activateAccount",
+        "com.atproto.server.checkAccountStatus",
+        "com.atproto.server.confirmEmail",
+        "com.atproto.server.confirmSignup",
+        "com.atproto.server.createAccount",
+        "com.atproto.server.createAppPassword",
+        "com.atproto.server.createInviteCode",
+        "com.atproto.server.createInviteCodes",
+        "com.atproto.server.createSession",
+        "com.atproto.server.createTotpSecret",
+        "com.atproto.server.deactivateAccount",
+        "com.atproto.server.deleteAccount",
+        "com.atproto.server.deletePasskey",
+        "com.atproto.server.deleteSession",
+        "com.atproto.server.describeServer",
+        "com.atproto.server.disableTotp",
+        "com.atproto.server.enableTotp",
+        "com.atproto.server.finishPasskeyRegistration",
+        "com.atproto.server.getAccountInviteCodes",
+        "com.atproto.server.getServiceAuth",
+        "com.atproto.server.getSession",
+        "com.atproto.server.getTotpStatus",
+        "com.atproto.server.listAppPasswords",
+        "com.atproto.server.listPasskeys",
+        "com.atproto.server.refreshSession",
+        "com.atproto.server.regenerateBackupCodes",
+        "com.atproto.server.requestAccountDelete",
+        "com.atproto.server.requestEmailConfirmation",
+        "com.atproto.server.requestEmailUpdate",
+        "com.atproto.server.requestPasswordReset",
+        "com.atproto.server.resendMigrationVerification",
+        "com.atproto.server.resendVerification",
+        "com.atproto.server.reserveSigningKey",
+        "com.atproto.server.resetPassword",
+        "com.atproto.server.revokeAppPassword",
+        "com.atproto.server.startPasskeyRegistration",
+        "com.atproto.server.updateEmail",
+        "com.atproto.server.updatePasskey",
+        "com.atproto.server.verifyMigrationEmail",
+        "com.atproto.sync.getBlob",
+        "com.atproto.sync.getBlocks",
+        "com.atproto.sync.getCheckout",
+        "com.atproto.sync.getHead",
+        "com.atproto.sync.getLatestCommit",
+        "com.atproto.sync.getRecord",
+        "com.atproto.sync.getRepo",
+        "com.atproto.sync.getRepoStatus",
+        "com.atproto.sync.listBlobs",
+        "com.atproto.sync.listRepos",
+        "com.atproto.sync.notifyOfUpdate",
+        "com.atproto.sync.requestCrawl",
+        "com.atproto.sync.subscribeRepos",
+        "com.atproto.temp.checkSignupQueue",
+        "com.atproto.temp.dereferenceScope",
+    ]
+    .into_iter()
+    .collect()
+});
 
 fn is_protected_method(method: &str) -> bool {
-    PROTECTED_METHODS.contains(&method)
+    PROTECTED_METHODS.contains(method)
 }
 
 pub struct XrpcProxyLayer {
@@ -192,7 +198,9 @@ async fn proxy_handler(
             .into_response();
     }
 
-    let Some(proxy_header) = get_header_str(&headers, "atproto-proxy").map(String::from) else {
+    let Some(proxy_header) =
+        get_header_str(&headers, crate::util::HEADER_ATPROTO_PROXY).map(String::from)
+    else {
         return ApiError::InvalidRequest("Missing required atproto-proxy header".into())
             .into_response();
     };
@@ -212,30 +220,29 @@ async fn proxy_handler(
     let client = proxy_client();
     let mut request_builder = client.request(method_verb.clone(), &target_url);
 
-    let mut auth_header_val = headers.get("Authorization").cloned();
+    let mut auth_header_val = headers.get(http::header::AUTHORIZATION).cloned();
     if let Some(extracted) = crate::auth::extract_auth_token_from_header(
-        crate::util::get_header_str(&headers, "Authorization"),
+        crate::util::get_header_str(&headers, http::header::AUTHORIZATION),
     ) {
         let token = extracted.token;
-        let dpop_proof = crate::util::get_header_str(&headers, "DPoP");
+        let dpop_proof = crate::util::get_header_str(&headers, crate::util::HEADER_DPOP);
         let http_uri = crate::util::build_full_url(&format!("/xrpc{}", uri));
 
         match crate::auth::validate_token_with_dpop(
             state.user_repo.as_ref(),
             state.oauth_repo.as_ref(),
             &token,
-            extracted.is_dpop,
+            extracted.scheme,
             dpop_proof,
             method_verb.as_str(),
             &http_uri,
-            false,
-            false,
+            crate::auth::AccountRequirement::Active,
         )
         .await
         {
             Ok(auth_user) => {
                 if let Err(e) = crate::auth::scope_check::check_rpc_scope(
-                    auth_user.is_oauth(),
+                    &auth_user.auth_source,
                     auth_user.scope.as_deref(),
                     &resolved.did,
                     method,
@@ -298,7 +305,9 @@ async fn proxy_handler(
                 info!(error = ?e, "Proxy token validation failed, returning error to client");
                 let mut response = ApiError::from(e).into_response();
                 if let Ok(nonce_val) = crate::oauth::verify::generate_dpop_nonce().parse() {
-                    response.headers_mut().insert("DPoP-Nonce", nonce_val);
+                    response
+                        .headers_mut()
+                        .insert(crate::util::HEADER_DPOP_NONCE, nonce_val);
                 }
                 return response;
             }
@@ -306,13 +315,13 @@ async fn proxy_handler(
     }
 
     if let Some(val) = auth_header_val {
-        request_builder = request_builder.header("Authorization", val);
+        request_builder = request_builder.header(http::header::AUTHORIZATION, val);
     }
     request_builder = crate::api::proxy_client::HEADERS_TO_FORWARD
         .iter()
-        .filter_map(|name| headers.get(*name).map(|val| (*name, val)))
+        .filter_map(|name| headers.get(name).map(|val| (name, val)))
         .fold(request_builder, |builder, (name, val)| {
-            builder.header(name, val)
+            builder.header(name.as_str(), val)
         });
     if !body.is_empty() {
         request_builder = request_builder.body(body);
@@ -333,7 +342,7 @@ async fn proxy_handler(
             let mut response_builder = Response::builder().status(status);
             response_builder = crate::api::proxy_client::RESPONSE_HEADERS_TO_FORWARD
                 .iter()
-                .filter_map(|name| headers.get(*name).map(|val| (*name, val)))
+                .filter_map(|name| headers.get(name).map(|val| (name, val)))
                 .fold(response_builder, |builder, (name, val)| {
                     builder.header(name, val)
                 });

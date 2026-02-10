@@ -171,7 +171,7 @@ pub async fn reset_password(
         }
     };
     futures::future::join_all(result.session_jtis.iter().map(|jti| {
-        let cache_key = format!("auth:session:{}:{}", result.did, jti);
+        let cache_key = crate::cache_keys::session_key(&result.did, jti);
         let cache = state.cache.clone();
         async move {
             if let Err(e) = cache.delete(&cache_key).await {

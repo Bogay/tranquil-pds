@@ -62,6 +62,12 @@ pub struct AppState {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct RateLimitParams {
+    pub limit: u32,
+    pub window_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum RateLimitKind {
     Login,
     AccountCreation,
@@ -86,7 +92,7 @@ pub enum RateLimitKind {
 }
 
 impl RateLimitKind {
-    fn key_prefix(&self) -> &'static str {
+    const fn key_prefix(&self) -> &'static str {
         match self {
             Self::Login => "login",
             Self::AccountCreation => "account_creation",
@@ -111,28 +117,88 @@ impl RateLimitKind {
         }
     }
 
-    fn limit_and_window_ms(&self) -> (u32, u64) {
+    const fn params(&self) -> RateLimitParams {
         match self {
-            Self::Login => (10, 60_000),
-            Self::AccountCreation => (10, 3_600_000),
-            Self::PasswordReset => (5, 3_600_000),
-            Self::ResetPassword => (10, 60_000),
-            Self::RefreshSession => (60, 60_000),
-            Self::OAuthToken => (300, 60_000),
-            Self::OAuthAuthorize => (10, 60_000),
-            Self::OAuthPar => (30, 60_000),
-            Self::OAuthIntrospect => (30, 60_000),
-            Self::AppPassword => (10, 60_000),
-            Self::EmailUpdate => (5, 3_600_000),
-            Self::TotpVerify => (5, 300_000),
-            Self::HandleUpdate => (10, 300_000),
-            Self::HandleUpdateDaily => (50, 86_400_000),
-            Self::VerificationCheck => (60, 60_000),
-            Self::SsoInitiate => (10, 60_000),
-            Self::SsoCallback => (30, 60_000),
-            Self::SsoUnlink => (10, 60_000),
-            Self::OAuthRegisterComplete => (5, 300_000),
-            Self::HandleVerification => (10, 60_000),
+            Self::Login => RateLimitParams {
+                limit: 10,
+                window_ms: 60_000,
+            },
+            Self::AccountCreation => RateLimitParams {
+                limit: 10,
+                window_ms: 3_600_000,
+            },
+            Self::PasswordReset => RateLimitParams {
+                limit: 5,
+                window_ms: 3_600_000,
+            },
+            Self::ResetPassword => RateLimitParams {
+                limit: 10,
+                window_ms: 60_000,
+            },
+            Self::RefreshSession => RateLimitParams {
+                limit: 60,
+                window_ms: 60_000,
+            },
+            Self::OAuthToken => RateLimitParams {
+                limit: 300,
+                window_ms: 60_000,
+            },
+            Self::OAuthAuthorize => RateLimitParams {
+                limit: 10,
+                window_ms: 60_000,
+            },
+            Self::OAuthPar => RateLimitParams {
+                limit: 30,
+                window_ms: 60_000,
+            },
+            Self::OAuthIntrospect => RateLimitParams {
+                limit: 30,
+                window_ms: 60_000,
+            },
+            Self::AppPassword => RateLimitParams {
+                limit: 10,
+                window_ms: 60_000,
+            },
+            Self::EmailUpdate => RateLimitParams {
+                limit: 5,
+                window_ms: 3_600_000,
+            },
+            Self::TotpVerify => RateLimitParams {
+                limit: 5,
+                window_ms: 300_000,
+            },
+            Self::HandleUpdate => RateLimitParams {
+                limit: 10,
+                window_ms: 300_000,
+            },
+            Self::HandleUpdateDaily => RateLimitParams {
+                limit: 50,
+                window_ms: 86_400_000,
+            },
+            Self::VerificationCheck => RateLimitParams {
+                limit: 60,
+                window_ms: 60_000,
+            },
+            Self::SsoInitiate => RateLimitParams {
+                limit: 10,
+                window_ms: 60_000,
+            },
+            Self::SsoCallback => RateLimitParams {
+                limit: 30,
+                window_ms: 60_000,
+            },
+            Self::SsoUnlink => RateLimitParams {
+                limit: 10,
+                window_ms: 60_000,
+            },
+            Self::OAuthRegisterComplete => RateLimitParams {
+                limit: 5,
+                window_ms: 300_000,
+            },
+            Self::HandleVerification => RateLimitParams {
+                limit: 10,
+                window_ms: 60_000,
+            },
         }
     }
 }
@@ -294,11 +360,11 @@ impl AppState {
         }
 
         let key = format!("{}:{}", kind.key_prefix(), client_ip);
-        let (limit, window_ms) = kind.limit_and_window_ms();
+        let params = kind.params();
 
         if !self
             .distributed_rate_limiter
-            .check_rate_limit(&key, limit, window_ms)
+            .check_rate_limit(&key, params.limit, params.window_ms)
             .await
         {
             crate::metrics::record_rate_limit_rejection(limiter_name);

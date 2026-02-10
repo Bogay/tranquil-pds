@@ -98,7 +98,10 @@ fn cleanup() {
 
 #[allow(dead_code)]
 pub fn client() -> Client {
-    Client::new()
+    Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .expect("Failed to build HTTP client")
 }
 
 #[allow(dead_code)]

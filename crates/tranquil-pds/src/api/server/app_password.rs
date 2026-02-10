@@ -150,8 +150,9 @@ pub async fn create_app_password(
                 ApiError::InternalError(None)
             })?;
 
-    let privilege =
-        tranquil_db_traits::AppPasswordPrivilege::from(input.privileged.unwrap_or(false));
+    let privilege = tranquil_db_traits::AppPasswordPrivilege::from_privileged_flag(
+        input.privileged.unwrap_or(false),
+    );
     let created_at = chrono::Utc::now();
 
     let create_data = AppPasswordCreate {
@@ -232,7 +233,7 @@ pub async fn revoke_app_password(
         .log_db_err("revoking sessions for app password")?;
 
     futures::future::join_all(sessions_to_invalidate.iter().map(|jti| {
-        let cache_key = format!("auth:session:{}:{}", &auth.did, jti);
+        let cache_key = crate::cache_keys::session_key(&auth.did, jti);
         let cache = state.cache.clone();
         async move {
             let _ = cache.delete(&cache_key).await;

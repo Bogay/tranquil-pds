@@ -144,7 +144,7 @@ pub async fn get_invite_codes(
         })
         .collect();
 
-    let next_cursor = if codes_rows.len() == limit as usize {
+    let next_cursor = if codes_rows.len() == usize::try_from(limit).unwrap_or(0) {
         codes_rows.last().map(|r| r.code.clone())
     } else {
         None

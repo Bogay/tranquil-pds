@@ -197,12 +197,16 @@ impl ImageProcessor {
         max_size: u32,
     ) -> Result<ProcessedImage, ImageError> {
         let (orig_width, orig_height) = (img.width(), img.height());
+        let safe_f64_to_u32 =
+            |v: f64| -> u32 { u32::try_from(v.round() as u64).unwrap_or(u32::MAX) };
         let (new_width, new_height) = if orig_width > orig_height {
-            let ratio = max_size as f64 / orig_width as f64;
-            (max_size, (orig_height as f64 * ratio) as u32)
+            let ratio = f64::from(max_size) / f64::from(orig_width);
+            let scaled = safe_f64_to_u32((f64::from(orig_height) * ratio).max(1.0));
+            (max_size, scaled.min(max_size))
         } else {
-            let ratio = max_size as f64 / orig_height as f64;
-            ((orig_width as f64 * ratio) as u32, max_size)
+            let ratio = f64::from(max_size) / f64::from(orig_height);
+            let scaled = safe_f64_to_u32((f64::from(orig_width) * ratio).max(1.0));
+            (scaled.min(max_size), max_size)
         };
         let thumb = img.resize(new_width, new_height, FilterType::Lanczos3);
         self.encode_image(&thumb)

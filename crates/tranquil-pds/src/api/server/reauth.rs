@@ -8,7 +8,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
-use tranquil_db_traits::{SessionRepository, UserRepository};
+use tranquil_db_traits::{SessionRepository, UserRepository, WebauthnChallengeType};
 
 use crate::auth::{Active, Auth};
 use crate::rate_limit::{TotpVerifyLimit, check_user_rate_limit_with_message};
@@ -17,12 +17,20 @@ use crate::types::PlainPassword;
 
 pub const REAUTH_WINDOW_SECONDS: i64 = 300;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReauthMethod {
+    Password,
+    Totp,
+    Passkey,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReauthStatusResponse {
     pub last_reauth_at: Option<DateTime<Utc>>,
     pub reauth_required: bool,
-    pub available_methods: Vec<String>,
+    pub available_methods: Vec<ReauthMethod>,
 }
 
 pub async fn get_reauth_status(
@@ -180,7 +188,11 @@ pub async fn reauth_passkey_start(
 
     state
         .user_repo
-        .save_webauthn_challenge(&auth.did, "authentication", &state_json)
+        .save_webauthn_challenge(
+            &auth.did,
+            WebauthnChallengeType::Authentication,
+            &state_json,
+        )
         .await
         .log_db_err("saving authentication state")?;
 
@@ -201,7 +213,7 @@ pub async fn reauth_passkey_finish(
 ) -> Result<Response, ApiError> {
     let auth_state_json = state
         .user_repo
-        .load_webauthn_challenge(&auth.did, "authentication")
+        .load_webauthn_challenge(&auth.did, WebauthnChallengeType::Authentication)
         .await
         .log_db_err("loading authentication state")?
         .ok_or(ApiError::NoChallengeInProgress)?;
@@ -229,14 +241,17 @@ pub async fn reauth_passkey_finish(
     let cred_id_bytes = auth_result.cred_id().as_ref();
     match state
         .user_repo
-        .update_passkey_counter(cred_id_bytes, auth_result.counter() as i32)
+        .update_passkey_counter(
+            cred_id_bytes,
+            i32::try_from(auth_result.counter()).unwrap_or(i32::MAX),
+        )
         .await
     {
         Ok(false) => {
             warn!(did = %&auth.did, "Passkey counter anomaly detected - possible cloned key");
             let _ = state
                 .user_repo
-                .delete_webauthn_challenge(&auth.did, "authentication")
+                .delete_webauthn_challenge(&auth.did, WebauthnChallengeType::Authentication)
                 .await;
             return Err(ApiError::PasskeyCounterAnomaly);
         }
@@ -248,7 +263,7 @@ pub async fn reauth_passkey_finish(
 
     let _ = state
         .user_repo
-        .delete_webauthn_challenge(&auth.did, "authentication")
+        .delete_webauthn_challenge(&auth.did, WebauthnChallengeType::Authentication)
         .await;
 
     let reauthed_at = update_last_reauth_cached(&*state.session_repo, &state.cache, &auth.did)
@@ -265,12 +280,12 @@ pub async fn update_last_reauth_cached(
     did: &crate::types::Did,
 ) -> Result<DateTime<Utc>, tranquil_db_traits::DbError> {
     let now = session_repo.update_last_reauth(did).await?;
-    let cache_key = format!("reauth:{}", did);
+    let cache_key = crate::cache_keys::reauth_key(did);
     let _ = cache
         .set(
             &cache_key,
             &now.timestamp().to_string(),
-            std::time::Duration::from_secs(REAUTH_WINDOW_SECONDS as u64),
+            std::time::Duration::from_secs(u64::try_from(REAUTH_WINDOW_SECONDS).unwrap_or(300)),
         )
         .await;
     Ok(now)
@@ -290,7 +305,7 @@ async fn get_available_reauth_methods(
     user_repo: &dyn UserRepository,
     _session_repo: &dyn SessionRepository,
     did: &crate::types::Did,
-) -> Vec<String> {
+) -> Vec<ReauthMethod> {
     let mut methods = Vec::new();
 
     let has_password = user_repo
@@ -301,17 +316,17 @@ async fn get_available_reauth_methods(
         .is_some();
 
     if has_password {
-        methods.push("password".to_string());
+        methods.push(ReauthMethod::Password);
     }
 
     let has_totp = user_repo.has_totp_enabled(did).await.unwrap_or(false);
     if has_totp {
-        methods.push("totp".to_string());
+        methods.push(ReauthMethod::Totp);
     }
 
     let has_passkeys = user_repo.has_passkeys(did).await.unwrap_or(false);
     if has_passkeys {
-        methods.push("passkey".to_string());
+        methods.push(ReauthMethod::Passkey);
     }
 
     methods
@@ -332,7 +347,7 @@ pub async fn check_reauth_required_cached(
     cache: &std::sync::Arc<dyn crate::cache::Cache>,
     did: &crate::types::Did,
 ) -> bool {
-    let cache_key = format!("reauth:{}", did);
+    let cache_key = crate::cache_keys::reauth_key(did);
     if let Some(timestamp_str) = cache.get(&cache_key).await
         && let Ok(timestamp) = timestamp_str.parse::<i64>()
     {
@@ -355,7 +370,7 @@ pub async fn check_reauth_required_cached(
 pub struct ReauthRequiredError {
     pub error: String,
     pub message: String,
-    pub reauth_methods: Vec<String>,
+    pub reauth_methods: Vec<ReauthMethod>,
 }
 
 pub async fn reauth_required_response(
@@ -428,5 +443,5 @@ pub async fn legacy_mfa_required_response(
 pub struct MfaVerificationRequiredError {
     pub error: String,
     pub message: String,
-    pub reauth_methods: Vec<String>,
+    pub reauth_methods: Vec<ReauthMethod>,
 }

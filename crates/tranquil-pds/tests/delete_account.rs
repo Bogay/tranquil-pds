@@ -365,7 +365,7 @@ async fn test_delete_account_missing_fields() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res1.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res1.status(), StatusCode::BAD_REQUEST);
     let res2 = client
         .post(format!(
             "{}/xrpc/com.atproto.server.deleteAccount",
@@ -378,7 +378,7 @@ async fn test_delete_account_missing_fields() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res2.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res2.status(), StatusCode::BAD_REQUEST);
     let res3 = client
         .post(format!(
             "{}/xrpc/com.atproto.server.deleteAccount",
@@ -391,7 +391,7 @@ async fn test_delete_account_missing_fields() {
         .send()
         .await
         .expect("Failed to send request");
-    assert_eq!(res3.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(res3.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

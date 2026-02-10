@@ -1,11 +1,31 @@
 use base32::Alphabet;
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use subtle::ConstantTimeEq;
 use totp_rs::{Algorithm, TOTP};
 
 const TOTP_DIGITS: usize = 6;
 const TOTP_STEP: u64 = 30;
+const TOTP_STEP_SIGNED: i64 = TOTP_STEP as i64;
 const TOTP_SECRET_LENGTH: usize = 20;
+
+#[derive(Debug)]
+pub enum TotpError {
+    CreationFailed(String),
+    QrGenerationFailed(String),
+    HashFailed(String),
+}
+
+impl std::fmt::Display for TotpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CreationFailed(e) => write!(f, "TOTP creation failed: {}", e),
+            Self::QrGenerationFailed(e) => write!(f, "QR generation failed: {}", e),
+            Self::HashFailed(e) => write!(f, "Hash failed: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for TotpError {}
 
 pub fn generate_totp_secret() -> Vec<u8> {
     let mut secret = vec![0u8; TOTP_SECRET_LENGTH];
@@ -31,7 +51,7 @@ fn create_totp(
     secret: Vec<u8>,
     issuer: Option<String>,
     account_name: String,
-) -> Result<TOTP, String> {
+) -> Result<TOTP, TotpError> {
     TOTP::new(
         Algorithm::SHA1,
         TOTP_DIGITS,
@@ -41,7 +61,7 @@ fn create_totp(
         issuer,
         account_name,
     )
-    .map_err(|e| format!("Failed to create TOTP: {}", e))
+    .map_err(|e| TotpError::CreationFailed(e.to_string()))
 }
 
 pub fn verify_totp_code(secret: &[u8], code: &str) -> bool {
@@ -60,7 +80,7 @@ pub fn verify_totp_code(secret: &[u8], code: &str) -> bool {
         .unwrap_or(0);
 
     [-1i64, 0, 1].iter().any(|&offset| {
-        let time = (now as i64 + offset * TOTP_STEP as i64) as u64;
+        let time = now.wrapping_add_signed(offset * TOTP_STEP_SIGNED);
         let expected = totp.generate(time);
         let is_valid: bool = code.as_bytes().ct_eq(expected.as_bytes()).into();
         is_valid
@@ -84,7 +104,7 @@ pub fn generate_qr_png_base64(
     secret: &[u8],
     account_name: &str,
     issuer: &str,
-) -> Result<String, String> {
+) -> Result<String, TotpError> {
     use base64::{Engine, engine::general_purpose::STANDARD};
 
     let totp = create_totp(
@@ -95,7 +115,7 @@ pub fn generate_qr_png_base64(
 
     let qr_png = totp
         .get_qr_png()
-        .map_err(|e| format!("Failed to generate QR code: {}", e))?;
+        .map_err(|e| TotpError::QrGenerationFailed(e.to_string()))?;
 
     Ok(STANDARD.encode(qr_png))
 }
@@ -112,7 +132,7 @@ pub fn generate_backup_codes() -> Vec<String> {
     (0..BACKUP_CODE_COUNT).for_each(|_| {
         let code: String = (0..BACKUP_CODE_LENGTH)
             .map(|_| {
-                let idx = (rng.next_u32() as usize) % BACKUP_CODE_ALPHABET.len();
+                let idx = rng.gen_range(0..BACKUP_CODE_ALPHABET.len());
                 BACKUP_CODE_ALPHABET[idx] as char
             })
             .collect();
@@ -122,8 +142,8 @@ pub fn generate_backup_codes() -> Vec<String> {
     codes
 }
 
-pub fn hash_backup_code(code: &str) -> Result<String, String> {
-    bcrypt::hash(code, BACKUP_CODE_BCRYPT_COST).map_err(|e| format!("Failed to hash code: {}", e))
+pub fn hash_backup_code(code: &str) -> Result<String, TotpError> {
+    bcrypt::hash(code, BACKUP_CODE_BCRYPT_COST).map_err(|e| TotpError::HashFailed(e.to_string()))
 }
 
 pub fn verify_backup_code(code: &str, hash: &str) -> bool {

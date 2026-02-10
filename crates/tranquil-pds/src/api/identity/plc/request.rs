@@ -19,7 +19,7 @@ pub async fn request_plc_operation_signature(
     auth: Auth<Permissive>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::IdentityAttr::Wildcard,
     ) {

@@ -7,8 +7,7 @@ use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use tranquil_comms::{
-    CommsChannel, CommsSender, CommsStatus, CommsType, NewComms, SendError, format_message,
-    get_strings,
+    CommsChannel, CommsSender, CommsType, NewComms, SendError, format_message, get_strings,
 };
 use tranquil_db_traits::{InfraRepository, QueuedComms, UserCommsPrefs, UserRepository};
 use uuid::Uuid;
@@ -54,35 +53,12 @@ impl CommsService {
     }
 
     pub async fn enqueue(&self, item: NewComms) -> Result<Uuid, tranquil_db_traits::DbError> {
-        let channel = match item.channel {
-            CommsChannel::Email => tranquil_db_traits::CommsChannel::Email,
-            CommsChannel::Discord => tranquil_db_traits::CommsChannel::Discord,
-            CommsChannel::Telegram => tranquil_db_traits::CommsChannel::Telegram,
-            CommsChannel::Signal => tranquil_db_traits::CommsChannel::Signal,
-        };
-        let comms_type = match item.comms_type {
-            CommsType::Welcome => tranquil_db_traits::CommsType::Welcome,
-            CommsType::EmailVerification => tranquil_db_traits::CommsType::EmailVerification,
-            CommsType::PasswordReset => tranquil_db_traits::CommsType::PasswordReset,
-            CommsType::EmailUpdate => tranquil_db_traits::CommsType::EmailUpdate,
-            CommsType::AccountDeletion => tranquil_db_traits::CommsType::AccountDeletion,
-            CommsType::AdminEmail => tranquil_db_traits::CommsType::AdminEmail,
-            CommsType::PlcOperation => tranquil_db_traits::CommsType::PlcOperation,
-            CommsType::TwoFactorCode => tranquil_db_traits::CommsType::TwoFactorCode,
-            CommsType::PasskeyRecovery => tranquil_db_traits::CommsType::PasskeyRecovery,
-            CommsType::LegacyLoginAlert => tranquil_db_traits::CommsType::LegacyLoginAlert,
-            CommsType::MigrationVerification => {
-                tranquil_db_traits::CommsType::MigrationVerification
-            }
-            CommsType::ChannelVerification => tranquil_db_traits::CommsType::ChannelVerification,
-            CommsType::ChannelVerified => tranquil_db_traits::CommsType::ChannelVerified,
-        };
         let id = self
             .infra_repo
             .enqueue_comms(
                 Some(item.user_id),
-                channel,
-                comms_type,
+                item.channel,
+                item.comms_type,
                 &item.recipient,
                 item.subject.as_deref(),
                 &item.body,
@@ -144,62 +120,15 @@ impl CommsService {
 
     async fn process_item(&self, item: QueuedComms) {
         let comms_id = item.id;
-        let channel = match item.channel {
-            tranquil_db_traits::CommsChannel::Email => CommsChannel::Email,
-            tranquil_db_traits::CommsChannel::Discord => CommsChannel::Discord,
-            tranquil_db_traits::CommsChannel::Telegram => CommsChannel::Telegram,
-            tranquil_db_traits::CommsChannel::Signal => CommsChannel::Signal,
-        };
-        let comms_item = tranquil_comms::QueuedComms {
-            id: item.id,
-            user_id: item.user_id,
-            channel,
-            comms_type: match item.comms_type {
-                tranquil_db_traits::CommsType::Welcome => CommsType::Welcome,
-                tranquil_db_traits::CommsType::EmailVerification => CommsType::EmailVerification,
-                tranquil_db_traits::CommsType::PasswordReset => CommsType::PasswordReset,
-                tranquil_db_traits::CommsType::EmailUpdate => CommsType::EmailUpdate,
-                tranquil_db_traits::CommsType::AccountDeletion => CommsType::AccountDeletion,
-                tranquil_db_traits::CommsType::AdminEmail => CommsType::AdminEmail,
-                tranquil_db_traits::CommsType::PlcOperation => CommsType::PlcOperation,
-                tranquil_db_traits::CommsType::TwoFactorCode => CommsType::TwoFactorCode,
-                tranquil_db_traits::CommsType::PasskeyRecovery => CommsType::PasskeyRecovery,
-                tranquil_db_traits::CommsType::LegacyLoginAlert => CommsType::LegacyLoginAlert,
-                tranquil_db_traits::CommsType::MigrationVerification => {
-                    CommsType::MigrationVerification
-                }
-                tranquil_db_traits::CommsType::ChannelVerification => {
-                    CommsType::ChannelVerification
-                }
-                tranquil_db_traits::CommsType::ChannelVerified => CommsType::ChannelVerified,
-            },
-            status: match item.status {
-                tranquil_db_traits::CommsStatus::Pending => CommsStatus::Pending,
-                tranquil_db_traits::CommsStatus::Processing => CommsStatus::Processing,
-                tranquil_db_traits::CommsStatus::Sent => CommsStatus::Sent,
-                tranquil_db_traits::CommsStatus::Failed => CommsStatus::Failed,
-            },
-            recipient: item.recipient,
-            subject: item.subject,
-            body: item.body,
-            metadata: item.metadata,
-            attempts: item.attempts,
-            max_attempts: item.max_attempts,
-            last_error: item.last_error,
-            created_at: item.created_at,
-            updated_at: item.updated_at,
-            scheduled_for: item.scheduled_for,
-            processed_at: item.processed_at,
-        };
-        let result = match self.senders.get(&channel) {
-            Some(sender) => sender.send(&comms_item).await,
+        let result = match self.senders.get(&item.channel) {
+            Some(sender) => sender.send(&item).await,
             None => {
                 warn!(
                     comms_id = %comms_id,
-                    channel = ?channel,
+                    channel = ?item.channel,
                     "No sender registered for channel"
                 );
-                Err(SendError::NotConfigured(channel))
+                Err(SendError::NotConfigured(item.channel))
             }
         };
         match result {
@@ -237,15 +166,6 @@ impl CommsService {
 
     async fn mark_failed(&self, id: Uuid, error: &str) -> Result<(), tranquil_db_traits::DbError> {
         self.infra_repo.mark_comms_failed(id, error).await
-    }
-}
-
-pub fn channel_display_name(channel: CommsChannel) -> &'static str {
-    match channel {
-        CommsChannel::Email => "email",
-        CommsChannel::Discord => "Discord",
-        CommsChannel::Telegram => "Telegram",
-        CommsChannel::Signal => "Signal",
     }
 }
 
@@ -289,15 +209,6 @@ fn resolve_recipient(
                 recipient: n.clone(),
             })
             .unwrap_or_else(email_fallback),
-    }
-}
-
-fn channel_from_str(s: &str) -> tranquil_db_traits::CommsChannel {
-    match s {
-        "discord" => tranquil_db_traits::CommsChannel::Discord,
-        "telegram" => tranquil_db_traits::CommsChannel::Telegram,
-        "signal" => tranquil_db_traits::CommsChannel::Signal,
-        _ => tranquil_db_traits::CommsChannel::Email,
     }
 }
 
@@ -453,7 +364,6 @@ pub mod repo {
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
         token: &str,
-        purpose: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
         let prefs = user_repo
@@ -463,18 +373,9 @@ pub mod repo {
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
         let current_email = prefs.email.clone().unwrap_or_default();
 
-        let (subject_template, body_template, comms_type) = match purpose {
-            "email_update" => (
-                strings.email_update_subject,
-                strings.short_token_body,
-                CommsType::EmailUpdate,
-            ),
-            _ => (
-                strings.email_update_subject,
-                strings.short_token_body,
-                CommsType::EmailUpdate,
-            ),
-        };
+        let subject_template = strings.email_update_subject;
+        let body_template = strings.short_token_body;
+        let comms_type = CommsType::EmailUpdate;
 
         let verify_page = format!("https://{}/app/settings", hostname);
         let body = format_message(
@@ -642,13 +543,19 @@ pub mod repo {
         user_repo: &dyn UserRepository,
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
-        channel: &str,
+        channel: tranquil_db_traits::CommsChannel,
         recipient: &str,
         code: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
-        let comms_channel = channel_from_str(channel);
-        let prefs = user_repo.get_comms_prefs(user_id).await.ok().flatten();
+        let comms_channel = channel;
+        let prefs = match user_repo.get_comms_prefs(user_id).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(user_id = %user_id, error = %e, "failed to fetch comms preferences, using defaults");
+                None
+            }
+        };
         let locale = prefs
             .as_ref()
             .and_then(|p| p.preferred_locale.as_deref())
@@ -762,7 +669,7 @@ pub mod repo {
         user_repo: &dyn UserRepository,
         infra_repo: &dyn InfraRepository,
         user_id: Uuid,
-        channel_name: &str,
+        channel: tranquil_db_traits::CommsChannel,
         recipient: &str,
         hostname: &str,
     ) -> Result<Uuid, DbError> {
@@ -771,27 +678,19 @@ pub mod repo {
             .await?
             .ok_or(DbError::NotFound)?;
         let strings = get_strings(prefs.preferred_locale.as_deref().unwrap_or("en"));
-        let display_name = match channel_name {
-            "email" => "Email",
-            "discord" => "Discord",
-            "telegram" => "Telegram",
-            "signal" => "Signal",
-            other => other,
-        };
         let body = format_message(
             strings.channel_verified_body,
             &[
                 ("handle", &prefs.handle),
-                ("channel", display_name),
+                ("channel", channel.display_name()),
                 ("hostname", hostname),
             ],
         );
         let subject = format_message(strings.channel_verified_subject, &[("hostname", hostname)]);
-        let comms_channel = channel_from_str(channel_name);
         infra_repo
             .enqueue_comms(
                 Some(user_id),
-                comms_channel,
+                channel,
                 CommsType::ChannelVerified,
                 recipient,
                 Some(&subject),

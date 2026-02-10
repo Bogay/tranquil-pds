@@ -2,8 +2,8 @@ use crate::api::error::ApiError;
 use crate::state::AppState;
 use crate::sync::firehose::SequencedEvent;
 use crate::sync::frame::{
-    AccountFrame, CommitFrame, ErrorFrameBody, ErrorFrameHeader, FrameHeader, IdentityFrame,
-    InfoFrame, SyncFrame,
+    AccountFrame, CommitFrame, ErrorFrameBody, ErrorFrameHeader, ErrorFrameName, FrameHeader,
+    FrameType, IdentityFrame, InfoFrame, InfoFrameName, SyncFrame,
 };
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
@@ -18,17 +18,86 @@ use tokio::io::AsyncWriteExt;
 use tranquil_db_traits::{AccountStatus, RepoEventType, RepoRepository};
 use tranquil_types::Did;
 
+#[derive(Debug)]
+pub enum SyncFrameError {
+    CarWrite(iroh_car::Error),
+    CarFinalize(iroh_car::Error),
+    IoFlush(std::io::Error),
+    CborSerialize(String),
+    MissingCommitCid,
+    CommitBlockNotFound,
+    RevExtraction,
+    InvalidEvent(String),
+    BlockStore(tranquil_db_traits::DbError),
+    CidParse(cid::Error),
+}
+
+impl std::fmt::Display for SyncFrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CarWrite(e) => write!(f, "CAR block write failed: {}", e),
+            Self::CarFinalize(e) => write!(f, "CAR finalize failed: {}", e),
+            Self::IoFlush(e) => write!(f, "CAR buffer flush failed: {}", e),
+            Self::CborSerialize(e) => write!(f, "CBOR serialization failed: {}", e),
+            Self::MissingCommitCid => write!(f, "missing commit_cid"),
+            Self::CommitBlockNotFound => write!(f, "commit block not found"),
+            Self::RevExtraction => write!(f, "could not extract rev from commit"),
+            Self::InvalidEvent(msg) => write!(f, "invalid event: {}", msg),
+            Self::BlockStore(e) => write!(f, "block store error: {}", e),
+            Self::CidParse(e) => write!(f, "CID parse failed: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for SyncFrameError {}
+
+impl From<serde_ipld_dagcbor::EncodeError<std::collections::TryReserveError>> for SyncFrameError {
+    fn from(e: serde_ipld_dagcbor::EncodeError<std::collections::TryReserveError>) -> Self {
+        Self::CborSerialize(e.to_string())
+    }
+}
+
+impl From<serde_ipld_dagcbor::EncodeError<std::io::Error>> for SyncFrameError {
+    fn from(e: serde_ipld_dagcbor::EncodeError<std::io::Error>) -> Self {
+        Self::CborSerialize(e.to_string())
+    }
+}
+
+impl From<cid::Error> for SyncFrameError {
+    fn from(e: cid::Error) -> Self {
+        Self::CidParse(e)
+    }
+}
+
+impl From<tranquil_db_traits::DbError> for SyncFrameError {
+    fn from(e: tranquil_db_traits::DbError) -> Self {
+        Self::BlockStore(e)
+    }
+}
+
+impl From<jacquard_repo::error::RepoError> for SyncFrameError {
+    fn from(e: jacquard_repo::error::RepoError) -> Self {
+        Self::BlockStore(tranquil_db_traits::DbError::from_query_error(e.to_string()))
+    }
+}
+
 pub struct RepoAccount {
-    pub did: String,
+    pub did: Did,
     pub user_id: uuid::Uuid,
     pub status: AccountStatus,
     pub repo_root_cid: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoAccessLevel {
+    Public,
+    Privileged,
+}
+
 pub enum RepoAvailabilityError {
-    NotFound(String),
-    Takendown(String),
-    Deactivated(String),
+    NotFound(Did),
+    Takendown(Did),
+    Deactivated(Did),
     Internal(String),
 }
 
@@ -64,7 +133,7 @@ pub async fn get_account_with_status(
         };
 
         RepoAccount {
-            did: r.did.to_string(),
+            did: r.did,
             user_id: r.user_id,
             status,
             repo_root_cid: r.repo_root_cid.map(|c| c.to_string()),
@@ -75,26 +144,25 @@ pub async fn get_account_with_status(
 pub async fn assert_repo_availability(
     repo_repo: &dyn RepoRepository,
     did: &Did,
-    is_admin_or_self: bool,
+    access_level: RepoAccessLevel,
 ) -> Result<RepoAccount, RepoAvailabilityError> {
     let account = get_account_with_status(repo_repo, did)
         .await
         .map_err(|e| RepoAvailabilityError::Internal(e.to_string()))?;
 
-    let did_str = did.to_string();
     let account = match account {
         Some(a) => a,
-        None => return Err(RepoAvailabilityError::NotFound(did_str)),
+        None => return Err(RepoAvailabilityError::NotFound(did.clone())),
     };
 
-    if is_admin_or_self {
+    if access_level == RepoAccessLevel::Privileged {
         return Ok(account);
     }
 
     match account.status {
-        AccountStatus::Takendown => return Err(RepoAvailabilityError::Takendown(did_str)),
+        AccountStatus::Takendown => return Err(RepoAvailabilityError::Takendown(did.clone())),
         AccountStatus::Deactivated => {
-            return Err(RepoAvailabilityError::Deactivated(did_str));
+            return Err(RepoAvailabilityError::Deactivated(did.clone()));
         }
         _ => {}
     }
@@ -112,7 +180,7 @@ async fn write_car_blocks(
     commit_cid: Cid,
     commit_bytes: Option<Bytes>,
     other_blocks: BTreeMap<Cid, Bytes>,
-) -> Result<Vec<u8>, anyhow::Error> {
+) -> Result<Vec<u8>, SyncFrameError> {
     let mut buffer = Cursor::new(Vec::new());
     let header = CarHeader::new_v1(vec![commit_cid]);
     let mut writer = CarWriter::new(header, &mut buffer);
@@ -120,22 +188,16 @@ async fn write_car_blocks(
         writer
             .write(*cid, data.as_ref())
             .await
-            .map_err(|e| anyhow::anyhow!("writing block {}: {}", cid, e))?;
+            .map_err(SyncFrameError::CarWrite)?;
     }
     if let Some(data) = commit_bytes {
         writer
             .write(commit_cid, data.as_ref())
             .await
-            .map_err(|e| anyhow::anyhow!("writing commit block: {}", e))?;
+            .map_err(SyncFrameError::CarWrite)?;
     }
-    writer
-        .finish()
-        .await
-        .map_err(|e| anyhow::anyhow!("finalizing CAR: {}", e))?;
-    buffer
-        .flush()
-        .await
-        .map_err(|e| anyhow::anyhow!("flushing CAR buffer: {}", e))?;
+    writer.finish().await.map_err(SyncFrameError::CarFinalize)?;
+    buffer.flush().await.map_err(SyncFrameError::IoFlush)?;
     Ok(buffer.into_inner())
 }
 
@@ -143,16 +205,16 @@ fn format_atproto_time(dt: chrono::DateTime<chrono::Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
-fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error> {
+fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameError> {
     let frame = IdentityFrame {
-        did: event.did.to_string(),
+        did: event.did.clone(),
         handle: event.handle.as_ref().map(|h| h.to_string()),
         seq: event.seq.as_i64(),
         time: format_atproto_time(event.created_at),
     };
     let header = FrameHeader {
         op: 1,
-        t: "#identity".to_string(),
+        t: FrameType::Identity,
     };
     let mut bytes = Vec::with_capacity(256);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
@@ -160,19 +222,17 @@ fn format_identity_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Erro
     Ok(bytes)
 }
 
-fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error> {
+fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, SyncFrameError> {
     let frame = AccountFrame {
-        did: event.did.to_string(),
+        did: event.did.clone(),
         active: event.active.unwrap_or(true),
-        status: event
-            .status
-            .and_then(|s| s.for_firehose().map(String::from)),
+        status: event.status.filter(|s| !s.is_active()),
         seq: event.seq.as_i64(),
         time: format_atproto_time(event.created_at),
     };
     let header = FrameHeader {
         op: 1,
-        t: "#account".to_string(),
+        t: FrameType::Account,
     };
     let mut bytes = Vec::with_capacity(256);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
@@ -192,26 +252,25 @@ fn format_account_event(event: &SequencedEvent) -> Result<Vec<u8>, anyhow::Error
 async fn format_sync_event(
     state: &AppState,
     event: &SequencedEvent,
-) -> Result<Vec<u8>, anyhow::Error> {
+) -> Result<Vec<u8>, SyncFrameError> {
     let commit_cid_str = event
         .commit_cid
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("Sync event missing commit_cid"))?;
+        .ok_or(SyncFrameError::MissingCommitCid)?;
     let commit_cid = Cid::from_str(commit_cid_str)?;
     let commit_bytes = state
         .block_store
         .get(&commit_cid)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("Commit block not found"))?;
+        .ok_or(SyncFrameError::CommitBlockNotFound)?;
     let rev = if let Some(ref stored_rev) = event.rev {
         stored_rev.clone()
     } else {
-        extract_rev_from_commit_bytes(&commit_bytes)
-            .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?
+        extract_rev_from_commit_bytes(&commit_bytes).ok_or(SyncFrameError::RevExtraction)?
     };
     let car_bytes = write_car_blocks(commit_cid, Some(commit_bytes), BTreeMap::new()).await?;
     let frame = SyncFrame {
-        did: event.did.to_string(),
+        did: event.did.clone(),
         rev,
         blocks: car_bytes,
         seq: event.seq.as_i64(),
@@ -219,7 +278,7 @@ async fn format_sync_event(
     };
     let header = FrameHeader {
         op: 1,
-        t: "#sync".to_string(),
+        t: FrameType::Sync,
     };
     let mut bytes = Vec::with_capacity(512);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
@@ -230,7 +289,7 @@ async fn format_sync_event(
 pub async fn format_event_for_sending(
     state: &AppState,
     event: SequencedEvent,
-) -> Result<Vec<u8>, anyhow::Error> {
+) -> Result<Vec<u8>, SyncFrameError> {
     match event.event_type {
         RepoEventType::Identity => return format_identity_event(&event),
         RepoEventType::Account => return format_account_event(&event),
@@ -240,9 +299,12 @@ pub async fn format_event_for_sending(
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
     let prev_cid_link = event.prev_cid.clone();
     let prev_data_cid_link = event.prev_data_cid.clone();
-    let mut frame: CommitFrame = event
-        .try_into()
-        .map_err(|e| anyhow::anyhow!("Invalid event: {}", e))?;
+    let mut frame: CommitFrame =
+        event
+            .try_into()
+            .map_err(|e: crate::sync::frame::CommitFrameError| {
+                SyncFrameError::InvalidEvent(e.to_string())
+            })?;
     if let Some(ref pdc) = prev_data_cid_link
         && let Ok(cid) = Cid::from_str(pdc.as_str())
     {
@@ -287,7 +349,7 @@ pub async fn format_event_for_sending(
     frame.blocks = car_bytes;
     let header = FrameHeader {
         op: 1,
-        t: "#commit".to_string(),
+        t: FrameType::Commit,
     };
     let mut bytes = Vec::with_capacity(frame.blocks.len() + 512);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
@@ -298,7 +360,7 @@ pub async fn format_event_for_sending(
 pub async fn prefetch_blocks_for_events(
     state: &AppState,
     events: &[SequencedEvent],
-) -> Result<HashMap<Cid, Bytes>, anyhow::Error> {
+) -> Result<HashMap<Cid, Bytes>, SyncFrameError> {
     let mut all_cids: Vec<Cid> = events
         .iter()
         .flat_map(|event| {
@@ -332,20 +394,19 @@ pub async fn prefetch_blocks_for_events(
 fn format_sync_event_with_prefetched(
     event: &SequencedEvent,
     prefetched: &HashMap<Cid, Bytes>,
-) -> Result<Vec<u8>, anyhow::Error> {
+) -> Result<Vec<u8>, SyncFrameError> {
     let commit_cid_str = event
         .commit_cid
         .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("Sync event missing commit_cid"))?;
+        .ok_or(SyncFrameError::MissingCommitCid)?;
     let commit_cid = Cid::from_str(commit_cid_str)?;
     let commit_bytes = prefetched
         .get(&commit_cid)
-        .ok_or_else(|| anyhow::anyhow!("Commit block not found in prefetched"))?;
+        .ok_or(SyncFrameError::CommitBlockNotFound)?;
     let rev = if let Some(ref stored_rev) = event.rev {
         stored_rev.clone()
     } else {
-        extract_rev_from_commit_bytes(commit_bytes)
-            .ok_or_else(|| anyhow::anyhow!("Could not extract rev from commit"))?
+        extract_rev_from_commit_bytes(commit_bytes).ok_or(SyncFrameError::RevExtraction)?
     };
     let car_bytes = futures::executor::block_on(write_car_blocks(
         commit_cid,
@@ -353,7 +414,7 @@ fn format_sync_event_with_prefetched(
         BTreeMap::new(),
     ))?;
     let frame = SyncFrame {
-        did: event.did.to_string(),
+        did: event.did.clone(),
         rev,
         blocks: car_bytes,
         seq: event.seq.as_i64(),
@@ -361,7 +422,7 @@ fn format_sync_event_with_prefetched(
     };
     let header = FrameHeader {
         op: 1,
-        t: "#sync".to_string(),
+        t: FrameType::Sync,
     };
     let mut bytes = Vec::new();
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
@@ -372,7 +433,7 @@ fn format_sync_event_with_prefetched(
 pub async fn format_event_with_prefetched_blocks(
     event: SequencedEvent,
     prefetched: &HashMap<Cid, Bytes>,
-) -> Result<Vec<u8>, anyhow::Error> {
+) -> Result<Vec<u8>, SyncFrameError> {
     match event.event_type {
         RepoEventType::Identity => return format_identity_event(&event),
         RepoEventType::Account => return format_account_event(&event),
@@ -382,9 +443,12 @@ pub async fn format_event_with_prefetched_blocks(
     let block_cids_str = event.blocks_cids.clone().unwrap_or_default();
     let prev_cid_link = event.prev_cid.clone();
     let prev_data_cid_link = event.prev_data_cid.clone();
-    let mut frame: CommitFrame = event
-        .try_into()
-        .map_err(|e| anyhow::anyhow!("Invalid event: {}", e))?;
+    let mut frame: CommitFrame =
+        event
+            .try_into()
+            .map_err(|e: crate::sync::frame::CommitFrameError| {
+                SyncFrameError::InvalidEvent(e.to_string())
+            })?;
     if let Some(ref pdc) = prev_data_cid_link
         && let Ok(cid) = Cid::from_str(pdc.as_str())
     {
@@ -427,7 +491,7 @@ pub async fn format_event_with_prefetched_blocks(
     frame.blocks = car_bytes;
     let header = FrameHeader {
         op: 1,
-        t: "#commit".to_string(),
+        t: FrameType::Commit,
     };
     let mut bytes = Vec::with_capacity(frame.blocks.len() + 512);
     serde_ipld_dagcbor::to_writer(&mut bytes, &header)?;
@@ -435,13 +499,16 @@ pub async fn format_event_with_prefetched_blocks(
     Ok(bytes)
 }
 
-pub fn format_info_frame(name: &str, message: Option<&str>) -> Result<Vec<u8>, anyhow::Error> {
+pub fn format_info_frame(
+    name: InfoFrameName,
+    message: Option<&str>,
+) -> Result<Vec<u8>, SyncFrameError> {
     let header = FrameHeader {
         op: 1,
-        t: "#info".to_string(),
+        t: FrameType::Info,
     };
     let frame = InfoFrame {
-        name: name.to_string(),
+        name,
         message: message.map(String::from),
     };
     let mut bytes = Vec::with_capacity(128);
@@ -450,10 +517,13 @@ pub fn format_info_frame(name: &str, message: Option<&str>) -> Result<Vec<u8>, a
     Ok(bytes)
 }
 
-pub fn format_error_frame(error: &str, message: Option<&str>) -> Result<Vec<u8>, anyhow::Error> {
+pub fn format_error_frame(
+    error: ErrorFrameName,
+    message: Option<&str>,
+) -> Result<Vec<u8>, SyncFrameError> {
     let header = ErrorFrameHeader { op: -1 };
     let frame = ErrorFrameBody {
-        error: error.to_string(),
+        error,
         message: message.map(String::from),
     };
     let mut bytes = Vec::with_capacity(128);

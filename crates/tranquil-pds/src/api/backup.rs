@@ -4,6 +4,7 @@ use crate::auth::{Active, Auth};
 use crate::scheduled::generate_full_backup;
 use crate::state::AppState;
 use crate::storage::{BackupStorage, backup_retention_count};
+use anyhow::Context;
 use axum::{
     Json,
     extract::{Query, State},
@@ -213,7 +214,7 @@ pub async fn create_backup(
     };
 
     let block_count = crate::scheduled::count_car_blocks(&car_bytes);
-    let size_bytes = car_bytes.len() as i64;
+    let size_bytes = i64::try_from(car_bytes.len()).unwrap_or(i64::MAX);
 
     let storage_key = match backup_storage
         .put_backup(&user.did, &repo_rev, &car_bytes)
@@ -292,11 +293,11 @@ async fn cleanup_old_backups(
     backup_storage: &dyn BackupStorage,
     user_id: uuid::Uuid,
     retention_count: u32,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let old_backups: Vec<OldBackupInfo> = backup_repo
-        .get_old_backups(user_id, retention_count as i64)
+        .get_old_backups(user_id, i64::from(retention_count))
         .await
-        .map_err(|e| format!("DB error fetching old backups: {}", e))?;
+        .context("DB error fetching old backups")?;
 
     for backup in old_backups {
         if let Err(e) = backup_storage.delete_backup(&backup.storage_key).await {
@@ -311,7 +312,7 @@ async fn cleanup_old_backups(
         backup_repo
             .delete_backup(backup.id)
             .await
-            .map_err(|e| format!("Failed to delete old backup record: {}", e))?;
+            .context("Failed to delete old backup record")?;
     }
 
     Ok(())

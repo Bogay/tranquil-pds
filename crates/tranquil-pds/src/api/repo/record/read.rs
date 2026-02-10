@@ -195,7 +195,7 @@ pub async fn list_records(
         }
     };
     let limit = input.limit.unwrap_or(50).clamp(1, 100);
-    let limit_i64 = limit as i64;
+    let limit_i64 = i64::from(limit);
     let cursor_rkey = input
         .cursor
         .as_ref()

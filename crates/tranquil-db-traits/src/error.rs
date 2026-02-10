@@ -26,6 +26,9 @@ pub enum DbError {
     #[error("Resource busy, try again")]
     LockContention,
 
+    #[error("Corrupt data in column: {0}")]
+    CorruptData(&'static str),
+
     #[error("Other database error: {0}")]
     Other(String),
 }

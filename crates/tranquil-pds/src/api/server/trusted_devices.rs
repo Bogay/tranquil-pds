@@ -103,7 +103,7 @@ pub async fn list_trusted_devices(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RevokeTrustedDeviceInput {
-    pub device_id: String,
+    pub device_id: DeviceId,
 }
 
 pub async fn revoke_trusted_device(
@@ -111,10 +111,9 @@ pub async fn revoke_trusted_device(
     auth: Auth<Active>,
     Json(input): Json<RevokeTrustedDeviceInput>,
 ) -> Result<Response, ApiError> {
-    let device_id = DeviceId::from(input.device_id.clone());
     match state
         .oauth_repo
-        .device_belongs_to_user(&device_id, &auth.did)
+        .device_belongs_to_user(&input.device_id, &auth.did)
         .await
     {
         Ok(true) => {}
@@ -129,7 +128,7 @@ pub async fn revoke_trusted_device(
 
     state
         .oauth_repo
-        .revoke_device_trust(&device_id)
+        .revoke_device_trust(&input.device_id)
         .await
         .log_db_err("revoking device trust")?;
 
@@ -140,7 +139,7 @@ pub async fn revoke_trusted_device(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateTrustedDeviceInput {
-    pub device_id: String,
+    pub device_id: DeviceId,
     pub friendly_name: Option<String>,
 }
 
@@ -149,10 +148,9 @@ pub async fn update_trusted_device(
     auth: Auth<Active>,
     Json(input): Json<UpdateTrustedDeviceInput>,
 ) -> Result<Response, ApiError> {
-    let device_id = DeviceId::from(input.device_id.clone());
     match state
         .oauth_repo
-        .device_belongs_to_user(&device_id, &auth.did)
+        .device_belongs_to_user(&input.device_id, &auth.did)
         .await
     {
         Ok(true) => {}
@@ -167,7 +165,7 @@ pub async fn update_trusted_device(
 
     state
         .oauth_repo
-        .update_device_friendly_name(&device_id, input.friendly_name.as_deref())
+        .update_device_friendly_name(&input.device_id, input.friendly_name.as_deref())
         .await
         .log_db_err("updating device friendly name")?;
 
@@ -177,14 +175,10 @@ pub async fn update_trusted_device(
 
 pub async fn get_device_trust_state(
     oauth_repo: &dyn OAuthRepository,
-    device_id: &str,
+    device_id: &DeviceId,
     did: &tranquil_types::Did,
 ) -> DeviceTrustState {
-    let device_id_typed = DeviceId::from(device_id.to_string());
-    match oauth_repo
-        .get_device_trust_info(&device_id_typed, did)
-        .await
-    {
+    match oauth_repo.get_device_trust_info(device_id, did).await {
         Ok(Some(info)) => DeviceTrustState::from_timestamps(info.trusted_at, info.trusted_until),
         _ => DeviceTrustState::Untrusted,
     }
@@ -192,7 +186,7 @@ pub async fn get_device_trust_state(
 
 pub async fn is_device_trusted(
     oauth_repo: &dyn OAuthRepository,
-    device_id: &str,
+    device_id: &DeviceId,
     did: &tranquil_types::Did,
 ) -> bool {
     get_device_trust_state(oauth_repo, device_id, did)
@@ -202,23 +196,19 @@ pub async fn is_device_trusted(
 
 pub async fn trust_device(
     oauth_repo: &dyn OAuthRepository,
-    device_id: &str,
+    device_id: &DeviceId,
 ) -> Result<(), tranquil_db_traits::DbError> {
     let now = Utc::now();
     let trusted_until = now + Duration::days(TRUST_DURATION_DAYS);
-    let device_id_typed = DeviceId::from(device_id.to_string());
-    oauth_repo
-        .trust_device(&device_id_typed, now, trusted_until)
-        .await
+    oauth_repo.trust_device(device_id, now, trusted_until).await
 }
 
 pub async fn extend_device_trust(
     oauth_repo: &dyn OAuthRepository,
-    device_id: &str,
+    device_id: &DeviceId,
 ) -> Result<(), tranquil_db_traits::DbError> {
     let trusted_until = Utc::now() + Duration::days(TRUST_DURATION_DAYS);
-    let device_id_typed = DeviceId::from(device_id.to_string());
     oauth_repo
-        .extend_device_trust(&device_id_typed, trusted_until)
+        .extend_device_trust(device_id, trusted_until)
         .await
 }

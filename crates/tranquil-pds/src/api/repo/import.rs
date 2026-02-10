@@ -92,8 +92,12 @@ pub async fn import_repo(
             "Root block not found in CAR file".into(),
         ));
     };
-    let commit_did = match jacquard_repo::commit::Commit::from_cbor(root_block) {
-        Ok(commit) => commit.did().to_string(),
+    let commit_did: Did = match jacquard_repo::commit::Commit::from_cbor(root_block) {
+        Ok(commit) => commit
+            .did()
+            .as_str()
+            .parse()
+            .map_err(|_| ApiError::InvalidRequest("Commit contains invalid DID".into()))?,
         Err(e) => {
             return Err(ApiError::InvalidRequest(format!("Invalid commit: {}", e)));
         }
@@ -104,9 +108,7 @@ pub async fn import_repo(
             commit_did, did
         )));
     }
-    let skip_verification = std::env::var("SKIP_IMPORT_VERIFICATION")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+    let skip_verification = crate::util::parse_env_bool("SKIP_IMPORT_VERIFICATION");
     let is_migration = user.deactivated_at.is_some();
     if skip_verification {
         warn!("Skipping all CAR verification for import (SKIP_IMPORT_VERIFICATION=true)");
@@ -221,10 +223,14 @@ pub async fn import_repo(
                 .flat_map(|record| {
                     let record_uri =
                         AtUri::from_parts(did.as_str(), &record.collection, &record.rkey);
-                    record.blob_refs.iter().map(move |blob_ref| {
-                        (record_uri.clone(), unsafe {
-                            CidLink::new_unchecked(blob_ref.cid.clone())
-                        })
+                    record.blob_refs.iter().filter_map(move |blob_ref| {
+                        match CidLink::new(&blob_ref.cid) {
+                            Ok(cid_link) => Some((record_uri.clone(), cid_link)),
+                            Err(_) => {
+                                tracing::warn!(cid = %blob_ref.cid, "skipping unparseable blob CID reference during import");
+                                None
+                            }
+                        }
                     })
                 })
                 .collect();
@@ -289,7 +295,7 @@ pub async fn import_repo(
                     error!("Failed to store new commit block: {:?}", e);
                     ApiError::InternalError(None)
                 })?;
-            let new_root_cid_link = unsafe { CidLink::new_unchecked(new_root_cid.to_string()) };
+            let new_root_cid_link = CidLink::from(&new_root_cid);
             state
                 .repo_repo
                 .update_repo_root(user_id, &new_root_cid_link, &new_rev_str)
@@ -313,7 +319,8 @@ pub async fn import_repo(
                 "Created new commit for imported repo: cid={}, rev={}",
                 new_root_str, new_rev_str
             );
-            if !is_migration && let Err(e) = sequence_import_event(&state, did, &new_root_str).await
+            if !is_migration
+                && let Err(e) = sequence_import_event(&state, did, &new_root_cid_link).await
             {
                 warn!("Failed to sequence import event: {:?}", e);
             }
@@ -378,12 +385,12 @@ pub async fn import_repo(
 async fn sequence_import_event(
     state: &AppState,
     did: &Did,
-    commit_cid: &str,
+    commit_cid: &CidLink,
 ) -> Result<(), tranquil_db::DbError> {
     let data = tranquil_db::CommitEventData {
         did: did.clone(),
         event_type: tranquil_db::RepoEventType::Commit,
-        commit_cid: Some(unsafe { CidLink::new_unchecked(commit_cid) }),
+        commit_cid: Some(commit_cid.clone()),
         prev_cid: None,
         ops: Some(serde_json::json!([])),
         blobs: Some(vec![]),

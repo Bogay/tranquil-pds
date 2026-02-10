@@ -677,6 +677,19 @@ async fn cross_node_rate_limit_via_login() {
     let nodes = common::cluster().await;
     let client = common::client();
 
+    let now_ms = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
+    let login_window_ms: u64 = 60_000;
+    let remaining = login_window_ms - (now_ms % login_window_ms);
+    if remaining < 35_000 {
+        tokio::time::sleep(Duration::from_millis(remaining + 100)).await;
+    }
+
     let uuid_bytes = uuid::Uuid::new_v4();
     let b = uuid_bytes.as_bytes();
     let unique_ip = format!("10.{}.{}.{}", b[0], b[1], b[2]);

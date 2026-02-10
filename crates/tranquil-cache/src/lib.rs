@@ -48,7 +48,7 @@ mod valkey {
                 .arg(key)
                 .arg(value)
                 .arg("PX")
-                .arg(ttl.as_millis().min(i64::MAX as u128) as i64)
+                .arg(i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX))
                 .query_async::<()>(&mut conn)
                 .await
                 .map_err(|e| CacheError::Connection(e.to_string()))
@@ -94,7 +94,7 @@ mod valkey {
         async fn check_rate_limit(&self, key: &str, limit: u32, window_ms: u64) -> bool {
             let mut conn = self.conn.clone();
             let full_key = format!("rl:{}", key);
-            let window_secs = window_ms.div_ceil(1000).max(1) as i64;
+            let window_secs = i64::try_from(window_ms.div_ceil(1000).max(1)).unwrap_or(i64::MAX);
             let result: Result<i64, _> = redis::Script::new(
                 r"local c = redis.call('INCR', KEYS[1])
 if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
@@ -106,7 +106,7 @@ return c",
             .invoke_async(&mut conn)
             .await;
             match result {
-                Ok(count) => count <= limit as i64,
+                Ok(count) => count <= i64::from(limit),
                 Err(e) => {
                     tracing::warn!(error = %e, "redis rate limit script failed, allowing request");
                     true

@@ -266,7 +266,7 @@ pub async fn create_session(
         refresh_jti: refresh_meta.jti.clone(),
         access_expires_at: access_meta.expires_at,
         refresh_expires_at: refresh_meta.expires_at,
-        login_type: tranquil_db_traits::LoginType::from(is_legacy_login),
+        login_type: tranquil_db_traits::LoginType::from_legacy_flag(is_legacy_login),
         mfa_verified: false,
         scope: app_password_scopes.clone(),
         controller_did: app_password_controller.clone(),
@@ -338,12 +338,6 @@ pub async fn get_session(
     );
     match db_result {
         Ok(Some(row)) => {
-            let preferred_channel = match row.preferred_comms_channel {
-                tranquil_db_traits::CommsChannel::Email => "email",
-                tranquil_db_traits::CommsChannel::Discord => "discord",
-                tranquil_db_traits::CommsChannel::Telegram => "telegram",
-                tranquil_db_traits::CommsChannel::Signal => "signal",
-            };
             let preferred_channel_verified = row
                 .channel_verification
                 .is_verified(row.preferred_comms_channel);
@@ -365,7 +359,7 @@ pub async fn get_session(
                 "handle": handle,
                 "did": &auth.did,
                 "active": account_state.is_active(),
-                "preferredChannel": preferred_channel,
+                "preferredChannel": row.preferred_comms_channel.as_str(),
                 "preferredChannelVerified": preferred_channel_verified,
                 "preferredLocale": row.preferred_locale,
                 "isAdmin": row.is_admin
@@ -404,7 +398,7 @@ pub async fn delete_session(
 ) -> Result<Response, ApiError> {
     let extracted = crate::auth::extract_auth_token_from_header(crate::util::get_header_str(
         &headers,
-        "Authorization",
+        http::header::AUTHORIZATION,
     ))
     .ok_or(ApiError::AuthenticationRequired)?;
     let jti = crate::auth::get_jti_from_token(&extracted.token)
@@ -413,7 +407,7 @@ pub async fn delete_session(
     match state.session_repo.delete_session_by_access_jti(&jti).await {
         Ok(rows) if rows > 0 => {
             if let Some(did) = did {
-                let session_cache_key = format!("auth:session:{}:{}", did, jti);
+                let session_cache_key = crate::cache_keys::session_key(&did, &jti);
                 let _ = state.cache.delete(&session_cache_key).await;
             }
             Ok(EmptyResponse::ok().into_response())
@@ -430,7 +424,7 @@ pub async fn refresh_session(
 ) -> Response {
     let extracted = match crate::auth::extract_auth_token_from_header(crate::util::get_header_str(
         &headers,
-        "Authorization",
+        http::header::AUTHORIZATION,
     )) {
         Some(t) => t,
         None => return ApiError::AuthenticationRequired.into_response(),
@@ -548,12 +542,6 @@ pub async fn refresh_session(
     );
     match db_result {
         Ok(Some(u)) => {
-            let preferred_channel = match u.preferred_comms_channel {
-                tranquil_db_traits::CommsChannel::Email => "email",
-                tranquil_db_traits::CommsChannel::Discord => "discord",
-                tranquil_db_traits::CommsChannel::Telegram => "telegram",
-                tranquil_db_traits::CommsChannel::Signal => "signal",
-            };
             let preferred_channel_verified = u
                 .channel_verification
                 .is_verified(u.preferred_comms_channel);
@@ -568,7 +556,7 @@ pub async fn refresh_session(
                 "did": session_row.did,
                 "email": u.email,
                 "emailConfirmed": u.channel_verification.email,
-                "preferredChannel": preferred_channel,
+                "preferredChannel": u.preferred_comms_channel.as_str(),
                 "preferredChannelVerified": preferred_channel_verified,
                 "preferredLocale": u.preferred_locale,
                 "isAdmin": u.is_admin,
@@ -609,7 +597,7 @@ pub struct ConfirmSignupOutput {
     pub did: Did,
     pub email: Option<String>,
     pub email_verified: bool,
-    pub preferred_channel: String,
+    pub preferred_channel: tranquil_db_traits::CommsChannel,
     pub preferred_channel_verified: bool,
 }
 
@@ -631,29 +619,26 @@ pub async fn confirm_signup(
         }
     };
 
-    let (channel_str, identifier) = match row.channel {
-        tranquil_db_traits::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
+    let identifier = match row.channel {
+        tranquil_db_traits::CommsChannel::Email => row.email.clone().unwrap_or_default(),
         tranquil_db_traits::CommsChannel::Discord => {
-            ("discord", row.discord_username.clone().unwrap_or_default())
+            row.discord_username.clone().unwrap_or_default()
         }
-        tranquil_db_traits::CommsChannel::Telegram => (
-            "telegram",
-            row.telegram_username.clone().unwrap_or_default(),
-        ),
-        tranquil_db_traits::CommsChannel::Signal => {
-            ("signal", row.signal_username.clone().unwrap_or_default())
+        tranquil_db_traits::CommsChannel::Telegram => {
+            row.telegram_username.clone().unwrap_or_default()
         }
+        tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
     };
 
     let normalized_token =
         crate::auth::verification_token::normalize_token_input(&input.verification_code);
     match crate::auth::verification_token::verify_signup_token(
         &normalized_token,
-        channel_str,
+        row.channel,
         &identifier,
     ) {
         Ok(token_data) => {
-            if token_data.did != input.did.as_str() {
+            if token_data.did != input.did {
                 warn!(
                     "Token DID mismatch for confirm_signup: expected {}, got {}",
                     input.did, token_data.did
@@ -733,21 +718,14 @@ pub async fn confirm_signup(
     {
         warn!("Failed to enqueue welcome notification: {:?}", e);
     }
-    let email_verified = matches!(row.channel, tranquil_db_traits::CommsChannel::Email);
-    let preferred_channel = match row.channel {
-        tranquil_db_traits::CommsChannel::Email => "email",
-        tranquil_db_traits::CommsChannel::Discord => "discord",
-        tranquil_db_traits::CommsChannel::Telegram => "telegram",
-        tranquil_db_traits::CommsChannel::Signal => "signal",
-    };
     Json(ConfirmSignupOutput {
         access_jwt: access_meta.token,
         refresh_jwt: refresh_meta.token,
         handle: row.handle,
         did: row.did,
         email: row.email,
-        email_verified,
-        preferred_channel: preferred_channel.to_string(),
+        email_verified: matches!(row.channel, tranquil_db_traits::CommsChannel::Email),
+        preferred_channel: row.channel,
         preferred_channel_verified: true,
     })
     .into_response()
@@ -783,22 +761,19 @@ pub async fn resend_verification(
         return ApiError::InvalidRequest("Account is already verified".into()).into_response();
     }
 
-    let (channel_str, recipient) = match row.channel {
-        tranquil_db_traits::CommsChannel::Email => ("email", row.email.clone().unwrap_or_default()),
+    let recipient = match row.channel {
+        tranquil_db_traits::CommsChannel::Email => row.email.clone().unwrap_or_default(),
         tranquil_db_traits::CommsChannel::Discord => {
-            ("discord", row.discord_username.clone().unwrap_or_default())
+            row.discord_username.clone().unwrap_or_default()
         }
-        tranquil_db_traits::CommsChannel::Telegram => (
-            "telegram",
-            row.telegram_username.clone().unwrap_or_default(),
-        ),
-        tranquil_db_traits::CommsChannel::Signal => {
-            ("signal", row.signal_username.clone().unwrap_or_default())
+        tranquil_db_traits::CommsChannel::Telegram => {
+            row.telegram_username.clone().unwrap_or_default()
         }
+        tranquil_db_traits::CommsChannel::Signal => row.signal_username.clone().unwrap_or_default(),
     };
 
     let verification_token =
-        crate::auth::verification_token::generate_signup_token(&input.did, channel_str, &recipient);
+        crate::auth::verification_token::generate_signup_token(&input.did, row.channel, &recipient);
     let formatted_token =
         crate::auth::verification_token::format_token_for_display(&verification_token);
 
@@ -807,7 +782,7 @@ pub async fn resend_verification(
         state.user_repo.as_ref(),
         state.infra_repo.as_ref(),
         row.id,
-        channel_str,
+        row.channel,
         &recipient,
         &formatted_token,
         hostname,
@@ -820,10 +795,17 @@ pub async fn resend_verification(
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionType {
+    Legacy,
+    OAuth,
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: String,
-    pub session_type: String,
+    pub session_type: SessionType,
     pub client_name: Option<String>,
     pub created_at: String,
     pub expires_at: String,
@@ -861,7 +843,7 @@ pub async fn list_sessions(
 
     let jwt_sessions = jwt_rows.into_iter().map(|row| SessionInfo {
         id: format!("jwt:{}", row.id),
-        session_type: "legacy".to_string(),
+        session_type: SessionType::Legacy,
         client_name: None,
         created_at: row.created_at.to_rfc3339(),
         expires_at: row.refresh_expires_at.to_rfc3339(),
@@ -874,7 +856,7 @@ pub async fn list_sessions(
         let is_current_oauth = is_oauth && current_jti.as_deref() == Some(row.token_id.as_str());
         SessionInfo {
             id: format!("oauth:{}", row.id),
-            session_type: "oauth".to_string(),
+            session_type: SessionType::OAuth,
             client_name: Some(client_name),
             created_at: row.created_at.to_rfc3339(),
             expires_at: row.expires_at.to_rfc3339(),
@@ -925,7 +907,7 @@ pub async fn revoke_session(
             .delete_session_by_id(session_id)
             .await
             .log_db_err("deleting session")?;
-        let cache_key = format!("auth:session:{}:{}", &auth.did, access_jti);
+        let cache_key = crate::cache_keys::session_key(&auth.did, &access_jti);
         if let Err(e) = state.cache.delete(&cache_key).await {
             warn!("Failed to invalidate session cache: {:?}", e);
         }

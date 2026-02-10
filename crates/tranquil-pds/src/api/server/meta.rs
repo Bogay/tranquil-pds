@@ -3,16 +3,17 @@ use crate::util::{discord_app_id, discord_bot_username, pds_hostname, telegram_b
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde_json::json;
 
-fn get_available_comms_channels() -> Vec<&'static str> {
-    let mut channels = vec!["email"];
+fn get_available_comms_channels() -> Vec<tranquil_db_traits::CommsChannel> {
+    use tranquil_db_traits::CommsChannel;
+    let mut channels = vec![CommsChannel::Email];
     if std::env::var("DISCORD_BOT_TOKEN").is_ok() {
-        channels.push("discord");
+        channels.push(CommsChannel::Discord);
     }
     if std::env::var("TELEGRAM_BOT_TOKEN").is_ok() {
-        channels.push("telegram");
+        channels.push(CommsChannel::Telegram);
     }
     if std::env::var("SIGNAL_CLI_PATH").is_ok() && std::env::var("SIGNAL_SENDER_NUMBER").is_ok() {
-        channels.push("signal");
+        channels.push(CommsChannel::Signal);
     }
     channels
 }
@@ -35,9 +36,7 @@ pub async fn describe_server() -> impl IntoResponse {
     let domains_str =
         std::env::var("AVAILABLE_USER_DOMAINS").unwrap_or_else(|_| pds_hostname.to_string());
     let domains: Vec<&str> = domains_str.split(',').map(|s| s.trim()).collect();
-    let invite_code_required = std::env::var("INVITE_CODE_REQUIRED")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false);
+    let invite_code_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
     let privacy_policy = std::env::var("PRIVACY_POLICY_URL").ok();
     let terms_of_service = std::env::var("TERMS_OF_SERVICE_URL").ok();
     let contact_email = std::env::var("CONTACT_EMAIL").ok();

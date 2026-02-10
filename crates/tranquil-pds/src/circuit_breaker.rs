@@ -1,3 +1,4 @@
+use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
@@ -24,15 +25,15 @@ pub struct CircuitBreaker {
 impl CircuitBreaker {
     pub fn new(
         name: &str,
-        failure_threshold: u32,
-        success_threshold: u32,
-        timeout_secs: u64,
+        failure_threshold: NonZeroU32,
+        success_threshold: NonZeroU32,
+        timeout_secs: NonZeroU64,
     ) -> Self {
         Self {
             name: name.to_string(),
-            failure_threshold,
-            success_threshold,
-            timeout: Duration::from_secs(timeout_secs),
+            failure_threshold: failure_threshold.get(),
+            success_threshold: success_threshold.get(),
+            timeout: Duration::from_secs(timeout_secs.get()),
             state: Arc::new(RwLock::new(CircuitState::Closed)),
             failure_count: AtomicU32::new(0),
             success_count: AtomicU32::new(0),
@@ -49,10 +50,10 @@ impl CircuitBreaker {
                 let last_failure = self.last_failure_time.load(Ordering::SeqCst);
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs();
 
-                if now - last_failure >= self.timeout.as_secs() {
+                if now.saturating_sub(last_failure) >= self.timeout.as_secs() {
                     drop(state);
                     let mut state = self.state.write().await;
                     if *state == CircuitState::Open {
@@ -100,7 +101,7 @@ impl CircuitBreaker {
                     *state = CircuitState::Open;
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_secs();
                     self.last_failure_time.store(now, Ordering::SeqCst);
                     tracing::warn!(
@@ -150,8 +151,18 @@ impl Default for CircuitBreakers {
 impl CircuitBreakers {
     pub fn new() -> Self {
         Self {
-            plc_directory: Arc::new(CircuitBreaker::new("plc_directory", 5, 3, 60)),
-            relay_notification: Arc::new(CircuitBreaker::new("relay_notification", 10, 5, 30)),
+            plc_directory: Arc::new(CircuitBreaker::new(
+                "plc_directory",
+                const { NonZeroU32::new(5).unwrap() },
+                const { NonZeroU32::new(3).unwrap() },
+                const { NonZeroU64::new(60).unwrap() },
+            )),
+            relay_notification: Arc::new(CircuitBreaker::new(
+                "relay_notification",
+                const { NonZeroU32::new(10).unwrap() },
+                const { NonZeroU32::new(5).unwrap() },
+                const { NonZeroU64::new(30).unwrap() },
+            )),
         }
     }
 }
@@ -223,16 +234,21 @@ impl<E: std::error::Error + 'static> std::error::Error for CircuitBreakerError<E
 mod tests {
     use super::*;
 
+    const TEST_FAILURE: NonZeroU32 = const { NonZeroU32::new(3).unwrap() };
+    const TEST_SUCCESS: NonZeroU32 = const { NonZeroU32::new(2).unwrap() };
+    const TEST_TIMEOUT: NonZeroU64 = const { NonZeroU64::new(10).unwrap() };
+    const TEST_ZERO_TIMEOUT: NonZeroU64 = const { NonZeroU64::new(1).unwrap() };
+
     #[tokio::test]
     async fn test_circuit_breaker_starts_closed() {
-        let cb = CircuitBreaker::new("test", 3, 2, 10);
+        let cb = CircuitBreaker::new("test", TEST_FAILURE, TEST_SUCCESS, TEST_TIMEOUT);
         assert_eq!(cb.state().await, CircuitState::Closed);
         assert!(cb.can_execute().await);
     }
 
     #[tokio::test]
     async fn test_circuit_breaker_opens_after_failures() {
-        let cb = CircuitBreaker::new("test", 3, 2, 10);
+        let cb = CircuitBreaker::new("test", TEST_FAILURE, TEST_SUCCESS, TEST_TIMEOUT);
 
         cb.record_failure().await;
         assert_eq!(cb.state().await, CircuitState::Closed);
@@ -247,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_circuit_breaker_success_resets_failures() {
-        let cb = CircuitBreaker::new("test", 3, 2, 10);
+        let cb = CircuitBreaker::new("test", TEST_FAILURE, TEST_SUCCESS, TEST_TIMEOUT);
 
         cb.record_failure().await;
         cb.record_failure().await;
@@ -263,12 +279,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_circuit_breaker_half_open_closes_after_successes() {
-        let cb = CircuitBreaker::new("test", 3, 2, 0);
+        let cb = CircuitBreaker::new("test", TEST_FAILURE, TEST_SUCCESS, TEST_ZERO_TIMEOUT);
 
         futures::future::join_all((0..3).map(|_| cb.record_failure())).await;
         assert_eq!(cb.state().await, CircuitState::Open);
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1100)).await;
         assert!(cb.can_execute().await);
         assert_eq!(cb.state().await, CircuitState::HalfOpen);
 
@@ -281,11 +297,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_circuit_breaker_half_open_reopens_on_failure() {
-        let cb = CircuitBreaker::new("test", 3, 2, 0);
+        let cb = CircuitBreaker::new("test", TEST_FAILURE, TEST_SUCCESS, TEST_ZERO_TIMEOUT);
 
         futures::future::join_all((0..3).map(|_| cb.record_failure())).await;
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1100)).await;
         cb.can_execute().await;
 
         cb.record_failure().await;
@@ -294,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_circuit_breaker_helper() {
-        let cb = CircuitBreaker::new("test", 3, 2, 10);
+        let cb = CircuitBreaker::new("test", TEST_FAILURE, TEST_SUCCESS, TEST_TIMEOUT);
 
         let result: Result<i32, CircuitBreakerError<std::io::Error>> =
             with_circuit_breaker(&cb, || async { Ok(42) }).await;

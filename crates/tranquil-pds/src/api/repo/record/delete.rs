@@ -1,6 +1,6 @@
 use crate::api::error::ApiError;
 use crate::api::repo::record::utils::{
-    CommitParams, RecordOp, commit_and_log, get_current_root_cid,
+    CommitError, CommitParams, RecordOp, commit_and_log, get_current_root_cid,
 };
 use crate::api::repo::record::write::{CommitInfo, prepare_repo_write};
 use crate::auth::{Active, Auth, VerifyScope};
@@ -186,10 +186,7 @@ pub async fn delete_record(
     .await
     {
         Ok(res) => res,
-        Err(e) if e.contains("ConcurrentModification") => {
-            return Ok(ApiError::InvalidSwap(Some("Repo has been modified".into())).into_response());
-        }
-        Err(e) => return Ok(ApiError::InternalError(Some(e)).into_response()),
+        Err(e) => return Ok(ApiError::from(e).into_response()),
     };
 
     if let Some(ref controller) = controller_did {
@@ -241,28 +238,30 @@ pub async fn delete_record_internal(
     user_id: Uuid,
     collection: &Nsid,
     rkey: &Rkey,
-) -> Result<(), String> {
+) -> Result<(), CommitError> {
     let _write_lock = state.repo_write_locks.lock(user_id).await;
 
     let root_cid_str = state
         .repo_repo
         .get_repo_root_cid_by_user_id(user_id)
         .await
-        .map_err(|e| format!("DB error: {}", e))?
-        .ok_or_else(|| "Repo root not found".to_string())?;
+        .map_err(|e| CommitError::DatabaseError(e.to_string()))?
+        .ok_or(CommitError::RepoNotFound)?;
 
     let current_root_cid =
-        Cid::from_str(root_cid_str.as_str()).map_err(|_| "Invalid repo root CID".to_string())?;
+        Cid::from_str(root_cid_str.as_str()).map_err(|e| CommitError::InvalidCid(e.to_string()))?;
 
     let tracking_store = TrackingBlockStore::new(state.block_store.clone());
     let commit_bytes = tracking_store
         .get(&current_root_cid)
         .await
-        .map_err(|e| format!("Failed to fetch commit: {:?}", e))?
-        .ok_or_else(|| "Commit block not found".to_string())?;
+        .map_err(|e| CommitError::BlockStoreFailed(format!("{:?}", e)))?
+        .ok_or(CommitError::BlockStoreFailed(
+            "Commit block not found".into(),
+        ))?;
 
-    let commit =
-        Commit::from_cbor(&commit_bytes).map_err(|e| format!("Failed to parse commit: {:?}", e))?;
+    let commit = Commit::from_cbor(&commit_bytes)
+        .map_err(|e| CommitError::CommitParseFailed(format!("{:?}", e)))?;
 
     let mst = Mst::load(Arc::new(tracking_store.clone()), commit.data, None);
     let key = format!("{}/{}", collection, rkey);
@@ -270,7 +269,7 @@ pub async fn delete_record_internal(
     let prev_record_cid = mst
         .get(&key)
         .await
-        .map_err(|e| format!("MST get error: {:?}", e))?;
+        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
 
     let Some(prev_cid) = prev_record_cid else {
         return Ok(());
@@ -279,12 +278,12 @@ pub async fn delete_record_internal(
     let new_mst = mst
         .delete(&key)
         .await
-        .map_err(|e| format!("Failed to delete from MST: {:?}", e))?;
+        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
 
     let new_mst_root = new_mst
         .persist()
         .await
-        .map_err(|e| format!("Failed to persist MST: {:?}", e))?;
+        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
 
     let op = RecordOp::Delete {
         collection: collection.clone(),
@@ -298,11 +297,11 @@ pub async fn delete_record_internal(
     new_mst
         .blocks_for_path(&key, &mut new_mst_blocks)
         .await
-        .map_err(|e| format!("Failed to get new MST blocks: {:?}", e))?;
+        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
 
     mst.blocks_for_path(&key, &mut old_mst_blocks)
         .await
-        .map_err(|e| format!("Failed to get old MST blocks: {:?}", e))?;
+        .map_err(|e| CommitError::MstOperationFailed(format!("{:?}", e)))?;
 
     let mut relevant_blocks = new_mst_blocks.clone();
     relevant_blocks.extend(old_mst_blocks.iter().map(|(k, v)| (*k, v.clone())));

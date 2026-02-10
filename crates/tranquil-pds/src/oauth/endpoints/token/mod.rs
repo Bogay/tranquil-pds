@@ -15,7 +15,7 @@ pub use introspect::{
     IntrospectRequest, IntrospectResponse, RevokeRequest, introspect_token, revoke_token,
 };
 pub use types::{
-    ClientAuthParams, GrantType, TokenGrant, TokenRequest, TokenResponse, ValidatedTokenRequest,
+    GrantType, RequestClientAuth, TokenGrant, TokenRequest, TokenResponse, ValidatedTokenRequest,
 };
 
 pub async fn token_endpoint(
@@ -41,7 +41,7 @@ pub async fn token_endpoint(
         ));
     };
     let dpop_proof = headers
-        .get("DPoP")
+        .get(crate::util::HEADER_DPOP)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
     let validated = request.validate()?;

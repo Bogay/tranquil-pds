@@ -5,6 +5,7 @@
   import { toast } from '../../lib/toast.svelte'
   import { formatDate } from '../../lib/date'
   import type { Session } from '../../lib/types/api'
+  import Skeleton from '../Skeleton.svelte'
 
   interface Props {
     session: Session
@@ -15,6 +16,7 @@
   let codes = $state<InviteCode[]>([])
   let loading = $state(true)
   let creating = $state(false)
+  let disablingCode = $state<string | null>(null)
   let createdCode = $state<string | null>(null)
   let createdCodeCopied = $state(false)
   let copiedCode = $state<string | null>(null)
@@ -60,6 +62,20 @@
     }
   }
 
+  async function disableCode(code: string) {
+    if (!confirm($_('inviteCodes.disableConfirm', { values: { code } }))) return
+    disablingCode = code
+    try {
+      await api.disableInviteCodes(session.accessJwt, [code])
+      codes = codes.map(c => c.code === code ? { ...c, disabled: true } : c)
+      toast.success($_('inviteCodes.disableSuccess'))
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : $_('inviteCodes.disableFailed'))
+    } finally {
+      disablingCode = null
+    }
+  }
+
   function copyCode(code: string) {
     navigator.clipboard.writeText(code)
     copiedCode = code
@@ -96,7 +112,19 @@
   <section class="list-section">
     <h2>{$_('inviteCodes.yourCodes')}</h2>
     {#if loading}
-      <div class="loading">{$_('common.loading')}</div>
+      <ul class="code-list">
+        {#each Array(3) as _}
+          <li class="code-item skeleton-item">
+            <div class="code-main">
+              <Skeleton variant="line" size="medium" />
+            </div>
+            <div class="code-meta">
+              <Skeleton variant="line" size="short" />
+              <Skeleton variant="line" size="tiny" />
+            </div>
+          </li>
+        {/each}
+      </ul>
     {:else if codes.length === 0}
       <p class="empty">{$_('inviteCodes.noCodes')}</p>
     {:else}
@@ -174,7 +202,6 @@
     margin: 0 0 var(--space-4) 0;
   }
 
-  .loading,
   .empty {
     color: var(--text-secondary);
     padding: var(--space-6);
@@ -195,6 +222,10 @@
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
+  }
+
+  .skeleton-item {
+    pointer-events: none;
   }
 
   .code-item.disabled {
@@ -221,6 +252,11 @@
   }
 
   .copy-btn {
+    flex-shrink: 0;
+  }
+
+  .danger-text {
+    color: var(--error-text);
     flex-shrink: 0;
   }
 

@@ -20,6 +20,7 @@ pub use repo::{get_blocks, get_record, get_repo};
 pub use subscribe_repos::subscribe_repos;
 pub use tranquil_db_traits::AccountStatus;
 pub use util::{
-    RepoAccount, RepoAvailabilityError, assert_repo_availability, get_account_with_status,
+    RepoAccessLevel, RepoAccount, RepoAvailabilityError, assert_repo_availability,
+    get_account_with_status,
 };
 pub use verify::{CarVerifier, VerifiedCar, VerifyError};

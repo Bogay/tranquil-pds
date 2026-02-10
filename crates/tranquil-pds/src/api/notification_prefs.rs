@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
 use tranquil_db_traits::{CommsChannel, CommsStatus, CommsType};
+use tranquil_types::Did;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -130,91 +131,95 @@ pub struct UpdateNotificationPrefsInput {
 pub struct UpdateNotificationPrefsResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub verification_required: Vec<String>,
+    pub verification_required: Vec<CommsChannel>,
 }
 
 pub async fn request_channel_verification(
     state: &AppState,
     user_id: uuid::Uuid,
-    did: &str,
-    channel: &str,
+    did: &Did,
+    channel: CommsChannel,
     identifier: &str,
     handle: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, ApiError> {
     let token =
         crate::auth::verification_token::generate_channel_update_token(did, channel, identifier);
     let formatted_token = crate::auth::verification_token::format_token_for_display(&token);
 
-    if channel == "email" {
-        let hostname = pds_hostname();
-        let handle_str = handle.unwrap_or("user");
-        crate::comms::comms_repo::enqueue_email_update(
-            state.infra_repo.as_ref(),
-            user_id,
-            identifier,
-            handle_str,
-            &formatted_token,
-            hostname,
-        )
-        .await
-        .map_err(|e| format!("Failed to enqueue email notification: {}", e))?;
-    } else {
-        let comms_channel = match channel {
-            "discord" => tranquil_db_traits::CommsChannel::Discord,
-            "telegram" => tranquil_db_traits::CommsChannel::Telegram,
-            "signal" => tranquil_db_traits::CommsChannel::Signal,
-            _ => return Err("Invalid channel".to_string()),
-        };
-        let hostname = pds_hostname();
-        let encoded_token = urlencoding::encode(&formatted_token);
-        let encoded_identifier = urlencoding::encode(identifier);
-        let verify_link = format!(
-            "https://{}/app/verify?token={}&identifier={}",
-            hostname, encoded_token, encoded_identifier
-        );
-        let prefs = state
-            .user_repo
-            .get_comms_prefs(user_id)
-            .await
-            .ok()
-            .flatten();
-        let locale = prefs
-            .as_ref()
-            .and_then(|p| p.preferred_locale.as_deref())
-            .unwrap_or("en");
-        let strings = crate::comms::get_strings(locale);
-        let body = crate::comms::format_message(
-            strings.channel_verification_body,
-            &[("code", &formatted_token), ("verify_link", &verify_link)],
-        );
-        let subject = crate::comms::format_message(
-            strings.channel_verification_subject,
-            &[("hostname", hostname)],
-        );
-        let recipient = match comms_channel {
-            tranquil_db_traits::CommsChannel::Telegram => state
-                .user_repo
-                .get_telegram_chat_id(user_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| identifier.to_string()),
-            _ => identifier.to_string(),
-        };
-        state
-            .infra_repo
-            .enqueue_comms(
-                Some(user_id),
-                comms_channel,
-                tranquil_db_traits::CommsType::ChannelVerification,
-                &recipient,
-                Some(&subject),
-                &body,
-                Some(json!({"code": formatted_token})),
+    match channel {
+        CommsChannel::Email => {
+            let hostname = pds_hostname();
+            let handle_str = handle.unwrap_or("user");
+            crate::comms::comms_repo::enqueue_email_update(
+                state.infra_repo.as_ref(),
+                user_id,
+                identifier,
+                handle_str,
+                &formatted_token,
+                hostname,
             )
             .await
-            .map_err(|e| format!("Failed to enqueue notification: {}", e))?;
+            .map_err(|e| {
+                ApiError::InternalError(Some(format!(
+                    "Failed to enqueue email notification: {}",
+                    e
+                )))
+            })?;
+        }
+        _ => {
+            let hostname = pds_hostname();
+            let encoded_token = urlencoding::encode(&formatted_token);
+            let encoded_identifier = urlencoding::encode(identifier);
+            let verify_link = format!(
+                "https://{}/app/verify?token={}&identifier={}",
+                hostname, encoded_token, encoded_identifier
+            );
+            let prefs = state
+                .user_repo
+                .get_comms_prefs(user_id)
+                .await
+                .ok()
+                .flatten();
+            let locale = prefs
+                .as_ref()
+                .and_then(|p| p.preferred_locale.as_deref())
+                .unwrap_or("en");
+            let strings = crate::comms::get_strings(locale);
+            let body = crate::comms::format_message(
+                strings.channel_verification_body,
+                &[("code", &formatted_token), ("verify_link", &verify_link)],
+            );
+            let subject = crate::comms::format_message(
+                strings.channel_verification_subject,
+                &[("hostname", hostname)],
+            );
+            let recipient = match channel {
+                CommsChannel::Telegram => state
+                    .user_repo
+                    .get_telegram_chat_id(user_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| identifier.to_string()),
+                _ => identifier.to_string(),
+            };
+            state
+                .infra_repo
+                .enqueue_comms(
+                    Some(user_id),
+                    channel,
+                    tranquil_db_traits::CommsType::ChannelVerification,
+                    &recipient,
+                    Some(&subject),
+                    &body,
+                    Some(json!({"code": formatted_token})),
+                )
+                .await
+                .map_err(|e| {
+                    ApiError::InternalError(Some(format!("Failed to enqueue notification: {}", e)))
+                })?;
+        }
     }
 
     Ok(token)
@@ -246,38 +251,25 @@ pub async fn update_notification_prefs(
     let effective_channel = input
         .preferred_channel
         .as_deref()
-        .map(|ch| match ch {
-            "email" => Ok(CommsChannel::Email),
-            "discord" => Ok(CommsChannel::Discord),
-            "telegram" => Ok(CommsChannel::Telegram),
-            "signal" => Ok(CommsChannel::Signal),
-            _ => Err(ApiError::InvalidRequest(
-                "Invalid channel. Must be one of: email, discord, telegram, signal".into(),
-            )),
+        .map(|ch| {
+            ch.parse::<CommsChannel>().map_err(|_| {
+                ApiError::InvalidRequest(
+                    "Invalid channel. Must be one of: email, discord, telegram, signal".into(),
+                )
+            })
         })
         .transpose()?
         .unwrap_or(current_prefs.preferred_channel);
 
-    let mut verification_required: Vec<String> = Vec::new();
+    let mut verification_required: Vec<CommsChannel> = Vec::new();
 
-    if let Some(ref channel_str) = input.preferred_channel {
-        let channel = match channel_str.as_str() {
-            "email" => CommsChannel::Email,
-            "discord" => CommsChannel::Discord,
-            "telegram" => CommsChannel::Telegram,
-            "signal" => CommsChannel::Signal,
-            _ => {
-                return Err(ApiError::InvalidRequest(
-                    "Invalid channel. Must be one of: email, discord, telegram, signal".into(),
-                ));
-            }
-        };
+    if input.preferred_channel.is_some() {
         state
             .user_repo
-            .update_preferred_comms_channel(&auth.did, channel)
+            .update_preferred_comms_channel(&auth.did, effective_channel)
             .await
             .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-        info!(did = %auth.did, channel = ?channel, "Updated preferred notification channel");
+        info!(did = %auth.did, channel = ?effective_channel, "Updated preferred notification channel");
     }
 
     if let Some(ref new_email) = input.email {
@@ -295,13 +287,12 @@ pub async fn update_notification_prefs(
                 &state,
                 user_id,
                 &auth.did,
-                "email",
+                CommsChannel::Email,
                 &email_clean,
                 Some(&handle),
             )
-            .await
-            .map_err(|e| ApiError::InternalError(Some(e)))?;
-            verification_required.push("email".to_string());
+            .await?;
+            verification_required.push(CommsChannel::Email);
             info!(did = %auth.did, "Requested email verification");
         }
     }
@@ -331,7 +322,7 @@ pub async fn update_notification_prefs(
                 .set_unverified_discord(user_id, &discord_clean)
                 .await
                 .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            verification_required.push("discord".to_string());
+            verification_required.push(CommsChannel::Discord);
             info!(did = %auth.did, discord_username = %discord_clean, "Stored unverified Discord username");
         }
     }
@@ -361,7 +352,7 @@ pub async fn update_notification_prefs(
                 .set_unverified_telegram(user_id, telegram_clean)
                 .await
                 .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            verification_required.push("telegram".to_string());
+            verification_required.push(CommsChannel::Telegram);
             info!(did = %auth.did, telegram_username = %telegram_clean, "Stored unverified Telegram username");
         }
     }
@@ -391,10 +382,16 @@ pub async fn update_notification_prefs(
                 .set_unverified_signal(user_id, &signal_clean)
                 .await
                 .map_err(|e| ApiError::InternalError(Some(format!("Database error: {}", e))))?;
-            request_channel_verification(&state, user_id, &auth.did, "signal", &signal_clean, None)
-                .await
-                .map_err(|e| ApiError::InternalError(Some(e)))?;
-            verification_required.push("signal".to_string());
+            request_channel_verification(
+                &state,
+                user_id,
+                &auth.did,
+                CommsChannel::Signal,
+                &signal_clean,
+                None,
+            )
+            .await?;
+            verification_required.push(CommsChannel::Signal);
             info!(did = %auth.did, signal_username = %signal_clean, "Stored unverified Signal username");
         }
     }

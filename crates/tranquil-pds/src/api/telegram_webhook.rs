@@ -86,7 +86,7 @@ pub async fn handle_telegram_webhook(
                         state.user_repo.as_ref(),
                         state.infra_repo.as_ref(),
                         user_id,
-                        "telegram",
+                        tranquil_db_traits::CommsChannel::Telegram,
                         &from.id.to_string(),
                         pds_hostname(),
                     )

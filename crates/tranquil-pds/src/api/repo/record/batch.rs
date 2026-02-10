@@ -11,6 +11,7 @@ use crate::delegation::DelegationActionType;
 use crate::repo::tracking::TrackingBlockStore;
 use crate::state::AppState;
 use crate::types::{AtIdentifier, AtUri, Did, Nsid, Rkey};
+use crate::validation::ValidationStatus;
 use axum::{
     Json,
     extract::State,
@@ -23,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
 const MAX_BATCH_WRITES: usize = 200;
 
@@ -87,7 +88,7 @@ async fn process_single_write(
             results.push(WriteResult::CreateResult {
                 uri,
                 cid: record_cid.to_string(),
-                validation_status: validation_status.map(|s| s.to_string()),
+                validation_status,
             });
             ops.push(RecordOp::Create {
                 collection: collection.clone(),
@@ -138,7 +139,7 @@ async fn process_single_write(
             results.push(WriteResult::UpdateResult {
                 uri,
                 cid: record_cid.to_string(),
-                validation_status: validation_status.map(|s| s.to_string()),
+                validation_status,
             });
             ops.push(RecordOp::Update {
                 collection: collection.clone(),
@@ -237,14 +238,14 @@ pub enum WriteResult {
         uri: AtUri,
         cid: String,
         #[serde(rename = "validationStatus", skip_serializing_if = "Option::is_none")]
-        validation_status: Option<String>,
+        validation_status: Option<ValidationStatus>,
     },
     #[serde(rename = "com.atproto.repo.applyWrites#updateResult")]
     UpdateResult {
         uri: AtUri,
         cid: String,
         #[serde(rename = "validationStatus", skip_serializing_if = "Option::is_none")]
-        validation_status: Option<String>,
+        validation_status: Option<ValidationStatus>,
     },
     #[serde(rename = "com.atproto.repo.applyWrites#deleteResult")]
     DeleteResult {},
@@ -441,15 +442,7 @@ pub async fn apply_writes(
     .await
     {
         Ok(res) => res,
-        Err(e) if e.contains("ConcurrentModification") => {
-            return Err(ApiError::InvalidSwap(Some("Repo has been modified".into())));
-        }
-        Err(e) => {
-            error!("Commit failed: {}", e);
-            return Err(ApiError::InternalError(Some(
-                "Failed to commit changes".into(),
-            )));
-        }
+        Err(e) => return Err(ApiError::from(e)),
     };
 
     if let Some(ref controller) = controller_did {

@@ -37,7 +37,7 @@ impl SessionRepository for PostgresSessionRepository {
             data.refresh_jti,
             data.access_expires_at,
             data.refresh_expires_at,
-            bool::from(data.login_type),
+            data.login_type.is_legacy(),
             data.mfa_verified,
             data.scope,
             data.controller_did.as_ref().map(|d| d.as_str()),
@@ -75,7 +75,7 @@ impl SessionRepository for PostgresSessionRepository {
             refresh_jti: r.refresh_jti,
             access_expires_at: r.access_expires_at,
             refresh_expires_at: r.refresh_expires_at,
-            login_type: LoginType::from(r.legacy_login),
+            login_type: LoginType::from_legacy_flag(r.legacy_login),
             mfa_verified: r.mfa_verified,
             scope: r.scope,
             controller_did: r.controller_did.map(Did::from),
@@ -325,7 +325,7 @@ impl SessionRepository for PostgresSessionRepository {
                 name: r.name,
                 password_hash: r.password_hash,
                 created_at: r.created_at,
-                privilege: AppPasswordPrivilege::from(r.privileged),
+                privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
                 scopes: r.scopes,
                 created_by_controller_did: r.created_by_controller_did.map(Did::from),
             })
@@ -358,7 +358,7 @@ impl SessionRepository for PostgresSessionRepository {
                 name: r.name,
                 password_hash: r.password_hash,
                 created_at: r.created_at,
-                privilege: AppPasswordPrivilege::from(r.privileged),
+                privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
                 scopes: r.scopes,
                 created_by_controller_did: r.created_by_controller_did.map(Did::from),
             })
@@ -389,7 +389,7 @@ impl SessionRepository for PostgresSessionRepository {
             name: r.name,
             password_hash: r.password_hash,
             created_at: r.created_at,
-            privilege: AppPasswordPrivilege::from(r.privileged),
+            privilege: AppPasswordPrivilege::from_privileged_flag(r.privileged),
             scopes: r.scopes,
             created_by_controller_did: r.created_by_controller_did.map(Did::from),
         }))
@@ -405,7 +405,7 @@ impl SessionRepository for PostgresSessionRepository {
             data.user_id,
             data.name,
             data.password_hash,
-            bool::from(data.privilege),
+            data.privilege.is_privileged(),
             data.scopes,
             data.created_by_controller_did.as_ref().map(|d| d.as_str())
         )
@@ -486,7 +486,7 @@ impl SessionRepository for PostgresSessionRepository {
         .map_err(map_sqlx_error)?;
 
         Ok(row.map(|r| SessionMfaStatus {
-            login_type: LoginType::from(r.legacy_login),
+            login_type: LoginType::from_legacy_flag(r.legacy_login),
             mfa_verified: r.mfa_verified,
             last_reauth_at: r.last_reauth_at,
         }))

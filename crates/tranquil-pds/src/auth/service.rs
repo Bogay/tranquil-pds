@@ -1,6 +1,4 @@
-use crate::types::Did;
 use crate::util::pds_hostname;
-use anyhow::{Result, anyhow};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
@@ -9,6 +7,77 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::debug;
+use tranquil_types::Did;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceTokenError {
+    #[error("Invalid token format")]
+    InvalidFormat,
+    #[error("Base64 decode failed")]
+    Base64Decode(#[source] base64::DecodeError),
+    #[error("JSON decode failed")]
+    JsonDecode(#[source] serde_json::Error),
+    #[error("Unsupported algorithm: {0}")]
+    UnsupportedAlgorithm(super::SigningAlgorithm),
+    #[error("Token expired")]
+    Expired,
+    #[error("Invalid audience: expected {expected}, got {actual}")]
+    InvalidAudience { expected: Did, actual: Did },
+    #[error("Token lxm '{token_lxm}' does not permit '{required}'")]
+    LxmMismatch { token_lxm: String, required: String },
+    #[error("Token missing lxm claim")]
+    MissingLxm,
+    #[error("Invalid signature format")]
+    InvalidSignature(#[source] k256::ecdsa::Error),
+    #[error("Signature verification failed")]
+    SignatureVerificationFailed(#[source] k256::ecdsa::Error),
+    #[error("No atproto verification method found")]
+    NoVerificationMethod,
+    #[error("Verification method missing publicKeyMultibase")]
+    MissingPublicKey,
+    #[error("Unsupported DID method")]
+    UnsupportedDidMethod,
+    #[error("DID not found: {0}")]
+    DidNotFound(String),
+    #[error("HTTP request failed")]
+    HttpFailed(#[source] reqwest::Error),
+    #[error("Failed to parse DID document")]
+    InvalidDidDocument(#[source] reqwest::Error),
+    #[error("HTTP {0}")]
+    HttpStatus(reqwest::StatusCode),
+    #[error("Invalid multibase encoding")]
+    InvalidMultibase(#[source] multibase::Error),
+    #[error("Invalid multicodec data")]
+    InvalidMulticodec,
+    #[error("Unsupported key type: expected secp256k1")]
+    UnsupportedKeyType,
+    #[error("Invalid public key")]
+    InvalidPublicKey(#[source] k256::ecdsa::Error),
+}
+
+struct JwtParts<'a> {
+    header: &'a str,
+    claims: &'a str,
+    signature: &'a str,
+}
+
+impl<'a> JwtParts<'a> {
+    fn parse(token: &'a str) -> Result<Self, ServiceTokenError> {
+        let mut parts = token.splitn(4, '.');
+        match (parts.next(), parts.next(), parts.next(), parts.next()) {
+            (Some(header), Some(claims), Some(signature), None) => Ok(Self {
+                header,
+                claims,
+                signature,
+            }),
+            _ => Err(ServiceTokenError::InvalidFormat),
+        }
+    }
+
+    fn signing_input(&self) -> String {
+        format!("{}.{}", self.header, self.claims)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,9 +117,9 @@ pub struct ServiceTokenClaims {
     #[serde(default)]
     pub sub: Option<Did>,
     pub aud: Did,
-    pub exp: usize,
+    pub exp: i64,
     #[serde(default)]
-    pub iat: Option<usize>,
+    pub iat: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lxm: Option<String>,
     #[serde(default)]
@@ -65,14 +134,14 @@ impl ServiceTokenClaims {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TokenHeader {
-    pub alg: String,
-    pub typ: String,
+    pub alg: super::SigningAlgorithm,
+    pub typ: super::TokenType,
 }
 
 pub struct ServiceTokenVerifier {
     client: Client,
     plc_directory_url: String,
-    pds_did: String,
+    pds_did: Did,
 }
 
 impl ServiceTokenVerifier {
@@ -81,7 +150,9 @@ impl ServiceTokenVerifier {
             .unwrap_or_else(|_| "https://plc.directory".to_string());
 
         let pds_hostname = pds_hostname();
-        let pds_did = format!("did:web:{}", pds_hostname);
+        let pds_did: Did = format!("did:web:{}", pds_hostname)
+            .parse()
+            .expect("PDS hostname produces a valid DID");
 
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
@@ -102,55 +173,50 @@ impl ServiceTokenVerifier {
         &self,
         token: &str,
         required_lxm: Option<&str>,
-    ) -> Result<ServiceTokenClaims> {
-        let parts: Vec<&str> = token.split('.').collect();
-        if parts.len() != 3 {
-            return Err(anyhow!("Invalid token format"));
-        }
+    ) -> Result<ServiceTokenClaims, ServiceTokenError> {
+        let jwt = JwtParts::parse(token)?;
 
         let header_bytes = URL_SAFE_NO_PAD
-            .decode(parts[0])
-            .map_err(|e| anyhow!("Base64 decode of header failed: {}", e))?;
+            .decode(jwt.header)
+            .map_err(ServiceTokenError::Base64Decode)?;
 
-        let header: TokenHeader = serde_json::from_slice(&header_bytes)
-            .map_err(|e| anyhow!("JSON decode of header failed: {}", e))?;
+        let header: TokenHeader =
+            serde_json::from_slice(&header_bytes).map_err(ServiceTokenError::JsonDecode)?;
 
-        if header.alg != "ES256K" {
-            return Err(anyhow!("Unsupported algorithm: {}", header.alg));
+        if header.alg != super::SigningAlgorithm::ES256K {
+            return Err(ServiceTokenError::UnsupportedAlgorithm(header.alg));
         }
 
         let claims_bytes = URL_SAFE_NO_PAD
-            .decode(parts[1])
-            .map_err(|e| anyhow!("Base64 decode of claims failed: {}", e))?;
+            .decode(jwt.claims)
+            .map_err(ServiceTokenError::Base64Decode)?;
 
-        let claims: ServiceTokenClaims = serde_json::from_slice(&claims_bytes)
-            .map_err(|e| anyhow!("JSON decode of claims failed: {}", e))?;
+        let claims: ServiceTokenClaims =
+            serde_json::from_slice(&claims_bytes).map_err(ServiceTokenError::JsonDecode)?;
 
-        let now = Utc::now().timestamp() as usize;
+        let now = Utc::now().timestamp();
         if claims.exp < now {
-            return Err(anyhow!("Token expired"));
+            return Err(ServiceTokenError::Expired);
         }
 
-        if claims.aud.as_str() != self.pds_did {
-            return Err(anyhow!(
-                "Invalid audience: expected {}, got {}",
-                self.pds_did,
-                claims.aud
-            ));
+        if claims.aud != self.pds_did {
+            return Err(ServiceTokenError::InvalidAudience {
+                expected: self.pds_did.clone(),
+                actual: claims.aud.clone(),
+            });
         }
 
         if let Some(required) = required_lxm {
             match &claims.lxm {
-                Some(lxm) if lxm == "*" || lxm == required => {}
+                Some(lxm) if crate::auth::lxm_permits(lxm, required) => {}
                 Some(lxm) => {
-                    return Err(anyhow!(
-                        "Token lxm '{}' does not permit '{}'",
-                        lxm,
-                        required
-                    ));
+                    return Err(ServiceTokenError::LxmMismatch {
+                        token_lxm: lxm.clone(),
+                        required: required.to_string(),
+                    });
                 }
                 None => {
-                    return Err(anyhow!("Token missing lxm claim"));
+                    return Err(ServiceTokenError::MissingLxm);
                 }
             }
         }
@@ -159,51 +225,51 @@ impl ServiceTokenVerifier {
         let public_key = self.resolve_signing_key(did).await?;
 
         let signature_bytes = URL_SAFE_NO_PAD
-            .decode(parts[2])
-            .map_err(|e| anyhow!("Base64 decode of signature failed: {}", e))?;
+            .decode(jwt.signature)
+            .map_err(ServiceTokenError::Base64Decode)?;
 
-        let signature = Signature::from_slice(&signature_bytes)
-            .map_err(|e| anyhow!("Invalid signature format: {}", e))?;
+        let signature =
+            Signature::from_slice(&signature_bytes).map_err(ServiceTokenError::InvalidSignature)?;
 
-        let message = format!("{}.{}", parts[0], parts[1]);
+        let message = jwt.signing_input();
 
         public_key
             .verify(message.as_bytes(), &signature)
-            .map_err(|e| anyhow!("Signature verification failed: {}", e))?;
+            .map_err(ServiceTokenError::SignatureVerificationFailed)?;
 
         debug!("Service token verified for DID: {}", did);
 
         Ok(claims)
     }
 
-    async fn resolve_signing_key(&self, did: &str) -> Result<VerifyingKey> {
+    async fn resolve_signing_key(&self, did: &str) -> Result<VerifyingKey, ServiceTokenError> {
         let did_doc = self.resolve_did_document(did).await?;
 
         let atproto_key = did_doc
             .verification_method
             .iter()
             .find(|vm| vm.id.ends_with("#atproto") || vm.id == format!("{}#atproto", did))
-            .ok_or_else(|| anyhow!("No atproto verification method found in DID document"))?;
+            .ok_or(ServiceTokenError::NoVerificationMethod)?;
 
         let multibase = atproto_key
             .public_key_multibase
             .as_ref()
-            .ok_or_else(|| anyhow!("Verification method missing publicKeyMultibase"))?;
+            .ok_or(ServiceTokenError::MissingPublicKey)?;
 
         parse_did_key_multibase(multibase)
     }
 
-    async fn resolve_did_document(&self, did: &str) -> Result<FullDidDocument> {
+    async fn resolve_did_document(&self, did: &str) -> Result<FullDidDocument, ServiceTokenError> {
         if did.starts_with("did:plc:") {
             self.resolve_did_plc(did).await
         } else if did.starts_with("did:web:") {
             self.resolve_did_web(did).await
         } else {
-            Err(anyhow!("Unsupported DID method: {}", did))
+            Err(ServiceTokenError::UnsupportedDidMethod)
         }
     }
 
-    async fn resolve_did_plc(&self, did: &str) -> Result<FullDidDocument> {
+    async fn resolve_did_plc(&self, did: &str) -> Result<FullDidDocument, ServiceTokenError> {
         let url = format!("{}/{}", self.plc_directory_url, urlencoding::encode(did));
         debug!("Resolving did:plc {} via {}", did, url);
 
@@ -212,32 +278,32 @@ impl ServiceTokenVerifier {
             .get(&url)
             .send()
             .await
-            .map_err(|e| anyhow!("HTTP request failed: {}", e))?;
+            .map_err(ServiceTokenError::HttpFailed)?;
 
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(anyhow!("DID not found: {}", did));
+            return Err(ServiceTokenError::DidNotFound(did.to_string()));
         }
 
         if !resp.status().is_success() {
-            return Err(anyhow!("HTTP {}", resp.status()));
+            return Err(ServiceTokenError::HttpStatus(resp.status()));
         }
 
         resp.json::<FullDidDocument>()
             .await
-            .map_err(|e| anyhow!("Failed to parse DID document: {}", e))
+            .map_err(ServiceTokenError::InvalidDidDocument)
     }
 
-    async fn resolve_did_web(&self, did: &str) -> Result<FullDidDocument> {
+    async fn resolve_did_web(&self, did: &str) -> Result<FullDidDocument, ServiceTokenError> {
         let host = did
             .strip_prefix("did:web:")
-            .ok_or_else(|| anyhow!("Invalid did:web format"))?;
+            .ok_or(ServiceTokenError::InvalidFormat)?;
 
-        let parts: Vec<&str> = host.split(':').collect();
-        if parts.is_empty() {
-            return Err(anyhow!("Invalid did:web format - no host"));
-        }
-
-        let host_part = parts[0].replace("%3A", ":");
+        let mut host_parts = host.splitn(2, ':');
+        let host_part = host_parts
+            .next()
+            .ok_or(ServiceTokenError::InvalidFormat)?
+            .replace("%3A", ":");
+        let path_part = host_parts.next();
 
         let scheme = if host_part.starts_with("localhost")
             || host_part.starts_with("127.0.0.1")
@@ -248,11 +314,12 @@ impl ServiceTokenVerifier {
             "https"
         };
 
-        let url = if parts.len() == 1 {
-            format!("{}://{}/.well-known/did.json", scheme, host_part)
-        } else {
-            let path = parts[1..].join("/");
-            format!("{}://{}/{}/did.json", scheme, host_part, path)
+        let url = match path_part {
+            None => format!("{}://{}/.well-known/did.json", scheme, host_part),
+            Some(path) => {
+                let resolved_path = path.replace(':', "/");
+                format!("{}://{}/{}/did.json", scheme, host_part, resolved_path)
+            }
         };
 
         debug!("Resolving did:web {} via {}", did, url);
@@ -262,15 +329,15 @@ impl ServiceTokenVerifier {
             .get(&url)
             .send()
             .await
-            .map_err(|e| anyhow!("HTTP request failed: {}", e))?;
+            .map_err(ServiceTokenError::HttpFailed)?;
 
         if !resp.status().is_success() {
-            return Err(anyhow!("HTTP {}", resp.status()));
+            return Err(ServiceTokenError::HttpStatus(resp.status()));
         }
 
         resp.json::<FullDidDocument>()
             .await
-            .map_err(|e| anyhow!("Failed to parse DID document: {}", e))
+            .map_err(ServiceTokenError::InvalidDidDocument)
     }
 }
 
@@ -280,44 +347,35 @@ impl Default for ServiceTokenVerifier {
     }
 }
 
-fn parse_did_key_multibase(multibase: &str) -> Result<VerifyingKey> {
+fn parse_did_key_multibase(multibase: &str) -> Result<VerifyingKey, ServiceTokenError> {
     if !multibase.starts_with('z') {
-        return Err(anyhow!(
-            "Expected base58btc multibase encoding (starts with 'z')"
+        let base_char = multibase.chars().next().unwrap_or('?');
+        return Err(ServiceTokenError::InvalidMultibase(
+            multibase::Error::UnknownBase(base_char),
         ));
     }
 
-    let (_, decoded) =
-        multibase::decode(multibase).map_err(|e| anyhow!("Failed to decode multibase: {}", e))?;
+    let (_, decoded) = multibase::decode(multibase).map_err(ServiceTokenError::InvalidMultibase)?;
 
     if decoded.len() < 2 {
-        return Err(anyhow!("Invalid multicodec data"));
+        return Err(ServiceTokenError::InvalidMulticodec);
     }
 
-    let (codec, key_bytes) = if decoded[0] == 0xe7 && decoded[1] == 0x01 {
-        (0xe701u16, &decoded[2..])
+    let key_bytes = if decoded.starts_with(&crate::plc::SECP256K1_MULTICODEC_PREFIX) {
+        &decoded[crate::plc::SECP256K1_MULTICODEC_PREFIX.len()..]
     } else {
-        return Err(anyhow!(
-            "Unsupported key type. Expected secp256k1 (0xe701), got {:02x}{:02x}",
-            decoded[0],
-            decoded[1]
-        ));
+        return Err(ServiceTokenError::UnsupportedKeyType);
     };
 
-    if codec != 0xe701 {
-        return Err(anyhow!("Only secp256k1 keys are supported"));
-    }
-
-    VerifyingKey::from_sec1_bytes(key_bytes).map_err(|e| anyhow!("Invalid public key: {}", e))
+    VerifyingKey::from_sec1_bytes(key_bytes).map_err(ServiceTokenError::InvalidPublicKey)
 }
 
 pub fn is_service_token(token: &str) -> bool {
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
+    let Ok(jwt) = JwtParts::parse(token) else {
         return false;
-    }
+    };
 
-    let Ok(claims_bytes) = URL_SAFE_NO_PAD.decode(parts[1]) else {
+    let Ok(claims_bytes) = URL_SAFE_NO_PAD.decode(jwt.claims) else {
         return false;
     };
 
@@ -376,5 +434,35 @@ mod tests {
         let test_key = "zQ3shcXtVCEBjUvAhzTW3r12DkpFdR2KmA3rHmuEMFx4GMBDB";
         let result = parse_did_key_multibase(test_key);
         assert!(result.is_ok(), "Failed to parse valid multibase key");
+    }
+
+    #[test]
+    fn test_jwt_parts_parse_valid() {
+        let jwt = JwtParts::parse("a.b.c").unwrap();
+        assert_eq!(jwt.header, "a");
+        assert_eq!(jwt.claims, "b");
+        assert_eq!(jwt.signature, "c");
+    }
+
+    #[test]
+    fn test_jwt_parts_parse_too_few() {
+        assert!(matches!(
+            JwtParts::parse("a.b"),
+            Err(ServiceTokenError::InvalidFormat)
+        ));
+    }
+
+    #[test]
+    fn test_jwt_parts_parse_too_many() {
+        assert!(matches!(
+            JwtParts::parse("a.b.c.d"),
+            Err(ServiceTokenError::InvalidFormat)
+        ));
+    }
+
+    #[test]
+    fn test_jwt_parts_signing_input() {
+        let jwt = JwtParts::parse("header.claims.sig").unwrap();
+        assert_eq!(jwt.signing_input(), "header.claims");
     }
 }

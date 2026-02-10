@@ -19,7 +19,7 @@ pub mod validation;
 pub mod verification;
 
 pub use error::ApiError;
-pub use proxy_client::{AtUriParts, proxy_client, validate_at_uri, validate_did, validate_limit};
+pub use proxy_client::{AtUriParts, proxy_client, validate_at_uri, validate_limit};
 pub use responses::{
     DidResponse, EmptyResponse, EnabledResponse, HasPasswordResponse, OptionsResponse,
     StatusResponse, SuccessResponse, TokenRequiredResponse, VerifiedResponse,

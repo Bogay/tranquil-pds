@@ -6,6 +6,24 @@ use std::sync::LazyLock;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
+#[derive(Debug, thiserror::Error)]
+pub enum ScopeExpansionError {
+    #[error("Invalid NSID format: {0}")]
+    InvalidNsid(String),
+    #[error("Missing definition: {0}")]
+    MissingDefinition(String),
+    #[error("Unexpected lexicon type: {0}")]
+    UnexpectedType(String),
+    #[error("DNS resolution failed: {0}")]
+    DnsResolution(String),
+    #[error("HTTP request failed: {0}")]
+    HttpFailed(String),
+    #[error("DID resolution failed: {0}")]
+    DidResolution(String),
+    #[error("No valid permissions found in permission-set")]
+    EmptyPermissions,
+}
+
 static LEXICON_CACHE: LazyLock<RwLock<HashMap<String, CachedLexicon>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
@@ -86,7 +104,10 @@ fn parse_include_scope(rest: &str) -> (&str, Option<&str>) {
         .unwrap_or((rest, None))
 }
 
-async fn expand_permission_set(nsid: &str, aud: Option<&str>) -> Result<String, String> {
+async fn expand_permission_set(
+    nsid: &str,
+    aud: Option<&str>,
+) -> Result<String, ScopeExpansionError> {
     let cache_key = match aud {
         Some(a) => format!("{}?aud={}", nsid, a),
         None => nsid.to_string(),
@@ -107,25 +128,27 @@ async fn expand_permission_set(nsid: &str, aud: Option<&str>) -> Result<String, 
     let main_def = lexicon
         .defs
         .get("main")
-        .ok_or("Missing 'main' definition in lexicon")?;
+        .ok_or(ScopeExpansionError::MissingDefinition("main".to_string()))?;
 
     if main_def.def_type != "permission-set" {
-        return Err(format!(
-            "Expected permission-set type, got: {}",
-            main_def.def_type
+        return Err(ScopeExpansionError::UnexpectedType(
+            main_def.def_type.clone(),
         ));
     }
 
-    let permissions = main_def
-        .permissions
-        .as_ref()
-        .ok_or("Missing permissions in permission-set")?;
+    let permissions =
+        main_def
+            .permissions
+            .as_ref()
+            .ok_or(ScopeExpansionError::MissingDefinition(
+                "permissions".to_string(),
+            ))?;
 
     let namespace_authority = extract_namespace_authority(nsid);
     let expanded = build_expanded_scopes(permissions, aud, &namespace_authority);
 
     if expanded.is_empty() {
-        return Err("No valid permissions found in permission-set".to_string());
+        return Err(ScopeExpansionError::EmptyPermissions);
     }
 
     {
@@ -143,10 +166,10 @@ async fn expand_permission_set(nsid: &str, aud: Option<&str>) -> Result<String, 
     Ok(expanded)
 }
 
-async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, String> {
+async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, ScopeExpansionError> {
     let parts: Vec<&str> = nsid.split('.').collect();
     if parts.len() < 3 {
-        return Err(format!("Invalid NSID format: {}", nsid));
+        return Err(ScopeExpansionError::InvalidNsid(nsid.to_string()));
     }
 
     let authority = parts[..2]
@@ -166,7 +189,7 @@ async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, String> {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
 
     let url = format!(
         "{}/xrpc/com.atproto.repo.getRecord?repo={}&collection=com.atproto.lexicon.schema&rkey={}",
@@ -181,26 +204,26 @@ async fn fetch_lexicon_via_atproto(nsid: &str) -> Result<LexiconDoc, String> {
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch lexicon: {}", e))?;
+        .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Failed to fetch lexicon: HTTP {}",
+        return Err(ScopeExpansionError::HttpFailed(format!(
+            "HTTP {}",
             response.status()
-        ));
+        )));
     }
 
     let record: GetRecordResponse = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse lexicon response: {}", e))?;
+        .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
 
     Ok(record.value)
 }
 
-async fn resolve_lexicon_did_authority(authority: &str) -> Result<String, String> {
+async fn resolve_lexicon_did_authority(authority: &str) -> Result<String, ScopeExpansionError> {
     let resolver = TokioAsyncResolver::tokio_from_system_conf()
-        .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+        .map_err(|e| ScopeExpansionError::DnsResolution(e.to_string()))?;
 
     let dns_name = format!("_lexicon.{}", authority);
     debug!(dns_name = %dns_name, "Looking up DNS TXT record");
@@ -208,7 +231,7 @@ async fn resolve_lexicon_did_authority(authority: &str) -> Result<String, String
     let txt_records = resolver
         .txt_lookup(&dns_name)
         .await
-        .map_err(|e| format!("DNS lookup failed for {}: {}", dns_name, e))?;
+        .map_err(|e| ScopeExpansionError::DnsResolution(format!("{}: {}", dns_name, e)))?;
 
     txt_records
         .iter()
@@ -217,14 +240,19 @@ async fn resolve_lexicon_did_authority(authority: &str) -> Result<String, String
             let txt = String::from_utf8_lossy(data);
             txt.strip_prefix("did=").map(|did| did.to_string())
         })
-        .ok_or_else(|| format!("No valid did= TXT record found at {}", dns_name))
+        .ok_or_else(|| {
+            ScopeExpansionError::DnsResolution(format!(
+                "No valid did= TXT record found at {}",
+                dns_name
+            ))
+        })
 }
 
-async fn resolve_did_to_pds(did: &str) -> Result<String, String> {
+async fn resolve_did_to_pds(did: &str) -> Result<String, ScopeExpansionError> {
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .map_err(|e| ScopeExpansionError::HttpFailed(e.to_string()))?;
 
     let url = if did.starts_with("did:plc:") {
         format!("https://plc.directory/{}", did)
@@ -232,7 +260,10 @@ async fn resolve_did_to_pds(did: &str) -> Result<String, String> {
         let domain = did.strip_prefix("did:web:").unwrap();
         format!("https://{}/.well-known/did.json", domain)
     } else {
-        return Err(format!("Unsupported DID method: {}", did));
+        return Err(ScopeExpansionError::DidResolution(format!(
+            "Unsupported DID method: {}",
+            did
+        )));
     };
 
     let response = client
@@ -240,22 +271,27 @@ async fn resolve_did_to_pds(did: &str) -> Result<String, String> {
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("Failed to resolve DID: {}", e))?;
+        .map_err(|e| ScopeExpansionError::DidResolution(e.to_string()))?;
 
     if !response.status().is_success() {
-        return Err(format!("Failed to resolve DID: HTTP {}", response.status()));
+        return Err(ScopeExpansionError::DidResolution(format!(
+            "HTTP {}",
+            response.status()
+        )));
     }
 
     let doc: PlcDocument = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse DID document: {}", e))?;
+        .map_err(|e| ScopeExpansionError::DidResolution(e.to_string()))?;
 
     doc.service
         .iter()
         .find(|s| s.id == "#atproto_pds")
         .map(|s| s.service_endpoint.clone())
-        .ok_or_else(|| "No #atproto_pds service found in DID document".to_string())
+        .ok_or(ScopeExpansionError::DidResolution(
+            "No #atproto_pds service found in DID document".to_string(),
+        ))
 }
 
 fn extract_namespace_authority(nsid: &str) -> String {

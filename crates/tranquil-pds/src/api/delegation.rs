@@ -7,7 +7,7 @@ use crate::delegation::{
 };
 use crate::rate_limit::{AccountCreationLimit, RateLimited};
 use crate::state::AppState;
-use crate::types::{Did, Handle, Nsid, Rkey};
+use crate::types::{Did, Handle};
 use crate::util::{pds_hostname, pds_hostname_without_port};
 use axum::{
     Json,
@@ -164,7 +164,9 @@ pub async fn remove_controller(
                 .session_repo
                 .delete_app_passwords_by_controller(&auth.did, &input.controller_did)
                 .await
-                .unwrap_or(0) as usize;
+                .unwrap_or(0)
+                .try_into()
+                .unwrap_or(0usize);
 
             let revoked_oauth_tokens = state
                 .oauth_repo
@@ -473,9 +475,7 @@ pub async fn create_delegated_account(
             Err(_) => return Ok(ApiError::InvalidInviteCode.into_response()),
         }
     } else {
-        let invite_required = std::env::var("INVITE_CODE_REQUIRED")
-            .map(|v| v == "true" || v == "1")
-            .unwrap_or(false);
+        let invite_required = crate::util::parse_env_bool("INVITE_CODE_REQUIRED");
         if invite_required {
             return Ok(ApiError::InviteCodeRequired.into_response());
         }
@@ -529,8 +529,11 @@ pub async fn create_delegated_account(
         .into_response());
     }
 
-    let did = unsafe { Did::new_unchecked(&genesis_result.did) };
-    let handle = unsafe { Handle::new_unchecked(&handle) };
+    let did: Did = genesis_result
+        .did
+        .parse()
+        .map_err(|_| ApiError::InternalError(Some("PLC genesis returned invalid DID".into())))?;
+    let handle: Handle = handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     info!(did = %did, handle = %handle, controller = %can_control.did(), "Created DID for delegated account");
 
     let encrypted_key_bytes = match crate::config::encrypt_key(&secret_key_bytes) {
@@ -627,13 +630,11 @@ pub async fn create_delegated_account(
         "$type": "app.bsky.actor.profile",
         "displayName": handle
     });
-    let profile_collection = unsafe { Nsid::new_unchecked("app.bsky.actor.profile") };
-    let profile_rkey = unsafe { Rkey::new_unchecked("self") };
     if let Err(e) = crate::api::repo::record::create_record_internal(
         &state,
         &did,
-        &profile_collection,
-        &profile_rkey,
+        &crate::types::PROFILE_COLLECTION,
+        &crate::types::PROFILE_RKEY,
         &profile_record,
     )
     .await

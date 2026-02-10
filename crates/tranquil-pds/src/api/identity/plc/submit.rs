@@ -26,7 +26,7 @@ pub async fn submit_plc_operation(
     Json(input): Json<SubmitPlcOperationInput>,
 ) -> Result<Response, ApiError> {
     if let Err(e) = crate::auth::scope_check::check_identity_scope(
-        auth.is_oauth(),
+        &auth.auth_source,
         auth.scope.as_deref(),
         crate::oauth::scopes::IdentityAttr::Wildcard,
     ) {
@@ -87,7 +87,7 @@ pub async fn submit_plc_operation(
     {
         let service_type = pds.get("type").and_then(|v| v.as_str());
         let endpoint = pds.get("endpoint").and_then(|v| v.as_str());
-        if service_type != Some("AtprotoPersonalDataServer") {
+        if service_type != Some(crate::plc::ServiceType::Pds.as_str()) {
             return Err(ApiError::InvalidRequest(
                 "Incorrect type on atproto_pds service".into(),
             ));
@@ -143,9 +143,18 @@ pub async fn submit_plc_operation(
             warn!("Failed to sequence identity event: {:?}", e);
         }
     }
-    let _ = state.cache.delete(&format!("handle:{}", user.handle)).await;
-    let _ = state.cache.delete(&format!("plc:doc:{}", did)).await;
-    let _ = state.cache.delete(&format!("plc:data:{}", did)).await;
+    let _ = state
+        .cache
+        .delete(&crate::cache_keys::handle_key(&user.handle))
+        .await;
+    let _ = state
+        .cache
+        .delete(&crate::cache_keys::plc_doc_key(did))
+        .await;
+    let _ = state
+        .cache
+        .delete(&crate::cache_keys::plc_data_key(did))
+        .await;
     if state.did_resolver.refresh_did(did).await.is_none() {
         warn!(did = %did, "Failed to refresh DID cache after PLC update");
     }

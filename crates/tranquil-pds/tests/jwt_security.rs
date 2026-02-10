@@ -10,10 +10,9 @@ use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tranquil_pds::auth::{
-    self, SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED, SCOPE_REFRESH,
-    TOKEN_TYPE_ACCESS, TOKEN_TYPE_REFRESH, TOKEN_TYPE_SERVICE, create_access_token,
-    create_refresh_token, create_service_token, get_did_from_token, get_jti_from_token,
-    verify_access_token, verify_refresh_token, verify_token,
+    self, TokenScope, TokenType, create_access_token, create_refresh_token, create_service_token,
+    get_did_from_token, get_jti_from_token, verify_access_token, verify_refresh_token,
+    verify_token,
 };
 
 fn generate_user_key() -> Vec<u8> {
@@ -100,11 +99,11 @@ fn test_algorithm_substitution_attacks() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
 
-    let none_header = json!({ "alg": "none", "typ": TOKEN_TYPE_ACCESS });
+    let none_header = json!({ "alg": "none", "typ": TokenType::Access.as_str() });
     let claims = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
         "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600,
-        "jti": "attack-token", "scope": SCOPE_ACCESS
+        "jti": "attack-token", "scope": TokenScope::Access.as_str()
     });
     let none_token = create_unsigned_jwt(&none_header, &claims);
     assert!(
@@ -112,7 +111,7 @@ fn test_algorithm_substitution_attacks() {
         "Algorithm 'none' must be rejected"
     );
 
-    let hs256_header = json!({ "alg": "HS256", "typ": TOKEN_TYPE_ACCESS });
+    let hs256_header = json!({ "alg": "HS256", "typ": TokenType::Access.as_str() });
     let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&hs256_header).unwrap());
     let claims_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&claims).unwrap());
     use hmac::{Hmac, Mac};
@@ -128,7 +127,7 @@ fn test_algorithm_substitution_attacks() {
     );
 
     for (alg, sig_len) in [("RS256", 256), ("ES256", 64)] {
-        let header = json!({ "alg": alg, "typ": TOKEN_TYPE_ACCESS });
+        let header = json!({ "alg": alg, "typ": TokenType::Access.as_str() });
         let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
         let fake_sig = URL_SAFE_NO_PAD.encode(vec![1u8; sig_len]);
         let token = format!("{}.{}.{}", header_b64, claims_b64, fake_sig);
@@ -179,7 +178,7 @@ fn test_token_type_confusion() {
 fn test_scope_validation() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
-    let header = json!({ "alg": "ES256K", "typ": TOKEN_TYPE_ACCESS });
+    let header = json!({ "alg": "ES256K", "typ": TokenType::Access.as_str() });
 
     let invalid_scope = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
@@ -225,7 +224,11 @@ fn test_scope_validation() {
         .is_err()
     );
 
-    for scope in [SCOPE_ACCESS, SCOPE_APP_PASS, SCOPE_APP_PASS_PRIVILEGED] {
+    for scope in [
+        TokenScope::Access.as_str(),
+        TokenScope::AppPass.as_str(),
+        TokenScope::AppPassPrivileged.as_str(),
+    ] {
         let claims = json!({
             "iss": did, "sub": did, "aud": "did:web:test.pds",
             "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600,
@@ -240,7 +243,7 @@ fn test_scope_validation() {
     let refresh_scope = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
         "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600,
-        "jti": "test", "scope": SCOPE_REFRESH
+        "jti": "test", "scope": TokenScope::Refresh.as_str()
     });
     assert!(
         verify_access_token(
@@ -255,12 +258,12 @@ fn test_scope_validation() {
 fn test_expiration_and_timing() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
-    let header = json!({ "alg": "ES256K", "typ": TOKEN_TYPE_ACCESS });
+    let header = json!({ "alg": "ES256K", "typ": TokenType::Access.as_str() });
     let now = Utc::now().timestamp();
 
     let expired = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
-        "iat": now - 7200, "exp": now - 3600, "jti": "test", "scope": SCOPE_ACCESS
+        "iat": now - 7200, "exp": now - 3600, "jti": "test", "scope": TokenScope::Access.as_str()
     });
     let result = verify_access_token(
         &create_custom_jwt(&header, &expired, &key_bytes),
@@ -270,7 +273,7 @@ fn test_expiration_and_timing() {
 
     let future_iat = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
-        "iat": now + 60, "exp": now + 7200, "jti": "test", "scope": SCOPE_ACCESS
+        "iat": now + 60, "exp": now + 7200, "jti": "test", "scope": TokenScope::Access.as_str()
     });
     assert!(
         verify_access_token(
@@ -282,7 +285,7 @@ fn test_expiration_and_timing() {
 
     let just_expired = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
-        "iat": now - 10, "exp": now - 1, "jti": "test", "scope": SCOPE_ACCESS
+        "iat": now - 10, "exp": now - 1, "jti": "test", "scope": TokenScope::Access.as_str()
     });
     assert!(
         verify_access_token(
@@ -294,7 +297,7 @@ fn test_expiration_and_timing() {
 
     let far_future = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
-        "iat": now, "exp": i64::MAX, "jti": "test", "scope": SCOPE_ACCESS
+        "iat": now, "exp": i64::MAX, "jti": "test", "scope": TokenScope::Access.as_str()
     });
     let _ = verify_access_token(
         &create_custom_jwt(&header, &far_future, &key_bytes),
@@ -303,7 +306,7 @@ fn test_expiration_and_timing() {
 
     let negative_iat = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
-        "iat": -1000000000i64, "exp": now + 3600, "jti": "test", "scope": SCOPE_ACCESS
+        "iat": -1000000000i64, "exp": now + 3600, "jti": "test", "scope": TokenScope::Access.as_str()
     });
     let _ = verify_access_token(
         &create_custom_jwt(&header, &negative_iat, &key_bytes),
@@ -359,11 +362,11 @@ fn test_malformed_tokens() {
 fn test_claim_validation() {
     let key_bytes = generate_user_key();
     let did = "did:plc:test";
-    let header = json!({ "alg": "ES256K", "typ": TOKEN_TYPE_ACCESS });
+    let header = json!({ "alg": "ES256K", "typ": TokenType::Access.as_str() });
 
     let missing_exp = json!({
         "iss": did, "sub": did, "aud": "did:web:test",
-        "iat": Utc::now().timestamp(), "scope": SCOPE_ACCESS
+        "iat": Utc::now().timestamp(), "scope": TokenScope::Access.as_str()
     });
     assert!(
         verify_access_token(
@@ -375,7 +378,7 @@ fn test_claim_validation() {
 
     let missing_iat = json!({
         "iss": did, "sub": did, "aud": "did:web:test",
-        "exp": Utc::now().timestamp() + 3600, "scope": SCOPE_ACCESS
+        "exp": Utc::now().timestamp() + 3600, "scope": TokenScope::Access.as_str()
     });
     assert!(
         verify_access_token(
@@ -387,7 +390,7 @@ fn test_claim_validation() {
 
     let missing_sub = json!({
         "iss": did, "aud": "did:web:test",
-        "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600, "scope": SCOPE_ACCESS
+        "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600, "scope": TokenScope::Access.as_str()
     });
     assert!(
         verify_access_token(
@@ -399,7 +402,7 @@ fn test_claim_validation() {
 
     let wrong_types = json!({
         "iss": 12345, "sub": ["did:plc:test"], "aud": {"url": "did:web:test"},
-        "iat": "not a number", "exp": "also not a number", "jti": null, "scope": SCOPE_ACCESS
+        "iat": "not a number", "exp": "also not a number", "jti": null, "scope": TokenScope::Access.as_str()
     });
     assert!(
         verify_access_token(
@@ -412,7 +415,7 @@ fn test_claim_validation() {
     let unicode_injection = json!({
         "iss": "did:plc:test\u{0000}attacker", "sub": "did:plc:test\u{202E}rekatta",
         "aud": "did:web:test.pds", "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600,
-        "jti": "test", "scope": SCOPE_ACCESS
+        "jti": "test", "scope": TokenScope::Access.as_str()
     });
     if let Ok(data) = verify_access_token(
         &create_custom_jwt(&header, &unicode_injection, &key_bytes),
@@ -453,13 +456,13 @@ fn test_header_injection_and_constant_time() {
     let did = "did:plc:test";
 
     let header = json!({
-        "alg": "ES256K", "typ": TOKEN_TYPE_ACCESS,
+        "alg": "ES256K", "typ": TokenType::Access.as_str(),
         "kid": "../../../../../../etc/passwd", "jku": "https://attacker.com/keys"
     });
     let claims = json!({
         "iss": did, "sub": did, "aud": "did:web:test.pds",
         "iat": Utc::now().timestamp(), "exp": Utc::now().timestamp() + 3600,
-        "jti": "test", "scope": SCOPE_ACCESS
+        "jti": "test", "scope": TokenScope::Access.as_str()
     });
     assert!(
         verify_access_token(&create_custom_jwt(&header, &claims, &key_bytes), &key_bytes).is_ok()

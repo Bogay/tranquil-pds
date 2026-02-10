@@ -2,6 +2,7 @@ pub mod api;
 pub mod appview;
 pub mod auth;
 pub mod cache;
+pub mod cache_keys;
 pub mod cid_types;
 pub mod circuit_breaker;
 pub mod comms;
@@ -658,27 +659,91 @@ pub fn app(state: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .layer(DefaultBodyLimit::max(util::get_max_blob_size()))
+        .layer(axum::middleware::map_response(rewrite_422_to_400))
         .layer(middleware::from_fn(metrics::metrics_middleware))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
                 .allow_headers([
-                    "Authorization".parse().unwrap(),
-                    "Content-Type".parse().unwrap(),
-                    "Content-Encoding".parse().unwrap(),
-                    "Accept-Encoding".parse().unwrap(),
-                    "DPoP".parse().unwrap(),
-                    "atproto-proxy".parse().unwrap(),
-                    "atproto-accept-labelers".parse().unwrap(),
-                    "x-bsky-topics".parse().unwrap(),
+                    http::header::AUTHORIZATION,
+                    http::header::CONTENT_TYPE,
+                    http::header::CONTENT_ENCODING,
+                    http::header::ACCEPT_ENCODING,
+                    util::HEADER_DPOP,
+                    util::HEADER_ATPROTO_PROXY,
+                    util::HEADER_ATPROTO_ACCEPT_LABELERS,
+                    util::HEADER_X_BSKY_TOPICS,
                 ])
                 .expose_headers([
-                    "WWW-Authenticate".parse().unwrap(),
-                    "DPoP-Nonce".parse().unwrap(),
-                    "atproto-repo-rev".parse().unwrap(),
-                    "atproto-content-labelers".parse().unwrap(),
+                    http::header::WWW_AUTHENTICATE,
+                    util::HEADER_DPOP_NONCE,
+                    util::HEADER_ATPROTO_REPO_REV,
+                    util::HEADER_ATPROTO_CONTENT_LABELERS,
                 ]),
         )
         .with_state(state)
+}
+
+async fn rewrite_422_to_400(response: axum::response::Response) -> axum::response::Response {
+    if response.status() != StatusCode::UNPROCESSABLE_ENTITY {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let bytes = match axum::body::to_bytes(body, 64 * 1024).await {
+        Ok(b) => b,
+        Err(_) => {
+            parts.status = StatusCode::BAD_REQUEST;
+            parts.headers.remove(http::header::CONTENT_LENGTH);
+            let fallback = json!({"error": "InvalidRequest", "message": "Invalid request body"});
+            return axum::response::Response::from_parts(
+                parts,
+                axum::body::Body::from(serde_json::to_vec(&fallback).unwrap_or_default()),
+            );
+        }
+    };
+    let raw = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
+        .unwrap_or_else(|| {
+            String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| "Invalid request body".into())
+        });
+    let message = humanize_json_error(&raw);
+
+    parts.status = StatusCode::BAD_REQUEST;
+    parts.headers.remove(http::header::CONTENT_LENGTH);
+    let error_name = classify_deserialization_error(&raw);
+    let new_body = json!({
+        "error": error_name,
+        "message": message
+    });
+    axum::response::Response::from_parts(
+        parts,
+        axum::body::Body::from(serde_json::to_vec(&new_body).unwrap_or_default()),
+    )
+}
+
+fn humanize_json_error(raw: &str) -> String {
+    if raw.contains("missing field") {
+        raw.split("missing field `")
+            .nth(1)
+            .and_then(|s| s.split('`').next())
+            .map(|field| format!("Missing required field: {}", field))
+            .unwrap_or_else(|| raw.to_string())
+    } else if raw.contains("invalid type") {
+        format!("Invalid field type: {}", raw)
+    } else if raw.contains("Invalid JSON") || raw.contains("syntax") {
+        "Invalid JSON syntax".to_string()
+    } else if raw.contains("Content-Type") || raw.contains("content type") {
+        "Content-Type must be application/json".to_string()
+    } else {
+        raw.to_string()
+    }
+}
+
+fn classify_deserialization_error(raw: &str) -> &'static str {
+    match raw {
+        s if s.contains("invalid handle") => "InvalidHandle",
+        _ => "InvalidRequest",
+    }
 }

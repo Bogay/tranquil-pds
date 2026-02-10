@@ -84,7 +84,7 @@ pub async fn update_account_handle(
         .ok()
         .flatten()
         .ok_or(ApiError::AccountNotFound)?;
-    let handle_for_check = unsafe { Handle::new_unchecked(&handle) };
+    let handle_for_check: Handle = handle.parse().map_err(|_| ApiError::InvalidHandle(None))?;
     if let Ok(true) = state
         .user_repo
         .check_handle_exists(&handle_for_check, user_id)
@@ -100,9 +100,15 @@ pub async fn update_account_handle(
         Ok(0) => Err(ApiError::AccountNotFound),
         Ok(_) => {
             if let Some(old) = old_handle {
-                let _ = state.cache.delete(&format!("handle:{}", old)).await;
+                let _ = state
+                    .cache
+                    .delete(&crate::cache_keys::handle_key(&old))
+                    .await;
             }
-            let _ = state.cache.delete(&format!("handle:{}", handle)).await;
+            let _ = state
+                .cache
+                .delete(&crate::cache_keys::handle_key(&handle))
+                .await;
             if let Err(e) = crate::api::repo::record::sequence_identity_event(
                 &state,
                 did,

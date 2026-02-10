@@ -3,7 +3,7 @@ use crate::auth::{Admin, Auth};
 use crate::state::AppState;
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{error, warn};
 use tranquil_types::CidLink;
 
 #[derive(Serialize)]
@@ -187,15 +187,24 @@ pub async fn update_server_config(
         };
 
         if let Some(old_cid_str) = should_delete_old {
-            let old_cid = unsafe { CidLink::new_unchecked(old_cid_str) };
-            if let Ok(Some(storage_key)) =
-                state.infra_repo.get_blob_storage_key_by_cid(&old_cid).await
-            {
-                if let Err(e) = state.blob_store.delete(&storage_key).await {
-                    error!("Failed to delete old logo blob from storage: {:?}", e);
+            match CidLink::new(old_cid_str) {
+                Ok(old_cid) => {
+                    if let Ok(Some(storage_key)) =
+                        state.infra_repo.get_blob_storage_key_by_cid(&old_cid).await
+                    {
+                        if let Err(e) = state.blob_store.delete(&storage_key).await {
+                            error!("Failed to delete old logo blob from storage: {:?}", e);
+                        }
+                        if let Err(e) = state.infra_repo.delete_blob_by_cid(&old_cid).await {
+                            error!("Failed to delete old logo blob record: {:?}", e);
+                        }
+                    }
                 }
-                if let Err(e) = state.infra_repo.delete_blob_by_cid(&old_cid).await {
-                    error!("Failed to delete old logo blob record: {:?}", e);
+                Err(e) => {
+                    warn!(
+                        "Old logo CID in database is invalid, skipping cleanup: {:?}",
+                        e
+                    );
                 }
             }
         }

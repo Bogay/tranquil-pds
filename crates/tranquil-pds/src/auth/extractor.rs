@@ -64,9 +64,21 @@ impl IntoResponse for AuthError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthScheme {
+    Bearer,
+    DPoP,
+}
+
+impl AuthScheme {
+    pub fn is_dpop(self) -> bool {
+        matches!(self, Self::DPoP)
+    }
+}
+
 pub struct ExtractedToken {
     pub token: String,
-    pub is_dpop: bool,
+    pub scheme: AuthScheme,
 }
 
 pub fn extract_bearer_token_from_header(auth_header: Option<&str>) -> Option<String> {
@@ -100,7 +112,7 @@ pub fn extract_auth_token_from_header(auth_header: Option<&str>) -> Option<Extra
         }
         return Some(ExtractedToken {
             token: token.to_string(),
-            is_dpop: false,
+            scheme: AuthScheme::Bearer,
         });
     }
 
@@ -111,7 +123,7 @@ pub fn extract_auth_token_from_header(auth_header: Option<&str>) -> Option<Extra
         }
         return Some(ExtractedToken {
             token: token.to_string(),
-            is_dpop: true,
+            scheme: AuthScheme::DPoP,
         });
     }
 
@@ -255,7 +267,7 @@ async fn verify_oauth_token_and_build_user(
     }
 }
 
-async fn verify_service_token(token: &str) -> Result<ServiceTokenClaims, AuthError> {
+async fn verify_service_token_claims(token: &str) -> Result<ServiceTokenClaims, AuthError> {
     let verifier = ServiceTokenVerifier::new();
     let claims = verifier
         .verify_service_token(token, None)
@@ -289,11 +301,11 @@ async fn extract_auth_internal(
         extract_auth_token_from_header(Some(auth_header)).ok_or(AuthError::InvalidFormat)?;
 
     if is_service_token(&extracted.token) {
-        let claims = verify_service_token(&extracted.token).await?;
+        let claims = verify_service_token_claims(&extracted.token).await?;
         return Ok(ExtractedAuth::Service(claims));
     }
 
-    let dpop_proof = crate::util::get_header_str(&parts.headers, "DPoP");
+    let dpop_proof = crate::util::get_header_str(&parts.headers, crate::util::HEADER_DPOP);
     let method = parts.method.as_str();
     let original_uri = parts
         .extensions
@@ -418,7 +430,7 @@ pub struct ServiceAuth {
 impl ServiceAuth {
     pub fn require_lxm(&self, expected_lxm: &str) -> Result<(), ApiError> {
         match &self.claims.lxm {
-            Some(lxm) if lxm == "*" || lxm == expected_lxm => Ok(()),
+            Some(lxm) if crate::auth::lxm_permits(lxm, expected_lxm) => Ok(()),
             Some(lxm) => Err(ApiError::AuthorizationError(format!(
                 "Token lxm '{}' does not permit '{}'",
                 lxm, expected_lxm

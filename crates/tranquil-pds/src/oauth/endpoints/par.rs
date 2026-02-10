@@ -131,7 +131,7 @@ pub async fn pushed_authorization_request(
         axum::http::StatusCode::CREATED,
         Json(ParResponse {
             request_uri: request_id.0,
-            expires_in: PAR_EXPIRY_SECONDS as u64,
+            expires_in: u64::try_from(PAR_EXPIRY_SECONDS).unwrap_or(600),
         }),
     ))
 }

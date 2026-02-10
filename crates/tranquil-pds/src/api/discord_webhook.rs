@@ -183,7 +183,7 @@ async fn handle_command(state: AppState, interaction: Interaction) -> Response {
                 state.user_repo.as_ref(),
                 state.infra_repo.as_ref(),
                 user_id,
-                "discord",
+                tranquil_db_traits::CommsChannel::Discord,
                 &discord_user_id,
                 pds_hostname(),
             )

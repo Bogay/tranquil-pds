@@ -261,7 +261,7 @@ impl InfraRepository for PostgresInfraRepository {
             .map(|r| InviteCodeInfo {
                 code: r.code,
                 available_uses: r.available_uses,
-                state: InviteCodeState::from(r.disabled),
+                state: InviteCodeState::from_optional_disabled_flag(r.disabled),
                 for_account: Some(Did::from(r.for_account)),
                 created_at: r.created_at,
                 created_by: None,
@@ -438,7 +438,7 @@ impl InfraRepository for PostgresInfraRepository {
             .map(|r| InviteCodeInfo {
                 code: r.code,
                 available_uses: r.available_uses,
-                state: InviteCodeState::from(r.disabled),
+                state: InviteCodeState::from_optional_disabled_flag(r.disabled),
                 for_account: Some(Did::from(r.for_account)),
                 created_at: r.created_at,
                 created_by: Some(Did::from(r.created_by)),
@@ -461,7 +461,7 @@ impl InfraRepository for PostgresInfraRepository {
         Ok(result.map(|r| InviteCodeInfo {
             code: r.code,
             available_uses: r.available_uses,
-            state: InviteCodeState::from(r.disabled),
+            state: InviteCodeState::from_optional_disabled_flag(r.disabled),
             for_account: Some(Did::from(r.for_account)),
             created_at: r.created_at,
             created_by: Some(Did::from(r.created_by)),
@@ -492,7 +492,7 @@ impl InfraRepository for PostgresInfraRepository {
                     InviteCodeInfo {
                         code: r.code,
                         available_uses: r.available_uses,
-                        state: InviteCodeState::from(r.disabled),
+                        state: InviteCodeState::from_optional_disabled_flag(r.disabled),
                         for_account: Some(Did::from(r.for_account)),
                         created_at: r.created_at,
                         created_by: Some(Did::from(r.created_by)),

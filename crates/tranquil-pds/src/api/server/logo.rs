@@ -21,7 +21,10 @@ pub async fn get_logo(State(state): State<AppState>) -> Response {
         Some(c) if !c.is_empty() => c,
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
-    let cid = unsafe { crate::types::CidLink::new_unchecked(&cid_str) };
+    let cid = match crate::types::CidLink::new(&cid_str) {
+        Ok(c) => c,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
 
     let metadata = match state.blob_repo.get_blob_metadata(&cid).await {
         Ok(Some(m)) => m,
@@ -38,7 +41,7 @@ pub async fn get_logo(State(state): State<AppState>) -> Response {
             .header(header::CONTENT_TYPE, &metadata.mime_type)
             .header(header::CACHE_CONTROL, "public, max-age=3600")
             .body(Body::from(data))
-            .unwrap(),
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
         Err(e) => {
             error!("Failed to fetch logo from storage: {:?}", e);
             StatusCode::NOT_FOUND.into_response()

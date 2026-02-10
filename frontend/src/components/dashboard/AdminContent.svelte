@@ -35,27 +35,12 @@
     invitesDisabled?: boolean
   }
 
-  interface Invite {
-    code: string
-    available: number
-    disabled: boolean
-    forAccount: string
-    createdBy: string
-    createdAt: string
-    uses: Array<{ usedBy: string; usedAt: string }>
-  }
-
   let stats = $state<ServerStats | null>(null)
   let users = $state<User[]>([])
   let loading = $state(true)
   let usersLoading = $state(false)
   let searchQuery = $state('')
   let usersCursor = $state<string | undefined>(undefined)
-
-  let invites = $state<Invite[]>([])
-  let invitesLoading = $state(false)
-  let invitesCursor = $state<string | undefined>(undefined)
-  let showInvites = $state(false)
 
   let selectedUser = $state<User | null>(null)
   let userActionLoading = $state(false)
@@ -217,38 +202,6 @@
       secondaryColorInput !== secondaryColor ||
       secondaryColorDarkInput !== secondaryColorDark ||
       logoChanged
-  }
-
-  async function loadInvites(reset = false) {
-    invitesLoading = true
-    if (reset) {
-      invites = []
-      invitesCursor = undefined
-    }
-    try {
-      const result = await api.getInviteCodes(session.accessJwt, {
-        cursor: reset ? undefined : invitesCursor,
-        limit: 25,
-      })
-      invites = reset ? result.codes : [...invites, ...result.codes]
-      invitesCursor = result.cursor
-      showInvites = true
-    } catch {
-      toast.error($_('admin.failedToLoadInvites'))
-    } finally {
-      invitesLoading = false
-    }
-  }
-
-  async function disableInvite(code: string) {
-    if (!confirm($_('admin.disableInviteConfirm', { values: { code } }))) return
-    try {
-      await api.disableInviteCodes(session.accessJwt, [code])
-      invites = invites.map(i => i.code === code ? { ...i, disabled: true } : i)
-      toast.success($_('admin.inviteDisabled'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : $_('admin.failedToDisableInvite'))
-    }
   }
 
   async function showUserDetail(user: User) {
@@ -467,53 +420,6 @@
     {/if}
   </section>
 
-  <section class="invites-section">
-    <h3>{$_('admin.inviteCodes')}</h3>
-    <div class="section-actions">
-      <button onclick={() => loadInvites(true)} disabled={invitesLoading}>
-        {invitesLoading ? $_('common.loading') : showInvites ? $_('admin.refresh') : $_('admin.loadInviteCodes')}
-      </button>
-    </div>
-    {#if showInvites}
-      {#if invites.length === 0}
-        <p class="empty">{$_('admin.noInvites')}</p>
-      {:else}
-        <ul class="invite-list">
-          {#each invites as invite}
-            <li class="invite-item" class:disabled-row={invite.disabled}>
-              <div class="invite-info">
-                <code class="invite-code">{invite.code}</code>
-                <span class="invite-meta">
-                  {$_('admin.available')}: {invite.available} - {$_('admin.uses')}: {invite.uses.length} - {$_('admin.created')}: {formatDate(invite.createdAt)}
-                </span>
-              </div>
-              <div class="invite-status">
-                {#if invite.disabled}
-                  <span class="badge deactivated">{$_('admin.disabled')}</span>
-                {:else if invite.available === 0}
-                  <span class="badge unverified">{$_('admin.exhausted')}</span>
-                {:else}
-                  <span class="badge verified">{$_('admin.active')}</span>
-                {/if}
-              </div>
-              <div class="invite-actions">
-                {#if !invite.disabled}
-                  <button class="action-btn danger" onclick={() => disableInvite(invite.code)}>
-                    {$_('admin.disable')}
-                  </button>
-                {/if}
-              </div>
-            </li>
-          {/each}
-        </ul>
-        {#if invitesCursor}
-          <button type="button" class="load-more" onclick={() => loadInvites(false)} disabled={invitesLoading}>
-            {invitesLoading ? $_('common.loading') : $_('admin.loadMore')}
-          </button>
-        {/if}
-      {/if}
-    {/if}
-  </section>
 </div>
 
 {#if selectedUser}
@@ -857,74 +763,6 @@
   .badge.unverified {
     background: var(--bg-tertiary);
     color: var(--text-secondary);
-  }
-
-  .section-actions {
-    margin-bottom: var(--space-4);
-  }
-
-  .invite-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .invite-item {
-    display: flex;
-    align-items: center;
-    padding: var(--space-3);
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    gap: var(--space-3);
-  }
-
-  .invite-item.disabled-row {
-    opacity: 0.6;
-  }
-
-  .invite-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .invite-code {
-    display: block;
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-
-  .invite-meta {
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-  }
-
-  .invite-status {
-    flex-shrink: 0;
-  }
-
-  .invite-actions {
-    flex-shrink: 0;
-  }
-
-  .action-btn {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-  }
-
-  .action-btn.danger {
-    background: transparent;
-    border: 1px solid var(--error-border);
-    color: var(--error-text);
-  }
-
-  .action-btn.danger:hover {
-    background: var(--error-bg);
   }
 
   .modal-overlay {

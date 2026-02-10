@@ -7,11 +7,17 @@ import {
 import {
   P256PrivateKey,
   parsePrivateMultikey,
+  parsePublicMultikey,
   Secp256k1PrivateKey,
   Secp256k1PrivateKeyExportable,
 } from "@atcute/crypto";
 import * as CBOR from "@atcute/cbor";
-import { fromBase16, toBase64Url } from "@atcute/multibase";
+import {
+  fromBase16,
+  fromBase58Btc,
+  fromBase64Url,
+  toBase64Url,
+} from "@atcute/multibase";
 
 export type PrivateKey = P256PrivateKey | Secp256k1PrivateKey;
 
@@ -35,6 +41,137 @@ export interface PlcOperationData {
   verificationMethods: Record<string, string>;
   sig?: string;
 }
+
+type KeyCurve = "secp256k1" | "p256";
+
+const HEX_PRIVATE_KEY_REGEX = /^[0-9a-f]{64}$/i;
+const BASE58BTC_CHARSET_REGEX = /^[a-km-zA-HJ-NP-Z1-9]+$/;
+
+const importRawBytes = (
+  bytes: Uint8Array,
+  curve: KeyCurve,
+): Promise<PrivateKey> =>
+  curve === "p256"
+    ? P256PrivateKey.importRaw(bytes)
+    : Secp256k1PrivateKey.importRaw(bytes);
+
+const importFromMultikeyMatch = (
+  match: ReturnType<typeof parsePrivateMultikey>,
+): Promise<PrivateKey> =>
+  match.type === "p256"
+    ? P256PrivateKey.importRaw(match.privateKeyBytes)
+    : Secp256k1PrivateKey.importRaw(match.privateKeyBytes);
+
+const importJwk = async (
+  json: string,
+  _curve: KeyCurve,
+): Promise<PrivateKey> => {
+  const parsed: unknown = JSON.parse(json);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Invalid JWK: expected a JSON object");
+  }
+  const jwk = parsed as Record<string, unknown>;
+
+  if (jwk.kty !== "EC") {
+    throw new Error(
+      `Unsupported JWK key type: ${
+        String(jwk.kty)
+      }. Only EC keys are supported`,
+    );
+  }
+
+  if (typeof jwk.d !== "string") {
+    throw new Error(
+      "This JWK is a public key (missing 'd' parameter). The private key JWK is required",
+    );
+  }
+
+  const detectedCurve: KeyCurve = (() => {
+    switch (jwk.crv) {
+      case "secp256k1":
+        return "secp256k1";
+      case "P-256":
+        return "p256";
+      default:
+        throw new Error(
+          `Unsupported JWK curve: ${
+            String(jwk.crv)
+          }. Expected secp256k1 or P-256`,
+        );
+    }
+  })();
+
+  const privateKeyBytes = fromBase64Url(jwk.d);
+  return importRawBytes(privateKeyBytes, detectedCurve);
+};
+
+const importMultikeyOrBase58 = (
+  input: string,
+  curve: KeyCurve,
+): Promise<PrivateKey> => {
+  try {
+    const match = parsePrivateMultikey(input);
+    return importFromMultikeyMatch(match);
+  } catch {
+    try {
+      parsePublicMultikey(input);
+      throw new Error(
+        "This is a public multikey. The private key multikey is required",
+      );
+    } catch (publicErr) {
+      if (
+        publicErr instanceof Error &&
+        publicErr.message.includes("public multikey")
+      ) {
+        throw publicErr;
+      }
+    }
+
+    try {
+      return importBase58Raw(input, curve);
+    } catch {
+      return importBase58Raw(input.slice(1), curve);
+    }
+  }
+};
+
+const importBase58Raw = (
+  input: string,
+  curve: KeyCurve,
+): Promise<PrivateKey> => {
+  const bytes = fromBase58Btc(input);
+  if (bytes.length !== 32) {
+    throw new Error(
+      `Invalid base58 key: decoded to ${bytes.length} bytes, expected 32`,
+    );
+  }
+  return importRawBytes(bytes, curve);
+};
+
+const detectAndImportPrivateKey = (
+  input: string,
+  curve: KeyCurve,
+): Promise<PrivateKey> => {
+  if (input.startsWith("{")) {
+    return importJwk(input, curve);
+  }
+
+  if (HEX_PRIVATE_KEY_REGEX.test(input)) {
+    return importRawBytes(fromBase16(input.toLowerCase()), curve);
+  }
+
+  if (input.startsWith("z")) {
+    return importMultikeyOrBase58(input, curve);
+  }
+
+  if (BASE58BTC_CHARSET_REGEX.test(input)) {
+    return importBase58Raw(input, curve);
+  }
+
+  throw new Error(
+    "Unrecognized key format. Expected hex, base58, multikey, or JWK",
+  );
+};
 
 const jsonToB64Url = (obj: unknown): string => {
   const enc = new TextEncoder();
@@ -88,42 +225,21 @@ export class PlcOps {
 
   async getKeyPair(
     privateKeyString: string,
-    type: "secp256k1" | "p256" = "secp256k1",
+    type: KeyCurve = "secp256k1",
   ): Promise<KeypairInfo> {
-    const HEX_REGEX = /^[0-9a-f]+$/i;
-    const MULTIKEY_REGEX = /^z[a-km-zA-HJ-NP-Z1-9]+$/;
-    let keypair: PrivateKey | undefined;
-
     const trimmed = privateKeyString.trim();
 
-    if (HEX_REGEX.test(trimmed) && trimmed.length === 64) {
-      const privateKeyBytes = fromBase16(trimmed);
-      if (type === "p256") {
-        keypair = await P256PrivateKey.importRaw(privateKeyBytes);
-      } else {
-        keypair = await Secp256k1PrivateKey.importRaw(privateKeyBytes);
-      }
-    } else if (MULTIKEY_REGEX.test(trimmed)) {
-      const match = parsePrivateMultikey(trimmed);
-      const privateKeyBytes = match.privateKeyBytes;
-      if (match.type === "p256") {
-        keypair = await P256PrivateKey.importRaw(privateKeyBytes);
-      } else if (match.type === "secp256k1") {
-        keypair = await Secp256k1PrivateKey.importRaw(privateKeyBytes);
-      } else {
-        throw new Error(
-          `Unsupported key type: ${(match as { type: string }).type}`,
-        );
-      }
-    } else {
+    if (trimmed.length === 0) {
+      throw new Error("Private key is required");
+    }
+
+    if (trimmed.startsWith("did:key:")) {
       throw new Error(
-        "Invalid key format. Expected 64-char hex or multikey format.",
+        "This is a did:key public key identifier. The private key is required",
       );
     }
 
-    if (!keypair) {
-      throw new Error("Failed to parse private key");
-    }
+    const keypair = await detectAndImportPrivateKey(trimmed, type);
 
     return {
       type: "private_key",

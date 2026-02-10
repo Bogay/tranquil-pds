@@ -33,6 +33,10 @@ test-group = "heavy-load-tests"
 filter = "test(/two_node_stress_concurrent_load/)"
 test-group = "heavy-load-tests"
 
+[[profile.default.overrides]]
+filter = "binary(repo_lifecycle)"
+test-group = "heavy-load-tests"
+
 [[profile.ci.overrides]]
 filter = "test(/import_with_verification/) | test(/plc_migration/)"
 test-group = "serial-env-tests"
@@ -47,4 +51,8 @@ test-group = "heavy-load-tests"
 
 [[profile.ci.overrides]]
 filter = "test(/two_node_stress_concurrent_load/)"
+test-group = "heavy-load-tests"
+
+[[profile.ci.overrides]]
+filter = "binary(repo_lifecycle)"
 test-group = "heavy-load-tests"

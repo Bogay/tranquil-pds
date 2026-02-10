@@ -373,8 +373,7 @@ fn configure_socket(stream: &TcpStream) {
     if let Err(e) = sock_ref.set_tcp_nodelay(true) {
         tracing::warn!(error = %e, "failed to set TCP_NODELAY");
     }
-    let keepalive = socket2::TcpKeepalive::new()
-        .with_time(Duration::from_secs(30));
+    let keepalive = socket2::TcpKeepalive::new().with_time(Duration::from_secs(30));
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
     let keepalive = keepalive.with_interval(Duration::from_secs(10));
     let params = keepalive;

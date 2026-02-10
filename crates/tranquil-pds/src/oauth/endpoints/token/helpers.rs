@@ -77,8 +77,14 @@ pub fn create_access_token_with_delegation(
         "alg": "HS256",
         "typ": "at+jwt"
     });
-    let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).unwrap());
+    let header_b64 =
+        URL_SAFE_NO_PAD.encode(serde_json::to_string(&header).map_err(|_| {
+            OAuthError::ServerError("token header serialization failed".to_string())
+        })?);
+    let payload_b64 =
+        URL_SAFE_NO_PAD.encode(serde_json::to_string(&payload).map_err(|_| {
+            OAuthError::ServerError("token payload serialization failed".to_string())
+        })?);
     let signing_input = format!("{}.{}", header_b64, payload_b64);
     let config = AuthConfig::get();
     type HmacSha256 = hmac::Hmac<Sha256>;

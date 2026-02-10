@@ -113,6 +113,7 @@ impl From<ExternalEmail> for String {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "sso_provider_type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum SsoProviderType {
     Github,
     Discord,
@@ -141,7 +142,7 @@ impl SsoAction {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
+        match s {
             "login" => Some(Self::Login),
             "link" => Some(Self::Link),
             "register" => Some(Self::Register),
@@ -156,6 +157,44 @@ impl std::fmt::Display for SsoAction {
     }
 }
 
+impl std::str::FromStr for SsoProviderType {
+    type Err = InvalidSsoProviderType;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or(InvalidSsoProviderType)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidSsoProviderType;
+
+impl std::fmt::Display for InvalidSsoProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invalid SSO provider type")
+    }
+}
+
+impl std::error::Error for InvalidSsoProviderType {}
+
+impl std::str::FromStr for SsoAction {
+    type Err = InvalidSsoAction;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or(InvalidSsoAction)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidSsoAction;
+
+impl std::fmt::Display for InvalidSsoAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invalid SSO action")
+    }
+}
+
+impl std::error::Error for InvalidSsoAction {}
+
 impl SsoProviderType {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -169,7 +208,7 @@ impl SsoProviderType {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
+        match s {
             "github" => Some(Self::Github),
             "discord" => Some(Self::Discord),
             "google" => Some(Self::Google),

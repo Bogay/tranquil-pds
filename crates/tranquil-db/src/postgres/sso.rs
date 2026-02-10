@@ -68,17 +68,20 @@ impl SsoRepository for PostgresSsoRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(row.map(|r| ExternalIdentity {
-            id: r.id,
-            did: unsafe { Did::new_unchecked(&r.did) },
-            provider: r.provider,
-            provider_user_id: ExternalUserId::from(r.provider_user_id),
-            provider_username: r.provider_username.map(ExternalUsername::from),
-            provider_email: r.provider_email.map(ExternalEmail::from),
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-            last_login_at: r.last_login_at,
-        }))
+        row.map(|r| {
+            Ok(ExternalIdentity {
+                id: r.id,
+                did: r.did.parse().map_err(|_| DbError::CorruptData("DID"))?,
+                provider: r.provider,
+                provider_user_id: ExternalUserId::from(r.provider_user_id),
+                provider_username: r.provider_username.map(ExternalUsername::from),
+                provider_email: r.provider_email.map(ExternalEmail::from),
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+                last_login_at: r.last_login_at,
+            })
+        })
+        .transpose()
     }
 
     async fn get_external_identities_by_did(
@@ -99,20 +102,21 @@ impl SsoRepository for PostgresSsoRepository {
         .await
         .map_err(map_sqlx_error)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| ExternalIdentity {
-                id: r.id,
-                did: unsafe { Did::new_unchecked(&r.did) },
-                provider: r.provider,
-                provider_user_id: ExternalUserId::from(r.provider_user_id),
-                provider_username: r.provider_username.map(ExternalUsername::from),
-                provider_email: r.provider_email.map(ExternalEmail::from),
-                created_at: r.created_at,
-                updated_at: r.updated_at,
-                last_login_at: r.last_login_at,
+        rows.into_iter()
+            .map(|r| {
+                Ok(ExternalIdentity {
+                    id: r.id,
+                    did: r.did.parse().map_err(|_| DbError::CorruptData("DID"))?,
+                    provider: r.provider,
+                    provider_user_id: ExternalUserId::from(r.provider_user_id),
+                    provider_username: r.provider_username.map(ExternalUsername::from),
+                    provider_email: r.provider_email.map(ExternalEmail::from),
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                    last_login_at: r.last_login_at,
+                })
             })
-            .collect())
+            .collect()
     }
 
     async fn update_external_identity_login(
@@ -202,7 +206,10 @@ impl SsoRepository for PostgresSsoRepository {
         .map_err(map_sqlx_error)?;
 
         row.map(|r| {
-            let action = SsoAction::parse(&r.action).ok_or(DbError::NotFound)?;
+            let action: SsoAction = r
+                .action
+                .parse()
+                .map_err(|_| DbError::CorruptData("sso_action"))?;
             Ok(SsoAuthState {
                 state: r.state,
                 request_uri: r.request_uri,
@@ -210,7 +217,11 @@ impl SsoRepository for PostgresSsoRepository {
                 action,
                 nonce: r.nonce,
                 code_verifier: r.code_verifier,
-                did: r.did.map(|d| unsafe { Did::new_unchecked(&d) }),
+                did: r
+                    .did
+                    .map(|d| d.parse::<Did>())
+                    .transpose()
+                    .map_err(|_| DbError::CorruptData("DID"))?,
                 created_at: r.created_at,
                 expires_at: r.expires_at,
             })

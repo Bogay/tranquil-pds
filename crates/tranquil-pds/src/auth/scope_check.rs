@@ -7,22 +7,25 @@ use crate::oauth::scopes::{
     AccountAction, AccountAttr, IdentityAttr, RepoAction, ScopePermissions,
 };
 
-use super::SCOPE_ACCESS;
+use super::{AuthSource, TokenScope};
 
-fn has_custom_scope(scope: Option<&str>) -> bool {
-    match scope {
-        None => false,
-        Some(s) => s != SCOPE_ACCESS,
+fn requires_scope_check(auth_source: &AuthSource, scope: Option<&str>) -> bool {
+    match auth_source {
+        AuthSource::OAuth => true,
+        _ => match scope {
+            None => false,
+            Some(s) => s != TokenScope::Access.as_str(),
+        },
     }
 }
 
 pub fn check_repo_scope(
-    is_oauth: bool,
+    auth_source: &AuthSource,
     scope: Option<&str>,
     action: RepoAction,
     collection: &str,
 ) -> Result<(), Response> {
-    if !is_oauth && !has_custom_scope(scope) {
+    if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
 
@@ -32,8 +35,12 @@ pub fn check_repo_scope(
         .map_err(|e| ApiError::InsufficientScope(Some(e.to_string())).into_response())
 }
 
-pub fn check_blob_scope(is_oauth: bool, scope: Option<&str>, mime: &str) -> Result<(), Response> {
-    if !is_oauth && !has_custom_scope(scope) {
+pub fn check_blob_scope(
+    auth_source: &AuthSource,
+    scope: Option<&str>,
+    mime: &str,
+) -> Result<(), Response> {
+    if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
 
@@ -44,12 +51,12 @@ pub fn check_blob_scope(is_oauth: bool, scope: Option<&str>, mime: &str) -> Resu
 }
 
 pub fn check_rpc_scope(
-    is_oauth: bool,
+    auth_source: &AuthSource,
     scope: Option<&str>,
     aud: &str,
     lxm: &str,
 ) -> Result<(), Response> {
-    if !is_oauth && !has_custom_scope(scope) {
+    if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
 
@@ -60,12 +67,12 @@ pub fn check_rpc_scope(
 }
 
 pub fn check_account_scope(
-    is_oauth: bool,
+    auth_source: &AuthSource,
     scope: Option<&str>,
     attr: AccountAttr,
     action: AccountAction,
 ) -> Result<(), Response> {
-    if !is_oauth && !has_custom_scope(scope) {
+    if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
 
@@ -76,11 +83,11 @@ pub fn check_account_scope(
 }
 
 pub fn check_identity_scope(
-    is_oauth: bool,
+    auth_source: &AuthSource,
     scope: Option<&str>,
     attr: IdentityAttr,
 ) -> Result<(), Response> {
-    if !is_oauth && !has_custom_scope(scope) {
+    if !requires_scope_check(auth_source, scope) {
         return Ok(());
     }
 

@@ -196,7 +196,7 @@ async fn build_did_document(state: &AppState, did: &crate::types::Did) -> serde_
             })).collect::<Vec<_>>(),
             "service": [{
                 "id": "#atproto_pds",
-                "type": "AtprotoPersonalDataServer",
+                "type": crate::plc::ServiceType::Pds.as_str(),
                 "serviceEndpoint": service_endpoint
             }]
         });
@@ -244,7 +244,7 @@ async fn build_did_document(state: &AppState, did: &crate::types::Did) -> serde_
         }],
         "service": [{
             "id": "#atproto_pds",
-            "type": "AtprotoPersonalDataServer",
+            "type": crate::plc::ServiceType::Pds.as_str(),
             "serviceEndpoint": service_endpoint
         }]
     })
