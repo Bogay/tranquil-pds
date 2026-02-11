@@ -1,4 +1,4 @@
-# Tranquil PDS on Kubernetes
+# Tranquil PDS on kubernetes
 
 If you're reaching for kubernetes for this app, you're experienced enough to know how to spin up:
 
@@ -19,7 +19,7 @@ and more, check the .env.example.
 
 Health check: `GET /xrpc/_health`
 
-## Custom Homepage
+## Custom homepage
 
 Mount a ConfigMap with your `homepage.html` into the container's frontend directory and it becomes your landing page. Go nuts with it. Account dashboard is at `/app/` so you won't break anything.
 

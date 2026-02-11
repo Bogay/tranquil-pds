@@ -1,23 +1,26 @@
-# Tranquil PDS Production Installation on Debian
+# Tranquil PDS production installation on debian
 
-This guide covers installing Tranquil PDS on Debian 13.
+This guide covers installing Tranquil PDS on Debian.
+
+It is a "compile the thing on the server itself" -style guide.
+This cop-out is because Tranquil isn't built and released via CI as of yet.
 
 ## Prerequisites
 
-- A VPS with at least 2GB RAM
-- Disk space for blobs (depends on usage; plan for ~1GB per active user as a baseline)
+- A server :p
+- Disk space enough for blobs (depends on usage; plan for ~1GB per active user as a baseline)
 - A domain name pointing to your server's IP
 - A wildcard TLS certificate for `*.pds.example.com` (user handles are served as subdomains)
-- Root or sudo access
+- Root/sudo/doas access
 
-## System Setup
+## System setup
 
 ```bash
 apt update && apt upgrade -y
 apt install -y curl git build-essential pkg-config libssl-dev
 ```
 
-## Install Rust
+## Install rust
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -38,7 +41,7 @@ sudo -u postgres psql -c "CREATE DATABASE pds OWNER tranquil_pds;"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE pds TO tranquil_pds;"
 ```
 
-## Create Blob Storage Directories
+## Create blob storage directories
 
 ```bash
 mkdir -p /var/lib/tranquil/blobs /var/lib/tranquil/backups
@@ -54,7 +57,7 @@ export PATH="$HOME/.deno/bin:$PATH"
 echo 'export PATH="$HOME/.deno/bin:$PATH"' >> ~/.bashrc
 ```
 
-## Clone and Build Tranquil PDS
+## Clone and build Tranquil PDS
 
 ```bash
 cd /opt
@@ -64,14 +67,6 @@ cd frontend
 deno task build
 cd ..
 cargo build --release
-```
-
-## Install sqlx-cli and Run Migrations
-
-```bash
-cargo install sqlx-cli --no-default-features --features postgres
-export DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds"
-sqlx migrate run
 ```
 
 ## Configure Tranquil PDS
@@ -87,7 +82,7 @@ Edit `/etc/tranquil-pds/tranquil-pds.env` and fill in your values. Generate secr
 openssl rand -base64 48
 ```
 
-## Install Frontend Files
+## Install frontend files
 
 ```bash
 mkdir -p /var/www/tranquil-pds
@@ -95,7 +90,7 @@ cp -r /opt/tranquil-pds/frontend/dist/* /var/www/tranquil-pds/
 chown -R www-data:www-data /var/www/tranquil-pds
 ```
 
-## Create Systemd Service
+## Create systemd service
 
 ```bash
 useradd -r -s /sbin/nologin tranquil-pds
@@ -127,7 +122,7 @@ systemctl enable tranquil-pds
 systemctl start tranquil-pds
 ```
 
-## Install and Configure nginx
+## Install and configure nginx
 
 ```bash
 apt install -y nginx certbot python3-certbot-nginx
@@ -264,7 +259,7 @@ nginx -t
 systemctl reload nginx
 ```
 
-## Obtain Wildcard SSL Certificate
+## Obtain a wildcard SSL cert
 
 User handles are served as subdomains (eg., `alice.pds.example.com`), so you need a wildcard certificate.
 
@@ -289,7 +284,7 @@ After obtaining the cert, reload nginx:
 systemctl reload nginx
 ```
 
-## Configure Firewall
+## Configure firewall if you're into that sort of thing
 
 ```bash
 apt install -y ufw
@@ -299,7 +294,7 @@ ufw allow 443/tcp
 ufw enable
 ```
 
-## Verify Installation
+## Verify installation
 
 ```bash
 systemctl status tranquil-pds
@@ -323,16 +318,17 @@ cargo build --release
 systemctl stop tranquil-pds
 cp target/release/tranquil-pds /usr/local/bin/
 cp -r frontend/dist/* /var/www/tranquil-pds/
-DATABASE_URL="postgres://tranquil_pds:your-secure-password@localhost:5432/pds" sqlx migrate run
 systemctl start tranquil-pds
 ```
+
+Tranquil should auto-migrate if there are any new migrations to be applied to the db, so you don't need to worry.
 
 Backup database:
 ```bash
 sudo -u postgres pg_dump pds > /var/backups/pds-$(date +%Y%m%d).sql
 ```
 
-## Custom Homepage
+## Custom homepage
 
 Drop a `homepage.html` in `/var/www/tranquil-pds/` and it becomes your landing page. Account dashboard is at `/app/` so you won't break anything.
 

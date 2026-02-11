@@ -6,21 +6,19 @@ Bluesky runs on a federated protocol called AT Protocol. Your account lives on a
 
 This particular PDS thrives under harsh conditions. It is a dandelion growing through the cracks in the sidewalk concrete.
 
-It has full compatibility with Bluesky's reference PDS: same endpoints, same behavior, same client compatibility. Everything works: repo operations, blob storage, firehose, OAuth, handle resolution, account migration, the lot.
-
-Another excellent PDS is [Cocoon](https://tangled.org/hailey.at/cocoon), written in go.
+It has full compatibility with Bluesky's reference PDS.
 
 ## What's different about Tranquil PDS
 
-It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), SSO login and signup, did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), account delegation (letting others manage an account with configurable permission levels), automatic backups (configurable retention and frequency, one-click restore), and a built-in web UI for account management, OAuth consent, repo browsing, and admin.
+It is a superset of the reference PDS, including: passkeys and 2FA (WebAuthn/FIDO2, TOTP, backup codes, trusted devices), SSO login and signup, did:web support (PDS-hosted subdomains or bring-your-own), multi-channel communication (email, discord, telegram, signal) for verification and alerts, granular OAuth scopes with a consent UI showing human-readable descriptions, app passwords with granular permissions (read-only, post-only, or custom scopes), account delegation (letting others manage an account with configurable permission levels), and a built-in web UI for account management, repo browsing, and admin.
 
-The PDS itself is a single small binary with no node/npm runtime. It requires postgres. Blobs are stored on the local filesystem by default (S3 optional). Valkey is optional (supported as an alternative to the built-in cache).
+The PDS itself is a single binary with no nodeJS runtime. However, at time of writing, Tranquil requires postgres running separately. Blobs are stored on the local filesystem by default (S3 optional). Valkey is also optional (as an alternative to the built-in cache).
 
 ## Quick Start
 
 ```bash
 cp .env.example .env
-podman compose up -d
+podman compose up db -d
 just run
 ```
 
@@ -41,20 +39,18 @@ just lint
 
 ### Quick Deploy (Docker/Podman Compose)
 
-Edit `.env.prod` with your values. Generate secrets with `openssl rand -base64 48`.
+Edit `.env` with your values. Generate secrets with `openssl rand -base64 48`.
 
 ```bash
-cp .env.prod.example .env.prod
+cp .env.example .env
 podman-compose -f docker-compose.prod.yaml up -d
 ```
 
 ### Installation Guides
 
-| Guide | Best For |
-|-------|----------|
-| [Debian](docs/install-debian.md) | Debian 13+ with systemd |
-| [Containers](docs/install-containers.md) | Podman with quadlets or OpenRC |
-| [Kubernetes](docs/install-kubernetes.md) | You know what you're doing |
+- [Debian](docs/install-debian.md)
+- [Containers](docs/install-containers.md)
+- [Kubernetes](docs/install-kubernetes.md)
 
 ## Maintainers to ping
 
